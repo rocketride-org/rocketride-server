@@ -341,7 +341,14 @@ const SidebarProvider: React.FC = () => {
 							throw new Error(`"${file}" already exists; choose another name.`);
 						}
 						await projectVfs.write(file, { project_id: crypto.randomUUID(), store: defaultStoreBlock(), components: [] });
-						await ensurePipeReadme(file, file.slice(file.lastIndexOf('/') + 1, -'.pipe'.length));
+						// The pipe exists from here on: a README that cannot be written is
+						// told as that, and the Explorer still refreshes to show the pipe.
+						try {
+							await ensurePipeReadme(file, file.slice(file.lastIndexOf('/') + 1, -'.pipe'.length));
+						} catch (err) {
+							console.error('[SidebarProvider] starter README failed:', err);
+							setActionError(`"${file}" was created, but its starter README could not be written: ${err instanceof Error ? err.message : String(err)}`);
+						}
 						break;
 					}
 				}

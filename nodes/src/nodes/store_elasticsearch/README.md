@@ -78,7 +78,7 @@ The node scans every matching text hit in batches of 500 with a one-minute scrol
 
 OpenSearch uses the configured host, collection, and the **Authentication** choice: `basic` (the default) sends the configured username and password, `none` sends no credentials. The service starts in index mode, unlike Elasticsearch's vector-store default. The collection defaults to `rocketride` and allows lowercase letters, numbers, and underscores. Choose a new collection before switching a production workload between modes, rather than relying on a common name to be safe for both mappings.
 
-When **Authentication** is `basic`, a host without a scheme gets `http://`, then an `http://` URL is upgraded to `https://`. The client also disables certificate verification in that branch. This accommodates self-managed clusters with self-signed certificates, but it means the host and the authentication choice jointly determine the connection—not just the text entered in **Host**.
+When **Authentication** is `basic`, a host without a scheme gets `http://`, then an `http://` URL is upgraded to `https://`. The client disables certificate verification on every connection, whichever authentication is chosen. This accommodates self-managed clusters with self-signed certificates, but it means the host and the authentication choice jointly determine the connection—not just the text entered in **Host**.
 
 ### OpenSearch Store Mode, embedding dimension, and score
 
