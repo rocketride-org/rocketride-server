@@ -163,6 +163,60 @@ def test_a_served_node_the_index_names_in_capitals_is_found_in_lower_case(server
     assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['llm_x']
 
 
+def test_a_served_node_comes_with_the_served_nodes_it_imports(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['embed_y']
+    for name, requires in (('embed_y', ['embed_z']), ('embed_z', ['webhook'])):
+        protocol = f'{name}_p://'
+        index['nodes'][name] = {
+            'sha256': name,
+            'services': {'services.json': json.dumps({'protocol': protocol})},
+            'icons': {},
+            'requires': requires,
+        }
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    # Each after the nodes it imports
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['embed_z', 'embed_y', 'llm_x']
+    assert [args[0] for args in server['unpacked']] == ['embed_z', 'embed_y', 'llm_x']
+
+
+def test_a_node_whose_import_fails_to_unpack_is_not_unpacked(server, monkeypatch):
+    # Named to sort after llm_x, so path order alone would unpack llm_x first
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['zeta_y']
+    index['nodes']['zeta_y'] = {
+        'sha256': 'z',
+        'services': {'services.json': json.dumps({'protocol': 'zeta_y_p://'})},
+        'icons': {},
+    }
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    def unpack(*args):
+        server['unpacked'].append(args)
+        if args[0] == 'zeta_y':
+            raise OSError('disk full')
+
+    monkeypatch.setattr(node_store.node_packages, 'unpack', unpack)
+
+    with pytest.raises(OSError):
+        node_store.place({'components': [{'provider': 'provider_x'}]})
+    assert [args[0] for args in server['unpacked']] == ['zeta_y']
+
+
+def test_a_served_library_with_no_service_is_placed_with_the_node_that_imports_it(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['helper_x']
+    index['nodes']['helper_x'] = {'sha256': 'h', 'services': {}, 'icons': {}}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['helper_x', 'llm_x']
+    assert [args[0] for args in server['unpacked']] == ['helper_x', 'llm_x']
+
+
 def test_a_pipeline_that_names_no_served_node_unpacks_nothing(server):
     node_store.start()
 
@@ -240,6 +294,26 @@ def test_a_copy_an_earlier_release_unpacked_is_replaced_at_start(server):
 
     assert server['unpacked'] == [('webhook', b'webhook:w', 'w', server['nodes'])]
     assert len(server['warnings']) == 1 and 'webhook' in server['warnings'][0] and 'replaced' in server['warnings'][0]
+
+
+def test_a_copy_replaced_at_start_comes_with_the_nodes_it_now_imports(server, monkeypatch):
+    # Release N unpacked llm_x, so the scan registered it; this release's llm_x imports embed_y, not on disk
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['embed_y', 'webhook']
+    index['nodes']['embed_y'] = {'sha256': 'e', 'services': {}, 'icons': {}}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    monkeypatch.setattr(
+        node_store, 'getServiceDefinition', lambda p: {'on': 'disk'} if p in ('webhook', 'provider_x') else None
+    )
+    _unpacked_before(server, 'llm_x', 'older')
+    # The server's own folder, which it imports too, stays as it is
+    os.makedirs(os.path.join(server['nodes'], 'webhook'))
+
+    node_store.start()
+
+    # What it imports first; a pipeline naming llm_x places nothing, as the engine has it
+    assert [args[0] for args in server['unpacked']] == ['embed_y', 'llm_x']
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == []
 
 
 def test_a_copy_with_this_releases_digest_is_left_alone(server):
