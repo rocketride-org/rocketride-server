@@ -58,7 +58,7 @@ describe('buildIndex', () => {
 		const index = await readFile(path.join(staticDir, 'llms.txt'), 'utf8');
 		const firstSection = index.indexOf('\n## ');
 		const header = index.slice(0, firstSection);
-		assert.match(header, /^> RocketRide is an AI meta-harness with an enterprise-grade runtime built on C\+\+, for companies and pro-builders building durable AI at production scale\./m);
+		assert.match(header, /^> RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C\+\+, for companies and pro-builders building durable AI at production scale\./m);
 		assert.match(header, /^MIT licensed\. /m);
 		// The list is free-form text before the first section: llms.txt reads every
 		// H2 as a list of links, so it must not have a heading of its own.

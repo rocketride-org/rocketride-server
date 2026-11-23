@@ -79,7 +79,7 @@ Running pipelines are discovered automatically - start a pipeline in VS Code or 
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.ai) is an AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
+[RocketRide](https://rocketride.ai) is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
 
 - **Ready-to-use nodes** - LLM providers, vector databases, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
