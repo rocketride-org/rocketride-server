@@ -61,6 +61,8 @@ from crewai.events.types.logging_events import (
     AgentLogsStartedEvent,
 )
 
+from ai.common.utils import error_text
+
 from .crewai_runner import crewContext
 
 
@@ -150,6 +152,9 @@ def _dispatch(source: Any, event: Any) -> None:
     # Strip it before splatting so we don't get "multiple values for argument 'type'".
     if isinstance(data, dict) and 'type' in data:
         data = {k: v for k, v in data.items() if k != 'type'}
+    # A failure event's `error` is str() of the exception, and the client shows it: no engine source path.
+    if isinstance(data, dict) and isinstance(data.get('error'), str):
+        data['error'] = error_text(data['error'])
 
     invoker = getattr(context, 'invoker', None)
     instance = getattr(invoker, 'instance', None)
