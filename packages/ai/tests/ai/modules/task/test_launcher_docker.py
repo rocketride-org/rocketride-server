@@ -740,6 +740,80 @@ async def test_task_file_goes_in_as_a_tar_stream_before_start():
     assert cli.attached == [['start', '-a', '-i', 'c0ffee']]
 
 
+def _node(root, name, files):
+    """A node folder unpacked on the engine's disk: its files and the digest of its package."""
+    folder = root / name
+    folder.mkdir()
+    for file, text in {**files, '.rrnode.sha256': name}.items():
+        (folder / file).write_text(text)
+    return str(folder)
+
+
+async def test_the_runs_nodes_go_in_as_a_tar_stream_before_start(tmp_path):
+    """The packaged nodes the run loads reach the image's nodes folder before the container
+    starts, each with its digest file: the task's scan loads them, and depends() keeps its lock.
+    """
+    cli = FakeCli()
+    nodes = [
+        _node(tmp_path, 'embed_y', {'__init__.py': ''}),
+        _node(tmp_path, 'llm_x', {'IGlobal.py': 'x = 1', 'requirements.txt': 'openai'}),
+    ]
+    await _launcher(cli).start(_spec(nodes=nodes))
+
+    copies = [call for call in cli.calls if call.args[0] == 'cp']
+    assert [call.args for call in copies] == [
+        ['cp', '-', 'c0ffee:/opt/data'],
+        ['cp', '-', 'c0ffee:/opt/rocketride/nodes'],
+    ]
+    archive = tarfile.open(fileobj=io.BytesIO(copies[1].stdin))
+    assert sorted(archive.getnames()) == [
+        'embed_y',
+        'embed_y/.rrnode.sha256',
+        'embed_y/__init__.py',
+        'llm_x',
+        'llm_x/.rrnode.sha256',
+        'llm_x/IGlobal.py',
+        'llm_x/requirements.txt',
+    ]
+    assert archive.extractfile('llm_x/IGlobal.py').read() == b'x = 1'
+    assert len(cli.order) - cli.order[::-1].index('cp') - 1 < cli.order.index('start')
+
+
+async def test_the_runs_nodes_belong_to_the_user_the_task_runs_as(monkeypatch, tmp_path):
+    """Every member is the task user's; folders and programs 0755, other files 0644, whatever the engine's disk says."""
+    _ids(monkeypatch, 1001, 1001)
+    node = _node(tmp_path, 'llm_x', {'IGlobal.py': '', 'tool.cmd': ''})
+    os.chmod(os.path.join(node, 'IGlobal.py'), 0o666)
+    os.chmod(os.path.join(node, 'tool.cmd'), 0o755)
+    cli = FakeCli()
+    await _launcher(cli).start(_spec(nodes=[node]))
+
+    (_, copy) = [call for call in cli.calls if call.args[0] == 'cp']
+    members = {member.name: member for member in tarfile.open(fileobj=io.BytesIO(copy.stdin)).getmembers()}
+    assert {(m.uid, m.gid, m.uname, m.gname) for m in members.values()} == {(1001, 1001, '', '')}
+    assert [members[name].mode for name in ('llm_x', 'llm_x/IGlobal.py', 'llm_x/tool.cmd')] == [0o755, 0o644, 0o755]
+
+
+def test_links_in_a_node_folder_stay_out(tmp_path):
+    """Only the folder's own files go in: a link could carry anything of the engine's host into the task."""
+    node = _node(tmp_path, 'llm_x', {'IGlobal.py': ''})
+    (tmp_path / 'secret').write_text('not for the task')
+    try:
+        os.symlink(tmp_path / 'secret', os.path.join(node, 'leak.txt'))
+    except OSError:
+        pytest.skip('this host cannot make a symbolic link')
+    archive = tarfile.open(fileobj=io.BytesIO(dk.nodes_tar([node], 1000, 1000)))
+    assert sorted(archive.getnames()) == ['llm_x', 'llm_x/.rrnode.sha256', 'llm_x/IGlobal.py']
+
+
+def test_nodes_over_their_limit_are_refused(monkeypatch, tmp_path):
+    """They are read into memory at every start, so their size is capped."""
+    monkeypatch.setattr(dk, 'CONST_NODES_SIZE_LIMIT', 1024)
+    node = _node(tmp_path, 'llm_x', {'model.bin': 'x' * 4096})
+    with pytest.raises(ValueError, match="run's nodes take more than"):
+        dk.nodes_tar([node], 1000, 1000)
+
+
 async def test_create_finds_the_clis_config_but_the_task_never_sees_it():
     """Windows: docker create gets what the CLI reads its context from; none of it goes into the container."""
     environ = {
