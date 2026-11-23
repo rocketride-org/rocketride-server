@@ -3308,6 +3308,11 @@ class Task(DAPBase):
                 self._run_log = None
                 self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
 
+            # The engine may end during the awaits above: its stdout reader
+            # then started _terminated(), which ends the run
+            if self._terminated_called:
+                return
+
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
                 # Resolve billing identity from task control

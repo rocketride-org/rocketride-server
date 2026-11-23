@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV14 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-18T05:41:55.942Z
-// Source commit: 6f9a1f9886da42f1ec547cd24ab7035b02e4c08c
+// Generated:     2026-11-20T20:33:45.873Z
+// Source commit: 02ff0b3e799fb3d84357f57dea62b2b53995a205
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -182,6 +182,14 @@ export type LoginAttemptCancellationReason = "superseded" | "logout" | "detached
 export declare class LoginAttemptCancelledError extends Error {
     readonly reason: LoginAttemptCancellationReason;
     constructor(reason: LoginAttemptCancellationReason);
+}
+/**
+ * A command the server refused, such as starting or validating a pipeline.
+ *
+ * `code` says why, e.g. `NODE_NOT_ENTITLED`.
+ */
+export declare class CommandException extends RocketRideException {
+    constructor(dapResult: Record<string, unknown>);
 }
 /**
  * Exception raised for data pipe operations.
@@ -1019,30 +1027,10 @@ export interface CreateKeyParams {
     name: string;
     /** Array of permission strings to grant to this key. Empty for full PAT. */
     permissions: string[];
-    /**
-     * Optional ISO timestamp for key expiration. Omit to ask for no expiry.
-     * The server may grant an EARLIER expiry than requested (a key created
-     * over a sign-in session expires with that session's bound); the granted
-     * value is in {@link CreateKeyResult.expiresAt}.
-     */
+    /** Optional ISO timestamp for key expiration. Omit for no expiry. */
     expiresAt?: string;
     /** Optional team UUID to scope this key to. Omit for all teams. */
     teamId?: string;
-}
-/** Result of creating an API key. */
-export interface CreateKeyResult {
-    /** The raw key string. Shown once; it cannot be retrieved later. */
-    key: string;
-    /**
-     * The expiry the server actually granted, as an ISO timestamp, or null when
-     * the key does not expire. It can be earlier than the requested one.
-     * A timestamp without an offset ('2027-02-03T10:00:00') is UTC: the SDK
-     * passes the server's value through unchanged, and `Date.parse` would read
-     * it as local time, so parse it as UTC (append 'Z') before comparing.
-     * Absent when the server did not report it (an older server), so callers
-     * must not read a missing value as "never expires".
-     */
-    expiresAt?: string | null;
 }
 /** Parameters for inviting a new member to an organization. */
 export interface InviteMemberParams {
@@ -3843,14 +3831,14 @@ declare class AccountApi {
      */
     listKeys(): Promise<ApiKeyRecord[]>;
     /**
-     * Creates a new API key and returns the raw key string and its real expiry.
+     * Creates a new API key and returns the raw key string.
      *
      * @param params - Key creation parameters (name, permissions, expiresAt).
-     * @returns The raw key, and the expiry the server granted (`expiresAt`,
-     *   which may be earlier than requested; absent when the server did not
-     *   report it).
+     * @returns Object containing the raw key string.
      */
-    createKey(params: CreateKeyParams): Promise<CreateKeyResult>;
+    createKey(params: CreateKeyParams): Promise<{
+        key: string;
+    }>;
     /**
      * Revokes an API key by its ID.
      *
@@ -5418,7 +5406,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.source - Optional override for the source component ID
      * @returns Promise resolving to validation result with errors, warnings,
      *          and resolved component
-     * @throws Error if the server returns a validation error
+     * @throws CommandException if the server refuses the command (`code` says why, when it sends one);
+     *         a pipeline that fails validation resolves, with its problems in `errors`
      *
      * @example
      * ```typescript
@@ -6403,7 +6392,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param args    - Key/value arguments forwarded in the request.
      * @param options - Optional token (for task-scoped calls) and timeout in ms.
      * @returns The `body` field of a successful DAP response.
-     * @throws Error if the server signals failure.
+     * @throws CommandException if the server signals failure; `code` says why, when the server sends one.
      */
     call<T = any>(command: string, args?: Record<string, unknown>, options?: {
         token?: string;
@@ -15247,7 +15236,6 @@ interface IAccountViewProps {
         teamId?: string;
     }) => Promise<{
         key: string;
-        expiresAt?: string | null;
     }>;
     /** Revokes an API key by its ID. */
     onRevokeKey: (keyId: string) => Promise<void>;
