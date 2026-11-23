@@ -140,7 +140,7 @@ class IEndpoint(IEndpointBase):
 
             elif self.endpoint.logicalType in ('webhook', 'adtoolchain'):
                 url_text_map = {
-                    'webhook': 'Webhook interface URL',
+                    'webhook': 'Endpoint URL',
                     'adtoolchain': 'RocketRide DataToolchain interface URL',
                 }
                 info = {

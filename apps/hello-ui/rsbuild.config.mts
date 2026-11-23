@@ -73,7 +73,14 @@ export default defineConfig(() => {
 		// resolve through node_modules (pnpm workspace link) and MF provides
 		// the host's singleton at runtime. This prevents bundling duplicate
 		// fonts/CSS from shared into each remote app.
-		resolve: {},
+		// The ONE alias: the shared library, compiled from source into this
+		// bundle as rocket-ui compiles it (the common catalog picker lives
+		// there). shell and rocketride still come from the host.
+		resolve: {
+			alias: {
+				shared: path.resolve(__dirname, '../shared/src'),
+			},
+		},
 		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
 		// allowlist is possible; declaring it also stops the MF plugin injecting
 		// its own wildcard defaults (and warning about it).

@@ -60,7 +60,7 @@ export interface IEndpointInfo {
 	'open-tool'?: string;
 	/** The node the front end binds to: its component id in the pipeline. */
 	nodeId?: string;
-	/** Label for the endpoint URL row (e.g. "Webhook interface URL"). Absent on a source without a URL. */
+	/** Label for the endpoint URL row (e.g. "Endpoint URL"). Absent on a source without a URL. */
 	'url-text'?: string;
 	/** The data door's URL (webhook). Absent on a chat/dropper source: nothing to POST to. */
 	'url-link'?: string;

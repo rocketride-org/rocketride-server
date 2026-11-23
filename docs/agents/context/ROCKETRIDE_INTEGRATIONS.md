@@ -191,7 +191,7 @@ lanes you need (ROCKETRIDE_PIPELINES.md §Lanes).
 When the pipeline starts, the source node's **Endpoint Info** panel (on the canvas node and
 in the DEVELOPMENT panel) shows:
 
-- **Webhook interface URL** — `<server>/webhook/<address>`, the dotted address
+- **Endpoint URL** — `<server>/webhook/<address>`, the dotted address
   `<developerId>.<pipelineId>.<source>`, e.g.
   `https://api.rocketride.ai/webhook/acme.docBrain.webhook_1`. On a local engine
   `<server>` defaults to `http://localhost:5565`. The path takes the whole address

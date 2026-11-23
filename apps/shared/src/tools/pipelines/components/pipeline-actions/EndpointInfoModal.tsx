@@ -7,7 +7,8 @@
  * EndpointInfoModal — Plain React modal showing endpoint configuration details.
  *
  * Displays the endpoint URL and address, the minted key for the endpoint,
- * and integration examples (cURL / wget / TypeScript / Python / HTTP). No
+ * and the call examples the API Params page shows (JavaScript / TypeScript /
+ * Python / HTTP, with the pipeline's parameters). No
  * credential rides a URL (plan §2.4); the node's front end opens from the
  * node's own button, not from here (plan §3.6).
  */
@@ -16,7 +17,8 @@ import React, { ReactElement, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { IEndpointInfo, OpenToolHandler } from './PipelineActions';
 import type { IOpenToolNote } from './openTool';
-import { buildIntegrationExamples, defaultWebhookPayloadId, getWebhookPayload, WEBHOOK_PAYLOADS, type IntegrationTabId, type WebhookPayloadId } from './endpointIntegrationExamples';
+import { CallExamples } from '../../panels/params/CallExamplesBlock';
+import type { ICallExampleParam } from '../../panels/params/callExamples';
 import type { EndpointKeyMinter, IMintedEndpointKey } from './endpointKey';
 import { Button, commonStyles } from 'shell';
 
@@ -231,6 +233,8 @@ interface IEndpointInfoModalProps {
 	host?: string;
 	/** Mints the owner's scoped key for this endpoint (plan §2.4). Absent = the host cannot mint keys. */
 	onCreateEndpointKey?: EndpointKeyMinter;
+	/** The pipeline's public parameters, each with the value the call examples pass; absent = none shown. */
+	params?: ICallExampleParam[];
 }
 
 // =============================================================================
@@ -250,25 +254,14 @@ function processEndpointInfo(info: IEndpointInfo, host?: string): IEndpointInfo 
 	return processed;
 }
 
-const TAB_ORDER: IntegrationTabId[] = ['curl', 'curlCmd', 'powershell', 'wget', 'typescript', 'python', 'http'];
-
-const TAB_LABELS: Record<IntegrationTabId, string> = {
-	curl: 'cURL (Bash)',
-	curlCmd: 'cURL (cmd)',
-	powershell: 'PowerShell',
-	wget: 'wget',
-	typescript: 'TypeScript',
-	python: 'Python',
-	http: 'HTTP',
-};
-
-const INTEGRATION_TABS = TAB_ORDER.map((id) => ({ id, label: TAB_LABELS[id] }));
+/** No parameters: one array for every render, so the examples are not rebuilt. */
+const NO_PARAMS: ICallExampleParam[] = [];
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpenLink, tool, onOpenTool, displayName, host, onCreateEndpointKey }: IEndpointInfoModalProps): ReactElement | null {
+export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpenLink, tool, onOpenTool, displayName, host, onCreateEndpointKey, params }: IEndpointInfoModalProps): ReactElement | null {
 	// The key minted for THIS endpoint, shown once (plan §2.4): never stored,
 	// dropped when the modal shows another endpoint.
 	const [minted, setMinted] = useState<IMintedEndpointKey | null>(null);
@@ -278,20 +271,12 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	// longer current belongs to a previous endpoint and is ignored.
 	const mintGenerationRef = React.useRef(0);
 	const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
-	const [activeTab, setActiveTab] = useState<IntegrationTabId>('curl');
-	// The picked payload is an OVERRIDE, not the value itself: the modal stays
-	// mounted between openings, so seeding state from the lanes would freeze the
-	// first pipeline's answer. Deriving on each render keeps the preselection
-	// honest, while a click still wins until the endpoint changes.
-	const [payloadOverride, setPayloadOverride] = useState<WebhookPayloadId | null>(null);
-
 	const onCloseRef = React.useRef(onClose);
 	onCloseRef.current = onClose;
 
 	// Drop a manual pick when the panel is showing a different endpoint.
 	const endpointKey = endpointInfo?.['url-link'] ?? endpointInfo?.address ?? null;
 	React.useEffect(() => {
-		setPayloadOverride(null);
 		setMinted(null);
 		setMintError(null);
 		setMinting(false);
@@ -307,11 +292,6 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	const address = processed.address;
 	const isLocalEndpoint = /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(endpointUrl);
 	const isWebhookEndpoint = /web[\s-]?hook/i.test(endpointUrl) || /web[\s-]?hook/i.test(processed['url-text'] ?? '');
-
-	const connectedLanes = endpointInfo.lanes;
-	const payloadId = payloadOverride ?? defaultWebhookPayloadId(connectedLanes);
-	// The snippets carry the minted key once there is one, the placeholder before.
-	const examples = buildIntegrationExamples({ endpointUrl, authKey: minted?.key, isWebhook: isWebhookEndpoint, payloadId });
 
 	/** Create API key: task.data on this address, frozen to the home team, shown once.
 	 *  A mint is tied to the endpoint it started for: the modal stays mounted
@@ -333,9 +313,6 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 			if (mine === mintGenerationRef.current) setMinting(false);
 		}
 	};
-	const payload = getWebhookPayload(payloadId);
-	const readsChosenLane = connectedLanes?.includes(payload.lane) ?? true;
-
 	const handleCopy = (text: string, label: string) => {
 		navigator.clipboard
 			.writeText(text)
@@ -462,53 +439,10 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 						</div>
 					)}
 
-					{/* Integration examples — only a door has them */}
-					{endpointUrl && (
-					<div style={styles.testBox}>
-						<div style={styles.testTitle}>Integration examples</div>
-						<div style={styles.envHint}>{isWebhookEndpoint ? `Webhook: POST with the account key in the Authorization header${minted ? '' : ' (the snippets show a placeholder until you create a key)'}.` : 'Chat / UI: the SDK talks to this source by address (client.chat / sendFiles); the page URL carries no credential.'}</div>
-						{isWebhookEndpoint && (
-							<>
-								<div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
-									{WEBHOOK_PAYLOADS.map((option) => (
-										<button key={option.id} style={commonStyles.toggleButton(payloadId === option.id)} onClick={() => setPayloadOverride(option.id)}>
-											{option.label}
-										</button>
-									))}
-								</div>
-								<div style={styles.envHint}>
-									Sends <code>{payload.contentType}</code>, which the engine delivers on the <strong>{payload.lane}</strong> lane.
-									{connectedLanes?.length ? (
-										<>
-											{' '}
-											This pipeline reads <strong>{connectedLanes.join(', ')}</strong>.{!readsChosenLane && <> Nothing reads the {payload.lane} lane, so this body is answered 200 OK but reaches no component.</>}
-										</>
-									) : (
-										<> Pick the lane your first component reads. A body sent on a lane nothing reads is answered 200 OK but reaches no component.</>
-									)}
-								</div>
-							</>
-						)}
-						<div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-							{INTEGRATION_TABS.map((tab) => (
-								<button key={tab.id} style={commonStyles.toggleButton(activeTab === tab.id)} onClick={() => setActiveTab(tab.id as IntegrationTabId)}>
-									{tab.label}
-								</button>
-							))}
-						</div>
-						<div style={styles.integrationCodeScroll}>
-							<div style={styles.curlBlock}>{examples[activeTab]}</div>
-						</div>
-						<div style={styles.testActions}>
-							<button style={iconBtn(`ex-${activeTab}`)} onClick={() => handleCopy(examples[activeTab], `ex-${activeTab}`)}>
-								{copyFeedback === `ex-${activeTab}` ? 'Copied!' : 'Copy'}
-							</button>
-							<button style={styles.iconBtn} onClick={() => onOpenLink?.('https://docs.rocketride.org/', 'RocketRide docs')}>
-								Docs
-							</button>
-						</div>
-					</div>
-					)}
+					{/* How the source is called: the block the API Params page shows, for
+					    this address, with the pipeline's parameters and the key just
+					    minted (a placeholder before). */}
+					{address && <CallExamples address={address} params={params ?? NO_PARAMS} host={host} apiKey={minted?.key} />}
 				</div>
 			</div>
 		</div>,
