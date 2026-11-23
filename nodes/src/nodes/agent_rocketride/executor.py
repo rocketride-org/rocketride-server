@@ -1480,7 +1480,7 @@ def _execute_wave_calls(
                     return None
                 settled[idx] = 'done'
             entry = {'tool': tool, 'key': key, 'error': str(exc)}
-            return _with_call(entry, tool, asked, seen_calls, removed, check_tool, check_args)
+            return _with_call(entry, tool, asked, None if local else seen_calls, removed, check_tool, check_args)
 
         # Resolving can take long itself (a custom format asks the model). A tool
         # the wave gave up on, or whose time is spent, must not start now.
