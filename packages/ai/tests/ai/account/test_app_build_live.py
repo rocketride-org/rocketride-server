@@ -88,11 +88,25 @@ async def test_real_compilers_css_loaders_and_tsconfig_boundary(monkeypatch, tmp
     outside = tmp_path / 'another-tenant.d.ts'
     outside.write_text('declare const outsideValue: string;')
     descriptor.write_text('export default outsideValue;')
+    # Each read check has an in-job control of the same shape: the same tsconfig key pointing at a file
+    # INSIDE the job must compile, so a failing attack is the boundary at work, not a key tsc ignored.
+    inside = src / 'inside.d.ts'
+    inside.write_text('declare const outsideValue: string;')
     for key in ('files', 'include'):
+        control = dict(config, **{key: ['src/AppDescriptor.ts', str(inside)]})
+        tsconfig.write_text(json.dumps(control))
+        code, output = await run(tsc_argv)
+        assert code == 0, (key, 'control', output)
         attack = dict(config, **{key: ['src/AppDescriptor.ts', str(outside)]})
         tsconfig.write_text(json.dumps(attack))
         code, output = await run(tsc_argv)
         assert code != 0 and ('outsideValue' in output or 'not found' in output), (key, output)
+    inside_config = app / 'inside-tsconfig.json'
+    inside_config.write_text(json.dumps(dict(config, include=['src'])))
+    tsconfig.write_text(json.dumps({'extends': str(inside_config), 'include': ['src']}))
+    code, output = await run(tsc_argv)
+    assert code == 0, ('extends', 'control', output)
+    inside.unlink()  # the later checks must not find `outsideValue` declared inside the job
     outside_config = tmp_path / 'another-tenant-tsconfig.json'
     outside_config.write_text(json.dumps(config))
     tsconfig.write_text(json.dumps({'extends': str(outside_config), 'include': ['src']}))
@@ -102,6 +116,13 @@ async def test_real_compilers_css_loaders_and_tsconfig_boundary(monkeypatch, tmp
     outside_types = tmp_path / 'another-tenant-types' / 'secret'
     outside_types.mkdir(parents=True)
     (outside_types / 'index.d.ts').write_text('declare const outsideValue: string;')
+    inside_types = app / 'inside-types' / 'secret'
+    inside_types.mkdir(parents=True)
+    (inside_types / 'index.d.ts').write_text('declare const outsideValue: string;')
+    options = dict(config['compilerOptions'], typeRoots=[str(inside_types.parent)])
+    tsconfig.write_text(json.dumps(dict(config, compilerOptions=options)))
+    code, output = await run(tsc_argv)
+    assert code == 0, ('typeRoots', 'control', output)
     options = dict(config['compilerOptions'], typeRoots=[str(outside_types.parent)])
     tsconfig.write_text(json.dumps(dict(config, compilerOptions=options)))
     code, output = await run(tsc_argv)
@@ -110,6 +131,12 @@ async def test_real_compilers_css_loaders_and_tsconfig_boundary(monkeypatch, tmp
     descriptor.write_text("import {secret} from 'tenant-secret'; export default secret;")
     outside_module = tmp_path / 'another-tenant-module.d.ts'
     outside_module.write_text('export declare const secret: string;')
+    inside_module = app / 'inside-module.d.ts'
+    inside_module.write_text('export declare const secret: string;')
+    options = dict(config['compilerOptions'], baseUrl='.', paths={'tenant-secret': [str(inside_module)]})
+    tsconfig.write_text(json.dumps(dict(config, compilerOptions=options)))
+    code, output = await run(tsc_argv)
+    assert code == 0, ('paths', 'control', output)
     options = dict(config['compilerOptions'], baseUrl='.', paths={'tenant-secret': [str(outside_module)]})
     tsconfig.write_text(json.dumps(dict(config, compilerOptions=options)))
     code, output = await run(tsc_argv)

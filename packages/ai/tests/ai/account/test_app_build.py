@@ -864,7 +864,7 @@ def test_rmtree_never_follows_links(tmp_path):
             # Junctions need no privilege (symlinks may) — pnpm's own shape.
             subprocess.run(['cmd', '/c', 'mklink', '/J', link, target], check=True, capture_output=True)
         else:
-            os.symlink(target, link)
+            _symlink_or_skip(target, link)
 
     # Shape 1: a link inside the tree being cleaned.
     job = tmp_path / 'job'
@@ -1383,7 +1383,7 @@ async def test_harvest_refuses_an_out_dir_swapped_for_a_symlink(monkeypatch, bui
 
     def tamper(out_dir):
         shutil.rmtree(out_dir)
-        os.symlink(str(outside), out_dir)
+        _symlink_or_skip(str(outside), out_dir)
 
     rail = await _run_tampered(monkeypatch, tamper)
     final = rail.stamps[-1]
@@ -1402,7 +1402,7 @@ async def test_harvest_does_not_copy_a_manifest_asset_through_a_dangling_link(
     target.parent.mkdir()
 
     def tamper(out_dir):
-        os.symlink(str(target), os.path.join(out_dir, 'icon.svg'))
+        _symlink_or_skip(str(target), os.path.join(out_dir, 'icon.svg'))
 
     rail = await _run_tampered(monkeypatch, tamper)
     assert not target.exists()
@@ -1445,6 +1445,14 @@ def _guard_cases(job, env):
     ]
 
 
+def _symlink_or_skip(target, link) -> None:
+    """``os.symlink``, or skip: Windows without Developer Mode or the privilege raises OSError/NotImplementedError."""
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f'cannot create a symlink on this host: {exc}')
+
+
 def _guard_roots(tmp_path):
     job = tmp_path / 'job'
     env = tmp_path / 'env'
@@ -1472,7 +1480,7 @@ def test_resolved_request_guard_follows_symlinks_out_of_the_tree(tmp_path):
     target = tmp_path / 'secret.txt'
     target.write_text('x', encoding='utf-8')
     link = os.path.join(job, 'ws', 'apps', 'x', 'src', 'link.txt')
-    os.symlink(str(target), link)
+    _symlink_or_skip(str(target), link)
     assert app_build._resolved_request_allowed(link, (job, env), (env,)) is False
 
 
@@ -1503,6 +1511,12 @@ def test_emitted_config_carries_the_resolved_module_guard(tmp_path):
             pytest.fail('node is required in CI to evaluate the emitted guard')
         pytest.skip('node not available to evaluate the emitted guard')
     cases = _guard_cases(job, env)
+    # A path inside the job tree that links to a file outside it: the JS guard resolves it like the Python one.
+    outside = tmp_path / 'outside-secret.txt'
+    outside.write_text('x', encoding='utf-8')
+    link = os.path.join(job, 'ws', 'apps', 'x', 'src', 'escape.txt')
+    _symlink_or_skip(str(outside), link)
+    cases = cases + [(link, False)]
     probe = tmp_path / 'probe.mjs'
     probe.write_text(
         "import path from 'node:path';\nimport fs from 'node:fs';\n"
@@ -1891,7 +1905,7 @@ def test_under_refuses_a_symlink_out_of_the_root(tmp_path):
     outside = tmp_path / 'outside.txt'
     outside.write_text('x', encoding='utf-8')
     (root / 'a.txt').write_text('a', encoding='utf-8')
-    os.symlink(str(outside), str(root / 'b.txt'))
+    _symlink_or_skip(str(outside), str(root / 'b.txt'))
     roots = (os.path.realpath(str(root)),)
     assert app_build._under(str(root / 'a.txt'), roots) is True
     assert app_build._under(str(root / 'b.txt'), roots) is False
@@ -1977,19 +1991,24 @@ def test_lockfile_check_reads_yaml_as_pnpm_does(lock):
         app_build._refuse_lockfile_paths(lock)
 
 
-def test_lockfile_aliases_are_refused_quickly():
-    """Lockfile aliases (which pnpm never writes) are refused before
-    any walk, so nested aliases cannot make the check run for hours.
+def test_lockfile_aliases_are_refused_before_any_expansion(monkeypatch):
+    """Lockfile aliases (which pnpm never writes) are refused from the parser's
+    events, before the document is loaded, so nested aliases cannot make the
+    check expand. Asserted on the control flow, not on elapsed time: a paused
+    or slow runner cannot change what happens.
     """
-    import time
+    import yaml
 
+    def never_loaded(*args, **kwargs):
+        raise AssertionError('the lockfile was loaded (and its aliases expanded) before the alias refusal')
+
+    monkeypatch.setattr(yaml, 'safe_load_all', never_loaded)
+    monkeypatch.setattr(yaml, 'safe_load', never_loaded)
     lines = ['a0: &a0 [x, x, x, x, x, x, x, x, x, x]']
     for i in range(1, 8):
         lines.append(f'a{i}: &a{i} [' + ', '.join([f'*a{i - 1}'] * 10) + ']')
-    started = time.monotonic()
-    with pytest.raises(app_build.BuildFailure):
+    with pytest.raises(app_build.BuildFailure, match='YAML aliases'):
         app_build._refuse_lockfile_paths('\n'.join(lines) + '\n')
-    assert time.monotonic() - started < 1.0
 
 
 def test_lockfile_with_two_documents_is_read():
