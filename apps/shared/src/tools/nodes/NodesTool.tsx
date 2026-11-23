@@ -25,14 +25,41 @@
 // NODES TOOL — the builtin nodes tool's CONTROLLER
 // =============================================================================
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { ConnectionManager } from 'shell';
 import type { DevToolProps } from 'shell';
 import { useToolHost } from '../core/ToolContext';
 import { NodesSidebarPanel } from './NodesSidebarPanel';
 import type { IntroMode } from '../introCatalog';
+import { pickNodePackage, uploadNodePackage } from './nodeRail';
+
+/** The published nodes in the caller's catalogue: a published node's id holds a dot. */
+function publishedNodes(services: Record<string, unknown>): Array<{ id: string; title: string }> {
+	return Object.entries(services)
+		.filter(([id]) => id.includes('.'))
+		.map(([id, service]) => ({ id, title: (service as { title?: string })?.title || id }))
+		.sort((a, b) => a.id.localeCompare(b.id));
+}
 
 /** The nodes tool's sidebar controller. */
-export const NodesTool: React.FC<DevToolProps> = () => {
+export const NodesTool: React.FC<DevToolProps> = ({ documents, activeDocKey }) => {
 	const services = useToolHost();
-	return <NodesSidebarPanel onShowIntro={(mode: IntroMode) => services.openPage(`intro:${mode}`)} />;
+	const cm = ConnectionManager.getInstance();
+	const [nodes, setNodes] = useState(() => publishedNodes(cm.getCachedServices().services));
+	const [error, setError] = useState('');
+	useEffect(() => cm.on('shell:servicesUpdated', () => setNodes(publishedNodes(cm.getCachedServices().services))), [cm]);
+
+	/** Choose a .rrnode, upload it as a version, and open its node. */
+	const onUpload = (): void => {
+		setError('');
+		void pickNodePackage()
+			.then(async (data) => {
+				if (!data) return;
+				const nodeId = await uploadNodePackage(cm, data);
+				documents?.open(nodeId, nodeId);
+			})
+			.catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+	};
+
+	return <NodesSidebarPanel nodes={nodes} activeNodeId={activeDocKey?.startsWith('tool:nodes/') ? activeDocKey.slice('tool:nodes/'.length) : undefined} onOpenNode={documents ? (nodeId, title) => documents.open(nodeId, title) : undefined} onUpload={documents ? onUpload : undefined} error={error} onShowIntro={(mode: IntroMode) => services.openPage(`intro:${mode}`)} />;
 };

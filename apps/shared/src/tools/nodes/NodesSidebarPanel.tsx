@@ -27,6 +27,7 @@
 
 import React from 'react';
 import { BxNote } from 'shell';
+import { CodiconCircuitBoard } from '../../components/icons/Codicon';
 import { SidebarMenu } from 'shell';
 import type { ViewMenu } from 'shell';
 import { panelStyles } from '../core/chrome/panelStyles';
@@ -36,13 +37,26 @@ import type { IntroMode } from '../introCatalog';
 export interface INodesSidebarPanelProps {
 	/** Open the embedded Introduction page. */
 	onShowIntro?: (mode: IntroMode) => void;
+	/** The published nodes in the caller's catalogue. */
+	nodes?: Array<{ id: string; title: string }>;
+	/** The node whose document is active, if any. */
+	activeNodeId?: string;
+	/** Open a node's document. */
+	onOpenNode?: (nodeId: string, title: string) => void;
+	/** Choose a .rrnode and upload it as a version. */
+	onUpload?: () => void;
+	/** Why the last upload failed. */
+	error?: string;
 }
 
+/** The upload row's id: no node id has a leading '+'. */
+const UPLOAD = '+upload';
+
 /**
- * The Node Builder tool's sidebar body — the Introduction row above the
- * placeholder, until the node builder lands.
+ * The Nodes tool's sidebar body: the Introduction, then the nodes you
+ * publish (upload one, open one to publish its versions).
  */
-export const NodesSidebarPanel: React.FC<INodesSidebarPanelProps> = ({ onShowIntro }) => {
+export const NodesSidebarPanel: React.FC<INodesSidebarPanelProps> = ({ onShowIntro, nodes = [], activeNodeId, onOpenNode, onUpload, error }) => {
 	const navMenu: ViewMenu = {
 		entries: [{ id: 'intro', label: 'Introduction to Nodes', icon: <BxNote size={16} /> }],
 	};
@@ -59,7 +73,24 @@ export const NodesSidebarPanel: React.FC<INodesSidebarPanelProps> = ({ onShowInt
 					/>
 				</div>
 			)}
-			<div style={panelStyles.comingSoon}>Coming soon...</div>
+			{onOpenNode ? (
+				<div style={panelStyles.navSection}>
+					<SidebarMenu
+						menu={{
+							entries: [...(onUpload ? [{ id: UPLOAD, label: 'Upload a node…', icon: <CodiconCircuitBoard size={16} /> }] : []), ...nodes.map((n) => ({ id: n.id, label: n.title === n.id ? n.id : `${n.title} (${n.id})`, icon: <CodiconCircuitBoard size={16} /> }))],
+						}}
+						activeId={activeNodeId ?? ''}
+						onSelect={(id) => {
+							if (id === UPLOAD) onUpload?.();
+							else onOpenNode(id, nodes.find((n) => n.id === id)?.title ?? id);
+						}}
+					/>
+					{error ? <div style={{ ...panelStyles.comingSoon, color: 'var(--rr-color-error)' }}>{error}</div> : null}
+					{nodes.length === 0 ? <div style={panelStyles.comingSoon}>No published node reaches you yet. Upload a .rrnode, then publish it to @me.</div> : null}
+				</div>
+			) : (
+				<div style={panelStyles.comingSoon}>Coming soon...</div>
+			)}
 		</div>
 	);
 };
