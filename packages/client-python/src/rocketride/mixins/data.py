@@ -58,7 +58,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from ..core import DAPClient, PipeException
-from ..types import PIPELINE_RESULT, UPLOAD_RESULT
+from ..types import PIPELINE_RESULT, PipelineTraceLevel, UPLOAD_RESULT
 
 # A just-registered pipeline's per-pipe data listener can occasionally still be
 # binding when `open()` reaches it - observed under heavy concurrent load (e.g. many
@@ -141,6 +141,7 @@ class DataMixin(DAPClient):
             provider: str = None,
             on_sse=None,
             params: Dict[str, Any] = None,
+            pipeline_trace_level: Optional[PipelineTraceLevel] = None,
         ):
             """
             Create a new data pipe (usually called via client.pipe()).
@@ -159,10 +160,17 @@ class DataMixin(DAPClient):
                         event emitted by the pipeline node for this specific pipe
                 params: Per-call parameter values by public name; they ride
                         the open, the one door every per-call value enters by
+                pipeline_trace_level: The trace level of this pipe's transaction
+                        (open, writes, close): 'none', 'metadata', 'summary' or
+                        'full'. It rides the open and the engine binds the pipe
+                        at it, so the request's flow events follow it even on an
+                        engine shared by every caller of a published pipeline.
+                        None uses the control's own level
             """
             self._client = client
             self._token = token
             self._params = dict(params) if params else None
+            self._pipeline_trace_level = pipeline_trace_level
             self._objinfo = objinfo or {}
             self._mime_type = mime_type or 'application/octet-stream'
             self._provider = provider
@@ -231,6 +239,11 @@ class DataMixin(DAPClient):
                         'mimeType': self._mime_type,
                         'provider': self._provider,
                         **({'params': self._params} if self._params else {}),
+                        **(
+                            {'pipelineTraceLevel': self._pipeline_trace_level}
+                            if self._pipeline_trace_level is not None
+                            else {}
+                        ),
                     },
                     token=self._token,
                 )
@@ -514,6 +527,7 @@ class DataMixin(DAPClient):
         provider: str = None,
         on_sse=None,
         params: Dict[str, Any] = None,
+        pipeline_trace_level: Optional[PipelineTraceLevel] = None,
     ) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
@@ -531,6 +545,9 @@ class DataMixin(DAPClient):
             provider: Optional provider specification
             params: Per-call parameter values by public name (the pipeline's
                 ``parameters`` map); an unknown name is refused by the server
+            pipeline_trace_level: The trace level of the pipe's transaction
+                ('none', 'metadata', 'summary' or 'full'); it rides the open and
+                the engine binds the pipe at it. None uses the control's own level
 
         Returns:
             DataPipe: A pipe object for streaming data
@@ -559,6 +576,7 @@ class DataMixin(DAPClient):
             provider=provider,
             on_sse=on_sse,
             params=params,
+            pipeline_trace_level=pipeline_trace_level,
         )
 
     async def send(

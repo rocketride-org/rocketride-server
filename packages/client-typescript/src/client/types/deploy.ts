@@ -31,7 +31,7 @@
  * publish and pointer change is recorded immutably in the audit history.
  */
 
-import type { PipelineConfig } from './pipeline.js';
+import type { PipelineConfig, PipelineTraceLevel } from './pipeline.js';
 export type { PipelineConfig };
 
 // =============================================================================
@@ -91,7 +91,7 @@ export interface DeploymentSchedule {
 	ttl?: number | null;
 	/** Trace verbosity for this source's deploy runs; null/absent = the
 	    deploy default (full). */
-	traceLevel?: 'none' | 'metadata' | 'summary' | 'full' | null;
+	traceLevel?: PipelineTraceLevel | null;
 	/** Full task debug output (--trace=debugOut) for this source. */
 	debugOut?: boolean;
 	/** Unix timestamp (seconds) of the last scheduler dispatch, or null. */

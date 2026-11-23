@@ -192,6 +192,12 @@ class PipelineConfig(TypedDict, total=False):
     editorMode: str  # Active editor mode (e.g. 'design', 'status', 'flow')
 
 
+#: How much of a request's flow the engine records and sends as FLOW events,
+#: from nothing to every node's input and output: ``use()`` and ``submit()``
+#: take it, and so does a DataPipe for its own transaction.
+PipelineTraceLevel = Literal['none', 'metadata', 'summary', 'full']
+
+
 class SUBMIT_RESULT(TypedDict, total=False):
     """
     What ``submit()`` returns: the pipe ``close`` body plus the stamps.

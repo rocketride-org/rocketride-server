@@ -28,7 +28,7 @@ import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, PipeInterfaces, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, ConvertResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, PipelineTraceLevel, PipeInterfaces, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, ConvertResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, SUBMIT_INLINE_MAX, WIRE_PROTOCOL } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -103,6 +103,7 @@ export class DataPipe {
 	private _closed = false;
 	private _onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 	private _params?: Record<string, unknown>;
+	private _pipelineTraceLevel?: PipelineTraceLevel;
 
 	/**
 	 * Creates a new DataPipe instance.
@@ -119,9 +120,14 @@ export class DataPipe {
 	 *               (`@<team>/...`, `=team/<tid>/...`); any value throws
 	 * @param params - Per-call parameter values by public name; they ride the open,
 	 *                 the one door every per-call value enters by
+	 * @param pipelineTraceLevel - The trace level of this pipe's transaction (open,
+	 *                 writes, close): 'none' | 'metadata' | 'summary' | 'full'. It rides
+	 *                 the open and the engine binds the pipe at it, so the request's flow
+	 *                 events follow it even on an engine shared by every caller of a
+	 *                 published pipeline. Omitted, the control's own level applies.
 	 * @throws Error if `team` is passed (the per-call team option is retired)
 	 */
-	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>) {
+	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>, pipelineTraceLevel?: PipelineTraceLevel) {
 		refuseTeamOption(team);
 		this._client = client;
 		this._token = token;
@@ -130,6 +136,7 @@ export class DataPipe {
 		this._provider = provider;
 		this._onSSE = onSSE;
 		this._params = params && Object.keys(params).length > 0 ? { ...params } : undefined;
+		this._pipelineTraceLevel = pipelineTraceLevel;
 	}
 
 	/**
@@ -188,6 +195,7 @@ export class DataPipe {
 				mimeType: this._mimeType,
 				provider: this._provider,
 				...(this._params ? { params: this._params } : {}),
+				...(this._pipelineTraceLevel !== undefined ? { pipelineTraceLevel: this._pipelineTraceLevel } : {}),
 			},
 			token: this._token,
 		});
@@ -1622,7 +1630,7 @@ export class RocketRideClient extends DAPClient {
 			args?: string[];
 			ttl?: number;
 			/** Pipeline trace level. When set, captures every lane write and invoke call in the response under '_trace'. */
-			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
+			pipelineTraceLevel?: PipelineTraceLevel;
 			/** Optional display name for the task (e.g. shown in dashboard). */
 			name?: string;
 			/** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
@@ -1784,7 +1792,7 @@ export class RocketRideClient extends DAPClient {
 			args?: string[];
 			ttl?: number;
 			env?: Record<string, string>;
-			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
+			pipelineTraceLevel?: PipelineTraceLevel;
 		} = {}
 	): Promise<SUBMIT_RESULT> {
 		// Step 0: the retired team option, from an untyped caller, is refused before any request
@@ -2041,10 +2049,13 @@ export class RocketRideClient extends DAPClient {
 	 * `token` is the control id, or an address (bare or rooted, `@<team>/...`) the open
 	 * resolves the way `submit()` resolves a name, starting a published rung when
 	 * nothing is live. `team` is retired: pass `undefined` (any value throws); a
-	 * rooted address names the rung.
+	 * rooted address names the rung. `pipelineTraceLevel` is the trace level of
+	 * the pipe's transaction ('none' | 'metadata' | 'summary' | 'full'): it rides
+	 * the open and the engine binds the pipe at it; omitted, the control's own
+	 * level applies.
 	 */
-	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe> {
-		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE, team, params);
+	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>, pipelineTraceLevel?: PipelineTraceLevel): Promise<DataPipe> {
+		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE, team, params, pipelineTraceLevel);
 	}
 
 	/**

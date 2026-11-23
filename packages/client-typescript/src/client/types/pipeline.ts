@@ -141,6 +141,13 @@ export interface PipelineConfig {
 }
 
 /**
+ * How much of a request's flow the engine records and sends as FLOW events,
+ * from nothing to every node's input and output: `use()` and `submit()` take
+ * it, and so does a DataPipe for its own transaction.
+ */
+export type PipelineTraceLevel = 'none' | 'metadata' | 'summary' | 'full';
+
+/**
  * What `submit()` returns: the pipe `close` body plus the resolution stamps.
  *
  * The close body's own fields (`result_types`, `objects` ...) ride beside these.

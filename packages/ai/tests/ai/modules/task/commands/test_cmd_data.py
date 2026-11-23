@@ -471,6 +471,64 @@ async def test_an_internal_connection_forwards_its_own_stamp(catalog, engines, e
 
 
 # =============================================================================
+# THE PIPE'S TRACE LEVEL (plan 7.4): set by its open, for the whole transaction
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_each_callers_open_sets_its_own_pipes_trace_level_on_a_shared_engine(catalog, engines, engine_log):
+    """Two callers of one published shape share an engine; each pipe is bound at the level ITS open asked for."""
+    ts = _server()
+    a = await _publish(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+    b = await _publish(ts, _pipeline(instructions=['Be thorough.']), user='user-b')
+    assert a.task is b.task and a.task.shared
+    assert a.trace_level is None and b.trace_level is None
+    conn_a = _data_conn(ts, a)
+    conn_b = _data_conn(ts, b)
+    conn_b._account_info = _caller('user-b')
+
+    await _opened(ts, conn_a, pipelineTraceLevel='full')
+    await _opened(ts, conn_b)
+
+    # The level is the stamp's, never a loose argument the engine could read
+    assert [entry['_caller']['traceLevel'] for entry in engine_log] == ['full', None]
+    assert all('pipelineTraceLevel' not in entry for entry in engine_log)
+
+
+@pytest.mark.asyncio
+async def test_an_open_naming_no_level_takes_the_controls_and_a_later_frame_cannot_change_it(
+    catalog, engines, engine_log
+):
+    """Without a level the open stamps the control's; a write or close naming one changes nothing."""
+    ts = _server()
+    control = await _start(ts, _pipeline(), pipelineTraceLevel='metadata')
+    conn = _data_conn(ts, control)
+
+    pipe_id = await _opened(ts, conn)
+    await _frame(conn, subcommand='write', pipeId=pipe_id, data=b'x', pipelineTraceLevel='full')
+    await _frame(conn, subcommand='close', pipeId=pipe_id, pipelineTraceLevel='full')
+    await _opened(ts, conn, pipelineTraceLevel='summary')
+
+    assert [entry['_caller']['traceLevel'] for entry in engine_log] == ['metadata', 'metadata', 'metadata', 'summary']
+    assert all('pipelineTraceLevel' not in entry for entry in engine_log)
+
+
+@pytest.mark.asyncio
+async def test_an_open_naming_a_level_the_engine_has_not_is_refused_before_forwarding(catalog, engines, engine_log):
+    """An unknown level is an invalid argument naming the field; nothing reaches the engine."""
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+
+    with pytest.raises(TaskError) as refused:
+        await _opened(ts, conn, pipelineTraceLevel='verbose')
+
+    assert refused.value.code == TaskError.INVALID_ARGUMENT
+    assert refused.value.field == 'pipelineTraceLevel'
+    assert engine_log == []
+
+
+# =============================================================================
 # THE OPEN-PIPE RECORD (P1/P2)
 # =============================================================================
 

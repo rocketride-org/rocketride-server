@@ -63,6 +63,3 @@ export interface TraceRow {
 	pipelineResult?: Record<string, unknown>;
 }
 
-/** Pipeline trace level passed to the engine on run (matches the SDK `client.use` option). */
-export type TraceLevel = 'none' | 'metadata' | 'summary' | 'full';
-

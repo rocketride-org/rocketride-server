@@ -133,6 +133,8 @@ import type { PipelineComponent as Frozen_PipelineComponent } from '../contract/
 import type { PipelineComponent as Current_PipelineComponent } from './client/index.js';
 import type { PipelineConfig as Frozen_PipelineConfig } from '../contract/versions/v2.0';
 import type { PipelineConfig as Current_PipelineConfig } from './client/index.js';
+import type { PipelineTraceLevel as Frozen_PipelineTraceLevel } from '../contract/versions/v2.0';
+import type { PipelineTraceLevel as Current_PipelineTraceLevel } from './client/index.js';
 import type { SUBMIT_RESULT as Frozen_SUBMIT_RESULT } from '../contract/versions/v2.0';
 import type { SUBMIT_RESULT as Current_SUBMIT_RESULT } from './client/index.js';
 import type { PipeInterfaceNode as Frozen_PipeInterfaceNode } from '../contract/versions/v2.0';
@@ -719,6 +721,12 @@ const _k_PipelineConfig: { [K in _AllKeys<Frozen_PipelineConfig>]-?: K } = {} as
 void _k_PipelineConfig;
 const _b_PipelineConfig: [_DroppedKeys<Frozen_PipelineConfig, Current_PipelineConfig>] extends [never] ? true : _DroppedKeys<Frozen_PipelineConfig, Current_PipelineConfig> = true;
 void _b_PipelineConfig;
+const _t_PipelineTraceLevel: Frozen_PipelineTraceLevel = {} as Current_PipelineTraceLevel;
+void _t_PipelineTraceLevel;
+const _k_PipelineTraceLevel: { [K in _AllKeys<Frozen_PipelineTraceLevel>]-?: K } = {} as { [K in _AllKeys<Current_PipelineTraceLevel>]-?: K };
+void _k_PipelineTraceLevel;
+const _b_PipelineTraceLevel: [_DroppedKeys<Frozen_PipelineTraceLevel, Current_PipelineTraceLevel>] extends [never] ? true : _DroppedKeys<Frozen_PipelineTraceLevel, Current_PipelineTraceLevel> = true;
+void _b_PipelineTraceLevel;
 const _t_SUBMIT_RESULT: Frozen_SUBMIT_RESULT = {} as Current_SUBMIT_RESULT;
 void _t_SUBMIT_RESULT;
 const _k_SUBMIT_RESULT: { [K in _AllKeys<Frozen_SUBMIT_RESULT>]-?: K } = {} as { [K in _AllKeys<Current_SUBMIT_RESULT>]-?: K };

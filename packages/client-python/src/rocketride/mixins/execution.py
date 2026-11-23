@@ -61,7 +61,7 @@ from typing import Dict, Any, List, Optional, Union
 from ..core import DAPClient
 from ..core.constants import SUBMIT_INLINE_MAX
 from ..core.exceptions import PipeException
-from ..types.pipeline import SUBMIT_RESULT, PipelineConfig
+from ..types.pipeline import SUBMIT_RESULT, PipelineConfig, PipelineTraceLevel
 from ..types.task import TASK_STATUS
 
 try:
@@ -142,7 +142,7 @@ class ExecutionMixin(DAPClient):
         args: List[str] = None,
         ttl: int = None,
         env: Dict[str, str] = None,
-        pipeline_trace_level: str = None,
+        pipeline_trace_level: Optional[PipelineTraceLevel] = None,
     ) -> SUBMIT_RESULT:
         """
         Run ONE request through a named or inline pipeline: ``use()`` plus one ``send()``.
@@ -284,7 +284,7 @@ class ExecutionMixin(DAPClient):
         use_existing: bool = None,
         args: List[str] = None,
         ttl: int = None,
-        pipelineTraceLevel: str = None,
+        pipelineTraceLevel: Optional[PipelineTraceLevel] = None,
         name: str = None,
         env: Dict[str, str] = None,
     ) -> Dict[str, Any]:

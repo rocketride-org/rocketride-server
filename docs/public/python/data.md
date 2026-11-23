@@ -88,6 +88,16 @@ and takes effect at the next node boundary: the pending write fails with a
 finishes, and a cancel during the last node lets that write complete. `close()` still
 runs and releases the pipe.
 
+A pipe's trace level is part of its transaction, like its object and MIME type: pass
+`pipeline_trace_level` (a `PipelineTraceLevel`: `'none'`, `'metadata'`, `'summary'` or
+`'full'`) to `pipe()` and the engine binds that pipe at it, from `open()` to `close()`, so
+its FLOW events follow it even on an engine every caller of a published pipeline shares.
+Without one the control's own level applies, which is `none` on a published pipeline.
+
+```python
+pipe = await client.pipe('acme.docBrain', mime_type='text/plain', on_sse=on_sse, pipeline_trace_level='full')
+```
+
 Properties: `is_opened` and `pipe_id` (server-assigned after `open()`). `pipe()` and
 the pipe itself accept an `on_sse` callback for server-sent events, and
 `DataPipe.tool()` invokes a pipeline tool function through the pipe — see the

@@ -52,12 +52,13 @@ import { openToolDocKey, openToolTitle } from 'shared/tools/pipelines/components
 import { assertExternalUrl } from 'shared/ops/hostOps';
 import { isShortId, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewPipelineForm';
-import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
+import type { ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
 import { packPipe } from './packBundle';
 import { scaffoldPipe } from './scaffoldPipe';
 import { createProjectVfs } from '../workspace/projectVfs';
 import { defaultStoreBlock } from 'rocketride';
+import type { PipelineTraceLevel } from 'rocketride';
 import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
 import { besidePath, imageDataUri, isImageName } from 'shared/components/assets/assetsModel';
 import { MAX_README_IMAGE_BYTES } from 'shared/tools/appdev';
@@ -138,7 +139,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	// --- Unified settings (effective values incl. manifest defaults) ----------
 
 	// Default trace level for pipelines with no per-editor override
-	const settingTraceLevel = (String(settings['rocketride.pipeBuilder.pipelineTraceLevel'] ?? '') || 'full') as TraceLevel;
+	const settingTraceLevel = (String(settings['rocketride.pipeBuilder.pipelineTraceLevel'] ?? '') || 'full') as PipelineTraceLevel;
 	// Default idle-timeout in seconds; NaN when unset (then the engine default applies)
 	const settingTtl = Number(settings['rocketride.pipeBuilder.pipelineTTL'] ?? NaN);
 	// Extra command-line arguments for each task, kept as one raw string — the
