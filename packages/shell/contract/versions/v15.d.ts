@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV15 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-23T16:45:57.760Z
-// Source commit: 07cd8076d3d344c3624d2449e7345fb883dd61e1
+// Generated:     2026-11-23T17:09:30.038Z
+// Source commit: 16f849188f49a237244e74928527546bfbb97983
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -4009,8 +4009,8 @@ declare class BillingApi {
      * complete the checkout without a browser redirect to Stripe.
      *
      * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
-     * promotion code) — the subscription is already active and no payment
-     * step is needed.
+     * promotion code): no payment step is needed. A null secret does not by
+     * itself show that the subscription is active; read `status` for that.
      *
      * @param orgId         - Organisation UUID to subscribe.
      * @param appId         - App being subscribed (e.g. "brandi").
@@ -4018,6 +4018,8 @@ declare class BillingApi {
      * @param promotionCode - Optional promo code to apply (validated server-side).
      * @param attemptId     - Optional checkout identifier. Replay an ambiguous request only if
      * the server advertised billing_checkout_replay before dispatch and still advertises it.
+     * A replay reuses the same attempt ID and the exact same request, on the same authenticated
+     * server, user and organization; the capability on a different server does not authorize it.
      * Legacy servers may accept the field without deduplicating.
      * @returns Object with client_secret (or null), subscription_id, and status.
      */
@@ -4055,6 +4057,8 @@ declare class BillingApi {
      * @param code  - Customer-facing code string (case-insensitive).
      * @param attemptId - Optional redemption identifier. Replay an ambiguous request only if
      * the server advertised billing_checkout_replay before dispatch and still advertises it.
+     * A replay reuses the same attempt ID and the exact same request, on the same authenticated
+     * server, user and organization; the capability on a different server does not authorize it.
      * Legacy servers may accept the field without deduplicating.
      * @returns Redemption result with mode and granted credits.
      */
@@ -7918,8 +7922,9 @@ interface CheckoutModalBaseProps {
      * attempt ID so the connected server can recognize a retry.
      *
      * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
-     * promotion code) — the subscription is already active and the payment
-     * step is skipped entirely.
+     * promotion code): the payment step is skipped. A null secret does not by
+     * itself show that the subscription is active: with `requireCheckoutStatus`
+     * the modal also needs an explicit `active` or `trialing` status before it accepts it.
      */
     onCreateCheckout: (priceId: string, promotionCode?: string, attemptId?: string) => Promise<{
         clientSecret: string | null;

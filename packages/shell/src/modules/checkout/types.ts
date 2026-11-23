@@ -231,8 +231,9 @@ export interface CheckoutModalBaseProps {
 	 * attempt ID so the connected server can recognize a retry.
 	 *
 	 * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
-	 * promotion code) — the subscription is already active and the payment
-	 * step is skipped entirely.
+	 * promotion code): the payment step is skipped. A null secret does not by
+	 * itself show that the subscription is active: with `requireCheckoutStatus`
+	 * the modal also needs an explicit `active` or `trialing` status before it accepts it.
 	 */
 	onCreateCheckout: (priceId: string, promotionCode?: string, attemptId?: string) => Promise<{ clientSecret: string | null; subscriptionId: string; status?: string }>;
 

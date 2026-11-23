@@ -86,8 +86,8 @@ export class BillingApi {
 	 * complete the checkout without a browser redirect to Stripe.
 	 *
 	 * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
-	 * promotion code) — the subscription is already active and no payment
-	 * step is needed.
+	 * promotion code): no payment step is needed. A null secret does not by
+	 * itself show that the subscription is active; read `status` for that.
 	 *
 	 * @param orgId         - Organisation UUID to subscribe.
 	 * @param appId         - App being subscribed (e.g. "brandi").
@@ -95,6 +95,8 @@ export class BillingApi {
 	 * @param promotionCode - Optional promo code to apply (validated server-side).
 	 * @param attemptId     - Optional checkout identifier. Replay an ambiguous request only if
 	 * the server advertised billing_checkout_replay before dispatch and still advertises it.
+	 * A replay reuses the same attempt ID and the exact same request, on the same authenticated
+	 * server, user and organization; the capability on a different server does not authorize it.
 	 * Legacy servers may accept the field without deduplicating.
 	 * @returns Object with client_secret (or null), subscription_id, and status.
 	 */
@@ -146,6 +148,8 @@ export class BillingApi {
 	 * @param code  - Customer-facing code string (case-insensitive).
 	 * @param attemptId - Optional redemption identifier. Replay an ambiguous request only if
 	 * the server advertised billing_checkout_replay before dispatch and still advertises it.
+	 * A replay reuses the same attempt ID and the exact same request, on the same authenticated
+	 * server, user and organization; the capability on a different server does not authorize it.
 	 * Legacy servers may accept the field without deduplicating.
 	 * @returns Redemption result with mode and granted credits.
 	 */

@@ -999,9 +999,9 @@ Billing and subscription operations: plans, checkout, portal, and compute credit
 
 - `async get_details(org_id: str) -> list[BillingDetail]` — per-app subscription rows for the org.
 - `async get_product_prices(app_id: str) -> list[AppPrice]` — active plans for an app, month-first, formatted for a plan picker.
-- `async create_checkout_session(org_id: str, app_id: str, price_id: str, promotion_code: str | None = None) -> dict` — create a Stripe subscription; returns `{'clientSecret', 'subscriptionId', 'status'}`. `clientSecret` is `None` when the first invoice is $0 — the subscription is already active.
+- `async create_checkout_session(org_id: str, app_id: str, price_id: str, promotion_code: str | None = None, *, attempt_id: str | None = None) -> dict` — create a Stripe subscription; returns `{'clientSecret', 'subscriptionId', 'status'}`. `clientSecret` is `None` when the first invoice is $0, so no payment step is needed; read `status` for whether the subscription is active.
 - `async validate_promo_code(org_id: str, code: str, price_id: str | None = None) -> PromoValidation` — resolve a promo code without side effects; unknown/expired codes return `{'valid': False, 'reason': ...}` and never raise. Pass `price_id` to also get the discounted first-invoice amount.
-- `async redeem_promo_code(org_id: str, code: str) -> PromoRedemption` — redeem a credit-grant code ($0 subscription + immediate credits; `mode: 'credits_only'` when already subscribed). Discount-only codes are rejected — apply those at checkout.
+- `async redeem_promo_code(org_id: str, code: str, *, attempt_id: str | None = None) -> PromoRedemption` — redeem a credit-grant code ($0 subscription + immediate credits; `mode: 'credits_only'` when already subscribed). Discount-only codes are rejected — apply those at checkout.
 - `async create_portal_session(org_id: str, return_url: str) -> dict` — Stripe Billing Portal session; returns `{'url'}`.
 - `async cancel_subscription(org_id: str, app_id: str) -> dict` — schedule cancellation at period end (access retained until then).
 - `async upgrade_subscription(org_id: str, app_id: str, new_price_id: str) -> dict` — swap to a different plan with automatic proration.

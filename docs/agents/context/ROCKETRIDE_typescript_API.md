@@ -929,9 +929,9 @@ Typed wrapper for subscriptions, Stripe checkout, credit wallets, and usage.
 
 - `getDetails(orgId): Promise<BillingDetail[]>` — per-app subscription rows
 - `getProductPrices(appId): Promise<AppPrice[]>` — active plans for an app, month-first
-- `createCheckoutSession(orgId, appId, priceId, promotionCode?): Promise<{ clientSecret: string | null; subscriptionId: string; status: string }>` — `clientSecret` feeds `stripe.confirmPayment()`; `null` when the first invoice is $0 (subscription already active)
+- `createCheckoutSession(orgId, appId, priceId, promotionCode?, attemptId?): Promise<{ clientSecret: string | null; subscriptionId: string; status: string }>` — `clientSecret` feeds `stripe.confirmPayment()`; `null` when the first invoice is $0 (no payment step; read `status` for activation)
 - `validatePromoCode(orgId, code, priceId?): Promise<PromoValidation>` — side-effect-free; unknown/expired codes return `{ valid: false, reason }`, never throw
-- `redeemPromoCode(orgId, code): Promise<PromoRedemption>` — redeem a credit-grant code ($0 subscription + immediate credits; discount-only codes are rejected — apply those at checkout)
+- `redeemPromoCode(orgId, code, attemptId?): Promise<PromoRedemption>` — redeem a credit-grant code ($0 subscription + immediate credits; discount-only codes are rejected — apply those at checkout)
 - `createPortalSession(orgId, returnUrl): Promise<{ url: string }>` — Stripe Billing Portal for payment methods
 - `cancelSubscription(orgId, appId): Promise<{ canceled: boolean }>` — cancel at period end (access retained until then)
 - `upgradeSubscription(orgId, appId, newPriceId)` — swap plans with automatic proration

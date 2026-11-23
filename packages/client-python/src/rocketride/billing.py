@@ -121,8 +121,8 @@ class BillingApi:
         complete the checkout without a browser redirect to Stripe.
 
         ``clientSecret`` is None when the first invoice is $0 (e.g. a 100%-off
-        promotion code) — the subscription is already active and no payment
-        step is needed.
+        promotion code): no payment step is needed. A None secret does not by
+        itself show that the subscription is active; read ``status`` for that.
 
         Args:
             org_id: Organisation UUID to subscribe.
@@ -131,7 +131,10 @@ class BillingApi:
             promotion_code: Optional promo code to apply (validated server-side).
             attempt_id: Optional checkout identifier. Replay an ambiguous request only
                 if the server advertised billing_checkout_replay before dispatch and still
-                advertises it. Legacy servers may accept the field without deduplicating.
+                advertises it. A replay reuses the same attempt ID and the exact same request,
+                on the same authenticated server, user and organization; the capability on a
+                different server does not authorize it. Legacy servers may accept the field
+                without deduplicating.
 
         Returns:
             Dict with ``clientSecret`` (or None), ``subscriptionId``, and ``status``.
@@ -196,7 +199,10 @@ class BillingApi:
             code: Customer-facing code string (case-insensitive).
             attempt_id: Optional redemption identifier. Replay an ambiguous request only
                 if the server advertised billing_checkout_replay before dispatch and still
-                advertises it. Legacy servers may accept the field without deduplicating.
+                advertises it. A replay reuses the same attempt ID and the exact same request,
+                on the same authenticated server, user and organization; the capability on a
+                different server does not authorize it. Legacy servers may accept the field
+                without deduplicating.
 
         Returns:
             Redemption result with mode and granted credits.
