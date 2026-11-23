@@ -407,14 +407,6 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		if (req.command === 'rrext_process' && req.subcommand === 'open' && Number.isSafeInteger(body.pipe_id)) req.run?.pipeIds.delete(body.pipe_id as number);
 	};
 
-	/** An execute answer the choke point refuses: its run leaves the ledger and is terminated. */
-	const endDeniedRun = (st: IRealmState, req: IGatedRequest, response: DAPMessage): void => {
-		const body = isPlainObject(response) && isPlainObject(response.body) ? response.body : undefined;
-		const run = body && typeof body.token === 'string' ? st.ledger.runByToken(body.token) : undefined;
-		if (run) st.ledger.dropRun(run.handle);
-		endOrphan(req, response);
-	};
-
 	/**
 	 * An execute whose answer was lost (the engine call threw, e.g. a timeout):
 	 * the run may exist anyway, so look it up by its minted project and end it.
@@ -782,12 +774,6 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					}
 					const envelope = { ok: true, value: encoded } satisfies IWireEnvelope;
 					verdicts.set(envelope, hit ? 'deny' : 'ok');
-					if (hit) {
-						// The choke point refuses this answer (DA F8): the app never learns the run, so it is
-						// ended and forgotten, and the events buffered for it are dropped (finally, below).
-						if (req.command === 'execute') endDeniedRun(st, req, response);
-						return envelope;
-					}
 					// The answer clears the choke point: the events that came first are delivered (DA F8).
 					const early = req.mintedProject ? st.pending.get(req.mintedProject) : undefined;
 					if (early) {
