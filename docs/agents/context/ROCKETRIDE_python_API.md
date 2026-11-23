@@ -953,7 +953,7 @@ Account management: profile, API keys, organization, members, teams, and server-
 **API keys:**
 
 - `async list_keys() -> list[ApiKeyRecord]`
-- `async create_key(*, name: str, permissions: list[str] | None = None, expires_at: str | None = None, team_id: str | None = None) -> CreateKeyResult` — create a personal access token; returns `{'key': '<raw key>'}` (shown once — store it). With `team_id=None` the key inherits the user's teams and permissions; with `team_id` set, `permissions` must be provided and the key is scoped to that team. Effective permissions are always intersected with the user's at auth time.
+- `async create_key(*, name: str, permissions: list[str] | None = None, expires_at: str | None = None, team_id: str | None = None) -> CreateKeyResult` — create a personal access token; returns a `CreateKeyResult` dict, `{'key': '<raw key>', 'expiresAt': '<ISO timestamp or None>'}`: the raw key (shown once — store it) and the expiry the server granted, `None` when the key does not expire. The granted expiry can be earlier than the requested `expires_at`: a key created over a sign-in session expires with that session's bound (the key `rocketride login` mints works this way). A timestamp without an offset is UTC. `expiresAt` is absent when an older server did not report it, so do not read a missing value as "never expires". With `team_id=None` the key inherits the user's teams and permissions; with `team_id` set, `permissions` must be provided and the key is scoped to that team. Effective permissions are always intersected with the user's at auth time.
 - `async revoke_key(key_id: str) -> None`
 
 **Members:**

@@ -68,7 +68,7 @@ loop is a command.
 - `rocketride login [--deploy] [--apikey <key>]` — (re)authenticate and
   save credentials to `.env` (and make `.env` git-ignored in the same
   step). OSS servers take an API key; saas servers open the browser to
-  sign in and mint a durable personal API key. The browser tab waits
+  sign in and mint a personal API key that expires with the sign-in session; the CLI prints the expiry date (UTC) and says to run `rocketride login` again before then, or, when an older server does not report the expiry, says nothing about it. The browser tab waits
   until the key is minted, then closes itself where the browser allows it (Chrome, Edge); elsewhere
   (Firefox only lets scripts close windows scripts opened) it shows a
   RocketRide-branded "You're signed in" page, in your light/dark setting,
