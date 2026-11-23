@@ -8,7 +8,7 @@
 	"path": "nodes.tool_xtrace_memory",
 	"prefix": "xtrace",
 	"icon": "xtrace.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_xtrace_memory",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_xtrace_memory",
 	"description": ["Long-term, shared agent memory exposed as tools, backed by xTrace Memory Manager.", "Exposes two agent tools: 'remember' stores conversation turns and 'recall' returns the relevant, ready-to-inject context. Set your API key and org id and it works; point several agents at the same org (and group) to share one memory."],
 	"tile": ["Org: ${parameters.xtrace_memory.org_id}"],
 	"lanes": {},

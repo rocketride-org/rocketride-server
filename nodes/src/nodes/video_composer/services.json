@@ -9,7 +9,7 @@
 	"prefix": "video_composer",
 	"description": ["Stitches a sequence of image frames into an MP4 video using FFmpeg. ", "Place after any image-producing filter to re-encode matched frames into ", "a playable video clip."],
 	"icon": "video_composer.svg",
-	"documentation": "https://docs.rocketride.org/nodes/video_composer",
+	"documentation": "https://docs.rocketride.ai/nodes/video_composer",
 	"lanes": {
 		"image": ["video"]
 	},

@@ -8,7 +8,7 @@
 	"path": "nodes.tool_mem0",
 	"prefix": "mem0",
 	"icon": "mem0.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_mem0",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_mem0",
 	"description": ["Long-term, shared agent memory exposed as tools, backed by the hosted Mem0 Platform.", "Exposes two agent tools: 'remember' stores conversation turns and 'recall' returns the relevant memories. Set your API key and a user id and it works; point several agents at the same project (and ids) to share one memory."],
 	"tile": ["User: ${parameters.mem0.user_id}"],
 	"lanes": {},

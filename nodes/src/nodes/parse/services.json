@@ -51,7 +51,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "parse.svg",
-	"documentation": "https://docs.rocketride.org/nodes/parse/",
+	"documentation": "https://docs.rocketride.ai/nodes/parse/",
 	//
 	//
 	//	Optional:

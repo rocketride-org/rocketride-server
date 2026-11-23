@@ -8,7 +8,7 @@
 	"path": "nodes.tool_skills",
 	"prefix": "skills",
 	"icon": "skills.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_skills",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_skills",
 	"description": ["Gives agents custom skills: instructions for one kind of task, in the SKILL.md format.", "Enter skills in the node, or point it at a folder of skills in your RocketRide files.", "The agent sees each skill's name and description, and loads the full instructions only for the skill it needs."],
 	"lanes": {},
 	//

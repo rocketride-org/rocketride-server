@@ -9,7 +9,7 @@
 	"prefix": "twelvelabs",
 	"description": ["Sends a video to TwelveLabs along with instructions and returns the generated text response."],
 	"icon": "twelvelabs.svg",
-	"documentation": "https://docs.rocketride.org/nodes/twelvelabs",
+	"documentation": "https://docs.rocketride.ai/nodes/twelvelabs",
 	"lanes": {
 		"video": ["text"]
 	},

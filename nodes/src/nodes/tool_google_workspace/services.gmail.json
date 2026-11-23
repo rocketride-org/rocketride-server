@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.tool_google_workspace.gmail",
 	"icon": "gmail.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_google_workspace/gmail",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_google_workspace/gmail",
 	"description": [
 		"Exposes Gmail operations as agent tools.\n",
 		"Read, search, label, draft, send, and organize mail; permanent delete available with full access.\n",

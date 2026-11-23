@@ -8,7 +8,7 @@
 	"path": "nodes.tool_notion",
 	"prefix": "notion",
 	"icon": "notion.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_notion",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_notion",
 	"description": ["Exposes a Notion workspace (search, pages, databases) as agent tools.", "Search, read, and write Notion pages and databases using an internal integration secret: search by title, query database rows, read a page's body as plain text, and create/update/append pages."],
 	"tile": [],
 	"lanes": {},

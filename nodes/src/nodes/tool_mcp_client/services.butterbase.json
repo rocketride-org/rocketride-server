@@ -8,7 +8,7 @@
 	"path": "nodes.tool_mcp_client",
 	"prefix": "butterbase",
 	"icon": "butterbase.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_mcp_client",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_mcp_client",
 	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more, as tools named butterbase.<tool>.", "This is a branded preset of the generic MCP Client (Streamable HTTP), so it shares the same implementation. Prerequisite: enable Developer Mode on your Butterbase app so the agent can create/modify resources."],
 	"tile": ["Server: ${parameters.mcp_client.serverName}"],
 	"lanes": {},

@@ -8,7 +8,7 @@
 	"path": "nodes.tool_v0",
 	"prefix": "v0",
 	"icon": "vercel.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_v0",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_v0",
 	"description": ["A component that connects to Vercel's v0 API to generate React + Tailwind CSS UI ", "components from natural-language prompts. Supports generate_ui (create a new component ", "from a description) and refine_ui (iterate on a previous generation with follow-up ", "instructions). Experimental: API availability and behavior may change."],
 	"tile": ["Tool: v0 UI Generation"],
 	"lanes": {},

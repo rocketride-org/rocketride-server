@@ -8,7 +8,7 @@
 	"path": "nodes.tool_tavily",
 	"prefix": "tavily",
 	"icon": "tavily.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_tavily",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_tavily",
 	"description": ["Exposes Tavily real-time web search as an agent tool.", "Performs live web searches via the Tavily API and returns structured results with titles, URLs, content snippets, and relevance scores."],
 	"tile": [],
 	"lanes": {},
