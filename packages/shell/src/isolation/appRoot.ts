@@ -200,11 +200,15 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	/** Fetches the API key from both sources: `getClient().getApiKey()` and `host.apiKey` (`hostOps.ts:122`). */
 	const refreshApiKeys = (): void => {
 		addApiKey(clientApiKey());
+		// A logout or teardown bumps the epoch: an answer from the session before it must not re-add that session's key.
+		const askedIn = epoch;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const answered = Promise.resolve()
 			.then(() => cm.ops().request('host.apiKey', {}))
 			.then(
-				(answer) => addApiKey(isPlainObject(answer) ? answer.apiKey : undefined),
+				(answer) => {
+					if (epoch === askedIn) addApiKey(isPlainObject(answer) ? answer.apiKey : undefined);
+				},
 				() => undefined
 			);
 		const waited = new Promise<void>((resolve) => {
@@ -631,7 +635,13 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				const runGeneration = req.run?.generation;
 				try {
 					// DA F9: the API key fetched at attach (or login) is known before any answer is scrubbed.
-					if (apiKeyReady) await apiKeyReady;
+					if (apiKeyReady) {
+						await apiKeyReady;
+						// Admitted before a detach, teardown, logout or terminate that happened during the wait: ownership is checked again.
+						const runGone = req.run !== undefined && st.ledger.run(req.run.handle) !== req.run;
+						const fsGone = typeof req.fs?.handle === 'string' && st.ledger.fs(req.fs.handle) === undefined;
+						if (st.detached || closing > 0 || epoch !== startedIn || runGone || fsGone) throw deny('capability', 'client.request', { command: req.command });
+					}
 					// DA F8: events for this run that arrive before the answer are buffered, not dropped.
 					if (req.mintedProject) st.pending.set(req.mintedProject, []);
 					let response: DAPMessage;
