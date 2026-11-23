@@ -1322,10 +1322,11 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
     order = []
 
-    def place(pipeline):
+    def place(pipeline, isolated=False):
         order.append(('place', [c['provider'] for c in pipeline['components']]))
         if not available:
             raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
+        return ['llm_x']
 
     monkeypatch.setattr(engine.node_store, 'place', place)
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
@@ -1431,6 +1432,41 @@ async def test_an_isolated_task_is_told_whether_it_opens_the_store(monkeypatch, 
 
     spec = t._launcher.start.call_args.args[0]
     assert (spec.uses_store, spec.storage_root) == ((True, 'users/client-env-test/files') if opens else (False, ''))
+
+
+@pytest.mark.asyncio
+async def test_the_runtime_is_given_the_folders_of_the_nodes_its_run_loads(monkeypatch, tmp_path):
+    """The runtime is given the folder of each node place() names: a container
+    or a pod cannot see the engine's nodes/, so its runtime copies them in.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    monkeypatch.setattr(engine, 'pipeline_opens_store', lambda *a: False)
+    monkeypatch.setattr(engine.node_store, 'place', lambda pipeline, isolated: ['embed_y', 'llm_x'] if isolated else [])
+    monkeypatch.setattr(engine.node_release, 'nodes_dir', lambda: str(tmp_path))
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    t.source = 'src'
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
+    with pytest.raises(Launched):
+        await Task.start_task(t)
+
+    spec = t._launcher.start.call_args.args[0]
+    assert spec.nodes == [str(tmp_path / 'embed_y'), str(tmp_path / 'llm_x')]
 
 
 # ---------------------------------------------------------------------------
