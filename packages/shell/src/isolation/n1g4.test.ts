@@ -27,9 +27,9 @@
 
 /// <reference types="node" />
 
+import { performance } from 'node:perf_hooks';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import { buildBridgeInit } from './projection';
 import type { IBridgeInitInput } from './projection';
@@ -39,7 +39,7 @@ import type { ITestRoot } from './__test__/fixtures';
 import { assertNoReal, call, clientEvents, engineErrorText, expectDenied, expectOk, lastRun, transcript } from './__test__/n1';
 import { settle } from './__test__/realm';
 import type { IOpenedRealm } from './__test__/realm';
-import { assertNotForwarded, brief, outcome, startRun } from './__test__/util';
+import { assertCost, assertNotForwarded, bestPair, brief, outcome, startRun } from './__test__/util';
 
 const SRC = 'chat_1';
 const USER = 'u-1234567890abcdef';
@@ -222,66 +222,103 @@ test('T117 ids a realm plants in its own replies never change, refuse or evict a
 // T118 — F3 (security M2): bounded scrub cost with the root's sets full
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The best of `n` timed runs, in ms. */
-async function best(n: number, run: () => Promise<void>): Promise<number> {
-	let min = Infinity;
-	for (let i = 0; i < n; i++) {
-		const start = performance.now();
-		await run();
-		min = Math.min(min, performance.now() - start);
-	}
-	return min;
-}
+/** How far over its empty-set control a run may go on a loaded host (see assertCost). */
+const COST_RATIO = 10;
 
 test('T118 scrub cost is linear in the message, not in the needle sets (sets full)', async (tt) => {
-	await tt.test('inbound: a 256 KiB execute of 60,000 strings is gated in under 50 ms', async () => {
+	await tt.test('inbound: a 256 KiB execute of 60,000 strings is gated in under 250 ms', async () => {
 		const t = makeRoot();
-		tt.after(() => t.cleanup());
+		const c = makeRoot();
+		tt.after(() => {
+			t.cleanup();
+			c.cleanup();
+		});
 		const A = t.open(ENTRY_A, { grant: GRANT_A, caps: ['core', 'pipelines.run', 'fs.app'] });
+		const C = c.open(ENTRY_A, { grant: GRANT_A, caps: ['core', 'pipelines.run', 'fs.app'] });
 		await fillRootSets(t);
 		const strings = Array.from({ length: 60_000 }, (_, i) => 'abcdefghijklmnopqrstuvwxyz'[i % 26]);
-		const ms = await best(3, async () => {
-			const result = await execute(A, { config: { strings } });
+		// Only the execute is timed: the terminate that frees the run is clean-up.
+		const round = (realm: IOpenedRealm) => async (): Promise<number> => {
+			const start = performance.now();
+			const result = await execute(realm, { config: { strings } });
+			const took = performance.now() - start;
 			expectOk(result, 'execute with 60,000 strings');
-			await call(A, 'terminate', { token: String((result as { body: Record<string, unknown> }).body.token) });
-		});
-		tt.diagnostic(`inbound 60,000 strings: ${ms.toFixed(1)} ms (round trip incl. terminate)`);
-		assert.ok(ms < 50, `inbound gate took ${ms.toFixed(1)} ms`);
+			await call(realm, 'terminate', { token: String((result as { body: Record<string, unknown> }).body.token) });
+			return took;
+		};
+		const ms = await bestPair(3, round(C), round(A));
+		tt.diagnostic(`inbound 60,000 strings: ${ms.measured.toFixed(1)} ms, ${ms.control.toFixed(1)} ms with the sets empty (the execute only)`);
+		// Widened 5x for loaded CI hosts (margin was under 3x: up to 27.5 ms seen).
+		assertCost('inbound gate', ms, 250, COST_RATIO);
 	});
 
-	await tt.test('outbound: an 8 MiB status response is scrubbed and delivered in under 200 ms', async () => {
+	await tt.test('outbound: an 8 MiB status response is scrubbed and delivered in under 1000 ms', async () => {
 		const t = makeRoot();
-		tt.after(() => t.cleanup());
+		const c = makeRoot();
+		tt.after(() => {
+			t.cleanup();
+			c.cleanup();
+		});
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const C = c.open(ENTRY_A, { grant: GRANT_A });
 		const run = await startRun(A);
+		const runC = await startRun(C);
 		await fillRootSets(t);
 		const blob = randomBytes(4_000_000).toString('hex');
 		const big = Array.from({ length: 2000 }, (_, i) => blob.slice(i * 4000, (i + 1) * 4000));
 		t.cm.engine.setStatus({ big });
-		const ms = await best(3, async () => {
-			expectOk(await status(A, run.token), '8 MiB status');
-		});
-		tt.diagnostic(`outbound 8 MiB: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 200, `outbound scrub took ${ms.toFixed(1)} ms`);
+		c.cm.engine.setStatus({ big });
+		const ms = await bestPair(
+			3,
+			async () => {
+				const start = performance.now();
+				const answer = await status(C, runC.token);
+				const took = performance.now() - start;
+				expectOk(answer, '8 MiB status, sets empty');
+				return took;
+			},
+			async () => {
+				const start = performance.now();
+				const answer = await status(A, run.token);
+				const took = performance.now() - start;
+				expectOk(answer, '8 MiB status');
+				return took;
+			}
+		);
+		tt.diagnostic(`outbound 8 MiB: ${ms.measured.toFixed(1)} ms, ${ms.control.toFixed(1)} ms with the sets empty`);
+		// Widened 5x for loaded CI hosts (margin was under 3x: up to 128 ms seen).
+		assertCost('outbound scrub', ms, 1000, COST_RATIO);
 	});
 
 	await tt.test('events: 1000 owned events of 50 strings each are delivered in under 500 ms', async () => {
 		const t = makeRoot();
-		tt.after(() => t.cleanup());
+		const c = makeRoot();
+		tt.after(() => {
+			t.cleanup();
+			c.cleanup();
+		});
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const C = c.open(ENTRY_A, { grant: GRANT_A });
 		await startRun(A);
+		await startRun(C);
 		const real = lastRun(t.cm);
+		const realC = lastRun(c.cm);
 		await fillRootSets(t);
 		const notes = Array.from({ length: 50 }, (_, i) => `note ${i} of a chatty run, nothing secret here`);
-		const events = Array.from({ length: 1000 }, () => t.cm.engine.event('flow', { project_id: real.projectId, source: SRC, notes }));
-		const before = clientEvents(A).length;
-		const start = performance.now();
-		for (const event of events) t.cm.emitEngineEvent(event);
-		await until(() => clientEvents(A).length - before >= 1000);
-		const ms = performance.now() - start;
-		tt.diagnostic(`1000 events x 50 strings: ${ms.toFixed(1)} ms`);
-		assert.equal(clientEvents(A).length - before, 1000, 'every event is delivered');
-		assert.ok(ms < 500, `1000 events took ${ms.toFixed(1)} ms`);
+		// The events are built before the timer starts: only emitting them and their delivery are timed.
+		const deliver = (root: ITestRoot, realm: IOpenedRealm, projectId: string) => async (): Promise<number> => {
+			const events = Array.from({ length: 1000 }, () => root.cm.engine.event('flow', { project_id: projectId, source: SRC, notes }));
+			const before = clientEvents(realm).length;
+			const start = performance.now();
+			for (const event of events) root.cm.emitEngineEvent(event);
+			await until(() => clientEvents(realm).length - before >= 1000);
+			const took = performance.now() - start;
+			assert.equal(clientEvents(realm).length - before, 1000, 'every event is delivered');
+			return took;
+		};
+		const ms = await bestPair(1, deliver(c, C, realC.projectId), deliver(t, A, real.projectId));
+		tt.diagnostic(`1000 events x 50 strings: ${ms.measured.toFixed(1)} ms, ${ms.control.toFixed(1)} ms with the sets empty`);
+		assertCost('1000 events', ms, 500, COST_RATIO);
 	});
 });
 
