@@ -198,6 +198,9 @@ public:
     ///		Declare our factory type
     //-----------------------------------------------------------------
     _const auto FactoryType = "iEndpoint";
+    // Interfaces derived from this class share its factory registry, and every
+    // method stored in it returns a pointer to this root
+    using FactoryRoot = IServiceEndpoint;
 
     template <typename Buffer>
     auto __toString(Buffer &buff) const noexcept {

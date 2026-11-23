@@ -53,7 +53,7 @@ _NODES_SRC = _ROOT / 'nodes' / 'src'
 _UTILS = _ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
-_KEY = 'tk_mock-tenki-placeholder-for-tests'  # the real SDK refuses a key without tk_ before any request
+_KEY = 'lx_mock-tenki-placeholder-for-tests'  # the real SDK refuses a key without lx_ or tk_ before any request
 
 
 class _SandboxError(Exception):
@@ -90,8 +90,9 @@ def _stubs() -> dict:
         setattr(tenki, name, type(name, (_SandboxError,), {}))
     for name in ('PermissionDeniedError', 'QuotaExceededError'):
         setattr(tenki, name, type(name, (_SandboxError,), {}))
+    tenki.ResumeWaitTimeoutError = type('ResumeWaitTimeoutError', (_SandboxError, TimeoutError), {})
     names = ('depends', 'ai', 'ai.common', 'ai.common.config')
-    return {'rocketlib': rocketlib, 'tenki': tenki, **{name: MagicMock() for name in names}}
+    return {'rocketlib': rocketlib, 'luxor_ai': tenki, **{name: MagicMock() for name in names}}
 
 
 def _load(name, path):
@@ -203,13 +204,15 @@ class _Process:
         self.pid = next(_PIDS) if pid else None
         self.stdout, self.stderr = _Stream(), _Stream()
         self.killed, self._done = threading.Event(), threading.Event()
-        self._start, self._run_error, self._result = start, run_error, result or _Result(argv=list(argv))
+        self._start, self._run_error, self._final = start, run_error, result or _Result(argv=list(argv))
+        self._result = self._error = None  # recorded when the run ends, before the streams end, as in the SDK
         self._stalls, self._flood, self.escapes = run.get('stalls'), run.get('flood'), run.get('escapes')
         if not self._stalls:
             threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
         if self._run_error is not None:
+            self._error = self._run_error
             self.stdout.fail(self._run_error)
             self.stderr.fail(self._run_error)
         elif self._flood:
@@ -219,13 +222,14 @@ class _Process:
                     break
                 self.stdout.push(chunk)
                 time.sleep(0.002)
-            self._result = dataclasses.replace(self._result, stdout=self.stdout.read())
+            self._result = dataclasses.replace(self._final, stdout=self.stdout.read())
         else:
-            self.stdout.push(self._result.stdout)
-            self.stderr.push(self._result.stderr)
-        self._done.set()
+            self.stdout.push(self._final.stdout)
+            self.stderr.push(self._final.stderr)
+            self._result = self._final
         self.stdout.close()
         self.stderr.close()
+        self._done.set()  # last, as luxor-ai 1.5.2 does
 
     def close_stdin(self):
         self.session.calls.append('close_stdin')
@@ -423,6 +427,9 @@ class _Session:
             raise mod.SandboxError('paused source is still being torn down, retry shortly')
         self.state = 'RUNNING'
 
+    def _reset_data_plane(self):
+        self.calls.append('reset_data_plane')
+
     def wait_ready(self, timeout=None):
         self.calls.append(('wait_ready', timeout))
         if self.ready_gate is not None:
@@ -572,9 +579,44 @@ def test_a_missing_key_stops_startup_before_a_client_exists(monkeypatch, logs):
 
 def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(monkeypatch, logs):
     _, built = _started(monkeypatch, {'apikey': f'  {_KEY} ', 'exec_timeout_secs': 300})
-    assert built == [{'auth_token': _KEY, 'base_url': 'https://api.tenki.cloud', 'timeout': 300}]
+    assert built == [{'auth_token': _KEY, 'base_url': 'https://api.luxor.ai', 'timeout': 300}]
     _, built = _started(monkeypatch, {'base_url': 'https://tenki.example', 'exec_timeout_secs': 5})
     assert built == [{'auth_token': _KEY, 'base_url': 'https://tenki.example', 'timeout': 60}]
+    assert not any('2027-01-01' in line for line in logs)
+    # Unparseable: the real SDK's client refuses it, so no retired-name check stands in the way.
+    _, built = _started(monkeypatch, {'base_url': 'https://[api.tenki.cloud'})
+    assert built[0]['base_url'] == 'https://[api.tenki.cloud'
+    assert not any('2027-01-01' in line for line in logs)
+
+
+@pytest.mark.parametrize(
+    ('cfg', 'retired'),
+    [
+        ({'apikey': 'tk_mock-tenki-placeholder-for-tests'}, 'Tenki key (tk_)'),
+        ({'base_url': 'https://eu.tenki.cloud'}, 'points at eu.tenki.cloud'),
+        ({'base_url': 'https://tenki.cloud'}, 'points at tenki.cloud,'),
+    ],
+)
+def test_a_tenki_key_or_host_still_works_and_is_warned_about_before_luxor_retires_it(monkeypatch, logs, cfg, retired):
+    _, built = _started(monkeypatch, cfg)
+    assert built and built[0]['auth_token'] == cfg.get('apikey', _KEY)
+    assert built[0]['base_url'] == cfg.get('base_url', 'https://api.luxor.ai')
+    assert any(retired in line and 'stops working on 2027-01-01' in line for line in logs), logs
+    logs.clear()
+    _global(monkeypatch, {'apikey': _KEY, **cfg})[0].validateConfig()
+    assert any(retired in line and 'stops working on 2027-01-01' in line for line in logs), logs
+
+
+@pytest.mark.parametrize('base_url', ['https://api.tenki.cloud', 'API.Tenki.Cloud:443', 'https://api.tenki.cloud/'])
+def test_tenkis_api_host_is_swapped_for_luxors_so_a_deployed_pipeline_survives_the_retirement(
+    monkeypatch, logs, base_url
+):
+    _, built = _started(monkeypatch, {'base_url': base_url})
+    assert built[0]['base_url'] == 'https://api.luxor.ai'
+    assert any('api.tenki.cloud' in line and 'connects to https://api.luxor.ai' in line for line in logs), logs
+    logs.clear()
+    _global(monkeypatch, {'apikey': _KEY, 'base_url': base_url})[0].validateConfig()
+    assert any('stops working on 2027-01-01' in line and 'clear tenki.base_url' in line for line in logs), logs
 
 
 def test_the_editor_opens_the_node_without_a_key(monkeypatch, logs):
@@ -619,7 +661,7 @@ def test_a_command_allowed_to_outlive_the_session_is_warned_about(monkeypatch, l
     ('cfg', 'warning'),
     [
         ({}, 'apikey is required'),
-        ({'apikey': 'mock-key'}, 'starts with tk_'),
+        ({'apikey': 'mock-key'}, 'starts with lx_'),
         ({'toolGroups': ['nope']}, 'will fail to start: tenki.toolGroups matched no known'),
         ({'toolGroups': ['git', 'nope']}, 'unknown tool group(s): nope'),
         ({'label': 'My_Agent'}, 'will fail to start: tenki.label must be'),
@@ -712,7 +754,7 @@ def test_an_allowlist_entry_tenki_refuses_stops_startup_naming_the_rule_first(mo
     glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['ok.org', entry]})
     with pytest.raises(ValueError) as refused:
         glb.beginGlobal()
-    assert str(refused.value).startswith('tenki.allow_domains has an entry Tenki refuses (entry 2). Use bare hostnames')
+    assert str(refused.value).startswith('tenki.allow_domains has an entry Luxor refuses (entry 2). Use bare hostnames')
 
 
 def test_an_allowlist_entry_that_may_carry_a_credential_is_not_repeated(monkeypatch, logs):
@@ -792,9 +834,10 @@ def test_the_private_prefix_is_kept_in_the_form_git_matches(monkeypatch, logs, u
         ({'git_auth_url': 'http://github.com/'}, 'must be an https URL'),
         ({'git_auth_url': 'https://github.com/a/../b'}, 'must be an https URL'),
         ({'git_auth_url': 7}, 'must be a URL'),
-        ({'git_auth_secret': '9lives'}, 'must be the name of a Tenki secret'),
+        ({'git_auth_secret': '9lives'}, 'must be the name of a Luxor secret'),
         ({'git_auth_secret': 'ghp_' + 'a' * 36}, 'looks like a credential value'),
         ({'git_auth_secret': 'sk-ant-api03-abcdefgh12345678'}, 'looks like a credential value'),
+        ({'git_auth_secret': 'lx_' + 'a1' * 12}, 'looks like a credential value'),
         ({'secret_policies': []}, 'secret_policies is empty'),
         ({'allow_domains': ['gitlab.com']}, 'which tenki.allow_domains does not list'),
         ({'allow_domains': ['*.github.com']}, 'which tenki.allow_domains does not list'),  # one label only
@@ -807,7 +850,7 @@ def test_a_private_clone_setting_that_cannot_work_stops_startup(monkeypatch, log
     assert 'ghp_' not in str(refused.value) and 'abcdefgh' not in str(refused.value)
 
 
-@pytest.mark.parametrize('name', ['tk_github_basic', 'sk-shared-github', 'AKIA_LEGACY_POLICY'])
+@pytest.mark.parametrize('name', ['lx_github_basic', 'tk_github_basic', 'sk-shared-github', 'AKIA_LEGACY_POLICY'])
 def test_a_secret_name_that_merely_begins_like_a_token_is_accepted(monkeypatch, logs, name):
     assert _started(monkeypatch, {**_PRIVATE, 'git_auth_secret': name})[0].git_auth_secret == name
 
@@ -1091,6 +1134,36 @@ def test_a_look_at_the_session_that_runs_past_its_deadline_is_not_the_calls_time
     assert result['timed_out'] is False and 'recovering the sandbox ran past the deadline' in result['error']
 
 
+def test_a_resume_that_runs_past_its_deadline_is_not_the_calls_timeout(monkeypatch, logs):
+    # luxor-ai 1.5.2 raises ResumeWaitTimeoutError, not CommandTimeoutError, for a resume past the client deadline.
+    session = _Session()
+    inst, _ = _used(monkeypatch, session)
+    session.state = 'PAUSED'
+    monkeypatch.setattr(mod, '_RESUME_RETRY_SECS', 0)
+    session.resume = lambda: _raise(mod.ResumeWaitTimeoutError('timeout waiting for sandbox sb-1 to resume'))
+    result = inst.run_command({'command': 'ls'})
+    assert result['timed_out'] is False and 'recovering the sandbox ran past the deadline' in result['error']
+    assert 'reset_data_plane' in session.calls
+
+
+def test_a_resume_past_its_deadline_that_lands_is_warmed_up_on_a_fresh_data_plane(monkeypatch, logs):
+    # luxor-ai 1.5.2 raises ResumeWaitTimeoutError before it drops the pre-pause data-plane connection, though the
+    # resume may still land (on another host), so the node drops it.
+    session = _Session()
+    inst, _ = _used(monkeypatch, session)
+    session.state = 'PAUSED'
+
+    def lands_late():
+        session.calls.append('resume')
+        session.state = 'RUNNING'
+        raise mod.ResumeWaitTimeoutError('timeout waiting for sandbox sb-1 to resume')
+
+    session.resume = lands_late
+    assert inst.read_file({'path': 'notes.txt'})['session'] == 'resumed'
+    after = session.calls[session.calls.index('resume') :]
+    assert after.index('reset_data_plane') < after.index(('start', ('true',), 10))
+
+
 def test_shutdown_closes_the_session_and_the_client_and_nothing_is_used_after(monkeypatch, logs):
     session = _Session()
     inst, client = _used(monkeypatch, session)
@@ -1187,7 +1260,7 @@ def test_a_create_that_left_a_sandbox_running_closes_it(monkeypatch, logs):
     ('error', 'cfg', 'says', 'logged'),
     [
         (mod.PermissionDeniedError('API key requires Secrets access'), _PRIVATE, 'needs Secrets access', 'Secrets'),
-        (mod.QuotaExceededError('max concurrent jobs reached (limit: 5)'), {}, 'limit of the Tenki', "workspace's"),
+        (mod.QuotaExceededError('max concurrent jobs reached (limit: 5)'), {}, 'limit of the Luxor', "workspace's"),
         (mod.PermissionDeniedError('API key requires Secrets access'), {}, 'API key requires Secrets access', None),
     ],
 )
@@ -1894,7 +1967,7 @@ def test_tool_descriptions_state_the_configured_limits_and_that_a_lifetime_pause
     tools = inst._collect_tool_methods()
     descriptions = {name: method.__tool_meta__['description'](inst) for name, method in tools.items()}
     assert 'Execution timeout: 77s.' in descriptions['run_command'] and '1234 characters' in descriptions['read_file']
-    assert all('Tenki pauses a session that reaches its maximum lifetime' in text for text in descriptions.values())
+    assert all('Luxor pauses a session that reaches its maximum lifetime' in text for text in descriptions.values())
 
 
 def test_the_session_field_lists_every_value_the_node_reports():
