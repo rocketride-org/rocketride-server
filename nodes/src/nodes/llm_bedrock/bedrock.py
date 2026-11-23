@@ -168,7 +168,7 @@ class _ChatBedrock(ChatBedrock):
 
     def _stream(self, messages, stop=None, run_manager=None, **kwargs):
         # TODO(#2722): remove once a langchain-aws release that meters "length" is pinned.
-        # langchain-aws (1.9.0 and before) reports a streamed Meta or Mistral reply's
+        # langchain-aws (1.10.0 and before) reports a streamed Meta or Mistral reply's
         # usage only when it stops with "stop" (prepare_output_stream). One that reaches
         # the output limit stops with "length", and nothing is metered, though Bedrock sent
         # the counts in the last chunk. When a stream ends with no usage but carried those

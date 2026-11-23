@@ -5,7 +5,7 @@
 
 """A streamed Llama or Mistral reply that reaches the output limit is still metered.
 
-langchain-aws (1.9.0 and before) reports a streamed Meta or Mistral reply's usage only
+langchain-aws (1.10.0 and before) reports a streamed Meta or Mistral reply's usage only
 when it stops with "stop". Bedrock stops one that reaches max_gen_len / max_tokens with
 "length", and the reply was metered as nothing, though Bedrock sent the counts in the
 last chunk. The driver reports those counts once when the stream ends without usage.
