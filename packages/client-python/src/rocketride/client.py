@@ -399,8 +399,12 @@ class RocketRideClient(
                 covers the whole pipe whichever source is named.
 
         Returns:
-            ``{'address', 'rung', 'version', 'teamId'?, 'interfaces'}`` where
-            ``interfaces`` is ``{address: {classType: [{'nodeId', 'name'}]}}``.
+            ``{'address', 'rung', 'version', 'teamId'?, 'interfaces',
+            'parameters'}`` where ``interfaces`` is
+            ``{address: {classType: [{'nodeId', 'name'}]}}`` and ``parameters``
+            is the pipeline's per-call parameters as a caller sees them,
+            ``[{'name', 'default', 'type'?, 'title'?, 'description'?, 'enum'?,
+            'minimum'?, 'maximum'?}]`` (no node or field is told).
 
         Raises:
             RuntimeError: No published rung serves you (``TASK_NOT_REGISTERED``),

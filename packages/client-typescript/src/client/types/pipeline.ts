@@ -209,6 +209,30 @@ export interface PipeInterfaceNode {
  */
 export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]>>;
 
+/**
+ * One per-call parameter of a pipeline, as a caller sees it: the public name
+ * a call sets in `params`, what the value must be, and what a call gets when
+ * it omits it. The node and field behind the name are not told.
+ */
+export interface PipeParameter {
+	/** The public name (the key of `params`). */
+	name: string;
+	/** The value a call gets when it omits the parameter: the publisher's configured value, else the node's default. */
+	default: unknown;
+	/** The value's type (`string`, `integer`, `number`, `boolean`, ...). */
+	type?: string;
+	/** Display title. */
+	title?: string;
+	/** Description. */
+	description?: string;
+	/** Allowed values, when the parameter is an enum. */
+	enum?: unknown[];
+	/** Lower bound, when one is declared. */
+	minimum?: number;
+	/** Upper bound, when one is declared. */
+	maximum?: number;
+}
+
 /** The `interfaces()` answer: which publication would answer, and what it offers. */
 export interface PipeInterfaces {
 	/** The pipe address (`developerId.pipelineId`). */
@@ -221,4 +245,6 @@ export interface PipeInterfaces {
 	teamId?: string;
 	/** The map. */
 	interfaces: PipeInterfaceMap;
+	/** The pipeline's per-call parameters, in the map's order; absent on a server that predates them. */
+	parameters?: PipeParameter[];
 }

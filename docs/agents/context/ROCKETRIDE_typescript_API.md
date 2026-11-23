@@ -429,6 +429,13 @@ const databases = interfaces['acme.docBrain']?.database ?? [];   // [{ nodeId: '
 const dialect = await client.tool({ address: 'acme.docBrain', nodeId: databases[0].nodeId, tool: 'dialect' });
 ```
 
+The answer also carries `parameters`: the pipeline's per-call parameters as a caller sees them, in the publisher's order. Each is `{ name, default, type?, title?, description?, enum?, minimum?, maximum? }`: `name` is the key a call sets in `params`, `default` is what a call gets when it omits it (the publisher's configured value, else the node's default). The node and field behind a name are not told.
+
+```typescript
+const { parameters = [] } = await client.interfaces('acme.docBrain');
+// [{ name: 'maxEdge', default: 1024, type: 'integer', minimum: 256, maximum: 4096, description: 'Largest input edge' }]
+```
+
 ### `validate(options): Promise<ValidationResult>`
 
 Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). Returns `{ errors, warnings, ... }`: a pipeline will not execute while it has `errors`; `warnings` are non-fatal.

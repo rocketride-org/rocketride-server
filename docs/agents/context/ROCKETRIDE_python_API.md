@@ -435,6 +435,13 @@ databases = answer['interfaces'].get('acme.docBrain', {}).get('database', [])   
 dialect = await client.tool(address='acme.docBrain', node_id=databases[0]['nodeId'], tool='dialect')
 ```
 
+The answer also carries `parameters`: the pipeline's per-call parameters as a caller sees them, in the publisher's order. Each is `{'name', 'default', 'type'?, 'title'?, 'description'?, 'enum'?, 'minimum'?, 'maximum'?}`: `name` is the key a call sets in `params`, `default` is what a call gets when it omits it (the publisher's configured value, else the node's default). The node and field behind a name are not told.
+
+```python
+parameters = (await client.interfaces('acme.docBrain')).get('parameters', [])
+# [{'name': 'maxEdge', 'default': 1024, 'type': 'integer', 'minimum': 256, 'maximum': 4096, 'description': 'Largest input edge'}]
+```
+
 ### `async validate(pipeline: PipelineConfig, *, source: Optional[str] = None) -> VALIDATION_RESULT`
 
 Validate a pipeline configuration server-side (structure, required fields, component references) without starting it. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.

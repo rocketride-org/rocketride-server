@@ -192,6 +192,79 @@ def validate_parameters(pipeline: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return errors
 
 
+# ==== The map as a caller sees it ================================================
+
+#: The descriptor members a caller is told about a parameter.
+_DESCRIBED = ('type', 'title', 'description', 'enum', 'minimum', 'maximum')
+
+
+def describe_parameters(pipeline: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """
+    A pipeline's parameters as a CALLER sees them: what interfaces() answers.
+
+    One entry per public name, in the map's order: the name, the leaf's
+    type, title, description, enum and bounds (the node's own params
+    descriptor) and the default, which is what a call gets when it omits the
+    parameter: the component's configured value, else the node's default.
+    The target (nodeId.configKey) is NOT told: the pipeline's interior is
+    the publisher's. A parameter is never credential-shaped (the engine
+    refuses the flag on secret, env, oauth2, upload and constant leaves), so
+    a default is plain configuration.
+
+    Args:
+        pipeline: The pipeline dict (components, optional parameters).
+
+    Returns:
+        [{name, type, title, description, default, enum?, minimum?,
+        maximum?}]; an entry whose target does not resolve to a
+        param-flagged leaf is left out (the map's own validation reports
+        it at validate and publish).
+    """
+    parameters = pipeline.get('parameters')
+    if not isinstance(parameters, Mapping):
+        return []
+    components = _components_by_id(pipeline)
+    views: Dict[str, Any] = {}
+    out: List[Dict[str, Any]] = []
+    for name, target in parameters.items():
+        # Step 1: the entry must name a component of this pipeline and a key
+        parsed = parse_target(target)
+        if not isinstance(name, str) or parsed is None:
+            continue
+        node_id, key = parsed
+        component = components.get(node_id)
+        if component is None:
+            continue
+        if node_id not in views:
+            views[node_id] = _view_of(component)
+        view = views[node_id]
+        if view is None:
+            continue
+        # Step 2: the leaf and its self-contained descriptor
+        path = view.leaf_path(key)
+        descriptor = next(
+            (d for d in view.params if isinstance(d, dict) and d.get('field') == path),
+            None,
+        )
+        if path is None or descriptor is None:
+            continue
+        # Step 3: the default is the value the node runs with when the call
+        # omits the parameter: the resolved value of the active branch, else
+        # (a leaf of a branch the config does not select) the node's default
+        default = descriptor.get('default')
+        values = view.to_dict()
+        for short in values:
+            if short != 'node' and view.path_of(short) == path:
+                default = values[short]
+                break
+        entry: Dict[str, Any] = {'name': name, 'default': default}
+        for member in _DESCRIBED:
+            if descriptor.get(member) is not None:
+                entry[member] = descriptor[member]
+        out.append(entry)
+    return out
+
+
 # ==== The per-call values ======================================================
 
 
