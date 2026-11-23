@@ -360,6 +360,13 @@ Nodes can call `monitorSSE(pipe_id, type, data)` to broadcast custom updates
 
 Schema is intentionally open: interpret per node type.
 
+Agent nodes add `run_id` to the `data` of every event they send. It identifies
+one agent run and matches `meta.run_id` in that run's result, so it tells a
+parent agent from a worker it calls as a tool, which share a `pipe_id`. It does
+not say which run called which, and it is not an id for the pipeline run. Read how
+a run ended from its result: a worker refused after its last status event sends no
+new event, so that event can still say `done`.
+
 ### 5.5 Output / log lines (subscribe to `OUTPUT`)
 
 The original DAP `output` events from the engine are re-emitted to subscribers

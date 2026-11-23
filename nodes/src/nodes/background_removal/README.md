@@ -46,7 +46,7 @@ With a model server configured, inference runs there. Otherwise it runs locally 
 
 ### Output and failures
 
-For each successful image, `mean_alpha` is the alpha matte's average after scaling alpha bytes to `0.0`–`1.0`; `alpha_coverage_pct` is the percentage of pixels with alpha greater than `0.5`. The PNG encoder uses compression level 1. If image decoding or inference fails, the node logs a warning, drops that frame, and emits neither output for it.
+For each successful image, `mean_alpha` is the alpha matte's average after scaling alpha bytes to `0.0`–`1.0`; `alpha_coverage_pct` is the percentage of pixels with alpha greater than `0.5`. The PNG encoder uses compression level 1. If a frame cannot be decoded, or background removal or writing the outputs fails, the node raises an error that names the cause, and the engine marks the object as failed: the image, or the whole video the frame came from. The task goes on with the next object. Output already written is not withdrawn, such as the alpha statistics when only the cutout fails, or other frames of the same video.
 
 ## Upstream docs
 

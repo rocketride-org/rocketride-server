@@ -23,7 +23,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Tenki Sandbox tool node instance: the agent tools, all on the session IGlobal.call_with_session hands out."""
+"""Luxor Sandbox tool node instance: the agent tools, all on the session IGlobal.call_with_session hands out."""
 
 from __future__ import annotations
 
@@ -42,20 +42,20 @@ from rocketlib import IInstanceBase, tool_function, warning
 
 from ai.common.utils import normalize_tool_input, optional_bool, optional_int, optional_str, require_str
 
-from tenki import CommandTimeoutError, PermissionDeniedError, SandboxError
-from tenki import FileNotFoundError as TenkiFileNotFoundError  # also subclasses the builtin it shadows
+from luxor_ai import CommandTimeoutError, PermissionDeniedError, SandboxError
+from luxor_ai import FileNotFoundError as TenkiFileNotFoundError  # also subclasses the builtin it shadows
 
 from .IGlobal import CommandNotStartedError, IGlobal, about_the_vm_link
-from .sdk_shims import stop_keeping_output
+from .sdk_shims import run_ended, stop_keeping_output
 
-_HOME = '/home/tenki'  # the home and working directory, and the only root Tenki's file API accepts
+_HOME = '/home/tenki'  # the home and working directory, and the only root Luxor's file API accepts
 
-# Tenki-specific: unlike Daytona's, a Tenki session persists and is paused, not ended, at its lifetime.
+# Luxor-specific: unlike Daytona's, a Luxor session persists and is paused, not ended, at its lifetime.
 _SESSION_NOTE = (
-    'All Tenki Sandbox tools share one Linux VM, with /home/tenki as the home and working '
+    'All Luxor Sandbox tools share one Linux VM, with /home/tenki as the home and working '
     'directory; files and installed packages persist between calls. A paused session is resumed '
     'on the next call: memory and files under /home/tenki survive, but /tmp is cleared and open '
-    'network connections drop, so keep work under /home/tenki. Tenki pauses a session that reaches '
+    'network connections drop, so keep work under /home/tenki. Luxor pauses a session that reaches '
     'its maximum lifetime, and the next call resumes it the same way, which can take a minute. Only '
     'a session that has been terminated is replaced by a fresh, empty one.'
 )
@@ -66,7 +66,7 @@ _PATH_NOTE = (
 # git_log returns the whole log in one response, so it is always bounded.
 _DEFAULT_LOG_COUNT = 20
 _MAX_LOG_COUNT = 1000
-# Tenki stops a command at its timeout and says so on the result; only a stalled stream outlasts this grace.
+# Luxor stops a command at its timeout and says so on the result; only a stalled stream outlasts this grace.
 _RESULT_GRACE_SECS = 30
 # The most output of one command the engine keeps: the SDK keeps all of it until the command exits, with no limit.
 # Above the most the agent can be shown (1M characters, at most 4 MB of UTF-8).
@@ -78,7 +78,7 @@ _READ_LIMIT_BYTES = 4_000_000
 # sandbox's agent: measured 2026-10-16, a killed pipeline's children streamed on until the execution timeout. So each
 # command runs under `env TOOL_TENKI_RUN=<id>`, inherited by everything it starts, and this script stops, then kills,
 # every process carrying it, found in /proc with bash builtins only, until none is left, then prints its counts. Out of
-# reach: a process that clears its environment or runs as another user; Tenki's execution timeout stops those.
+# reach: a process that clears its environment or runs as another user; Luxor's execution timeout stops those.
 _RUN_MARKER = 'TOOL_TENKI_RUN'
 _KILL_TREE_SCRIPT = (
     'm="$1"; found=" "; killed=" "; '
@@ -108,10 +108,10 @@ _CUT_NOTICE = (
     '`> out.log 2>&1`) and read back the part you need.]'
 )
 
-# Tenki's documented answer (HTTP 403) when its proxy refuses to put a secret into a request; measured 2026-10-10.
+# Luxor's documented answer (HTTP 403) when its proxy refuses to put a secret into a request; measured 2026-10-10.
 _INJECTION_DENIED = 'secret_injection_denied'
 _DENIED_NOTICE = (
-    '[tool_tenki: this output contains "secret_injection_denied". Tenki documents that as its answer '
+    '[tool_tenki: this output contains "secret_injection_denied". Luxor documents that as its answer '
     '(HTTP 403) when it refuses to put a secret into a request, for example because no attached secret '
     'policy allows that secret for that host, method and path. If that is what happened here, repeating '
     'the request will not help: the policy is for the operator of this pipeline to change.]'
@@ -129,7 +129,7 @@ _SESSION_EVENT = {
     ),
 }
 
-# The interpreter and file extension per language. No TypeScript: ts-node is not in Tenki's base image, and a .ts run
+# The interpreter and file extension per language. No TypeScript: ts-node is not in Luxor's base image, and a .ts run
 # through it exited 0 with no output.
 _LANGUAGES = {'python': ('python3', '.py'), 'javascript': ('node', '.js')}
 
@@ -313,7 +313,7 @@ def _under_prefix(repo: str, prefix: str) -> bool:
 def _private_clone_argv(
     repo: str, directory: str, branch: str | None, depth: int | None, prefix: str, secret: str
 ) -> tuple[str, ...]:
-    """The clone command for a private repository, with Tenki's placeholder as its only credential."""
+    """The clone command for a private repository, with Luxor's placeholder as its only credential."""
     # Measured 2026-10-10: the header goes on the clone and stays in the clone's config, scoped to the prefix, so a
     # later fetch authenticates too. No shell, and no terminal prompt, so a refused request fails instead of waiting.
     argv = ['env', 'GIT_TERMINAL_PROMPT=0', 'git', 'clone']
@@ -330,7 +330,7 @@ def _private_clone_note(glb) -> str:
     if not glb.git_auth_secret:
         return 'Private repositories cannot be cloned: this node holds no git credentials.'
     return (
-        f'Private repositories under {glb.git_auth_url} can be cloned with an https URL: Tenki adds the '
+        f'Private repositories under {glb.git_auth_url} can be cloned with an https URL: Luxor adds the '
         'credential outside the sandbox, and a later fetch or pull in the clone, run_command included, '
         'authenticates the same way. Other private repositories cannot be cloned.'
     )
@@ -438,12 +438,6 @@ def _stopped_by_kill(report: tuple[int, int] | None, ran_on: float) -> int:
     return killed
 
 
-def _run_ended(process) -> bool:
-    """Whether ``process``'s result is in or its run failed (the SDK sets ``_done`` before it ends the streams)."""
-    done = getattr(process, '_done', None)
-    return done is not None and done.is_set()
-
-
 class _OutputGuard:
     """Reads a command's output as it arrives; past ``limit`` bytes the SDK keeps no more and the command is killed."""
 
@@ -481,7 +475,7 @@ class _OutputGuard:
                 if cut:
                     stop_keeping_output(self._process)
                     # A run whose exit already arrived sends nothing more, and what it left running on purpose stays.
-                    if not _run_ended(self._process):
+                    if not run_ended(self._process):
                         self.kill = _kill_command_tree(self._session, self._process, self._marker)
                     self.kill_done = time.monotonic()
         except Exception:
@@ -579,7 +573,7 @@ def _run_process(session, argv, timeout: int, once: _Once):
     except TimeoutError as e:
         raise ResultTimeoutError(
             f'the sandbox reported no result within {limit}s, {_RESULT_GRACE_SECS}s past the execution timeout '
-            'at which Tenki stops a command. A kill was sent as well, but over a stalled connection it may '
+            'at which Luxor stops a command. A kill was sent as well, but over a stalled connection it may '
             'not have arrived.'
         ) from e
     finally:
@@ -640,7 +634,7 @@ class IInstance(IInstanceBase):
             once=once,
         )
 
-    # Group: execution. Both tools run through a bash login shell, which puts nvm's node on PATH, as Tenki's own
+    # Group: execution. Both tools run through a bash login shell, which puts nvm's node on PATH, as Luxor's own
     # shell helper does.
 
     @_tool(
@@ -665,7 +659,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_EXEC_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Run a shell command in the remote Tenki sandbox (isolated from this machine): install '
+            'Run a shell command in the remote Luxor sandbox (isolated from this machine): install '
             'dependencies, build, run tests. On the default image commands run as user tenki with '
             'passwordless sudo, so install system packages with sudo apt-get. The call waits until '
             "the command's output streams close, so start a long-running server in the background "
@@ -675,7 +669,7 @@ class IInstance(IInstanceBase):
         ),
     )
     def run_command(self, args):
-        """Run a shell command in the shared Tenki session."""
+        """Run a shell command in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         command = require_str(args, 'command', tool_name='tenki')
         cwd = (optional_str(args, 'cwd', tool_name='tenki') or '').strip()
@@ -705,14 +699,14 @@ class IInstance(IInstanceBase):
         },
         output_schema=_EXEC_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Execute a code snippet in the remote Tenki sandbox (isolated from this machine) and return '
+            'Execute a code snippet in the remote Luxor sandbox (isolated from this machine) and return '
             'its output. The code is saved to a temporary file under /home/tenki, run, and the file is '
             'removed afterwards. '
             f'{_SESSION_NOTE} Execution timeout: {self.IGlobal.exec_timeout_secs}s.'
         ),
     )
     def run_code(self, args):
-        """Execute a code snippet in the shared Tenki session."""
+        """Execute a code snippet in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         require_str(args, 'code', tool_name='tenki')
         code = args['code']  # as given: stripping would shift the line numbers of a traceback
@@ -751,13 +745,13 @@ class IInstance(IInstanceBase):
         },
         output_schema=_CHANGE_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Write a text file in the remote Tenki sandbox, creating it or replacing its content, '
+            'Write a text file in the remote Luxor sandbox, creating it or replacing its content, '
             f'along with any missing parent directories. Content over {_READ_LIMIT_BYTES:,} bytes is refused. '
             f'{_PATH_NOTE} {_SESSION_NOTE}'
         ),
     )
     def write_file(self, args):
-        """Write a text file in the shared Tenki session."""
+        """Write a text file in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         path = _normalize_path(args.get('path'))
         content = args.get('content')
@@ -802,14 +796,14 @@ class IInstance(IInstanceBase):
         },
         output_schema=_CHANGE_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Edit a text file in the remote Tenki sandbox by replacing one exact, unique occurrence of old_text '
+            'Edit a text file in the remote Luxor sandbox by replacing one exact, unique occurrence of old_text '
             'with new_text. Refused, and nothing written, when old_text occurs zero times or more than once. '
             f'Use it for a small change instead of rewriting the whole file with write_file. {_PATH_NOTE} '
             f'{_SESSION_NOTE}'
         ),
     )
     def edit_file(self, args):
-        """Replace one exact, unique occurrence of old_text in a text file in the shared Tenki session."""
+        """Replace one exact, unique occurrence of old_text in a text file in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         path = _normalize_path(args.get('path'))
         old, new = args.get('old_text'), args.get('new_text')
@@ -867,13 +861,13 @@ class IInstance(IInstanceBase):
             },
         },
         description=lambda self: (
-            'Read a text file from the remote Tenki sandbox, decoded as UTF-8. At most '
+            'Read a text file from the remote Luxor sandbox, decoded as UTF-8. At most '
             f'{self.IGlobal.max_output_chars} characters are returned, and a file over '
             f'{_READ_LIMIT_BYTES:,} bytes is refused. {_PATH_NOTE} {_SESSION_NOTE}'
         ),
     )
     def read_file(self, args):
-        """Read a text file from the shared Tenki session."""
+        """Read a text file from the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         path = _normalize_path(args.get('path'))
         cap = self.IGlobal.max_output_chars
@@ -932,12 +926,12 @@ class IInstance(IInstanceBase):
             },
         },
         description=lambda self: (
-            "List a directory in the remote Tenki sandbox: each entry's name, whether it is a "
+            "List a directory in the remote Luxor sandbox: each entry's name, whether it is a "
             f'directory, and its size, sorted by name. {_PATH_NOTE} {_SESSION_NOTE}'
         ),
     )
     def list_files(self, args):
-        """List a directory in the shared Tenki session."""
+        """List a directory in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         path = _normalize_path(args.get('path') or '.')
         include_hidden = optional_bool(args, 'include_hidden', default=False, tool_name='tenki')
@@ -963,12 +957,12 @@ class IInstance(IInstanceBase):
         },
         output_schema=_CHANGE_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Create a directory in the remote Tenki sandbox, including any missing parent directories. '
+            'Create a directory in the remote Luxor sandbox, including any missing parent directories. '
             f'{_PATH_NOTE} {_SESSION_NOTE}'
         ),
     )
     def make_directory(self, args):
-        """Create a directory in the shared Tenki session."""
+        """Create a directory in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         path = _normalize_path(args.get('path'))
 
@@ -987,13 +981,13 @@ class IInstance(IInstanceBase):
         },
         output_schema=_CHANGE_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Delete a file or directory in the remote Tenki sandbox. A directory is deleted recursively, '
+            'Delete a file or directory in the remote Luxor sandbox. A directory is deleted recursively, '
             'with everything inside it, and cannot be recovered. /home/tenki itself cannot be deleted. '
             f'{_PATH_NOTE} {_SESSION_NOTE}'
         ),
     )
     def delete_path(self, args):
-        """Delete a file or directory, recursively, in the shared Tenki session."""
+        """Delete a file or directory, recursively, in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         path = _normalize_path(args.get('path'))
         if path == _HOME:
@@ -1006,7 +1000,7 @@ class IInstance(IInstanceBase):
 
         return self._change(path, 'delete', remove, replace=False)
 
-    # Group: git. Tenki's git helpers, which return git's raw output. Only git_clone may start a fresh session: the
+    # Group: git. Luxor's git helpers, which return git's raw output. Only git_clone may start a fresh session: the
     # others work on a repository that an ended session took with it.
 
     @_tool(
@@ -1045,14 +1039,14 @@ class IInstance(IInstanceBase):
             },
         },
         description=lambda self: (
-            "Clone a git repository into the remote Tenki sandbox, returning git's output and the folder "
+            "Clone a git repository into the remote Luxor sandbox, returning git's output and the folder "
             f'it was cloned into. {_private_clone_note(self.IGlobal)} '
             f'The clone must finish within {self.IGlobal.rpc_timeout_secs}s, so use depth for large '
             f'repositories. {_SESSION_NOTE}'
         ),
     )
     def git_clone(self, args):
-        """Clone a git repository into the shared Tenki session."""
+        """Clone a git repository into the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         repo = _clone_url(_git_arg(args, 'repo', required=True))
         branch = _git_arg(args, 'branch')
@@ -1065,7 +1059,7 @@ class IInstance(IInstanceBase):
             directory = _normalize_path(folder)
         glb = self.IGlobal
         cap = glb.max_output_chars
-        # Only clones under the private prefix carry the placeholder: Tenki refuses a request carrying one that no
+        # Only clones under the private prefix carry the placeholder: Luxor refuses a request carrying one that no
         # attached policy allows (measured: 403 secret_injection_denied on a public repository).
         private = None
         if glb.git_auth_secret and _under_prefix(repo, glb.git_auth_url):
@@ -1093,7 +1087,7 @@ class IInstance(IInstanceBase):
                     output = f'{_CUT_NOTICE.format(limit=_OUTPUT_LIMIT_BYTES)} git printed: {output}'
                 if result.timed_out:
                     return failed(
-                        f'the clone did not finish within {glb.rpc_timeout_secs}s, when Tenki stopped it; use '
+                        f'the clone did not finish within {glb.rpc_timeout_secs}s, when Luxor stopped it; use '
                         f'depth for a large repository. git printed: {output}'
                     )
                 if result.exit_code != 0:
@@ -1118,12 +1112,12 @@ class IInstance(IInstanceBase):
         },
         output_schema=_GIT_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Check out a branch, tag or commit in a git repository in the remote Tenki sandbox, or create '
+            'Check out a branch, tag or commit in a git repository in the remote Luxor sandbox, or create '
             f'a new branch. {_SESSION_NOTE}'
         ),
     )
     def git_checkout(self, args):
-        """Check out a ref in a repository in the shared Tenki session."""
+        """Check out a ref in a repository in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         ref = _git_arg(args, 'ref', required=True)
         create = optional_bool(args, 'create', default=False, tool_name='tenki')
@@ -1154,12 +1148,12 @@ class IInstance(IInstanceBase):
         },
         output_schema=_GIT_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Show a git diff for a repository in the remote Tenki sandbox. Choose the revisions with a '
+            'Show a git diff for a repository in the remote Luxor sandbox. Choose the revisions with a '
             f'range, or with base and head, and narrow it with path. {_SESSION_NOTE}'
         ),
     )
     def git_diff(self, args):
-        """Show a diff for a repository in the shared Tenki session."""
+        """Show a diff for a repository in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         revisions = {key: _git_arg(args, key) for key in ('range', 'base', 'head')}
         if revisions['range'] and (revisions['base'] or revisions['head']):
@@ -1195,12 +1189,12 @@ class IInstance(IInstanceBase):
         },
         output_schema=_GIT_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Show the commit log of a git repository in the remote Tenki sandbox, newest first, '
+            'Show the commit log of a git repository in the remote Luxor sandbox, newest first, '
             f'{_DEFAULT_LOG_COUNT} commits unless max_count says otherwise. {_SESSION_NOTE}'
         ),
     )
     def git_log(self, args):
-        """Show the commit log of a repository in the shared Tenki session."""
+        """Show the commit log of a repository in the shared Luxor session."""
         args = normalize_tool_input(args, tool_name='tenki')
         max_count = optional_int(
             args, 'max_count', default=_DEFAULT_LOG_COUNT, lo=1, hi=_MAX_LOG_COUNT, tool_name='tenki'
