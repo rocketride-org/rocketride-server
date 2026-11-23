@@ -642,8 +642,9 @@ async def apps_session(request: Request):
 
 # The only files the unversioned /apps/<dir>/<file> route serves on SaaS: the
 # listing assets seeded manifests point at ('/apps/<dir>/icon.svg', og images,
-# readmes). Never a script, stylesheet or other executable bundle part.
-_LISTING_ASSET_SUFFIXES = frozenset({'.svg', '.png', '.jpg', '.jpeg', '.webp', '.ico', '.md'})
+# readmes) and the README images the build copies flat into '<dir>/assets/'.
+# Never a script, stylesheet or other executable bundle part.
+_LISTING_ASSET_SUFFIXES = frozenset({'.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.ico', '.md'})
 
 
 async def apps_static(request: Request):
@@ -728,9 +729,11 @@ async def apps_static(request: Request):
         # _authorize_app is catalog visibility, not the per-version entitlement
         # the versioned route enforces, so a bundle served from here would skip
         # the paid-app gate. Serve only the listing assets (icons, readmes) the
-        # manifests point at, directly under the app directory; bundles come
-        # from /apps/<id>/v<N>/ alone.
-        if len(rel_parts) != 2 or file_path.suffix.lower() not in _LISTING_ASSET_SUFFIXES:
+        # manifests point at, directly under the app directory or its assets/
+        # folder; bundles come from /apps/<id>/v<N>/ alone.
+        top_level = len(rel_parts) == 2
+        readme_asset = len(rel_parts) == 3 and rel_parts[1] == 'assets'
+        if not (top_level or readme_asset) or file_path.suffix.lower() not in _LISTING_ASSET_SUFFIXES:
             raise HTTPException(status_code=404, detail='Not found')
 
     # Serve the file if it exists
