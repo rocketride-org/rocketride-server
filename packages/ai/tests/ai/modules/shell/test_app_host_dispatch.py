@@ -50,7 +50,7 @@ from .isolation_support import app_host_of, csp_directives, label_for, meta_cont
 
 LABEL = label_for('acme.thirdparty')
 HOST = app_host_of(LABEL)
-FAKE_TOKEN = 'v1.k1.eyJhIjoieCJ9.c2lnbmF0dXJl'  # token-shaped; only used where no real one can exist yet
+FAKE_TOKEN = 'v1.k1.eyJhIjoieCJ9.c2lnbmF0dXJl'  # token-shaped; only where no real one can exist yet; gitleaks:allow
 
 
 def _config_or_none(env):

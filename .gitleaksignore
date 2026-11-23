@@ -22,3 +22,8 @@ ac6a40ae05fc07e87d2d825b7daf6eaeb9af8caf:packages/server/engine-core/test/crypto
 # at runtime; these fingerprints cover the original commit still in the PR range.
 bbe1c7130b0ffc708767d4b7a7dc676f27f44a01:packages/ai/tests/ai/modules/task/test_task_db_credential.py:generic-api-key:233
 bbe1c7130b0ffc708767d4b7a7dc676f27f44a01:packages/ai/tests/ai/modules/task/test_task_db_credential.py:generic-api-key:234
+
+# Deliberately invalid frame token ('v1.k1...') in the shell app-host dispatch
+# test, added in b68d718d6. The current line carries gitleaks:allow; this covers
+# the original commit still in the PR range.
+b68d718d65ed6c155b0032bd900508d4034e44d3:packages/ai/tests/ai/modules/shell/test_app_host_dispatch.py:generic-api-key:52
