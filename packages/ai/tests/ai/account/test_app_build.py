@@ -1428,6 +1428,61 @@ async def test_harvest_does_not_copy_a_manifest_asset_through_a_dangling_link(
     assert rail.stamps[-1]['status'] == 'failed'
 
 
+_DIST = ('orgs', 'org1', 'files', '.deployments', 'acme.brandy', 'v000001-abcdef12', 'dist')
+
+
+@pytest.mark.asyncio
+async def test_harvest_refuses_an_app_dir_swapped_for_a_symlink(monkeypatch, build_store, toolchain, tmp_path):
+    """The bundle step can write the job dir: an app dir swapped for a link to a
+    host directory must not have its icon copied (the copy runs outside the sandbox).
+    """
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'icon.svg').write_text('<svg>host file</svg>')
+
+    def tamper(out_dir):
+        app_dir = os.path.join(os.path.dirname(out_dir), 'ws', 'apps', 'brandy-ui')
+        shutil.rmtree(app_dir)
+        _symlink_or_skip(str(outside), app_dir)
+
+    rail = await _run_tampered(monkeypatch, tamper)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'harvest'), final
+    assert not (build_store.joinpath(*_DIST) / 'icon.svg').exists()
+    assert not (build_store.joinpath(*_DIST)).exists()
+
+
+@pytest.mark.asyncio
+async def test_harvest_copies_the_manifest_icon_for_a_normal_app(monkeypatch, build_store, toolchain):
+    rail = await _run_tampered(monkeypatch, lambda out_dir: None)
+    assert rail.stamps[-1]['status'] == 'ok', rail.stamps[-1]
+    assert (build_store.joinpath(*_DIST) / 'icon.svg').read_text() == '<svg/>'
+
+
+@pytest.mark.asyncio
+async def test_harvest_copies_the_manifest_icon_for_an_app_at_the_workspace_root(monkeypatch, build_store, toolchain):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr(
+            'package.json',
+            json.dumps(
+                {'name': 'brandy-ui', 'version': '1.0.0', 'appManifest': {'id': 'acme.brandy', 'icon': 'icon.svg'}}
+            ),
+        )
+        archive.writestr('tsconfig.json', json.dumps({'compilerOptions': {'strict': True}}))
+        archive.writestr('src/index.ts', "import('./AppDescriptor');")
+        archive.writestr('src/AppDescriptor.ts', 'export default {};')
+        archive.writestr('icon.svg', '<svg/>')
+    rail = _FakeRail(buffer.getvalue(), {'status': 'queued', 'attempt': 0})
+    rail.entry['metadata']['appRoot'] = ''
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    monkeypatch.setattr(app_build, '_exec', _FakeExec())
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    assert rail.stamps[-1]['status'] == 'ok', rail.stamps[-1]
+    assert (build_store.joinpath(*_DIST) / 'icon.svg').read_text() == '<svg/>'
+
+
 def _guard_cases(job, env):
     """(request, allowed) pairs shared by the Python helper and the JS twin.
 

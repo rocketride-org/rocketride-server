@@ -2308,6 +2308,12 @@ class AppBuildWorker:
         out_root = os.path.join(os.path.realpath(job_dir), '.out')
         if os.path.islink(out_dir) or os.path.realpath(out_dir) != out_root:
             raise BuildFailure('harvest', 'the build output directory is not the job output directory')
+        # The same code can also swap the app dir (or ws) for a link to a host
+        # directory, and the asset copy below runs on the host, outside the
+        # sandbox: refuse unless the app tree is still the job's own ws tree.
+        job_ws = os.path.join(os.path.realpath(job_dir), 'ws')
+        if os.path.realpath(ws_dir) != job_ws or not _under(app_dir, (job_ws,)):
+            raise BuildFailure('harvest', 'the app directory is not inside the job workspace')
         # Manifest-referenced assets: rsbuild only emits what code imports,
         # and the entry token is scoped to dist/ — copy icon/readme in.
         for key in ('icon', 'readme'):
