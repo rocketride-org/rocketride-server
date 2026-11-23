@@ -73,6 +73,7 @@ typescript < 5.6).
 """
 
 import asyncio
+import contextvars
 import glob
 import json
 import os
@@ -220,7 +221,17 @@ _BROWSERSLIST_DEFAULT = ('chrome >= 107', 'edge >= 107', 'firefox >= 104', 'safa
 # name a pnpmfile; pnpmfiles are code. --ignore-pnpmfile is the second lock.
 # .swcrc configures the SWC transpiler (plugins load by path) and the
 # browserslist files steer target resolution.
-_REMOVED_CONFIG_FILES = ('.npmrc', '.pnpmfile.cjs', '.pnpmfile.mjs', '.swcrc', '.browserslistrc', 'browserslist')
+# .corepack.env is read by Corepack's upward walk and can set COREPACK_HOME,
+# COREPACK_NPM_REGISTRY or COREPACK_INTEGRITY_KEYS.
+_REMOVED_CONFIG_FILES = (
+    '.npmrc',
+    '.pnpmfile.cjs',
+    '.pnpmfile.mjs',
+    '.swcrc',
+    '.browserslistrc',
+    'browserslist',
+    '.corepack.env',
+)
 
 # The pnpm-workspace.yaml keys that survive into the scratch workspace —
 # workspace layout and resolution only. Everything else (pnpm 10 accepts
@@ -348,6 +359,10 @@ class BuildInfraFailure(Exception):
 # =============================================================================
 
 
+# True only around the job's `pnpm install` (see _build_env).
+_JOB_INSTALL: 'contextvars.ContextVar[bool]' = contextvars.ContextVar('rr_build_job_install', default=False)
+
+
 def _build_env() -> Dict[str, str]:
     """The scrubbed environment build subprocesses run in.
 
@@ -376,6 +391,20 @@ def _build_env() -> Dict[str, str]:
     )
     env = {key: os.environ[key] for key in keep if key in os.environ}
     env['NO_COLOR'] = '1'
+    # A pnpm that is a Corepack shim walks up from cwd and loads the app's
+    # .corepack.env. The file is removed from the tree and ignored here, and
+    # COREPACK_HOME is the WORKER's (never derived from the job's dir/HOME).
+    env['COREPACK_ENV_FILE'] = '0'
+    env['COREPACK_HOME'] = os.environ.get('COREPACK_HOME') or os.path.join(
+        os.path.expanduser('~'), '.cache', 'node', 'corepack'
+    )
+    if _JOB_INSTALL.get():
+        # Job install only: the toolchain bootstrap may legitimately need the
+        # network to fetch pnpm through a shim the first time, so these pins
+        # are not applied to it. The job install runs the already-cached pnpm
+        # and must not fetch a "latest" or app-chosen package manager.
+        env['COREPACK_ENABLE_NETWORK'] = '0'
+        env['COREPACK_DEFAULT_TO_LATEST'] = '0'
     return env
 
 
@@ -1979,7 +2008,11 @@ class AppBuildWorker:
                 if os.path.isfile(os.path.join(ws_dir, *inc.split('/'), 'package.json')):
                     argv += ['--filter', f'./{inc}']
         await feed.set_phase('install')
-        code, out = await _exec(argv, ws_dir, _PHASE_TIMEOUTS['install'], on_line=feed.line)
+        token = _JOB_INSTALL.set(True)
+        try:
+            code, out = await _exec(argv, ws_dir, _PHASE_TIMEOUTS['install'], on_line=feed.line)
+        finally:
+            _JOB_INSTALL.reset(token)
         await feed.flush()
         log_parts.append(f'== install ==\n$ {" ".join(argv)}\n{out}')
         if code != 0:

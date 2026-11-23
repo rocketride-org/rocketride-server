@@ -1483,6 +1483,37 @@ def test_env_filter_accepts_the_colon_assignment_form(tmp_path):
     assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_API: https://x']
 
 
+def test_corepack_env_file_is_removed_from_the_tree(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / '.corepack.env', 'COREPACK_HOME=/evil\n')
+    _write(ws / 'apps' / 'x' / '.corepack.env', 'COREPACK_NPM_REGISTRY=http://evil\n')
+    assert app_build._remove_pnpm_configs(str(ws)) == ['.corepack.env', 'apps/x/.corepack.env']
+
+
+def test_build_env_pins_corepack_to_the_workers_values(monkeypatch):
+    """The Corepack walk can read an app's .corepack.env; the build env pins
+    the keys it could set, using the WORKER's home and never the job's.
+    """
+    monkeypatch.delenv('COREPACK_HOME', raising=False)
+    monkeypatch.setenv('HOME', '/worker/home')
+    env = app_build._build_env()
+    assert env['COREPACK_ENV_FILE'] == '0'
+    assert env['COREPACK_HOME'] == os.path.join(os.path.expanduser('~'), '.cache', 'node', 'corepack')
+    assert 'COREPACK_ENABLE_NETWORK' not in env and 'COREPACK_DEFAULT_TO_LATEST' not in env
+    monkeypatch.setenv('COREPACK_HOME', '/worker/corepack')
+    assert app_build._build_env()['COREPACK_HOME'] == '/worker/corepack'
+
+
+def test_job_install_env_also_pins_corepack_network_and_latest():
+    token = app_build._JOB_INSTALL.set(True)
+    try:
+        env = app_build._build_env()
+    finally:
+        app_build._JOB_INSTALL.reset(token)
+    assert env['COREPACK_ENABLE_NETWORK'] == '0' and env['COREPACK_DEFAULT_TO_LATEST'] == '0'
+    assert 'COREPACK_ENABLE_NETWORK' not in app_build._build_env()
+
+
 def test_env_filter_only_touches_dotenv_names(tmp_path):
     """`.env` and `.env.*` are filtered; `.environment.json` is not an env file."""
     app = tmp_path / 'app'
