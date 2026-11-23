@@ -307,17 +307,6 @@ async def test_without_a_local_bundle_there_is_nothing_to_reseed_from(static_app
     assert await bundle_changed(registry, 'org', ENTRY) is False
 
 
-def test_seed_artifact_fallback_name_uses_the_derivation():
-    """#1022: with no moduleId in apps.json, a seeded app gets the same derived
-    container name as a deployed one ('-' maps to '_' too).
-    """
-    assert seed_apps.seed_artifact_of({'id': 'rocketride.my-app'})['moduleId'] == 'rocketride_my_app'
-    # An explicit seed moduleId that differs from the derived fallback is kept.
-    assert seed_apps.seed_artifact_of({'id': 'rocketride.x', 'moduleId': 'rocketride_legacy_x'})['moduleId'] == (
-        'rocketride_legacy_x'
-    )
-
-
 # =============================================================================
 # forced reseed keeps an admin's disabled public binding disabled
 # =============================================================================

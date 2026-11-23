@@ -1224,9 +1224,7 @@ class AppBuildWorker:
             and '..' not in inc.split('/')
             and '.' not in inc.split('/')
         ]
-        from ai.account.app_deploy import module_id_of
-
-        module_id = str(artifact.get('moduleId') or module_id_of(app_id))
+        module_id = str(artifact.get('moduleId') or app_id.replace('.', '_'))
 
         # ── MATERIALIZE ──────────────────────────────────────────────────
         node = _find_node()
