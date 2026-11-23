@@ -2529,7 +2529,7 @@ async def test_publish_serializes_claim_check_and_binding_per_container_name(reg
     assert len(registry.set_calls) == 1
 
 
-async def _race_two_engines(registry, monkeypatch, created):
+async def _race_two_engines(registry, monkeypatch, created, undo_together=False):
     """Publish two apps that derive one container name from two 'engines'.
 
     The per-name lock is process-local, so two engines each hold their own:
@@ -2537,7 +2537,9 @@ async def _race_two_engines(registry, monkeypatch, created):
     pre-checks run before either write (the first write waits for both
     arrivals) and both writes land before either re-check can read (each
     publish_set returns only once both rows exist). ``created`` maps app id
-    to the createdAt its row gets, as the backend would stamp it.
+    to the createdAt its row gets, as the backend would stamp it. With
+    ``undo_together`` neither back-out takes effect until both racers have
+    reached it, so both re-checks read both rows (as two engines would).
     """
     import asyncio
 
@@ -2565,6 +2567,19 @@ async def _race_two_engines(registry, monkeypatch, created):
         return row
 
     monkeypatch.setattr(account_singleton, 'publish_set', racing_publish_set, raising=False)
+    original_state = account_singleton.publish_set_state
+    undoing = asyncio.Event()
+    undo_count = {'n': 0}
+
+    async def racing_publish_set_state(*args):
+        if undo_together:
+            undo_count['n'] += 1
+            if undo_count['n'] == 2:
+                undoing.set()
+            await undoing.wait()
+        return await original_state(*args)
+
+    monkeypatch.setattr(account_singleton, 'publish_set_state', racing_publish_set_state, raising=False)
     a = _FakeConn(teams=_TEAMS, developer_id='acme')
     b = _FakeConn(teams=_TEAMS, developer_id='acme_foo')
     req_a = _request('publish', version=1, target='@public')
@@ -2595,7 +2610,9 @@ async def test_two_engines_tied_first_publishes_both_back_out(registry, quiet_pu
     publishes see the other, back out and report the holder error: neither
     reports success for a binding that serves nothing. A retry settles it.
     """
-    results = await _race_two_engines(registry, monkeypatch, {'acme.foo_bar': 100.0, 'acme_foo.bar': 100.0})
+    results = await _race_two_engines(
+        registry, monkeypatch, {'acme.foo_bar': 100.0, 'acme_foo.bar': 100.0}, undo_together=True
+    )
 
     assert [r['success'] for r in results] == [False, False]
     assert "'acme_foo.bar' already holds" in results[0]['message']
