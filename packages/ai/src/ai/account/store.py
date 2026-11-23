@@ -692,6 +692,9 @@ class Store:
 
             backend = AzureBlobStore(url, secret_key)
 
+        elif scheme == 'channel':
+            # What a run that loads a published node gets instead of the server's store
+            raise ValueError('A run whose pipeline names a published node has no direct access to the file store')
         else:
             raise ValueError(f'Unsupported storage backend: {scheme}')
 
