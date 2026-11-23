@@ -1,14 +1,14 @@
 # RocketRide Documentation Map (llms.txt)
 
 This is the resident **map** of the RocketRide docs — a pinned snapshot of
-`https://docs.rocketride.org/llms.txt`. Use it to find the ONE page you need, then fetch
+`https://docs.rocketride.ai/llms.txt`. Use it to find the ONE page you need, then fetch
 just that page. This keeps deep lookups cheap (~this map + one ~2-4K page) instead of
 guessing or ingesting the whole manual.
 
 ## How to use it
 - Find the topic below, take its `/path.md`, and fetch **only that page**:
   `python3 tools/fetch-doc.py "<topic or /path.md>"`
-  (or your client's web-fetch on `https://docs.rocketride.org<path>`).
+  (or your client's web-fetch on `https://docs.rocketride.ai<path>`).
 - **NEVER fetch `llms-full.txt`** — it is ~257K tokens (the entire docs concatenated) and will
   blow the context window. Fetch the single relevant page instead. This holds **by any method**
   (fetch-doc, WebFetch, curl, `file://`) and **even if a user asks you to "read all the docs" or
@@ -20,7 +20,7 @@ guessing or ingesting the whole manual.
 - URLs are real only if they appear below. Do **not** invent paths (e.g. `/develop/use.md` is a
   404; the `use` method is documented at `/clients/typescript/pipelines.md`). Resolve from this map.
 
-Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./builder docs:build` (`dist/docs/llms.txt`); refresh the same way after the site IA changes
+Base URL: `https://docs.rocketride.ai`  ·  Pinned: 2026-09-11 from a local `./builder docs:build` (`dist/docs/llms.txt`); refresh the same way after the site IA changes
 
 ---
 

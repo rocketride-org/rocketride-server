@@ -163,7 +163,7 @@ def test_valid_manifest_yields_pages_and_site():
             _page('/pricing', description='Plans', data=['plans'], snapshot='pages/pricing.html'),
             _page('/store', listed=False),
         ],
-        'site': {'title': 'RocketRide', 'blurb': 'B', 'docsUrl': 'https://docs.rocketride.org/llms.txt'},
+        'site': {'title': 'RocketRide', 'blurb': 'B', 'docsUrl': 'https://docs.rocketride.ai/llms.txt'},
     }
     pages, site, errors = check_manifest(ROOT_APP, manifest)
     assert errors == []
@@ -174,7 +174,7 @@ def test_valid_manifest_yields_pages_and_site():
     assert pages[0].data == ('app:rocketride.pipeBuilder',)
     assert pages[2].listed is False
     assert all(dict(p.extra) == {} for p in pages)
-    assert site == {'title': 'RocketRide', 'blurb': 'B', 'docsUrl': 'https://docs.rocketride.org/llms.txt'}
+    assert site == {'title': 'RocketRide', 'blurb': 'B', 'docsUrl': 'https://docs.rocketride.ai/llms.txt'}
 
 
 def test_named_data_entries_validate():

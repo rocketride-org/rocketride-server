@@ -30,11 +30,11 @@
 
 <p>
   <a href="https://rocketride.org">Home</a> |
-  <a href="https://docs.rocketride.org/">Documentation</a> |
+  <a href="https://docs.rocketride.ai/">Documentation</a> |
   <a href="https://pypi.org/project/rocketride/">Python SDK</a> |
   <a href="https://www.npmjs.com/package/rocketride">TypeScript SDK</a> |
-  <a href="https://docs.rocketride.org/connect/mcp/http">MCP Server</a> |
-  For coding agents: <a href="https://docs.rocketride.org/quickstart/coding-agents/">start page</a>, <a href="https://docs.rocketride.org/llms.txt">llms.txt</a> |
+  <a href="https://docs.rocketride.ai/connect/mcp/http">MCP Server</a> |
+  For coding agents: <a href="https://docs.rocketride.ai/quickstart/coding-agents/">start page</a>, <a href="https://docs.rocketride.ai/llms.txt">llms.txt</a> |
   <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride">VS Code Marketplace</a> |
   <a href="https://open-vsx.org/extension/RocketRide/rocketride">Open VSX Registry</a>
 </p>
@@ -143,7 +143,7 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
    asyncio.run(main())
    ```
 
-   TypeScript works the same way: [`npm install rocketride`](https://www.npmjs.com/package/rocketride) · [SDK docs](https://docs.rocketride.org/clients/typescript)
+   TypeScript works the same way: [`npm install rocketride`](https://www.npmjs.com/package/rocketride) · [SDK docs](https://docs.rocketride.ai/clients/typescript)
 
 **Next steps, one at a time:**
 
@@ -171,7 +171,7 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
 
 1. All pipelines are recognized with the `*.pipe` format. Each pipeline and its configuration are JSON objects - but the extension in your IDE will render within our visual builder canvas.
 
-2. All pipelines begin with a source node: _webhook_, _chat_, or _dropper_. For specific usage, examples, and inspiration on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/).
+2. All pipelines begin with a source node: _webhook_, _chat_, or _dropper_. For specific usage, examples, and inspiration on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.ai/).
 
 3. Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 
@@ -193,13 +193,13 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
 
      The image is amd64 only. On Apple Silicon, add `--platform linux/amd64` to both `docker pull` and `docker create`.
 
-     Clients need a non-empty key, and an engine started without one accepts any value (for example `export ROCKETRIDE_APIKEY=rr_local`). To use the engine's built-in MCP server, start it with `-e ROCKETRIDE_APIKEY=rr_...` and send that same value; the [coding-agents start page](https://docs.rocketride.org/quickstart/coding-agents/) has the full MCP setup.
+     Clients need a non-empty key, and an engine started without one accepts any value (for example `export ROCKETRIDE_APIKEY=rr_local`). To use the engine's built-in MCP server, start it with `-e ROCKETRIDE_APIKEY=rr_...` and send that same value; the [coding-agents start page](https://docs.rocketride.ai/quickstart/coding-agents/) has the full MCP setup.
 
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
 
    - **RocketRide Cloud** - Skip the setup and ship straight to [managed hosting](https://cloud.rocketride.ai/). Same portable pipeline JSON, zero infrastructure to run, from prototype to production. [Get started](https://cloud.rocketride.ai/)
 
-6. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/clients/python) and [TypeScript/JS](https://docs.rocketride.org/clients/typescript) applications utilizing our SDK.
+6. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.ai/clients/python) and [TypeScript/JS](https://docs.rocketride.ai/clients/typescript) applications utilizing our SDK.
 
 ## Observability
 
@@ -211,7 +211,7 @@ Selecting running pipelines allows for in-depth analytics. Trace call trees, tok
 
 ## Documentation
 
-Everything on [docs.rocketride.org](https://docs.rocketride.org/) is built from the [`docs/`](docs/) tree in this repo, split by audience. [`docs/README.md`](docs/README.md) is the full map; the short version:
+Everything on [docs.rocketride.ai](https://docs.rocketride.ai/) is built from the [`docs/`](docs/) tree in this repo, split by audience. [`docs/README.md`](docs/README.md) is the full map; the short version:
 
 | Looking for | Start at |
 |---|---|
@@ -299,7 +299,7 @@ ROCKETRIDE_APIKEY=your-api-key
 ```
 
 <p align="center">
-  <a href="https://cloud.rocketride.ai/"><strong>Get Started</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.org/operate/cloud">Read the Cloud docs</a>
+  <a href="https://cloud.rocketride.ai/"><strong>Get Started</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.ai/operate/cloud">Read the Cloud docs</a>
 </p>
 
 ## On-Prem &nbsp;<code>FREE &amp; MIT</code>
@@ -336,7 +336,7 @@ ROCKETRIDE_APIKEY=rr_local
 ```
 
 <p align="center">
-  <a href="#quick-start"><strong>Quick Start</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.org/operate/self-hosting">Read the On-Prem docs</a>
+  <a href="#quick-start"><strong>Quick Start</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.ai/operate/self-hosting">Read the On-Prem docs</a>
 </p>
 
 <p align="center">Ready to ship? Deploy your pipeline on <a href="https://cloud.rocketride.ai/">RocketRide Cloud</a>, or run on-prem, free.</p>

@@ -7,7 +7,7 @@ The app API — `AppManifest`, `AppDescriptor`, shell props, screen zones, hooks
 `connectionManager`, the documents system, the virtual file system,
 `DocExplorer`/`DocTabs`, cross-app component loading, and theming — is the same
 in both setups and is documented once, publicly, at
-[Shell API](https://docs.rocketride.org/guides/apps)
+[Shell API](https://docs.rocketride.ai/guides/apps)
 (source: `docs/public/product/guides/apps/index.md`). Only the project setup differs,
 and that difference is what this page covers.
 
