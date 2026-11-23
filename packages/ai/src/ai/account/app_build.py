@@ -496,38 +496,79 @@ async def _exec_compiler(
         isolated = app_build_sandbox.command(argv, cwd, job_dir, env_dir)
     except app_build_sandbox.SandboxUnavailable as exc:
         raise BuildInfraFailure('sandbox', str(exc)) from exc
+    provider = os.path.basename(isolated[0])
     status_read = status_write = None
-    if os.path.basename(isolated[0]) == 'bwrap' and os.name != 'nt':
+    if provider == 'bwrap' and os.name != 'nt':
         # bwrap writes its child pid here only once the sandbox is set up, so "exited non-zero
         # and wrote no pid" is a startup failure, while anything else is the compiler's own
         # result. The compiler's output is app-controlled and never decides this.
         status_read, status_write = os.pipe()
+        os.set_blocking(status_read, False)
         isolated = [isolated[0], '--info-fd', str(status_write), *isolated[1:]]
-    try:
-        if status_write is None:
-            code, out = await _exec(isolated, cwd, timeout, on_line=on_line)
-        else:
-            code, out = await _exec(isolated, cwd, timeout, on_line=on_line, pass_fds=(status_write,))
-        started = None
-        if status_read is not None:
+
+    # Live output is held while it could still be the provider's own startup text (which can
+    # carry host paths): until bwrap reports its child, or for sandbox-exec (no status channel)
+    # while every line so far is a `sandbox-exec:` line. The hold is bounded.
+    held: List[str] = []
+    state = {'live': on_line is None or (status_read is None and provider != 'sandbox-exec')}
+
+    def reported() -> bool:
+        if status_read is None:
+            return False
+        try:
             # The parent still holds the write end, so the pipe never reports EOF; the read is
             # non-blocking and bounded by the few bytes bwrap wrote, so it cannot hang.
-            os.set_blocking(status_read, False)
-            try:
-                started = bool(os.read(status_read, 4096))
-            except BlockingIOError:
-                started = False
+            return bool(os.read(status_read, 4096))
+        except BlockingIOError:
+            return False
+
+    async def release() -> None:
+        state['live'] = True
+        pending, held[:] = list(held), []
+        for line in pending:
+            await on_line(line)
+
+    started = False
+
+    async def gate(line: str) -> None:
+        nonlocal started
+        if state['live']:
+            await on_line(line)
+            return
+        if status_read is not None:
+            started = started or reported()
+            if started:
+                held.append(line)
+                await release()
+                return
+        elif not line.startswith('sandbox-exec: '):
+            held.append(line)
+            await release()
+            return
+        if len(held) < 200:
+            held.append(line)
+
+    try:
+        feed = on_line if state['live'] else gate
+        if status_write is None:
+            code, out = await _exec(isolated, cwd, timeout, on_line=feed)
+        else:
+            code, out = await _exec(isolated, cwd, timeout, on_line=feed, pass_fds=(status_write,))
+        decided = (started or reported()) if status_read is not None else None
     finally:
         for fd in (status_read, status_write):
             if fd is not None:
                 os.close(fd)
     # The sandbox itself failed to start (e.g. a kernel that denies user namespaces):
     # an infrastructure failure to retry or alert on, not a compile error for the developer.
-    failure = app_build_sandbox.startup_failure(isolated, code, out, started)
+    failure = app_build_sandbox.startup_failure(isolated, code, out, decided)
     if failure is not None:
-        # The provider's text can carry host paths: it goes to the operator log only.
+        # The provider's text can carry host paths: held lines are dropped from the developer
+        # feed, and the text goes to the operator log only.
         error(f'[app_build] sandbox could not start (exit {code}): {failure}')
         raise BuildInfraFailure('sandbox', 'app build sandbox could not start')
+    if not state['live'] and held:
+        await release()  # not a startup failure after all: nothing was provider-only
     return code, out
 
 
