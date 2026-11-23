@@ -49,6 +49,10 @@ from .constants import (
 )
 
 
+# A search rejected for asking for too many hits names the index's limit
+_MAX_RESULT_WINDOW = re.compile(r'Result window is too large, from \+ size must be less than or equal to: \[(\d+)\]')
+
+
 def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
     """Highlight configuration for text search (Elasticsearch/OpenSearch DSL)."""
     return {
@@ -81,6 +85,7 @@ class Store(DocumentStoreBase):
     renderChunkSize: int = 32 * 1024 * 1024
     # The most hits render asks for in one search. Elasticsearch rejects a search
     # whose from + size exceeds index.max_result_window (10000 by default).
+    # An index configured lower lowers this to its limit on the first rejection.
     renderPageSize: int = 10000
     payload_limit: int = 32 * 1024 * 1024
     similarity: str = 'cosine'
@@ -684,13 +689,12 @@ class Store(DocumentStoreBase):
         # copy only replaces it in place. The callback gets the joined text one
         # renderChunkSize group of chunkIds at a time.
         groupSize = self.renderChunkSize
-        pageSize = self.renderPageSize
         groupStart = 0
         pieces: Dict[int, str] = {}
 
         cursor = 0
         while True:
-            hits = self._searchRenderPage(objectId, cursor, pageSize)
+            hits = self._searchRenderPage(objectId, cursor)
 
             lastChunk = cursor
             for hit in hits:
@@ -713,15 +717,40 @@ class Store(DocumentStoreBase):
                 # Of several copies of one chunk number, the last one read is kept
                 pieces[chunk] = source.get(CONTENT_FIELD) or ''
 
-            if len(hits) < pageSize:
+            # Compared after the search, which may have lowered the page size to the index's limit
+            if len(hits) < self.renderPageSize:
                 break
             cursor = self._nextRenderCursor(cursor, lastChunk)
 
         self._emitRenderGroup(pieces, callback)
 
-    def _searchRenderPage(self, objectId: str, cursor: int, pageSize: int) -> List[Dict[str, Any]]:
+    def _searchRenderPage(self, objectId: str, cursor: int) -> List[Dict[str, Any]]:
         """
-        Return up to pageSize hits of one document from chunkId cursor on, in chunkId order.
+        Return up to renderPageSize hits of one document from chunkId cursor on, in chunkId order.
+
+        An index whose index.max_result_window is below renderPageSize rejects
+        the search and names its limit. renderPageSize then drops to that limit,
+        for this page and every later render, and the page is searched again.
+        """
+        while True:
+            try:
+                return self._searchRenderPageOnce(objectId, cursor, self.renderPageSize)
+            except Exception as error:
+                # Matched on the message, not the class: the error is whatever the
+                # client raises, and anything else is raised unchanged
+                match = _MAX_RESULT_WINDOW.search(str(error))
+                if match is None:
+                    raise
+                limit = int(match.group(1))
+
+                # Only a lower, usable limit is retried, so the retries end
+                if not 0 < limit < self.renderPageSize:
+                    raise
+                self.renderPageSize = limit
+
+    def _searchRenderPageOnce(self, objectId: str, cursor: int, pageSize: int) -> List[Dict[str, Any]]:
+        """
+        Search once for up to pageSize hits of one document from chunkId cursor on, in chunkId order.
         """
         search_body = {
             'query': {

@@ -182,11 +182,57 @@ def test_render_of_an_unknown_document_calls_nothing():
     assert _render(driver, 'missing') == []
 
 
+def _limited_store(docs, window):
+    """The driver on an index whose index.max_result_window is set to window."""
+    driver = _store(docs)
+    driver.client.maxResultWindow = window
+    return driver
+
+
+def test_render_of_a_small_document_on_an_index_with_a_lower_result_window():
+    """An index set to 500 rejects the default page; even a 2-chunk document must still render."""
+    driver = _limited_store(_shuffled(_docs('o1', 2)), 500)
+
+    assert _render(driver, 'o1') == [_expected(2)]
+    assert [search['size'] for search in driver.client.searches] == [10_000, 500]  # rejected once
+
+    # The lowered page size is kept, so a later render is not rejected again
+    driver.client.searches.clear()
+    assert _render(driver, 'o1') == [_expected(2)]
+    assert [search['size'] for search in driver.client.searches] == [500]
+
+
+def test_render_pages_under_an_index_with_a_lower_result_window():
+    """A document longer than the index's limit is read in pages of that limit."""
+    driver = _limited_store(_shuffled(_docs('o1', 1_201)), 500)
+
+    assert _render(driver, 'o1') == [_expected(1_201)]
+    # Rejected, two full pages, then a short one
+    assert [search['size'] for search in driver.client.searches] == [10_000, 500, 500, 500]
+
+
+def test_render_raises_a_search_error_that_is_not_the_result_window():
+    """Only the result-window rejection is retried; any other search error reaches the caller."""
+    driver = _store(_docs('o1', 2))
+    calls = []
+
+    def failing_search(index, body=None, **kwargs):
+        calls.append(body)
+        raise es_mock.BadRequestError('parsing_exception', 'unknown query [bool]')
+
+    driver.client.search = failing_search
+
+    with pytest.raises(es_mock.BadRequestError, match='parsing_exception'):
+        _render(driver, 'o1')
+    assert len(calls) == 1
+    assert driver.renderPageSize == 10_000
+
+
 @pytest.mark.parametrize('size', [MAX_RESULT_WINDOW, MAX_RESULT_WINDOW + 1])
 def test_the_mock_enforces_the_result_window(size):
     client = es_mock.Elasticsearch()
     if size > MAX_RESULT_WINDOW:
-        with pytest.raises(ValueError, match='Result window is too large'):
+        with pytest.raises(es_mock.BadRequestError, match='Result window is too large'):
             client.search(index=_INDEX, body={'size': size})
     else:
         assert client.search(index=_INDEX, body={'size': size})['hits']['hits'] == []

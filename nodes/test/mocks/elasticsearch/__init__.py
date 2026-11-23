@@ -25,6 +25,17 @@ _indices = _store_data._indices
 MAX_RESULT_WINDOW = 10000
 
 
+class ApiError(Exception):
+    """Mirrors elasticsearch.ApiError: the server answered with an error."""
+
+
+class BadRequestError(ApiError):
+    """Mirrors elasticsearch.BadRequestError (HTTP 400), whose text carries the root cause's reason."""
+
+    def __init__(self, error_type: str, reason: str) -> None:
+        super().__init__(f'BadRequestError(400, {error_type!r}, {reason!r})')
+
+
 def _field(source: Dict[str, Any], path: str) -> Any:
     """The value at a dotted path such as 'meta.chunkId', or None."""
     value: Any = source
@@ -110,6 +121,9 @@ class Elasticsearch:
         self.indices = IndicesMock()
         self.cluster = ClusterMock()
 
+        # An index can set index.max_result_window below the default; a test sets this to model one
+        self.maxResultWindow = MAX_RESULT_WINDOW
+
     def index(
         self, index: str, id: Optional[str] = None, body: Optional[Dict] = None, refresh: bool = False, **kwargs: Any
     ) -> Dict[str, Any]:
@@ -123,14 +137,15 @@ class Elasticsearch:
         return {'count': len(_store.get(index, []))}
 
     def search(self, index: str, body: Optional[Dict] = None, **kwargs: Any) -> Dict[str, Any]:
-        # Like a server with default index settings, reject a page past index.max_result_window
+        # Like the server, reject a page past index.max_result_window
         body = body or {}
         window = int(body.get('from', 0) or 0) + int(body.get('size', 10) or 0)
-        if window > MAX_RESULT_WINDOW:
-            raise ValueError(
+        if window > self.maxResultWindow:
+            raise BadRequestError(
+                'search_phase_execution_exception',
                 f'Result window is too large, from + size must be less than or equal to: '
-                f'[{MAX_RESULT_WINDOW}] but was [{window}]. This limit can be set by changing the '
-                f'[index.max_result_window] index level setting.'
+                f'[{self.maxResultWindow}] but was [{window}]. This limit can be set by changing the '
+                f'[index.max_result_window] index level setting.',
             )
 
         # bool.must is a list of clauses or, as Elasticsearch also accepts, a single clause
