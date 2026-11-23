@@ -609,6 +609,22 @@ async def test_r972_1b_debugger_events_skip_unauthenticated_connections(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_set_monitor_catchup_skipped_when_gate_stale(monkeypatch):
+    """Catch-up sends on a new subscription bit re-check live authority first."""
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    server._authz = MagicMock()
+    server._authz.gate_ok = MagicMock(return_value=False)
+    control = MagicMock()
+    control.id = 'run-1'
+
+    await conn._send_updates(control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY | EVENT_TYPE.TASK)
+
+    assert events(conn) == []
+    server._authz.gate_ok.assert_called_with(conn)
+
+
+@pytest.mark.asyncio
 async def test_push_rebuild_failure_spares_a_newer_identity(monkeypatch):
     """A failed rebuild clears the verification stamp only while the connection
     still holds the identity that failed; a reauth that installed another

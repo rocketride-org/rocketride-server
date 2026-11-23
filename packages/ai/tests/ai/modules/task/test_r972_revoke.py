@@ -139,6 +139,37 @@ async def test_r972_1a_deauth_drops_events_and_allows_reauth(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_deauth_detaches_debugger_before_reauth_as_other_user(monkeypatch):
+    """A deauthed debugger is detached, so a later re-auth as another user receives nothing."""
+    from unittest.mock import MagicMock
+
+    from ai.modules.task.task_engine import Task
+
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('user-a'))
+    task = Task.__new__(Task)
+    task.id = 'run-1'
+    task._run_log = None
+    task._debugger = conn
+    task._status = MagicMock()
+    task.stamp_log_event = MagicMock()
+    task.debug_message = MagicMock()
+    server._task_control['run-1'] = MagicMock(task=task)
+
+    await conn.on_deauth(_request('deauth'))
+    server._server.authenticate_credential = AsyncMock(return_value=identity('user-b'))
+    await conn.on_auth(_request('auth', auth='rr_session'))
+    assert conn._account_info.userId == 'user-b'
+
+    conn.sent.clear()
+    message = {'event': 'stopped', 'body': {'project_id': 'p', 'runKind': 'dev'}}
+    await task._forward_task_event(EVENT_TYPE.DEBUGGER, message)
+
+    assert events(conn, 'stopped') == []
+    assert task._debugger is None
+
+
+@pytest.mark.asyncio
 async def test_r972_1a_self_demotion_revokes_caller_and_scopes_removal(monkeypatch):
     """E8: a SaaS-shaped push after self-demotion revokes the caller's socket;
     its ``connection_removed`` event still carries the original user.
