@@ -474,7 +474,7 @@ def _done(answer='OK'):
 
 def test_budget_decides_the_mode_per_run(wave, monkeypatch):
     tools = _tools(30)  # 8,699 characters
-    for budget, mode in [(1000, 'compact'), (8699, 'full'), (100000, 'full'), (0, 'full')]:
+    for budget, mode in [(1000, 'compact'), (8699, 'full'), (100000, 'full')]:
         run = _Run(wave, monkeypatch, tools=tools, replies=[_done()], budget=budget).run()
         assert run.trace['tool_catalog'] == {'mode': mode, 'tools': 30, 'chars': 8699, 'budget': budget}
         assert (run.views[0] is not None) == (mode == 'compact')
@@ -487,11 +487,15 @@ def test_default_is_off(wave, monkeypatch):
     assert driver._tool_catalog_budget == 0
 
     run = _Run(wave, monkeypatch, tools=_tools(200), replies=[_done()]).run()
-    assert run.trace['tool_catalog']['mode'] == 'full'
     assert run.views == [None]
+    # The trace is what it was before the budget: an agent called as a tool returns
+    # it to its parent, whose prompt would otherwise change.
+    assert not {'tool_catalog', 'planning_steps', 'loaded_tools'} & set(run.trace)
 
 
-@pytest.mark.parametrize('value, budget', [(24000, 24000), ('500', 500), (-5, 0), ('', 0), (None, 0), ('x', 0)])
+@pytest.mark.parametrize(
+    'value, budget', [(24000, 24000), ('500', 500), (-5, 0), ('', 0), (None, 0), ('x', 0), (True, 0), (1.5, 0)]
+)
 def test_the_budget_setting_is_read_from_the_node_config(wave, value, budget):
     glb = SimpleNamespace(logicalType='agent_rocketride', connConfig={'tool_catalog_budget': value})
     driver = wave.rocketride_agent.RocketRideDriver(SimpleNamespace(glb=glb))
@@ -682,6 +686,38 @@ def test_a_discovery_timeout_after_a_passing_check_does_not_block_done(wave, mon
     assert run.answer == 'done'
     assert finished.is_set(), 'the run waited for the timed-out lookup before it ended'
     assert run.states[0].background.running() == 0
+
+
+def test_a_skipped_check_whose_lookup_timed_out_does_not_undo_a_pass(wave, monkeypatch):
+    release = threading.Event()
+    tools = _tools(30)  # the last one is CHECK
+
+    def get(name):
+        release.wait(10)
+        return {'name': name}
+
+    def check_then_drop_it(run):
+        tools.pop()  # a refresh drops the check tool: the next prompt does not show it
+        return _calls((CHECK, {}))
+
+    replies = [
+        _calls((LOAD, {'names': [_name(1)]})),
+        _calls((_name(1), {'id': '1'})),
+        check_then_drop_it,
+        _calls((CHECK, {})),  # not shown, so answered locally; its lookup times out
+        _done('done'),
+    ]
+    run = _Run(wave, monkeypatch, tools=tools, replies=replies, budget=1, verify_tool=CHECK, get=get)
+    run.driver._tool_timeout_s = 0.05
+    monkeypatch.setattr(wave.rocketride_agent, 'warning', lambda msg: release.set())
+    try:
+        run.run()
+    finally:
+        release.set()
+
+    assert run.trace['waves'][3]['results'][0]['error'].startswith(f'TimeoutError: looking up {CHECK}')
+    assert run.invoked == [(_name(1), {'id': '1'}), (CHECK, {})]
+    assert run.trace['stop_reason'] == 'done' and run.answer == 'done'
 
 
 def _scripted(wave, monkeypatch, budget, *, max_waves=10):

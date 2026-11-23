@@ -252,7 +252,8 @@ def simulate_run(
     driver.call_llm_json = call_llm_json
     driver.call_llm = call_llm
     report.answer, trace = driver._run(context=build_context(wave, descriptors, invoke=invoke), question=question(wave))
-    report.planning_steps = trace.get('planning_steps', 0)
+    # Counted here: the trace records planning_steps only with the budget set.
+    report.planning_steps = sum(1 for r in report.requests if r.kind == 'plan')
     report.stop_reason = trace.get('stop_reason', '')
     report.loaded_tools = trace.get('loaded_tools')
     report.tool_catalog = trace.get('tool_catalog', {})
@@ -278,7 +279,7 @@ def report(rows: Sequence[Tuple[str, int, RunReport]]) -> str:
             if m is None:
                 continue
             lines.append(
-                f'| {label} | {budget:,} | {run.tool_catalog.get("mode", "?")} | {run.planning_steps} | {name} | '
+                f'| {label} | {budget:,} | {run.tool_catalog.get("mode", "full")} | {run.planning_steps} | {name} | '
                 f'{_cell(m.tools_block)} | {_cell(m.loaded_block)} | {_cell(m.prompt)} | {_cell(m.prefix)} |'
             )
     lines.append('')

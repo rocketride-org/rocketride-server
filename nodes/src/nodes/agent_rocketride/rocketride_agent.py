@@ -74,7 +74,7 @@ def _tool_timeout(value: Any) -> Optional[float]:
 
 def _catalog_budget(value: Any) -> int:
     """Read the tool_catalog_budget setting: characters, 0 for every schema in every prompt; the default when unset."""
-    if value is None or value == '':
+    if value is None or value == '' or isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
         return DEFAULT_CATALOG_BUDGET
     try:
         return max(0, int(value))
@@ -174,7 +174,7 @@ class RocketRideDriver(AgentBase):
         state = RunState()
         try:
             answer, trace = self._run_waves(context=run_context, question=question, state=state)
-            if isinstance(trace, dict):
+            if isinstance(trace, dict) and 'tool_catalog' in trace:
                 trace['loaded_tools'] = sorted(state.loaded_tools) if state.loaded_tools is not None else None
             return answer, trace
         finally:
@@ -209,9 +209,10 @@ class RocketRideDriver(AgentBase):
              done=true and every call succeeded, returns its answer.
           6. Prunes memory keys the LLM has finished with (remove field) and loops.
 
-        The trace records why the run stopped: done, max_waves, empty_plan or error,
-        and how the tool catalog was shown (``tool_catalog``) and how many planning
-        requests the run made (``planning_steps``).
+        The trace records why the run stopped: done, max_waves, empty_plan or error.
+        With the budget set it also records how the tool catalog was shown
+        (``tool_catalog``) and how many planning requests the run made
+        (``planning_steps``); with it off the trace is what it was before the budget.
 
         In compact mode, before each planning request, one read of the catalog
         decides what the prompt shows and which tools may run in that step. If that
@@ -240,7 +241,9 @@ class RocketRideDriver(AgentBase):
 
         # trace is returned to the caller and recorded for observability.
         # waves is shared by reference — appending to it here also updates trace.
-        trace: Dict[str, Any] = {'waves': waves, 'run_id': run_id, 'tool_catalog': catalog_info, 'planning_steps': 0}
+        trace: Dict[str, Any] = {'waves': waves, 'run_id': run_id}
+        if catalog_info is not None:
+            trace.update(tool_catalog=catalog_info, planning_steps=0)
 
         # Scratch persists the LLM's working notes across iterations.
         # The LLM emits it in each response and we re-inject it into the next
@@ -252,7 +255,8 @@ class RocketRideDriver(AgentBase):
             debug(f'rocketride wave wave_num={wave_num} run_id={run_id}')
             self.sendSSE(context, 'thinking', message=f'Planning step {wave_num + 1}...')
 
-            trace['planning_steps'] += 1
+            if catalog_info is not None:
+                trace['planning_steps'] += 1
             view = None
             if state.loaded_tools is not None:
                 # One read of the catalog for this step: the planner shows exactly these
@@ -406,13 +410,18 @@ class RocketRideDriver(AgentBase):
                 else:
                     results.append({'tool': 'reply-check', 'key': key, 'error': f'Skipped: {problem}'})
 
-            checks = [r for i, r in enumerate(results) if self._is_check(r, tool_calls, i)]
+            # The tools this step's prompt showed in full (compact mode), or None. A call
+            # to any other tool never reached the host, so it is neither a check nor a change.
+            shown = state.shown_tools if state.loaded_tools is not None else None
+            checks = [
+                r
+                for i, r in enumerate(results)
+                if self._is_check(r, tool_calls, i) and (shown is None or r.get('tool') in shown)
+            ]
             if checks:
                 # The newest check decides: if any check in this step raised or
                 # reported a failure, the work is unchecked again, whatever passed before.
                 last_check = -1 if any(r.get('error') or r.get('failed') for r in checks) else wave_num
-            # The tools this step's prompt showed in full (compact mode), or None.
-            shown = state.shown_tools if state.loaded_tools is not None else None
             if any(self._is_change(r, tool_calls, i, shown) for i, r in enumerate(results)):
                 # Any other call counts as a change, even one that failed: a write
                 # may have landed before its result could be stored.
@@ -523,21 +532,28 @@ class RocketRideDriver(AgentBase):
         connected = ', '.join(sorted(names)) or 'none'
         raise ValueError(f'verify_tool {self._verify_tool!r} is not a connected tool (connected: {connected})')
 
-    def _catalog_mode(self, context: AgentContext) -> Tuple[Optional[Set[str]], Dict[str, Any]]:
+    def _catalog_mode(self, context: AgentContext) -> Tuple[Optional[Set[str]], Optional[Dict[str, Any]]]:
         """Decide once per run whether every schema goes in the prompt (None) or schemas load on demand.
 
         On demand, the set of loaded tools starts with the check tool, which the run
-        calls after every change. The second value describes the decision for the trace.
+        calls after every change. The second value describes the decision for the
+        trace, or is None with the budget off: then nothing is measured or recorded.
         """
+        if self._tool_catalog_budget <= 0:
+            return None, None
         descriptors = named_descriptors(getattr(context.tools, 'list', None) or [])
-        size = catalog_chars(descriptors)
+        try:
+            size = catalog_chars(descriptors)
+        except (TypeError, ValueError):
+            # A descriptor that is not JSON: the eager planner reports it, as with the budget off.
+            size = None
         info: Dict[str, Any] = {
             'mode': 'full',
             'tools': len(descriptors),
             'chars': size,
             'budget': self._tool_catalog_budget,
         }
-        if self._tool_catalog_budget <= 0 or size <= self._tool_catalog_budget:
+        if size is None or size <= self._tool_catalog_budget:
             return None, info
         if any(td['name'] == LOAD_TOOL for td in descriptors):
             # A connected tool with the loading step's name must keep working as a tool.

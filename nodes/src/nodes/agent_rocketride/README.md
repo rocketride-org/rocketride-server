@@ -80,7 +80,7 @@ A call that runs past the **Tool time limit** is reported to the model as timed 
 
 ### On-demand tool schemas
 
-With the compact catalog the catalog lines sit in the start of the prompt that providers may cache, and stay the same across the steps of a run while the catalog is unchanged; the loaded schemas are re-sent on each step in the context, after it. The mode is decided once per run; a connected tool named `tools.load` is the one exception. Which schemas a step shows is decided before that step is planned, so a tool loaded in one step can be called from the next. The trace an agent-as-tool call returns, and the Trace panel, carry the run's `tool_catalog` (mode, tool count, size and budget), `planning_steps` and `loaded_tools`; the answers lane carries the answer and token usage only.
+With the compact catalog the catalog lines sit in the start of the prompt that providers may cache, and stay the same across the steps of a run while the catalog is unchanged; the loaded schemas are re-sent on each step in the context, after it. The mode is decided once per run; a connected tool named `tools.load` is the one exception. Which schemas a step shows is decided before that step is planned, so a tool loaded in one step can be called from the next. With the budget set, the trace an agent-as-tool call returns, and the Trace panel, carry the run's `tool_catalog` (mode, tool count, size and budget), `planning_steps` and `loaded_tools`; the answers lane carries the answer and token usage only. With it off the trace has none of them, so a parent agent that calls this one sees the same result as before.
 
 ### Memory references
 
