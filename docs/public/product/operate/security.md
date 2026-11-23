@@ -44,10 +44,17 @@ inherit the engine's full environment, only an allowlist:
   holding the DSN of each database the run was approved for.
   Any other `ROCKETRIDE_DB_*` name passes through like the rest.
 - what nodes and the task itself use directly: `RR_STORE_URL`,
-  `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
+  `RR_STORE_SECRET_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
   `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and
   the API-key fallbacks individual node pages document (such as
   `OPENAI_API_KEY`)
+
+`RR_SIGNING_KEY` is never in a task's environment, even through
+`RR_SUBPROCESS_ENV`: the engine signs the download URLs a task asks for. Tasks
+run as the engine's OS user, so on a shared or multi-user engine set the key in
+the engine's process environment rather than in the `.env` next to the binary,
+and set `RR_PROC_PRIVATE=1` (Linux only) so tasks cannot read the engine's
+environment from `/proc`.
 
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.
@@ -88,9 +95,11 @@ The engine binds to `localhost` by default:
   the engine keeps and replaces on every start; the pipeline's process is given
   only a hash of it. The engine connects as soon as the process reports its
   listener, and over that connection the process may ask the engine only for
-  the commands the engine registered for it — today one, `spend.check`, which
-  asks whether the run's own organization may open a pipe. Its `/status`
-  endpoint accepts only that token.
+  the commands the engine registered for it — today two: `spend.check`, which
+  asks whether the run's own organization may open a pipe, and `store.url`,
+  which signs a fetch URL for a path under the run's own engine-selected
+  identity and storage root. The port's `/status` endpoint accepts only that
+  token.
 
 Only the source-node HTTP port needs to be accessible to external callers when
 you're using a webhook-based source. Port 5565 is a management interface;

@@ -101,7 +101,7 @@ The engine is not stateless. With RR_STORE_URL unset it keeps account files on
 local disk (Store._get_default_storage_url -> filesystem://~/.rocketlib/dtc),
 so every pod gets its own private copy: a file written through one pod is
 absent when the next request lands on another. On that same backend the engine
-also mints a per-process RR_SIGNING_KEY (ai/web/server.py::_ensure_signing_key),
+also signs with a per-process RR_SIGNING_KEY (ai/account/file_store.py::fetch_signing_key),
 so signed /task/fetch URLs issued by one pod 401 on every other.
 
 Both halves are fixed by one thing — a shared object store. s3:// and

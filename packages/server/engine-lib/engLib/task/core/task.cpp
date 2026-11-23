@@ -32,7 +32,8 @@ namespace {
 ///		thread only (the getTask() binding is consumed at endpoint
 ///		construction, inside the publish window) — publish, reads, and
 ///		clear are strictly sequential on that one thread, so no
-///		synchronization is needed.
+///		synchronization is needed. Python callers that need task facts on
+///		worker threads capture them at construction (FileStore._task_process).
 //-------------------------------------------------------------------------
 json::Value g_currentTask;
 }  // namespace
