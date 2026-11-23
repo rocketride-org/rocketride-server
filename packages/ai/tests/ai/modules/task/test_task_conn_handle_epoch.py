@@ -48,6 +48,7 @@ from ai.account.models import RequestContext
 from ai.account.store import StorageError, Store
 from ai.account.store_providers.filesystem import FilesystemStore
 from ai.modules.task.task_conn import TaskConn
+from ai.modules.task.task_server import TaskServer
 
 from .test_task_conn import _make_account_info, _make_conn
 
@@ -276,3 +277,96 @@ async def test_empty_conn_id_is_unowned_and_unaffected(store):
     await store.close_stale_handles('', 5)
     assert await fs.write_chunk(handle, b'ab') == 2
     await fs.close_write(handle)
+
+
+# ---------------------------------------------------------------------------
+# Account pushes racing a re-auth
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('push', ['account', 'org'])
+@pytest.mark.asyncio
+async def test_push_resolving_after_reauth_does_not_overwrite_the_new_identity(conn, store, monkeypatch, push):
+    """A push for A that lands after the socket re-authed as B must not put A back."""
+    from ai.account import account
+
+    await _auth(conn, 'cred-a')
+    gate = asyncio.Event()
+
+    async def get_auth(user_id, auth):
+        await gate.wait()
+        return _identity('user-a')
+
+    monkeypatch.setattr(account, '_service', SimpleNamespace(get_authentication_result=get_auth), raising=False)
+    conn._account_info.auth = 'rr_a'
+    conn.send_event = AsyncMock()
+    server = SimpleNamespace(_connections={1: conn}, debug_message=lambda m: None)
+    if push == 'account':
+        running = asyncio.ensure_future(TaskServer.push_account_update(server, 'user-a'))
+    else:
+        running = asyncio.ensure_future(TaskServer.push_org_update(server, 'org-1'))
+    await asyncio.sleep(0)
+
+    await _auth(conn, 'cred-b')
+    handle_b = await conn._get_file_store().open_write('b-secret.bin')
+    gate.set()
+    await running
+
+    assert conn._account_info.userId == 'user-b'
+    conn.send_event.assert_not_awaited()
+    await conn._get_file_store().write_chunk(handle_b, b'from-b')
+
+
+@pytest.mark.asyncio
+async def test_push_without_identity_change_still_refreshes(conn, store, monkeypatch):
+    """No re-auth during the lookup: the fresh identity is applied and pushed."""
+    from ai.account import account
+
+    await _auth(conn, 'cred-a')
+    fresh = _identity('user-a')
+
+    async def get_auth(user_id, auth):
+        return fresh
+
+    monkeypatch.setattr(account, '_service', SimpleNamespace(get_authentication_result=get_auth), raising=False)
+    conn._account_info.auth = 'rr_a'
+    conn.send_event = AsyncMock()
+    fresh.to_push_result = lambda: {}
+    server = SimpleNamespace(_connections={1: conn}, debug_message=lambda m: None)
+
+    await TaskServer.push_account_update(server, 'user-a')
+
+    assert conn._account_info is fresh
+    conn.send_event.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Concurrent teardown of one handle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_concurrent_teardowns_close_the_backend_once(store):
+    """The identity sweep racing disconnect cleanup must not double-close a handle."""
+    fs = FileStore(store, 'user-a', RequestContext(account_info=_identity('user-a'), conn_id='c1', auth_epoch=1))
+    await fs.open_write('x.bin')
+    gate = asyncio.Event()
+    calls = []
+    real = store._store.close_write
+
+    async def gated(path, context):
+        calls.append(path)
+        await gate.wait()
+        return await real(path, context)
+
+    store._store.close_write = gated
+    sweep = asyncio.ensure_future(store.close_stale_handles('c1', 2))
+    await asyncio.sleep(0)
+    disconnect = asyncio.ensure_future(store.close_all_handles('c1'))
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.gather(sweep, disconnect)
+
+    assert len(calls) == 1
+    assert store._shared_handles == {}
+    assert store._shared_write_locks == set()
