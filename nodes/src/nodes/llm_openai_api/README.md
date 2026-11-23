@@ -71,6 +71,20 @@ for any other refusal.
 
 The Nebius preset does not show the field. It sends 0 and recovers the same way.
 
+### Send cacheable prefix separately
+
+An agent prompt starts with text that is the same on every call. A gateway in front
+of the model can cache that text only if it can see where it ends. Turn on
+`cachePrefixParts` (custom profile) and a question that sets `cachePrefix` is sent as
+two text content parts: the unchanging start, then the rest. The node adds no
+`cache_control` marker; marking the first part is the gateway's job. Turn-mode requests
+do not change. Models that this node sends to the Responses API also stay one string, so
+the option has no effect on them.
+
+The option is off by default, and the request is then one string, as before. Turn it on
+only for an endpoint that accepts a list of content parts: one that does not will reject
+the call, and the caller gets the error. The call is not resent as a string.
+
 ### Nebius preset
 
 `services.nebius.json` registers **Nebius** (`llm_nebius://`) as a branded preset of

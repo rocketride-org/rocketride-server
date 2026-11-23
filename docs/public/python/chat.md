@@ -29,8 +29,11 @@ question.addQuestion('Summarize the main points and list keywords.')
 If you send the same question again and again with only its context, documents,
 goals or questions changing (an agent loop does), set `question.cachePrefix = True`.
 A provider that supports prompt caching (the Anthropic node, and Claude models on
-the Bedrock node) may then cache the unchanging start of the prompt; other
-providers ignore the flag.
+the Bedrock node) may then cache the unchanging start of the prompt. The
+OpenAI-Compatible API node with `cachePrefixParts` turned on sends that start as its
+own content part, so a gateway in front of the model can mark it (not for turn-mode
+questions, nor for models it sends to the Responses API). Other providers ignore the
+flag.
 
 `Question(type=QuestionType.QUESTION, filter=DocFilter(), expectJson=False, cachePrefix=False, role='')` —
 `QuestionType` is one of `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT`. Steer

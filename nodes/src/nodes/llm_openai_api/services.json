@@ -121,9 +121,15 @@
 			"minimum": 0,
 			"maximum": 2
 		},
+		"cachePrefixParts": {
+			"type": "boolean",
+			"title": "Send cacheable prefix separately",
+			"default": false,
+			"description": "Send the unchanging start of an agent prompt as its own content part, so a gateway in front of the model can mark it for caching. Leave off unless the endpoint accepts a list of content parts."
+		},
 		"openai_api.custom": {
 			"object": "custom",
-			"properties": ["model", "base_url", "modelTotalTokens", "modelOutputTokens", "llm.cloud.apikey", "llm.cloud.modelSource", "temperature"]
+			"properties": ["model", "base_url", "modelTotalTokens", "modelOutputTokens", "llm.cloud.apikey", "llm.cloud.modelSource", "temperature", "cachePrefixParts"]
 		},
 		"openai_api.profile": {
 			"title": "Model",
