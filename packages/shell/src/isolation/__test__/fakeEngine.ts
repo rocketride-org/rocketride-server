@@ -78,6 +78,10 @@ export interface IFakeEngine {
 	fail(command: string, message: string): void;
 	/** Makes the NEXT `request` for `command` THROW (a transport or SDK exception). */
 	throwNext(command: string, err: Error): void;
+	/** Makes the NEXT response to `command` `success: false` with this `message` (and `code`). */
+	failWith(command: string, failure: { message: string; code?: string }): void;
+	/** Merges `fields` into every `success: true` body of `command` from now on. */
+	extendBody(command: string, fields: Record<string, unknown>): void;
 	/** Holds responses to `command` until the returned release function runs. */
 	hold(command: string): () => void;
 	/** Sets the next `rrext_get_task_status` body fields. */
@@ -93,7 +97,8 @@ export function createFakeEngine(): IFakeEngine {
 	const runs: IFakeRun[] = [];
 	const fsHandles: string[] = [];
 	const monitors = new Map<string, Map<string, number>>();
-	const failures = new Map<string, string>();
+	const failures = new Map<string, { message: string; code?: string }>();
+	const extras = new Map<string, Record<string, unknown>>();
 	const throws = new Map<string, Error>();
 	const holds = new Map<string, Promise<void>>();
 	let statusFields: Record<string, unknown> = {};
@@ -177,7 +182,7 @@ export function createFakeEngine(): IFakeEngine {
 			const failure = failures.get(command);
 			if (failure !== undefined) {
 				failures.delete(command);
-				return { ...base, success: false, message: failure };
+				return { ...base, success: false, message: failure.message, ...(failure.code !== undefined ? { code: failure.code } : {}) } as DAPMessage;
 			}
 			if (command === 'rrext_get_token') {
 				// As the real engine: on_rrext_get_token (cmd_task.py) re-raises the
@@ -190,7 +195,7 @@ export function createFakeEngine(): IFakeEngine {
 			if (command === 'rrext_store' && (message.arguments as Record<string, unknown> | undefined)?.subcommand === 'fs_read') {
 				return { ...base, success: true, arguments: { data: new Uint8Array([1, 2, 3, 4]) } } as DAPMessage;
 			}
-			return { ...base, success: true, body: bodyFor(message) };
+			return { ...base, success: true, body: { ...bodyFor(message), ...(extras.get(command) ?? {}) } };
 		},
 		async addMonitor(key: Record<string, unknown>, types: string[]): Promise<void> {
 			monitorCalls.push({ kind: 'add', key: structuredClone(key), types: [...types] });
@@ -222,7 +227,9 @@ export function createFakeEngine(): IFakeEngine {
 		fsHandles,
 		monitors,
 		messagesFor: (command, since = 0) => received.slice(since).filter((r) => r.message.command === command),
-		fail: (command, message) => void failures.set(command, message),
+		fail: (command, message) => void failures.set(command, { message }),
+		failWith: (command, failure) => void failures.set(command, failure),
+		extendBody: (command, fields) => void extras.set(command, { ...(extras.get(command) ?? {}), ...fields }),
 		throwNext: (command, err) => void throws.set(command, err),
 		hold(command) {
 			let release!: () => void;

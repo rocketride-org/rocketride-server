@@ -73,6 +73,31 @@ const engineWork = (engine: IFakeEngine): number => engine.received.length + eng
 
 const rrbin = (bytes: number): { __rrbin: true; b64: string } => ({ __rrbin: true, b64: Buffer.alloc(bytes).toString('base64') });
 
+/** A table entry's identity: op, command and (for a subcommand row) one subcommand. */
+const rowKey = (op: string, command: string | undefined, subcommand: string | undefined): string => `${op}|${command ?? ''}|${subcommand ?? ''}`;
+
+/** Every (op, command, subcommand) the capability table declares, one key each. */
+function tableKeys(): string[] {
+	return readCapabilityJson().rows.flatMap((row) => (row.subcommands ?? [undefined]).map((sub) => rowKey(row.op, row.command, sub)));
+}
+
+/** The table entries the test catalogue exercises, by the subcommand each case really sends. */
+function catalogueKeys(): Set<string> {
+	const ctx = dummyCtx(refAppKey(ENTRY_A.id));
+	return new Set(
+		CASES.map((c) => {
+			const sub = c.build(ctx).message?.arguments?.subcommand;
+			return rowKey(c.op, c.command, typeof sub === 'string' ? sub : undefined);
+		})
+	);
+}
+
+/** Fails for each table entry (subcommands included) that has no catalogue case. */
+function assertCatalogueCoversTable(): void {
+	const covered = catalogueKeys();
+	for (const key of tableKeys()) assert.ok(covered.has(key), `the test catalogue has no case for the table row ${key}`);
+}
+
 // =============================================================================
 // T4 — everything design section 8 denies
 // =============================================================================
@@ -137,12 +162,7 @@ test('T4 each denied command or family is refused and never forwarded', async (t
 test('T5 each pipelines.run and fs.app row is allowed with its capability and denied without', async (tt) => {
 	const key = refAppKey(ENTRY_A.id);
 	const rows = readCapabilityJson().rows;
-	for (const row of rows) {
-		assert.ok(
-			CASES.some((c) => c.op === row.op && c.command === row.command),
-			`the test catalogue has no case for the table row ${row.cap} ${row.op} ${row.command ?? ''}`
-		);
-	}
+	assertCatalogueCoversTable();
 	const capOf = (c: ICase): string | undefined => rows.find((r) => r.op === c.op && r.command === c.command)?.cap;
 
 	for (const c of CASES.filter((x) => ['pipelines.run', 'fs.app'].includes(capOf(x) ?? ''))) {
@@ -214,12 +234,7 @@ test('T6 client.request params, DAP top-level keys and timeouts are bounded', as
 
 test('T7 an unknown argument key is refused on every row', async (tt) => {
 	const key = refAppKey(ENTRY_A.id);
-	for (const row of readCapabilityJson().rows) {
-		assert.ok(
-			CASES.some((c) => c.op === row.op && c.command === row.command),
-			`the test catalogue has no case for the table row ${row.op} ${row.command ?? ''}`
-		);
-	}
+	assertCatalogueCoversTable();
 	for (const c of CASES) {
 		await tt.test(c.name, async (st) => {
 			const { t, A, engine } = fixture(st);
@@ -323,10 +338,10 @@ test('T10 rrext_get_token denials and ownership', async (tt) => {
 		['a random rp_ alias', 'rp_AAAAAAAAAAAAAAAAAAAAAA'],
 		["another realm's alias", otherRun.projectId],
 	];
-	// In the pass-through the alias IS the real id; the first two only differ once ids are aliased.
 	for (const [name, projectId] of foreign) {
 		const before = engine.received.length;
-		if (projectId === run.projectId) continue;
+		// The realm's id must be an alias: if it equalled the engine's id, the real-id denial would not be exercised.
+		assert.notEqual(projectId, run.projectId, `${name} must differ from the realm's own project id`);
 		assertDenied(await clientRequest(A, call({ projectId, source: run.source })), 'ownership', `rrext_get_token with ${name}`);
 		assertNotForwarded(engine, before, `rrext_get_token with ${name}`);
 	}

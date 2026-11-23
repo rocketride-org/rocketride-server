@@ -42,7 +42,7 @@ test('T16 store paths are canonicalised and confined to apps/<appKey>', async (t
 	const key = refAppKey(ENTRY_A.id);
 	const otherKey = refAppKey(ENTRY_B.id);
 
-	const bad = ['../x', `apps/${key}/../y`, `apps/${key}/%2e%2e/y`, `apps\\${key}\\x`, `apps/${key}/a\u0000b`, `Apps/${key}/x`, `/apps/${key}/x`, '@/Team/x', '@/Org/x', `apps/${otherKey}/x`];
+	const bad = ['../x', `apps/${key}/../y`, `apps/${key}/%2e%2e/y`, `apps/${key}/%252e%252e/y`, `apps/${key}/%25252e%25252e/y`, `apps/${key}/%252e./y`, `apps/${key}/%252f..%252fy`, `apps\\${key}\\x`, `apps/${key}/a\u0000b`, `Apps/${key}/x`, `/apps/${key}/x`, '@/Team/x', '@/Org/x', `apps/${otherKey}/x`];
 	const msg = (command: string, path: string): DAPMessage => {
 		if (command === 'fs_open') return dap('rrext_store', { subcommand: 'fs_open', path, mode: 'r' });
 		if (command === 'fs_stat') return dap('rrext_store', { subcommand: 'fs_stat', path });
@@ -65,7 +65,9 @@ test('T16 store paths are canonicalised and confined to apps/<appKey>', async (t
 		const envelope = await clientRequest(A, dap('rrext_store', { subcommand: 'fs_stat', path }));
 		assert.equal(envelope.ok, true, `${path} must be allowed, got ${brief(envelope)}`);
 	}
-	const nfd = 'café.txt';
+	// Written as escapes so an editor cannot fold it to NFC: 'e' followed by U+0301.
+	const nfd = 'cafe\u0301.txt';
+	assert.notEqual(nfd, nfd.normalize('NFC'), 'the fixture really is decomposed');
 	const envelope = await clientRequest(A, dap('rrext_store', { subcommand: 'fs_stat', path: `apps/${key}/${nfd}` }));
 	assert.equal(envelope.ok, true, 'an NFD name must be allowed');
 	assert.equal((engine.received.at(-1)!.message.arguments as { path: string }).path, `apps/${key}/${nfd.normalize('NFC')}`, 'the forwarded path must be NFC');
