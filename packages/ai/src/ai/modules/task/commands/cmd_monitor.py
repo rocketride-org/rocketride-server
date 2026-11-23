@@ -399,8 +399,10 @@ class MonitorCommands(DAPConn):
             except Exception:
                 pass
 
-        # If we just turned on task (same permission as a live task event)
-        if new & EVENT_TYPE.TASK and self._may_monitor():
+        # If we just turned on task (same permission as a live task event).
+        # The summary send above awaited, so re-check live authority here: the
+        # gate read at the top may have gone stale while it ran (#972).
+        if new & EVENT_TYPE.TASK and (authz is None or authz.gate_ok(self)) and self._may_monitor():
             try:
                 # Loop through all active tasks the caller has access to
                 tasks: List[Dict[str, Any]] = []

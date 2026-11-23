@@ -644,6 +644,28 @@ async def test_set_monitor_catchup_skipped_when_gate_stale(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_catchup_gate_going_stale_during_summary_stops_task_list(monkeypatch):
+    """A gate that goes stale during the summary send is re-checked before the task list."""
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    calls = []
+
+    def gate_ok(c):
+        calls.append(c)
+        return len(calls) == 1  # fresh at the top, stale afterwards
+
+    server._authz = MagicMock()
+    server._authz.gate_ok = gate_ok
+    control = MagicMock()
+    control.id = 'run-1'
+
+    await conn._send_updates(control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY | EVENT_TYPE.TASK)
+
+    assert events(conn, 'apaevt_status_update')
+    assert events(conn, 'apaevt_task') == []
+
+
+@pytest.mark.asyncio
 async def test_push_rebuild_failure_spares_a_newer_identity(monkeypatch):
     """A failed rebuild clears the verification stamp only while the connection
     still holds the identity that failed; a reauth that installed another

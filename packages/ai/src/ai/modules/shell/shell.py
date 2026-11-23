@@ -489,6 +489,11 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
                 auth_failed = True
                 info = None
         if info is not None and not hasattr(info, 'userId'):
+            # authenticate() returns an (int, str) error tuple on failure. Only
+            # a definite denial (401/403) is a verdict worth caching; any other
+            # code (5xx, unavailable, unknown) is an outage and is not cached.
+            if not (isinstance(info, tuple) and info and info[0] in (401, 403)):
+                auth_failed = True
             info = None
         # A cached publish/version map is not a cached paid seat. Re-check
         # live membership and seat allocation even on a warm asset request.
