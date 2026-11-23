@@ -209,7 +209,14 @@ class TaskConn(
         _connection_id: Unique identifier for this DAP connection session
         _server: Reference to TaskServer for task lookup and management
         transport: Communication layer for DAP message exchange
+        _auth_epoch: Identity generation of this socket. Bumped (synchronously)
+            whenever an identity is installed (``on_auth``) or dropped
+            (``on_deauth``); file handles are stamped with it and die with the
+            identity that opened them.
     """
+
+    # Class default so __init__-bypassing test doubles read 0.
+    _auth_epoch: int = 0
 
     def __init__(
         self,
@@ -273,6 +280,10 @@ class TaskConn(
         # Account info set when client sends successful auth { auth: apikey } command.
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
+
+        # Identity generation (class default _auth_epoch = 0): bumped each time
+        # an identity is installed or dropped so file handles opened under an
+        # earlier identity stop working on this same socket.
 
         # Client IP — set by task_server.listen() immediately after construction,
         # used for per-IP unauthenticated connection tracking.
@@ -397,9 +408,14 @@ class TaskConn(
             self._transport.disconnect()
             return
 
+        # Install the new identity and bump the generation in one synchronous
+        # step: every handle opened under the previous identity is unusable
+        # from this instant, then swept (closed at the backend) below.
         self._account_info = result
         self._authenticated = True
+        self._auth_epoch += 1
         self._server.release_unauthed_slot(self._client_ip)
+        await self._close_stale_file_handles()
 
         # Capture optional client identification from auth arguments
         if args.get('clientName'):
@@ -434,7 +450,9 @@ class TaskConn(
 
         Reverts the connection to unauthenticated mode so only
         ``rrext_public_*`` commands are accepted. The WebSocket stays
-        open — callers can re-authenticate later via ``auth``.
+        open — callers can re-authenticate later via ``auth``. File handles
+        opened under the dropped identity are closed and cannot be reused by
+        a later identity on the same socket.
         """
         # Nothing to do if not authenticated
         if not self._authenticated:
@@ -447,8 +465,23 @@ class TaskConn(
         # Clear authentication state
         self._authenticated = False
         self._account_info = None
+        # Drop authority and bump the generation synchronously, then close the
+        # handles the dropped identity opened (they are unusable already).
+        self._auth_epoch += 1
+        await self._close_stale_file_handles()
 
         return self.build_response(request, body={})
+
+    async def _close_stale_file_handles(self) -> None:
+        """Close this connection's file handles from an older identity.
+
+        Best-effort like disconnect cleanup: errors are logged and swallowed
+        (the epoch check already makes stale handles unusable).
+        """
+        try:
+            await self._server.store.close_stale_handles(str(self._connection_id), self._auth_epoch)
+        except Exception as e:
+            self.debug_message(f'Error closing stale file handles for connection {self._connection_id}: {e}')
 
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the user holds the permission on ANY of their membership teams.
@@ -506,6 +539,7 @@ class TaskConn(
             account_info=self._account_info,
             conn_id=str(self._connection_id),
             source='local',
+            auth_epoch=self._auth_epoch,
         )
 
     def verify_team_permission(self, team_id: str, perm: str) -> None:

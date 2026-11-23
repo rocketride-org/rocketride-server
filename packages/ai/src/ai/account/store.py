@@ -766,6 +766,27 @@ class Store:
         for handle in doomed:
             await self._teardown_handle(handle)
 
+    async def close_stale_handles(self, connection_id, epoch: int) -> None:
+        """
+        Force-close a connection's handles opened under an OLDER identity.
+
+        Called when a connection's identity changes without the socket
+        closing (re-auth or deauth): the handles were authorized for the
+        previous identity, so they are torn down with the same sequence as
+        disconnect (commit/close at the backend, release write locks).
+        Handles at the current ``epoch`` are left alone.
+
+        Args:
+            connection_id: The ctx.conn_id string. Empty means unowned: no-op.
+            epoch: The connection's current identity generation.
+        """
+        conn_id = str(connection_id)
+        if not conn_id:
+            return
+        doomed = [h for h in self._shared_handles.values() if h.connection_id == conn_id and h.auth_epoch < epoch]
+        for handle in doomed:
+            await self._teardown_handle(handle)
+
     async def _teardown_handle(self, handle) -> None:
         """
         Force-close ONE handle: commit/close at the backend, then drop its
