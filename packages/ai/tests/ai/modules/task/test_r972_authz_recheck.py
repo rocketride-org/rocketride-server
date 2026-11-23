@@ -651,6 +651,18 @@ async def test_catchup_gate_going_stale_during_summary_stops_task_list(monkeypat
             state['stale'] = True
 
     conn._transport.send.side_effect = deliver_then_go_stale
+
+    # The task list is enumerated from the server's run table; once the gate
+    # is stale that table must never be read (this pins the cmd_monitor
+    # re-check on its own, independent of the TaskConn.send gate).
+    enumerated = []
+
+    class WatchedRuns(dict):
+        def items(self):
+            enumerated.append(True)
+            return super().items()
+
+    server._task_control = WatchedRuns()
     control = MagicMock()
     control.id = 'run-1'
 
@@ -658,6 +670,7 @@ async def test_catchup_gate_going_stale_during_summary_stops_task_list(monkeypat
 
     assert events(conn, 'apaevt_status_update')
     assert events(conn, 'apaevt_task') == []
+    assert enumerated == []
 
 
 @pytest.mark.asyncio

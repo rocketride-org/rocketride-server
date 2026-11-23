@@ -298,6 +298,24 @@ def test_hosted_overlay_cannot_silently_omit_the_liveness_provider():
     validate_credential_provider(LiveAccount())
 
 
+def test_credentials_only_overlay_is_refused_but_oss_still_starts():
+    """Live credentials without live authority would deny every sys.* holder forever."""
+
+    class CredentialsOnly(LiveAccount):
+        supports_live_authority = False
+
+    class Oss(AccountBase):
+        capabilities = ()
+
+        async def authenticate(self, credential):
+            return (401, 'no')
+
+    with pytest.raises(RuntimeError, match='must also enable live authority'):
+        validate_credential_provider(CredentialsOnly())
+    validate_credential_provider(LiveAccount())
+    validate_credential_provider(Oss())  # neither flag: OSS keeps starting
+
+
 def test_old_saas_overlay_fails_before_task_server_starts_background_tasks(monkeypatch):
     import ai.account
 
