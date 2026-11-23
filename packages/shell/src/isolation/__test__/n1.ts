@@ -73,9 +73,9 @@ export function generateToken(content: Record<string, unknown>, prefix = ''): st
  * CPython). The third has a non-ASCII id and the fourth the deploy shape.
  */
 export const GENERATE_TOKEN_VECTORS: Array<{ content: Record<string, unknown>; prefix: string; token: string }> = [
-	{ content: { kind: 'public', userId: 'local', project_id: 'p', source: 's' }, prefix: 'pk_', token: 'pk_73461d8e6d79db12faf291695e29788b' },
-	{ content: { kind: 'public', teamId: 'local', project_id: 'proj é 1', source: 'chat_1' }, prefix: 'pk_', token: 'pk_b21478fbb3ccb74dfacfc3c2c08a00aa' },
-	{ content: { kind: 'public', userId: 'u-1234567890abcdef', run_kind: 'deploy', project_id: 'rrapp.x.0f', source: 's' }, prefix: 'pk_', token: 'pk_2809976d1fe3ad5578673ee2f2ad78af' },
+	{ content: { kind: 'public', userId: 'local', project_id: 'p', source: 's' }, prefix: 'pk_', token: 'pk_73461d8e6d79db12faf291695e29788b' }, // gitleaks:allow
+	{ content: { kind: 'public', teamId: 'local', project_id: 'proj é 1', source: 'chat_1' }, prefix: 'pk_', token: 'pk_b21478fbb3ccb74dfacfc3c2c08a00aa' }, // gitleaks:allow
+	{ content: { kind: 'public', userId: 'u-1234567890abcdef', run_kind: 'deploy', project_id: 'rrapp.x.0f', source: 's' }, prefix: 'pk_', token: 'pk_2809976d1fe3ad5578673ee2f2ad78af' }, // gitleaks:allow
 ];
 
 // ── The transcript ────────────────────────────────────────────────────────────
