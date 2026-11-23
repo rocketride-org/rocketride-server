@@ -363,6 +363,24 @@ class BuildInfraFailure(Exception):
 _JOB_INSTALL: 'contextvars.ContextVar[bool]' = contextvars.ContextVar('rr_build_job_install', default=False)
 
 
+def _corepack_home() -> str:
+    """Corepack's cache dir as the WORKER's own environment resolves it.
+
+    Corepack's order: COREPACK_HOME, XDG_CACHE_HOME, (Windows) LOCALAPPDATA,
+    then the home directory's cache dir.
+    """
+    explicit = os.environ.get('COREPACK_HOME')
+    if explicit:
+        return explicit
+    xdg = os.environ.get('XDG_CACHE_HOME')
+    if xdg:
+        return os.path.join(xdg, 'node', 'corepack')
+    local = os.environ.get('LOCALAPPDATA')
+    if os.name == 'nt' and local:
+        return os.path.join(local, 'node', 'corepack')
+    return os.path.join(os.path.expanduser('~'), 'AppData/Local' if os.name == 'nt' else '.cache', 'node', 'corepack')
+
+
 def _build_env() -> Dict[str, str]:
     """The scrubbed environment build subprocesses run in.
 
@@ -395,9 +413,7 @@ def _build_env() -> Dict[str, str]:
     # .corepack.env. The file is removed from the tree and ignored here, and
     # COREPACK_HOME is the WORKER's (never derived from the job's dir/HOME).
     env['COREPACK_ENV_FILE'] = '0'
-    env['COREPACK_HOME'] = os.environ.get('COREPACK_HOME') or os.path.join(
-        os.path.expanduser('~'), '.cache', 'node', 'corepack'
-    )
+    env['COREPACK_HOME'] = _corepack_home()
     if _JOB_INSTALL.get():
         # Job install only: the toolchain bootstrap may legitimately need the
         # network to fetch pnpm through a shim the first time, so these pins
@@ -918,10 +934,11 @@ def _inert_config(name: str, module_package: bool = False) -> str:
 def _fold_name(name: str) -> str:
     """A filename as a case-insensitive Windows/macOS filesystem resolves it.
 
-    Casefolded (``po\u017ftcss`` is ``postcss``), with the trailing dots and
-    spaces Win32 strips (``.npmrc.`` is ``.npmrc``) removed.
+    Uppercased then casefolded (NTFS compares by uppercasing: a dotless
+    ``\u0131`` is ``I``; ``po\u017ftcss`` is ``postcss``), with the trailing dots
+    and spaces Win32 strips (``.npmrc.`` is ``.npmrc``) removed.
     """
-    return name.rstrip(' .').casefold()
+    return name.rstrip(' .').upper().casefold()
 
 
 def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
@@ -1918,7 +1935,8 @@ class AppBuildWorker:
         archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
         for item in archive.infolist():
             name = item.filename.replace('\\', '/')
-            if name.startswith('/') or '..' in name.split('/') or (len(name) > 1 and name[1] == ':'):
+            # ':' in any segment: a drive letter, or an NTFS alternate data stream.
+            if name.startswith('/') or '..' in name.split('/') or ':' in name:
                 raise BuildFailure('materialize', f'zip entry has an unsafe path: {item.filename!r}')
             # A shipped package tree would be resolved (and its code run)
             # in place of what pnpm installs — the client never packs one.

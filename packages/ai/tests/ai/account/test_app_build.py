@@ -1530,8 +1530,61 @@ def test_names_are_casefolded_and_win32_trailing_chars_stripped(tmp_path):
     _write(ws / 'node_modules_extra' / 'keep.txt', 'k')
     app_build._neutralize_tool_configs(str(ws), str(ws))
     assert 'MARKER' not in (ws / 'po\u017ftcss.config.js').read_text(encoding='utf-8')
-    assert app_build._remove_pnpm_configs(str(ws)) == ['.npmrc.']
+    # Win32 strips the trailing dot when the file is created, so the walk may
+    # report either spelling; the file must be gone in both.
+    removed = app_build._remove_pnpm_configs(str(ws))
+    assert len(removed) == 1 and removed[0] in ('.npmrc.', '.npmrc')
+    assert not any(name.startswith('.npmrc') for name in os.listdir(ws))
     assert (ws / 'node_modules_extra' / 'keep.txt').is_file()
+
+
+def test_fold_name_matches_ntfs_uppercase_comparison():
+    """NTFS compares names by uppercasing: a dotless i uppercases to I."""
+    assert app_build._fold_name('postcss.conf\u0131g.js') == 'postcss.config.js'
+    assert app_build._fold_name('po\u017ftcss.config.js') == 'postcss.config.js'
+    assert app_build._fold_name('.npmrc. ') == '.npmrc'
+
+
+def test_corepack_home_follows_corepacks_own_resolution_order(monkeypatch):
+    """COREPACK_HOME, else XDG_CACHE_HOME, else (Windows) LOCALAPPDATA, else
+    the worker home's cache dir. Read from the worker's env only.
+    """
+    for key in ('COREPACK_HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA'):
+        monkeypatch.delenv(key, raising=False)
+    home = os.path.expanduser('~')
+    sub = 'AppData/Local' if os.name == 'nt' else '.cache'
+    assert app_build._corepack_home() == os.path.join(home, sub, 'node', 'corepack')
+    monkeypatch.setenv('XDG_CACHE_HOME', '/xdg')
+    assert app_build._corepack_home() == os.path.join('/xdg', 'node', 'corepack')
+    monkeypatch.setenv('COREPACK_HOME', '/explicit')
+    assert app_build._corepack_home() == '/explicit'
+    assert app_build._build_env()['COREPACK_HOME'] == '/explicit'
+
+
+def test_corepack_home_uses_localappdata_on_windows(monkeypatch):
+    monkeypatch.delenv('COREPACK_HOME', raising=False)
+    monkeypatch.delenv('XDG_CACHE_HOME', raising=False)
+    monkeypatch.setenv('LOCALAPPDATA', 'L:/local')
+    monkeypatch.setattr(app_build.os, 'name', 'nt')
+    assert app_build._corepack_home() == os.path.join('L:/local', 'node', 'corepack')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'entry', ['node_modules:$I30:$INDEX_ALLOCATION/x.js', 'apps/a:b/x.js', 'C:/x.js'], ids=['ads', 'segment', 'drive']
+)
+async def test_zip_entry_with_a_colon_in_any_segment_is_refused(monkeypatch, build_store, toolchain, entry):
+    rail, fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['/x.js'])
+async def test_zip_entry_leading_slash_still_refused(monkeypatch, build_store, toolchain, entry):
+    rail, _fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    assert rail.stamps[-1]['status'] == 'failed'
 
 
 def test_env_filter_only_touches_dotenv_names(tmp_path):
