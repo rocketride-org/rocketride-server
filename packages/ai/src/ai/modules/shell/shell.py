@@ -513,7 +513,11 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
     now = time.time()
     hit = _version_dir_cache.get(key)
-    if not auth_failed and hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
+    # A warm entitled map is never reused once the token stops authenticating
+    # (denied or unverifiable): ``info`` is None then, and the map was resolved
+    # for a verified identity. An anonymous map still answers any caller.
+    stale_identity = info is None and hit is not None and hit.get('authed', False)
+    if not auth_failed and not stale_identity and hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
         # A hit only answers when it can satisfy the caller: an absent
         # ``want`` on a map old enough to re-resolve falls through to a
         # fresh DB walk below (the miss-refresh); a map younger than the
@@ -548,6 +552,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
         'resolvedAt': now,
         'floor': floor,
         'appId': app_id,
+        'authed': info is not None,
     }
     # Bounded like _app_auth_cache: expired first, then soonest-to-expire.
     if len(_version_dir_cache) > 4096:
