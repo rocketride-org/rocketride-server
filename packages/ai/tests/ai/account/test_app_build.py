@@ -1716,3 +1716,29 @@ async def test_install_lockfile_is_checked_before_typecheck_and_bundle(monkeypat
 
     assert rail.stamps[-1]['status'] == 'failed'
     assert not any(any('tsc' in str(a) for a in c['argv']) or 'build' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.parametrize('depth', [400, 3000])
+def test_workspace_yaml_deep_nesting_is_a_build_failure_not_a_crash(depth):
+    """Plain deep nesting (no aliases) must not escape as a RecursionError."""
+    text = 'overrides:\n  ' + '{a: ' * depth + 'x' + '}' * depth + '\n'
+    with pytest.raises(BuildFailure, match='nested') as info:
+        _patched_workspace_yaml(text, 'apps/x', [])
+    assert info.value.phase == 'materialize'
+
+
+@pytest.mark.parametrize('depth', [5000, 100000])
+@pytest.mark.parametrize('shape', ['array', 'object'])
+def test_deeply_nested_package_json_is_a_build_failure_not_a_crash(tmp_path, depth, shape):
+    """json.load / the spec walk / the rewrite must not leak a RecursionError."""
+    if shape == 'array':
+        # Parses, then recurses in the rewrite that strips the postcss key.
+        text = '{"postcss": 1, "keep": ' + '[' * depth + ']' * depth + '}'
+    else:
+        text = '{"dependencies": ' + '{"a":' * depth + '1' + '}' * depth + '}'
+    ws = tmp_path / 'ws'
+    ws.mkdir()
+    (ws / 'package.json').write_text(text, encoding='utf-8')
+    with pytest.raises(BuildFailure, match='nested') as info:
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert info.value.phase == 'materialize'

@@ -652,6 +652,8 @@ def _patched_workspace_yaml(
     if source_text is not None:
         try:
             data = yaml.safe_load(source_text)
+        except RecursionError:
+            raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
         except Exception as exc:
             raise BuildFailure('materialize', f'pnpm-workspace.yaml is not valid YAML: {exc}')
         data = data if isinstance(data, dict) else {}
@@ -671,11 +673,14 @@ def _patched_workspace_yaml(
                         f'pnpm-workspace.yaml packages entry {entry!r} reaches outside the source tree',
                     )
         seen: set = set()
-        for table in ('overrides', 'catalog'):
-            _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}', '.', seen)
-        catalogs = data.get('catalogs')
-        for named in catalogs.values() if isinstance(catalogs, dict) else ():
-            _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs', '.', seen)
+        try:
+            for table in ('overrides', 'catalog'):
+                _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}', '.', seen)
+            catalogs = data.get('catalogs')
+            for named in catalogs.values() if isinstance(catalogs, dict) else ():
+                _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs', '.', seen)
+        except RecursionError:
+            raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
     else:
         packages = [app_root or '.'] + [inc for inc in include_roots if inc]
         data = {'packages': packages}
@@ -697,7 +702,10 @@ def _patched_workspace_yaml(
     overrides['shell'] = f'file:{_SHELL_REL}'
     overrides['rocketride'] = f'file:{_ROCKETRIDE_REL}'
     data['overrides'] = overrides
-    return yaml.safe_dump(data, sort_keys=False)
+    try:
+        return yaml.safe_dump(data, sort_keys=False)
+    except RecursionError:
+        raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
 
 
 # Only the schemes pnpm resolves away from the local disk are exempt from the
@@ -850,7 +858,7 @@ def _package_is_module(path: str, ws_dir: str) -> bool:
             try:
                 with open(candidate, 'r', encoding='utf-8-sig') as handle:
                     manifest = json.load(handle)
-            except (OSError, UnicodeDecodeError, ValueError):
+            except (OSError, UnicodeDecodeError, ValueError, RecursionError):
                 return False
             return isinstance(manifest, dict) and manifest.get('type') == 'module'
         if os.path.abspath(here) == root or os.path.dirname(here) == here:
@@ -907,20 +915,25 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
                 try:
                     with open(path, 'r', encoding='utf-8-sig') as handle:
                         manifest = json.load(handle)
+                except RecursionError:
+                    raise BuildFailure('materialize', f'{rel} is nested too deeply')
                 except (UnicodeDecodeError, ValueError) as exc:
                     # Another reader (pnpm) may parse what this one skips.
                     raise BuildFailure('materialize', f'{rel} is not valid UTF-8 JSON: {exc}')
                 if not isinstance(manifest, dict):
                     continue
                 package_dir = posixpath.dirname(rel) or '.'
-                for table in _DEPENDENCY_TABLES:
-                    _refuse_unsafe_specs(manifest.get(table), rel, package_dir)
-                if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
-                    for key in _NEUTRALIZED_PACKAGE_KEYS:
-                        if manifest.pop(key, None) is not None:
-                            neutralized.append(f'{rel}:{key}')
-                    with open(path, 'w', encoding='utf-8') as handle:
-                        json.dump(manifest, handle, indent=2)
+                try:
+                    for table in _DEPENDENCY_TABLES:
+                        _refuse_unsafe_specs(manifest.get(table), rel, package_dir)
+                    if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
+                        for key in _NEUTRALIZED_PACKAGE_KEYS:
+                            if manifest.pop(key, None) is not None:
+                                neutralized.append(f'{rel}:{key}')
+                        with open(path, 'w', encoding='utf-8') as handle:
+                            json.dump(manifest, handle, indent=2)
+                except RecursionError:
+                    raise BuildFailure('materialize', f'{rel} is nested too deeply')
     return neutralized
 
 
