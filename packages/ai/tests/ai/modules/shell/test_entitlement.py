@@ -157,3 +157,18 @@ def test_saas_route_denies_a_token_whose_user_left(served_app):
     served_app.registry.membership['u1'] = {'org': 'org-2', 'teams': []}
     shell_mod.invalidate_app_serving(APP)
     assert served_app.get_bundle(token, host=host).status_code in DENIED
+
+
+def test_token_asset_rechecks_eligibility_before_its_warm_publish_map(served_app):
+    assert served_app.get_bundle().status_code == 200
+    served_app.registry.denied_use.add(('u1', served_app.APP, 1))
+    assert served_app.get_bundle().status_code == 404
+    assert served_app.registry.app_use_calls[-1] == ('u1', served_app.APP, 1)
+
+
+def test_public_asset_rechecks_eligibility_before_its_warm_publish_map(served_app):
+    path = f'/_p/{served_app.APP}/v1/remoteEntry.js'
+    assert served_app.get(path).status_code == 200
+    served_app.registry.denied_use.add(('', served_app.APP, 1))
+    assert served_app.get(path).status_code == 404
+    assert served_app.registry.app_use_calls[-1] == ('', served_app.APP, 1)

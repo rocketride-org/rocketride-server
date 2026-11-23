@@ -521,3 +521,36 @@ def test_e8_isolated_icon_is_not_a_script_vector(world):
         assert resp.headers.get('x-content-type-options') == 'nosniff'
     else:
         assert resp.status_code == 404
+
+
+def test_frame_grant_rechecks_eligibility_before_its_warm_verdict(world):
+    assert world.frame(THIRD).status_code == 200
+    world.registry.denied_use.add(('u1', THIRD, 1))
+    assert world.frame(THIRD).status_code == 404
+    assert world.registry.app_use_calls[-1] == ('u1', THIRD, 1)
+
+
+def test_frame_grant_checks_the_selected_registry_version(world):
+    world.registry.add(THIRD, 2)
+    world.registry.denied_use.add(('u1', THIRD, 1))
+    assert world.frame(THIRD, version=1).status_code == 404
+    assert world.frame(THIRD, version=2).status_code == 200
+    assert ('u1', THIRD, 2) in world.registry.app_use_calls
+
+
+def test_frame_grant_fails_closed_when_the_eligibility_hook_is_unavailable(world, monkeypatch):
+    from ai.account import account
+
+    assert world.frame(THIRD).status_code == 200
+    monkeypatch.setattr(account, 'authorize_app_use', None)
+    assert world.frame(THIRD).status_code == 404
+
+
+def test_frame_grant_fails_closed_when_the_eligibility_check_fails(world, monkeypatch):
+    from ai.account import account
+
+    async def unavailable(*args):
+        raise RuntimeError('eligibility service unavailable')
+
+    monkeypatch.setattr(account, 'authorize_app_use', unavailable)
+    assert world.frame(THIRD).status_code == 404

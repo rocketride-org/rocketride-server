@@ -53,6 +53,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from rocketlib import debug
+from types import SimpleNamespace
 from typing import Any, List, Mapping, NamedTuple, Optional, Tuple
 
 MODES = ('off', 'optin', 'enforce')
@@ -210,6 +211,13 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         origin = token.lower().rstrip('/')
         if not _ORIGIN.fullmatch(origin):
             raise _refuse(f'RR_SHELL_ORIGINS: {token!r} is not an http(s) origin')
+        # Five digits match the grammar, but 65536 (and :0) name no port: refuse them here, not in a browser.
+        try:
+            origin_port = urlsplit(origin).port
+        except ValueError:
+            origin_port = 0
+        if origin_port == 0:
+            raise _refuse(f'RR_SHELL_ORIGINS: {token!r} has a port outside 1-65535')
         if origin not in shell_origins:
             shell_origins.append(origin)
     if not shell_origins:
@@ -424,7 +432,13 @@ def known_capabilities() -> Optional[frozenset]:
 # What frame tokens import (AES-256-GCM and HKDF), checked at startup.
 _TOKEN_CRYPTO_MODULES = ('cryptography.hazmat.primitives.ciphers.aead', 'cryptography.hazmat.primitives.kdf.hkdf')
 
-_SAAS_ACCOUNT_METHODS = ('account_info_for', 'is_first_party', 'set_approved_capabilities', 'approved_capabilities')
+_SAAS_ACCOUNT_METHODS = (
+    'account_info_for',
+    'is_first_party',
+    'set_approved_capabilities',
+    'approved_capabilities',
+    'authorize_app_use',
+)
 
 
 def validate_isolation_config(account: Any = None) -> None:
@@ -680,6 +694,27 @@ def _is_saas() -> bool:
     return is_saas()
 
 
+async def _app_use_allowed(info: Any, app_id: str, version: int) -> bool:
+    """Check live eligibility for one concrete version before runtime authority.
+
+    The publish-map caches do not cache a paid seat, active membership or
+    account status. Older or unavailable SaaS overlays fail closed.
+    """
+    if not _is_saas():
+        return True
+    if type(version) is not int or version <= 0:
+        return False
+    from ai.account import account
+
+    authorize = getattr(account, 'authorize_app_use', None)
+    if not callable(authorize):
+        return False
+    try:
+        return await authorize(info, app_id, version) is True
+    except Exception:
+        return False
+
+
 async def token_version_dirs(user_id: str, org_id: str, app_id: str) -> dict:
     """
     Registry version -> dist dir that a frame token of ``(user_id, org_id)`` may serve.
@@ -707,13 +742,18 @@ async def token_version_dirs(user_id: str, org_id: str, app_id: str) -> dict:
     return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
 
 
-async def public_version_dirs(app_id: str) -> dict:
+async def public_version_dirs(app_id: str, version: Optional[int] = None) -> dict:
     """Registry version -> dist dir an anonymous caller may load (SaaS: public ``ready``; OSS: open)."""
     from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
 
+    saas = _is_saas()
+    if saas and version is not None and not await _app_use_allowed(None, app_id, version):
+        return {}
     key = ('public', app_id)
     hit = _cached(_entitlement_cache, key)
     if hit is not None:
+        if saas and version is None:
+            return {v: path for v, path in hit['dirs'].items() if await _app_use_allowed(None, app_id, v)}
         return hit['dirs']
     dirs = await entitled_version_dirs(None, app_id) if _is_saas() else await open_version_dirs(app_id)
     return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
@@ -745,6 +785,12 @@ async def entitlement_ok(user_id: str, org_id: str, app_id: str, version: int) -
     """
     if not _is_saas():
         return True
+    # These ids come from the authenticated frame-token claims. The SaaS
+    # hook validates their current user/org relationship in its live query;
+    # it must run even when the publish-map verdict below is still warm.
+    info = SimpleNamespace(userId=user_id, organization={'id': org_id})
+    if not await _app_use_allowed(info, app_id, version):
+        return False
     return version in await token_version_dirs(user_id, org_id, app_id)
 
 
@@ -1170,6 +1216,8 @@ async def frame_grant(app_id: str, version: int, token: str, info: Any, config: 
     an anonymous caller gets the ``/_p/`` prefix of a public ``ready``
     version. Only an app the caller's winner stamps as isolated is framed.
     """
+    if not await _app_use_allowed(info, app_id, version):
+        return None
     verdict = await version_verdict(token if info is not None else '', app_id)
     if verdict is None or not verdict.isolated:
         return None
@@ -1177,7 +1225,7 @@ async def frame_grant(app_id: str, version: int, token: str, info: Any, config: 
         user_id, org_id, _ = _identity_of(info)
         dirs = await token_version_dirs(user_id, org_id, app_id)
     else:
-        dirs = await public_version_dirs(app_id)
+        dirs = await public_version_dirs(app_id, version)
     dist_dir = dirs.get(version)
     facts = await _version_facts(app_id, version, dist_dir) if dist_dir else None
     if facts is None:

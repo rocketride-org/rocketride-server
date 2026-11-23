@@ -65,6 +65,7 @@ from ai.modules.shell.app_origin import (
     IsolationConfig,
     client_ip,
     current_config,
+    entitlement_ok,
     guest_dir,
     is_canonical_app_id,
     label_of,
@@ -264,6 +265,8 @@ class AppHostMiddleware:
             return _not_found()
         if claims['v'] != version:
             return _not_found()
+        if not await entitlement_ok(claims['u'], claims['o'], claims['a'], version):
+            return _not_found()
         dirs = await token_version_dirs(claims['u'], claims['o'], claims['a'])
         return await _read_dist(dirs.get(version), rest, _TOKEN_CACHE)
 
@@ -271,7 +274,7 @@ class AppHostMiddleware:
         """``/_p/<appId>/v<N>/<file>``: a version an anonymous caller may load, on the app's own host."""
         if not is_canonical_app_id(app_id) or not hmac.compare_digest(label_of(app_id), label):
             return _not_found()
-        dirs = await public_version_dirs(app_id)
+        dirs = await public_version_dirs(app_id, version)
         return await _read_dist(dirs.get(version), rest, _PUBLIC_CACHE)
 
 
