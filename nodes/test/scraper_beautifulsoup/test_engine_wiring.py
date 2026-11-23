@@ -250,6 +250,74 @@ def test_validate_config_accepts_engine_ijson_params(monkeypatch):
     # The whole validation path (compile + pinned-host check) must accept them.
     endpoint.validateConfig(False)
 
+def test_validate_config_accepts_empty_engine_ijson_allow_list(monkeypatch):
+    """An empty IJson-wrapped allow-list must validate with zero patterns (#3434)."""
+    import scraper_beautifulsoup.IEndpoint as iep
+
+    class _EngineIJson:
+        def __init__(self, value):
+            self.value = value
+
+    class _IJson(_EngineIJson):
+        @staticmethod
+        def toDict(obj):
+            if isinstance(obj, _EngineIJson):
+                return _IJson.toDict(obj.value)
+            if isinstance(obj, dict):
+                return {key: _IJson.toDict(value) for key, value in obj.items()}
+            if isinstance(obj, list):
+                return [_IJson.toDict(value) for value in obj]
+            return obj
+
+    monkeypatch.setattr(iep, 'IJson', _IJson)
+
+    captured = {}
+    monkeypatch.setattr(iep, 'build_fetcher', lambda cfg: captured.update(cfg) or object())
+
+    endpoint = IEndpoint.__new__(IEndpoint)
+    endpoint.endpoint = MagicMock(name='endpoint')
+    endpoint.endpoint.serviceConfig = {'parameters': _EngineIJson({
+        'sources': [{'name': 'a', 'kind': 'feed', 'url': 'https://news.example/feed'}],
+        'urlAllowList': _EngineIJson([]),
+    })}
+
+    # Must not raise, and the empty IJson list must reach build_fetcher as a native [].
+    endpoint.validateConfig(False)
+    assert captured['urlAllowList'] == []
+
+
+def test_validate_config_rejects_unpinned_engine_ijson_allow_list(monkeypatch):
+    """An IJson-wrapped unpinned allow-list row must still be rejected (#3434)."""
+    import scraper_beautifulsoup.IEndpoint as iep
+
+    class _EngineIJson:
+        def __init__(self, value):
+            self.value = value
+
+    class _IJson(_EngineIJson):
+        @staticmethod
+        def toDict(obj):
+            if isinstance(obj, _EngineIJson):
+                return _IJson.toDict(obj.value)
+            if isinstance(obj, dict):
+                return {key: _IJson.toDict(value) for key, value in obj.items()}
+            if isinstance(obj, list):
+                return [_IJson.toDict(value) for value in obj]
+            return obj
+
+    monkeypatch.setattr(iep, 'IJson', _IJson)
+
+    endpoint = IEndpoint.__new__(IEndpoint)
+    endpoint.endpoint = MagicMock(name='endpoint')
+    endpoint.endpoint.serviceConfig = {'parameters': _EngineIJson({
+        'sources': [{'name': 'a', 'kind': 'feed', 'url': 'https://news.example/feed'}],
+        'urlAllowList': _EngineIJson(['news\\.example']),
+    })}
+
+    # Unwrapped to a native list, the unpinned row must be rejected by build_fetcher.
+    with pytest.raises(ValueError):
+        endpoint.validateConfig(False)
+
 
 # -- tools through IInstance ----------------------------------------------
 
