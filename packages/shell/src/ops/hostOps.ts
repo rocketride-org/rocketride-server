@@ -50,6 +50,7 @@
 import { useEffect, useState } from 'react';
 import { ConnectionManager } from '../connection/connection';
 import { registerOpHandlers } from './busOps';
+import { assertExternalUrl } from './externalUrl';
 import type { OpImplTable, ShellOpMap, ShellOpSpec } from './busOps';
 
 /** The shell-served host ops, declared locally (see the header). */
@@ -64,6 +65,10 @@ interface ShellHostOpMap extends ShellOpMap {
 	 *  own handler. Callers pass the result into the SDK's billing methods
 	 *  (`createPortalSession`/`createCreditCheckout`). */
 	'host.stripeReturnUrl': ShellOpSpec<Record<string, never>, { url: string }>;
+	/** Opens a URL in the user's real browser, in a new tab. The shell's
+	 *  default is `window.open` (right for the cloud root); hosts that open
+	 *  links differently (VS Code) pre-register their own handler. */
+	'host.openExternal': ShellOpSpec<{ url: string }, void>;
 }
 
 /** What {@link useShellApiKey} returns. */
@@ -93,6 +98,9 @@ export function registerShellHostOps(bus: Parameters<typeof registerOpHandlers>[
 	const impls: OpImplTable<ShellHostOpMap> = {
 		'host.apiKey': () => ({ apiKey: source.getClient()?.getApiKey?.() ?? null }),
 		'host.stripeReturnUrl': () => ({ url: `${window.location.origin}${window.location.pathname}` }),
+		'host.openExternal': (p) => {
+			window.open(assertExternalUrl(p.url), '_blank', 'noopener');
+		},
 	};
 	return registerOpHandlers<ShellHostOpMap>(bus, impls);
 }
