@@ -37,7 +37,7 @@ _SERVICES = {
     'register': 'filter',
     'node': 'python',
     'description': ['Ends its task process the way the text asks.'],
-    'documentation': 'https://docs.rocketride.org',
+    'documentation': 'https://docs.rocketride.ai',
     'lanes': {'text': ['text']},
     'propertyDefinitions': {},
     'properties': [],

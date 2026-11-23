@@ -1074,7 +1074,7 @@ await db.transaction(async (tx) => {
 });
 ```
 
-Rules: the target node needs `allow_execute: true` (the same flag gates transactions); tables must already exist (drizzle-kit `push`/`studio` are not part of this integration — run migrations via `client.database.query()` from a trusted context); binary (`Buffer`/`bytea`) parameters are rejected because queries transport as JSON; failed statements throw `DrizzleQueryError` whose `cause` holds the pipeline's error; an engine too old to honor `rowMode: 'array'` makes the driver throw rather than return empty records. Full guide: https://docs.rocketride.org/clients/typescript/database-drizzle
+Rules: the target node needs `allow_execute: true` (the same flag gates transactions); tables must already exist (drizzle-kit `push`/`studio` are not part of this integration — run migrations via `client.database.query()` from a trusted context); binary (`Buffer`/`bytea`) parameters are rejected because queries transport as JSON; failed statements throw `DrizzleQueryError` whose `cause` holds the pipeline's error; an engine too old to honor `rowMode: 'array'` makes the driver throw rather than return empty records. Full guide: https://docs.rocketride.ai/clients/typescript/database-drizzle
 
 ##### `sequelize(options): Sequelize` — deprecated
 

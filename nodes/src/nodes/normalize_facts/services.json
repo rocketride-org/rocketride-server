@@ -20,7 +20,7 @@
 		"<code>currency_convert_explicit</code> node. Records that are not fact objects pass through unchanged."
 	],
 	"icon": "util-text.svg",
-	"documentation": "https://docs.rocketride.org/nodes/normalize_facts",
+	"documentation": "https://docs.rocketride.ai/nodes/normalize_facts",
 	"lanes": {
 		"answers": ["answers"]
 	},

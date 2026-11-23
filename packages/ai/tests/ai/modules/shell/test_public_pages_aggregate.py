@@ -147,7 +147,7 @@ def test_legacy_fallback_when_no_manifest_declares_pages():
     assert '/pricing' in agg.exact and agg.exact['/store'].listed is False
     assert agg.exact['/pricing'].head_title == 'Pricing | RocketRide'
     assert agg.exact['/'].head_title == 'RocketRide'
-    assert agg.site['docsUrl'] == 'https://docs.rocketride.org/llms.txt'
+    assert agg.site['docsUrl'] == 'https://docs.rocketride.ai/llms.txt'
 
 
 def test_legacy_fallback_when_every_declared_page_is_invalid():

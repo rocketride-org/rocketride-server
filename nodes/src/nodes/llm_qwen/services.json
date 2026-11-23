@@ -60,7 +60,7 @@
 	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "qwen.svg",
-	"documentation": "https://docs.rocketride.org/nodes/llm_qwen",
+	"documentation": "https://docs.rocketride.ai/nodes/llm_qwen",
 	//
 	// Optional:
 	//		Rendering hints to the UI which indicate which fields of

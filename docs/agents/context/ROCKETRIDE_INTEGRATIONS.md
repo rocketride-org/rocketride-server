@@ -131,15 +131,15 @@ with a valid key. Behind a proxy, run the engine on a bind that is not localhost
 or a private network; otherwise clients can reach the engine directly and skip the TLS
 proxy and its access rules.
 
-More: https://docs.rocketride.org/connect/mcp/http/ and
-https://docs.rocketride.org/connect/mcp/http/self-hosting/.
+More: https://docs.rocketride.ai/connect/mcp/http/ and
+https://docs.rocketride.ai/connect/mcp/http/self-hosting/.
 
 ### Deprecated: the `rocketride-mcp` stdio package
 
 The older `rocketride-mcp` package (`pip install rocketride-mcp`, Python 3.10+) is
 deprecated; prefer the built-in server above. It runs over stdio, exposes your running
 pipelines as tools that take a single `filepath` argument, and is configured only by
-environment variables. Full reference: https://docs.rocketride.org/connect/mcp/stdio/
+environment variables. Full reference: https://docs.rocketride.ai/connect/mcp/stdio/
 
 | Variable | Required | Description |
 |---|---|---|

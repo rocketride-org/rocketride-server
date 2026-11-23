@@ -60,7 +60,7 @@
 	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "bedrock.svg",
-	"documentation": "https://docs.rocketride.org/nodes/llm_bedrock",
+	"documentation": "https://docs.rocketride.ai/nodes/llm_bedrock",
 	//
 	// Optional:
 	//		Rendering hints to the UI which indicate which fields of

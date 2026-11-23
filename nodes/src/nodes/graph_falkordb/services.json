@@ -55,7 +55,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "falkordb.svg",
-	"documentation": "https://docs.rocketride.org/nodes/graph_falkordb",
+	"documentation": "https://docs.rocketride.ai/nodes/graph_falkordb",
 	// Surfaces the active graph on the canvas tile (see #2155): an unopened
 	// node silently resolves to the default "graph": "agent", and nothing on
 	// the canvas showed which graph -- or that it was a fallback -- until a

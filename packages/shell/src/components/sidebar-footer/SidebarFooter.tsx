@@ -240,7 +240,7 @@ const S = {
 
 /** Opens the platform documentation site — the standard `onOpenDocs`. */
 export function openPlatformDocs(): void {
-	window.open('https://docs.rocketride.org', '_blank', 'noopener');
+	window.open('https://docs.rocketride.ai', '_blank', 'noopener');
 }
 
 // =============================================================================

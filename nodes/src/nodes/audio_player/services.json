@@ -54,7 +54,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "audio-player.svg",
-	"documentation": "https://docs.rocketride.org/nodes/audio_player",
+	"documentation": "https://docs.rocketride.ai/nodes/audio_player",
 	//
 	//
 	//	Optional:
