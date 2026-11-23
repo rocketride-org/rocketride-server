@@ -196,7 +196,10 @@ _NEUTRALIZED_CONFIGS = (
 # babel as config (plugins by name); `pnpm` carries pnpm settings (hooks,
 # patches, overrides, ...) that are developer configuration; `browserslist`
 # steers the transpiler's target resolution (the platform sets its own).
-_NEUTRALIZED_PACKAGE_KEYS = ('postcss', 'babel', 'pnpm', 'browserslist')
+# `packageManager` and `devEngines` pin a package manager: a Corepack shim
+# (which _find_pnpm may resolve from PATH) honors the pin and would fetch and
+# run whatever version the app names instead of the platform's pnpm.
+_NEUTRALIZED_PACKAGE_KEYS = ('postcss', 'babel', 'pnpm', 'browserslist', 'packageManager', 'devEngines')
 
 # Dependency tables whose specs are checked for link:/file: escapes.
 _DEPENDENCY_TABLES = (
@@ -889,7 +892,7 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
     forms and the package.json ``postcss`` key load plugins by name — all
     developer code. The WHOLE source tree is walked (``app_dir`` lies inside
     ``ws_dir``): existing config files get inert content and the config keys
-    (postcss, babel, pnpm, browserslist) are stripped from every package.json,
+    (postcss, babel, pnpm, browserslist, packageManager, devEngines) are stripped from every package.json,
     whose dependency specs must not use ``link:`` or out-of-tree ``file:``.
     Absent files are not created.
 

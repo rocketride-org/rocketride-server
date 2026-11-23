@@ -1326,6 +1326,22 @@ def test_package_json_pnpm_and_browserslist_keys_are_removed(tmp_path):
         assert data['a'] == 1
 
 
+def test_package_json_package_manager_pins_are_removed(tmp_path):
+    """`packageManager` / `devEngines` (honored by a Corepack pnpm shim) are
+    stripped; a manifest without any neutralized key is not rewritten.
+    """
+    ws = tmp_path / 'ws'
+    pinned = {'name': 'x', 'packageManager': 'pnpm@1.0.0', 'devEngines': {'packageManager': {'name': 'pnpm'}}, 'a': 1}
+    _write(ws / 'package.json', json.dumps(pinned))
+    plain_text = '{"name":"y","a":2}'
+    _write(ws / 'apps' / 'y' / 'package.json', plain_text)
+    out = app_build._neutralize_tool_configs(str(ws), str(ws))
+    data = json.loads((ws / 'package.json').read_text(encoding='utf-8'))
+    assert 'packageManager' not in data and 'devEngines' not in data and data['a'] == 1
+    assert {'package.json:packageManager', 'package.json:devEngines'} <= set(out)
+    assert (ws / 'apps' / 'y' / 'package.json').read_text(encoding='utf-8') == plain_text
+
+
 @pytest.mark.parametrize('spec', ['link:../x', 'link:./local', 'file:/etc', 'file:../x', 'file:a/../../x', 'FILE:///x'])
 @pytest.mark.parametrize(
     'table', ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides']
