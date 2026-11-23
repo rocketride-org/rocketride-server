@@ -847,9 +847,9 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 
 	const dirty = isDirty || pendingFiles > 0;
 
-	// The latest files, section and host calls, for work that completes after a render
-	const latest = useRef({ files, section, onSave, onRevert });
-	latest.current = { files, section, onSave, onRevert };
+	// The latest document, files, section and host calls, for work that completes after a render
+	const latest = useRef({ project, files, section, onSave, onRevert });
+	latest.current = { project, files, section, onSave, onRevert };
 
 	// The panes' write: into the document, unless Cancel ended the generation
 	// of panes it came from (an icon drop still reading its file when Cancel
@@ -914,7 +914,20 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 					wrote = true;
 				}
 			}
-			// Step 3: the document, by the host's own save
+			// Step 3: the README the block names exists from the start. A pane that
+			// added the block (a Version typed into a pipeline that had none)
+			// leaves the host nothing to stamp, so the host's save writes no
+			// starter README: the page writes it when the folder has none.
+			const readme = latest.current.project.store?.readme;
+			if (assetsHost && readme) {
+				const there = await assetsHost.readFile(readme).then((text) => text !== null, () => true);
+				if (!there) {
+					const shown = latest.current.project;
+					await assetsHost.writeFile(readme, pipeReadmeStub(shown.name || shown.project_id || 'this pipeline'));
+					wrote = true;
+				}
+			}
+			// Step 4: the document, by the host's own save
 			latest.current.onSave?.();
 			// The panes read the files as they are now
 			if (wrote) {

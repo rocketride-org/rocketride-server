@@ -466,7 +466,7 @@ def test_a_store_version_is_major_minor_patch_with_an_optional_tag(version):
     assert validate_store_block({'version': version})['version'] == version
 
 
-@pytest.mark.parametrize('version', ['1', '1.0', 'v1.0.0', '1.0.0.0', '', 7, None])
+@pytest.mark.parametrize('version', ['1', '1.0', 'v1.0.0', '1.0.0.0', '', 7, None, '1.0.0\n', '\u0661.\u0662.\u0663'])
 def test_any_other_store_version_is_refused(version):
     with pytest.raises(ValueError, match='store.version must be a version'):
         validate_store_block({'version': version})

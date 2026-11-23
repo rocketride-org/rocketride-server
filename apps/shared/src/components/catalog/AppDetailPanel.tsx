@@ -20,6 +20,7 @@ import { entryLabel, isAgentEntry } from './agentEntry';
 import { agentApi, type AgentApi, type ApiRow } from './agentApi';
 import EndpointInfoModal from '../../tools/pipelines/components/pipeline-actions/EndpointInfoModal';
 import { mintEndpointKey } from '../../tools/pipelines/components/pipeline-actions/endpointKey';
+import { openToolLabel } from '../../tools/pipelines/components/pipeline-actions/openTool';
 import { publishedSourceEndpoint } from '../../tools/pipelines/components/pipeline-actions/sourceEndpoint';
 
 // Shell runtime access flows through the single curated contract accessor.
@@ -173,7 +174,8 @@ export const AppDetailPanel: React.FC<AppDetailPanelProps> = ({
 	// check + "Added" with a pop, then settle back into the resting label ("Open").
 	const [showAdded, setShowAdded] = useState(false);
 	useEffect(() => {
-		if (!justAdded) return;
+		// The add was taken back (the server refused it) or the entry changed: no flash stays up
+		if (!justAdded) { setShowAdded(false); return; }
 		setShowAdded(true);
 		const id = window.setTimeout(() => setShowAdded(false), 1500);
 		return () => window.clearTimeout(id);
@@ -222,6 +224,16 @@ export const AppDetailPanel: React.FC<AppDetailPanelProps> = ({
 	// show for a running source, fed here from the published source.
 	const [endpointRow, setEndpointRow] = useState<ApiRow | null>(null);
 	useEffect(() => { if (!open) setEndpointRow(null); }, [open, agentAddress]);
+	// A chat or dropper source opens in its app, bound to the source's address:
+	// the dialog's Open button, as the editors' dialog has it
+	const endpointTool = useMemo(() => {
+		const info = endpointRow ? publishedSourceEndpoint(endpointRow) : null;
+		const appId = info?.['open-tool'];
+		return appId && info?.nodeId && info.address ? { appId, nodeId: info.nodeId, address: info.address, label: openToolLabel(appId, info['button-text']) } : undefined;
+	}, [endpointRow]);
+	const openTool = useCallback((appId: string, address: string) => {
+		ConnectionManager.getInstance().emit('shell:switchApp', { appId, params: { pipe: address } });
+	}, []);
 	// The parameters as the dialog's call examples pass them
 	const exampleParams = useMemo(() => (api?.parameters ?? []).map((parameter) => ({ name: parameter.name, value: parameter.example })), [api]);
 	const createEndpointKey = useCallback((address: string) => {
@@ -257,7 +269,7 @@ export const AppDetailPanel: React.FC<AppDetailPanelProps> = ({
 
 	// Determine pricing label from app mode
 	const mode = app.mode;
-	const pricingLabel = mode === 'free' ? 'Free' : mode === 'paywall' ? 'Free · Premium Features' : 'Subscription';
+	const pricingLabel = (mode ?? 'free') === 'free' ? 'Free' : mode === 'paywall' ? 'Free · Premium Features' : 'Subscription';
 
 	// Stats bar items
 	const stats: { label: string; value: string }[] = [
@@ -305,7 +317,9 @@ export const AppDetailPanel: React.FC<AppDetailPanelProps> = ({
 				onClose={() => setEndpointRow(null)}
 				onOpenLink={(url) => { window.open(url, '_blank', 'noopener'); }}
 				displayName={endpointRow?.name}
-				host={window.location.origin}
+				host={ConnectionManager.getInstance().getHttpUrl() || window.location.origin}
+				tool={endpointTool}
+				onOpenTool={openTool}
 				onCreateEndpointKey={createEndpointKey}
 				params={exampleParams}
 			/>

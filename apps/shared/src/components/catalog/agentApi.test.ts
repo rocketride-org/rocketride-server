@@ -92,3 +92,21 @@ test('the parameters are told by public name: the type with its bounds or values
 		],
 	});
 });
+
+test('a call example passes the explicit default, else a sample inside the bounds', () => {
+	const api = agentApi(
+		{
+			interfaces: {},
+			parameters: [
+				{ name: 'style', default: '', type: 'string', enum: ['mask', ''] },
+				{ name: 'strict', default: false, type: 'boolean' },
+				{ name: 'offset', default: null, type: 'integer', maximum: 0 },
+				{ name: 'edge', default: null, type: 'integer', minimum: 256, maximum: 4096 },
+				{ name: 'count', default: 0, type: 'integer' },
+			],
+		},
+		'acme.docBrain'
+	);
+	// '' and false and 0 are defaults, not absences; a sample never leaves the bounds
+	assert.deepEqual(api?.parameters.map((parameter) => parameter.example), ['', false, 0, 256, 0]);
+});

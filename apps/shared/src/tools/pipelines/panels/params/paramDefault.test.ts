@@ -38,3 +38,14 @@ test('a boolean takes true or false; a list or an object takes JSON; a string ta
 	assert.deepEqual(parseDefault('[a', leaf({ type: 'array' })), { problem: 'Valid JSON' });
 	assert.deepEqual(parseDefault('gpt-5.2', leaf({ type: 'string' })), { value: 'gpt-5.2' });
 });
+
+test('an allowed value still answers to the bounds, a container to its type, a string keeps its spaces', () => {
+	assert.deepEqual(parseDefault('4', leaf({ type: 'integer', enum: [4, 8], minimum: 6 })), { problem: 'At least 6' });
+	assert.deepEqual(parseDefault('8', leaf({ type: 'integer', enum: [4, 8], minimum: 6 })), { value: 8 });
+	assert.deepEqual(parseDefault('42', leaf({ type: 'array' })), { problem: 'A JSON list, such as ["a", "b"]' });
+	assert.deepEqual(parseDefault('[]', leaf({ type: 'object' })), { problem: 'A JSON object, such as {"key": "value"}' });
+	assert.deepEqual(parseDefault('null', leaf({ type: 'object' })), { problem: 'A JSON object, such as {"key": "value"}' });
+	assert.deepEqual(parseDefault('{"a":1}', leaf({ type: 'object' })), { value: { a: 1 } });
+	assert.deepEqual(parseDefault(' hello ', leaf({ type: 'string' })), { value: ' hello ' });
+	assert.deepEqual(parseDefault(' 12 ', leaf({ type: 'number' })), { value: 12 });
+});

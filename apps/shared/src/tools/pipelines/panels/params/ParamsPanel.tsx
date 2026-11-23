@@ -677,9 +677,10 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 	/** Commit a typed Default when the field accepts it; leave the draft showing its problem otherwise. */
 	const commitDefaultDraft = useCallback(
 		(option: ITargetOption) => {
-			const draft = Object.hasOwn(defaultDrafts, option.target) ? defaultDrafts[option.target].trim() : undefined;
+			// The text goes to the parser as typed: a string Default keeps its spaces
+			const draft = Object.hasOwn(defaultDrafts, option.target) ? defaultDrafts[option.target] : undefined;
 			if (draft === undefined) return;
-			if (draft === '') {
+			if (draft.trim() === '') {
 				if (option.stored !== undefined) commitDefault(option, undefined);
 				dropDefaultDraft(option.target);
 				return;
@@ -820,7 +821,7 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 												(() => {
 													const typed = Object.hasOwn(defaultDrafts, option.target) ? defaultDrafts[option.target] : undefined;
 													const shownDefault = typed ?? (option.stored === undefined || option.stored === null ? '' : typeof option.stored === 'string' ? option.stored : JSON.stringify(option.stored));
-													const check = typed !== undefined && typed.trim() !== '' ? parseDefault(typed.trim(), option.descriptor) : null;
+													const check = typed !== undefined && typed.trim() !== '' ? parseDefault(typed, option.descriptor) : null;
 													const defaultProblem = check && 'problem' in check ? check.problem : null;
 													return (
 														<>

@@ -77,7 +77,7 @@ export const STORE_KEYS = ['tagline', 'categories', 'tags', 'icon', 'readme', 'l
  * with an optional pre-release tag. It is what a tile shows; the registry's
  * version NUMBER stays what a deploy or a pin names.
  */
-export const STORE_VERSION_PATTERN = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+export const STORE_VERSION_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/;
 
 /** The monetization modes, the app model. */
 export const STORE_MODES = ['free', 'subscription', 'paywall'] as const;

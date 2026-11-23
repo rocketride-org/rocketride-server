@@ -77,7 +77,7 @@ STORE_KEYS = frozenset({'tagline', 'categories', 'tags', 'icon', 'readme', 'link
 #: The pipeline's own version, set by its author as an app's is in package.json:
 #: major.minor.patch with an optional pre-release tag. It is what a tile shows;
 #: the registry's version NUMBER stays what a deploy or a pin names.
-STORE_VERSION = re.compile(r'^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')
+STORE_VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?')
 
 #: The listing modes, the app model (plan 8.4).
 STORE_MODES = ('free', 'subscription', 'paywall')
@@ -171,7 +171,7 @@ def validate_store_block(pipeline: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             raise ValueError('store.tagline must be a string')
         out['tagline'] = block['tagline']
     if 'version' in block:
-        if not isinstance(block['version'], str) or not STORE_VERSION.match(block['version']):
+        if not isinstance(block['version'], str) or not STORE_VERSION.fullmatch(block['version']):
             raise ValueError('store.version must be a version such as 1.0.0 (major.minor.patch)')
         out['version'] = block['version']
     for key in ('categories', 'tags'):

@@ -68,7 +68,7 @@ export type ApiParameter = {
 	description: string;
 	/** What a call gets when it omits the parameter, as text; '' when there is none. */
 	default: string;
-	/** The value a call example passes: the default, else the first allowed value, else a sample of the type. */
+	/** The value a call example passes: the default (an empty string, false and 0 included), else the first allowed value, else a sample of the type inside its bounds. */
 	example: unknown;
 };
 
@@ -90,6 +90,24 @@ export function parameterType(parameter: { type?: unknown; enum?: unknown; minim
 		if (high !== undefined) return `${type} ≤ ${high}`;
 	}
 	return type;
+}
+
+/**
+ * A value a call example passes for a parameter that declares no default: its
+ * first allowed value, else a value of its type inside its bounds.
+ *
+ * @param parameter - The parameter as the answer lists it.
+ * @returns The sample.
+ */
+function sampleValue(parameter: { type?: unknown; enum?: unknown; minimum?: unknown; maximum?: unknown }): unknown {
+	if (Array.isArray(parameter.enum) && parameter.enum.length) return parameter.enum[0];
+	if (parameter.type === 'integer' || parameter.type === 'number') {
+		const low = typeof parameter.minimum === 'number' ? parameter.minimum : undefined;
+		const high = typeof parameter.maximum === 'number' ? parameter.maximum : undefined;
+		if (low !== undefined) return low;
+		return high !== undefined && high < 1 ? high : 1;
+	}
+	return parameter.type === 'boolean' ? true : 'value';
 }
 
 /**
@@ -128,8 +146,9 @@ export function agentApi(answer: InterfacesAnswer | null | undefined, address: s
 		const text = typeof parameter.description === 'string' && parameter.description ? parameter.description : typeof parameter.title === 'string' ? parameter.title : '';
 		const value = parameter.default;
 		const shown = value === undefined || value === null || value === '' ? '' : typeof value === 'string' ? value : JSON.stringify(value);
-		const sample = Array.isArray(parameter.enum) && parameter.enum.length ? parameter.enum[0] : parameter.type === 'integer' || parameter.type === 'number' ? (typeof parameter.minimum === 'number' ? parameter.minimum : 1) : parameter.type === 'boolean' ? true : 'value';
-		parameters.push({ name: parameter.name, type: parameterType(parameter), description: text, default: shown, example: shown === '' ? sample : value });
+		// An explicit default is the example, the empty string, false and 0 included
+		const example = value === undefined || value === null ? sampleValue(parameter) : value;
+		parameters.push({ name: parameter.name, type: parameterType(parameter), description: text, default: shown, example });
 	}
 	if (rows.size === 0 && parameters.length === 0) return null;
 

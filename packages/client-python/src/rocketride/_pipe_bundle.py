@@ -81,7 +81,7 @@ STORE_KEYS = ('tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode'
 
 #: The pipeline's own version, as an app's is in package.json: major.minor.patch
 #: with an optional pre-release tag.
-STORE_VERSION = re.compile(r'^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')
+STORE_VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?')
 
 #: The monetization modes, the app model.
 STORE_MODES = ('free', 'subscription', 'paywall')
@@ -302,7 +302,7 @@ def validate_store_block(store: Any) -> PipeStoreBlock:
             raise ValueError('store.tagline must be a string')
         out['tagline'] = store['tagline']
     if 'version' in store:
-        if not isinstance(store['version'], str) or not STORE_VERSION.match(store['version']):
+        if not isinstance(store['version'], str) or not STORE_VERSION.fullmatch(store['version']):
             raise ValueError('store.version must be a version such as 1.0.0 (major.minor.patch)')
         out['version'] = store['version']
     for key in ('categories', 'tags'):

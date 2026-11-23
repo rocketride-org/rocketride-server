@@ -63,7 +63,13 @@ export const AppListRow: React.FC<AppListRowProps> = ({ app, t, onClick, ctaLabe
 	}, []);
 
 	return (
+		// The row is the detail's control, as a card is: focusable, opened by
+		// Enter or Space. Its action button is a separate control inside it.
 		<div
+			role="button"
+			tabIndex={0}
+			aria-label={`Show details for ${app.name}`}
+			onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(app); } }}
 			style={{
 				display: 'flex', alignItems: 'center', gap: 14,
 				padding: '12px 20px',

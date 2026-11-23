@@ -39,6 +39,8 @@ interface CatalogResult {
 	loading: boolean;
 	/** True if no catalog response arrived within CATALOG_TIMEOUT_MS (drives the error state). */
 	timedOut: boolean;
+	/** True when the catalog request itself failed: not an empty catalog. Cleared by the next read. */
+	failed: boolean;
 	/** Optimistically merge fields into a single catalog entry (e.g. onDesktop after install). */
 	patchApp: (appId: string, patch: Partial<AppManifestEntry>) => void;
 }
@@ -61,7 +63,7 @@ const CATALOG_TIMEOUT_MS = 5000;
  * @returns The catalog result with apps array and total count.
  */
 export function useCatalogApps(query?: CatalogQuery): CatalogResult {
-	const [result, setResult] = useState<Omit<CatalogResult, 'patchApp'>>({ apps: [], total: 0, offset: 0, limit: 20, loading: true, timedOut: false });
+	const [result, setResult] = useState<Omit<CatalogResult, 'patchApp'>>({ apps: [], total: 0, offset: 0, limit: 20, loading: true, timedOut: false, failed: false });
 
 	// Stable query key so useEffect doesn't re-fire on every render
 	const queryKey = JSON.stringify(query ?? {});
@@ -90,7 +92,7 @@ export function useCatalogApps(query?: CatalogQuery): CatalogResult {
 		const stopPolling = () => { stopped = true; if (timer) clearInterval(timer); timer = undefined; };
 
 		// Re-enter the loading state whenever the query changes or the viewer signs in.
-		setResult((r) => ({ ...r, loading: true, timedOut: false }));
+		setResult((r) => ({ ...r, loading: true, timedOut: false, failed: false }));
 
 		// Surface an error state if nothing ever loads (e.g. the connection never attaches),
 		// and stop retrying — there's no point continuing on the same cadence after timing out.
@@ -124,13 +126,15 @@ export function useCatalogApps(query?: CatalogQuery): CatalogResult {
 						limit: body.limit ?? 20,
 						loading: false,
 						timedOut: false,
+						failed: false,
 					});
 				} else {
 					setResult((r) => ({ ...r, loading: false, timedOut: false }));
 				}
 			} catch {
-				// DAP failed — stop the skeleton, leave whatever we had.
-				if (!cancelled) setResult((r) => ({ ...r, loading: false, timedOut: false }));
+				// The request failed: stop the skeleton, keep whatever was held, and say so
+				// (an empty catalog is a successful read, not this).
+				if (!cancelled) setResult((r) => ({ ...r, loading: false, timedOut: false, failed: true }));
 			}
 			return true;
 		};

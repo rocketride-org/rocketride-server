@@ -19,7 +19,7 @@
 // (`palette`; none = the shell theme), how a sign-in is asked for, and what
 // it records of the viewer's actions (`onEvent`).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getShellApi } from 'shell';
 import type { AppManifestEntry } from 'shell';
 import { AppDetailPanel } from './AppDetailPanel';
@@ -96,7 +96,7 @@ export interface ICatalogPickerProps {
 export const CatalogPicker: React.FC<ICatalogPickerProps> = ({ identity, shell, view = 'grid', palette, excludeIds, onSignIn, onEvent, onReadyChange, footer }) => {
 	const t = palette ?? SHELL_PALETTE;
 	const query = useMemo(() => (shell ? { shell } : undefined), [shell]);
-	const { apps: catalogApps, loading, timedOut, patchApp } = useCatalogApps(query);
+	const { apps: catalogApps, loading, timedOut, failed, patchApp } = useCatalogApps(query);
 	const cm = ConnectionManager.getInstance();
 
 	const [activeCategory, setActiveCategory] = useState('all');
@@ -111,8 +111,16 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({ identity, shell, 
 	}, []);
 
 	// Detail panel state
-	const [detailApp, setDetailApp] = useState<AppManifestEntry | null>(null);
+	// The entry the panel shows is the CATALOG's entry of that id, so a
+	// subscription or a desktop change that lands while the panel is open
+	// shows in it; the snapshot stands in once the entry has left the catalog
+	// (the slide-out, a sign-out).
+	const [detailSnapshot, setDetailApp] = useState<AppManifestEntry | null>(null);
+	const detailApp = useMemo(() => (detailSnapshot ? (catalogApps.find((a) => a.id === detailSnapshot.id) ?? detailSnapshot) : null), [detailSnapshot, catalogApps]);
 	const [panelOpen, setPanelOpen] = useState(false);
+	// The clear that follows a close, so opening another entry inside the slide-out cancels it
+	const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => () => { if (clearTimer.current) clearTimeout(clearTimer.current); }, []);
 	// The entry just added, so the panel plays its one-shot success on the action
 	const [justAddedId, setJustAddedId] = useState<string | null>(null);
 
@@ -199,6 +207,7 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({ identity, shell, 
 	// -- Actions ---------------------------------------------------------------------
 	const handleAppClick = useCallback((app: AppManifestEntry) => {
 		onEvent?.({ type: 'view', appId: app.id });
+		if (clearTimer.current) { clearTimeout(clearTimer.current); clearTimer.current = null; }
 		setDetailApp(app);
 		requestAnimationFrame(() => setPanelOpen(true));
 	}, [onEvent]);
@@ -206,7 +215,8 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({ identity, shell, 
 	const handleDetailClose = useCallback(() => {
 		setPanelOpen(false);
 		// The entry is cleared once the slide-out has played
-		setTimeout(() => setDetailApp(null), 350);
+		if (clearTimer.current) clearTimeout(clearTimer.current);
+		clearTimer.current = setTimeout(() => { clearTimer.current = null; setDetailApp(null); }, 350);
 	}, []);
 
 	/** The action's label for an entry. Signed out, account flags left from an earlier session are ignored. */
@@ -278,7 +288,7 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({ identity, shell, 
 				) : null
 			) : filteredApps.length === 0 ? (
 				<p style={{ padding: '40px 0', color: t.textMuted, fontSize: 14, textAlign: 'center' }}>
-					{timedOut && catalogApps.length === 0 ? "Couldn't load the catalog." : activeCategory !== 'all' ? 'Nothing in this category.' : 'Nothing in the catalog yet.'}
+					{(timedOut || failed) && catalogApps.length === 0 ? "Couldn't load the catalog." : activeCategory !== 'all' ? 'Nothing in this category.' : 'Nothing in the catalog yet.'}
 				</p>
 			) : (
 				<CatalogBody apps={filteredApps} t={t} view={view} onOpen={handleAppClick} getCtaLabel={getCtaLabel} onCta={handleCta} />
