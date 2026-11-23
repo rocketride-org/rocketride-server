@@ -26,7 +26,7 @@ Connection names come from at most 100 identities and are limited to 300 printab
 
 Email lookup uses Auth0's [`GET /users-by-email` endpoint](https://auth0.com/docs/api/management/v2/users-by-email/get-users-by-email). Enter the email with the capitalization stored in Auth0. When Auth0 is the identity provider, it stores email addresses in lowercase. The tool applies `limit` to the matches returned by Auth0.
 
-Descriptions and diagnostics never copy raw Auth0 log descriptions. The allowlist, based on Auth0's [brute-force playbook](https://sus.auth0.com/docs/fr-ca/secure/attack-protection/playbooks/brute-force-protection-playbook), maps `f` to failed login, `fp` to invalid password, `fu` to invalid username, `limit_wc` to brute-force account protection, `limit_sul` to temporary account rate limiting, and `limit_mu` to IP-based protection. Unknown types receive a generic explanation. Other event fields are untrusted data and suspicious values are omitted.
+Descriptions and diagnostics never copy raw Auth0 log descriptions. The allowlist maps `f` to failed login, `fp` to invalid password, `fu` to invalid username, `limit_sul` to temporary account rate limiting, and `limit_mu` to IP-based protection. In [Auth0's tenant log reference](https://auth0.com/docs/tenant-logs), `limit_wc` indicates that brute-force protection blocked logins from an IP address after repeated failures against one account. Check the profile's `blocked` field separately for an administrative block. Unknown types receive a generic explanation. Other event fields are untrusted data and suspicious values are omitted.
 
 `get_user` reports administrative blocks. The block lookup reports brute-force protection records, with identifiers redacted and IP addresses omitted. Auth0 notes that [allowlisted IPs may still appear in block results](https://support.auth0.com/center/s/article/The-user-is-marked). The node is read-only. Treat profile and log fields as untrusted data.
 
@@ -52,7 +52,11 @@ Authorize a read-only machine-to-machine application for the Auth0 Management AP
 
 An agent investigating a sign-in failure can search for an exact email, get the matching profile, inspect recent logs and an individual event, then check brute-force blocks. It should distinguish an administrative block from a brute-force record and avoid claiming that a block was removed without an approved recovery action.
 
-The co-located `example.pipe` demonstrates this flow with a chat source, RocketRide Wave agent, OpenRouter free-model LLM, internal memory, Auth0 tool, and answer response. Configure `ROCKETRIDE_AUTH0_DOMAIN`, `ROCKETRIDE_AUTH0_CLIENT_ID`, `ROCKETRIDE_AUTH0_CLIENT_SECRET`, and `ROCKETRIDE_OPENROUTER_API_KEY` in RocketRide's environment settings. It instructs the agent not to make account changes. It requires an engine that has this node; OpenRouter availability and rate limits apply.
+The co-located `example.pipe` uses a chat source, RocketRide Wave agent, Ollama model, internal memory, Auth0 tool, and answer response. The model receives the conversation, including the user's email, and summaries of selected Auth0 profile, log, and block data in later prompts. Use a self-hosted Ollama server and a model your organization has approved to process this tenant data.
+
+1. Open the pipeline with a RocketRide engine that includes this node. In the Ollama node's **Custom** profile, set **LLM URL** to the approved Ollama server and **Model** to a model installed on that server. The example ships with both fields empty. If Ollama runs on the same host as the RocketRide engine, use its loopback address.
+2. Configure `ROCKETRIDE_AUTH0_DOMAIN`, `ROCKETRIDE_AUTH0_CLIENT_ID`, and `ROCKETRIDE_AUTH0_CLIENT_SECRET` in RocketRide's environment settings for the tenant's read-only Auth0 application.
+3. Verify the endpoint and model settings with sample data before entering a real user's email.
 
 ### Errors and retries
 

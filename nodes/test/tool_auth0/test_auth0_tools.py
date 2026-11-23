@@ -291,6 +291,24 @@ def test_suspect_fields_are_omitted_from_logs(tool):
     assert '192.0.2.1' not in str(result) and 'sensitive-token' not in str(result)
 
 
+def test_limit_wc_explains_an_ip_block_even_when_profile_is_not_blocked(tool):
+    """Distinguish an IP-based brute-force event from an administrative block."""
+    instance, client, _ = tool
+    event = {'log_id': 'l1', 'type': 'limit_wc', 'ip': '192.0.2.1'}
+    client.request.side_effect = [{'user_id': 'u', 'blocked': False}, [event], event]
+
+    profile = instance.get_user({'user_id': 'u'})
+    logs = instance.get_user_logs({'user_id': 'u'})
+    detail = instance.get_log_event({'log_id': 'l1'})
+
+    explanation = (
+        'Brute-force protection blocked logins from an IP address after repeated failed attempts against one account.'
+    )
+    assert profile['blocked'] is False
+    assert logs['events'][0]['description'] == detail['diagnostics'] == explanation
+    assert '192.0.2.1' not in str(logs) and '192.0.2.1' not in str(detail)
+
+
 @pytest.mark.parametrize(
     'value,expected',
     [

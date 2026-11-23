@@ -35,7 +35,7 @@ _EXPLANATIONS = {
     'f': 'Login failed.',
     'fp': 'Login failed because the password was invalid.',
     'fu': 'Login failed because the username was invalid.',
-    'limit_wc': 'Brute-force protection blocked attempts to an account.',
+    'limit_wc': 'Brute-force protection blocked logins from an IP address after repeated failed attempts against one account.',
     'limit_sul': 'Login attempts were temporarily limited for the account.',
     'limit_mu': 'Login attempts were blocked by IP-based protection.',
 }

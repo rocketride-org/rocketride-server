@@ -185,7 +185,6 @@ def test_example_plain_environment_references_configure_auth0(node, pipeline, se
         'ROCKETRIDE_AUTH0_DOMAIN': 'tenant.auth0.com',
         'ROCKETRIDE_AUTH0_CLIENT_ID': 'read-id',
         secret_name: 'read-private',
-        'ROCKETRIDE_OPENROUTER_API_KEY': 'llm-private',
     }
     resolved = pipeline.resolve_pipeline_env(example, env)
     config = next(item['config'] for item in resolved['components'] if item['provider'] == 'tool_auth0')

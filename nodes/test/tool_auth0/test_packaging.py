@@ -34,7 +34,7 @@ def test_example_pipeline_wires_auth0_to_agent_without_writes():
     assert {item['provider'] for item in components.values()} == {
         'chat',
         'agent_rocketride',
-        'llm_openai_api',
+        'llm_ollama',
         'memory_internal',
         'tool_auth0',
         'response_answers',
@@ -46,15 +46,16 @@ def test_example_pipeline_wires_auth0_to_agent_without_writes():
     assert all(name in instructions for name in ('search_users', 'get_user', 'get_user_blocks', 'get_user_logs'))
     assert agent['input'] == [{'lane': 'questions', 'from': 'chat_1'}]
     assert components['response_answers_1']['input'] == [{'lane': 'answers', 'from': 'agent_rocketride_1'}]
-    for name, kind in (('llm_openai_api_1', 'llm'), ('memory_internal_1', 'memory'), ('tool_auth0_1', 'tool')):
+    for name, kind in (('llm_ollama_1', 'llm'), ('memory_internal_1', 'memory'), ('tool_auth0_1', 'tool')):
         assert components[name]['control'] == [{'classType': kind, 'from': 'agent_rocketride_1'}]
     config = components['tool_auth0_1']['config']
     assert config['domain'] == '${ROCKETRIDE_AUTH0_DOMAIN}'
     assert config['clientId'] == '${ROCKETRIDE_AUTH0_CLIENT_ID}'
     assert config['clientSecret'] == '${ROCKETRIDE_AUTH0_CLIENT_SECRET}'
-    llm = components['llm_openai_api_1']['config']['custom']
-    assert llm['apikey'] == '${ROCKETRIDE_OPENROUTER_API_KEY}'
-    assert llm['base_url'] == 'https://openrouter.ai/api/v1' and llm['model'] == 'openrouter/free'
+    llm_config = components['llm_ollama_1']['config']
+    assert llm_config['profile'] == 'custom'
+    llm = llm_config['custom']
+    assert llm['serverbase'] == '' and llm['model'] == ''
     assert 'Never make account changes' in ' '.join(agent['config']['instructions'])
 
 
@@ -79,7 +80,7 @@ def test_example_edges_match_actual_service_definitions():
     paths = [
         'nodes/src/nodes/webhook/services.chat.json',
         'nodes/src/nodes/agent_rocketride/services.json',
-        'nodes/src/nodes/llm_openai_api/services.json',
+        'nodes/src/nodes/llm_ollama/services.json',
         'nodes/src/nodes/memory_internal/services.json',
         'nodes/src/nodes/tool_auth0/services.json',
         'nodes/src/nodes/response/services.answers.json',
@@ -90,7 +91,7 @@ def test_example_edges_match_actual_service_definitions():
     assert definitions['chat']['lanes']['_source'] == ['questions']
     assert 'answers' in definitions['agent_rocketride']['lanes']['questions']
     assert 'answers' in definitions['response_answers']['lanes']
-    for kind, provider in (('llm', 'llm_openai_api'), ('memory', 'memory_internal'), ('tool', 'tool_auth0')):
+    for kind, provider in (('llm', 'llm_ollama'), ('memory', 'memory_internal'), ('tool', 'tool_auth0')):
         assert kind in definitions[provider]['classType']
         assert kind in definitions['agent_rocketride']['invoke']
 

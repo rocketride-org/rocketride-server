@@ -145,19 +145,18 @@
       ]
     },
     {
-      "id": "llm_openai_api_1",
-      "provider": "llm_openai_api",
-      "name": "OpenAI-Compatible API",
+      "id": "llm_ollama_1",
+      "provider": "llm_ollama",
+      "name": "Ollama",
       "config": {
         "profile": "custom",
         "custom": {
-          "apikey": "${ROCKETRIDE_OPENROUTER_API_KEY}",
-          "base_url": "https://openrouter.ai/api/v1",
-          "model": "openrouter/free",
+          "serverbase": "",
+          "model": "",
           "modelOutputTokens": 4096,
           "modelTotalTokens": 32768
         },
-        "name": "OpenAI-Compatible API"
+        "name": "Ollama"
       },
       "ui": {
         "position": {
