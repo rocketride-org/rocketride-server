@@ -502,7 +502,12 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
                 auth_failed = True
                 info = None
         if info is not None and not hasattr(info, 'userId'):
-            info = None  # authenticate() returns an error tuple on failure
+            # authenticate() returns an (int, str) error tuple on failure. Only
+            # a definite denial (401/403) is a verdict worth caching; any other
+            # code (5xx, unavailable, unknown) is an outage and is not cached.
+            if not (isinstance(info, tuple) and info and info[0] in (401, 403)):
+                auth_failed = True
+            info = None
         dirs = await entitled_version_dirs(info, app_id)
     else:
         dirs = await open_version_dirs(app_id)
