@@ -189,8 +189,12 @@ pages and run with the shell's authority. `/apps/` and any `%2e`, `%2f` or
 `%5c` left in the path are refused there. Any other URL must be `https:` or
 `http:` on `localhost`, `127.0.0.1` or `[::1]`. Credentials in the URL,
 non-http schemes, relative and protocol-relative URLs and unparsable strings
-are refused and show the invalid-URI message. A shell without an http(s)
-origin (a VS Code webview, `file://`) cannot tell which server is the
+are refused and show the invalid-URI message. These rules apply only to the
+URL the `webview:` document names. The provider does not follow the frame's
+later navigations, so an allowed `https:` page can redirect to any URL, the
+shell root included, and with `allow-same-origin` that frame then runs with
+the shell's authority. Treat every allowed external origin as trusted. A shell
+without an http(s) origin (a VS Code webview, `file://`) cannot tell which server is the
 engine: it frames only `/chat/` and `/dropper/` on any loopback host,
 refuses `/apps/` on every host, and frames other `https:` URLs.
 
