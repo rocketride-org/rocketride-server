@@ -916,6 +916,9 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 						if (held.get(relPath) === data) held.delete(relPath);
 						setPendingFiles(held.size);
 					}
+					// A write may have created the README a check found absent: the
+					// verdict is asked again before the document is applied
+					readmeChecked = undefined;
 					continue;
 				}
 				// Step 3: a pipeline without a store block gets one at Save; whether the
