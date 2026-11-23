@@ -326,6 +326,21 @@ test('R-unreceived an execute answer the realm cannot receive leaves no run held
 	assert.equal((await clientRequest(A, execMsg())).ok, true, 'no run quota is held for the refused answers');
 });
 
+test('R-unreceived an execute answer refused at the choke point for holding the API key gives the run back and ends it', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const key = `rr_${'k'.repeat(40)}`;
+	t.cm.apiKey = key;
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	engine.extendBody('execute', { leak: key });
+	for (let i = 0; i < 9; i++) await assertDeniedOp(clientRequest(A, execMsg()), 'credential', `execute answer ${i} that holds the key`);
+	await settle();
+	assert.equal(terminatedTokens(t).length, 9, 'every run whose answer the realm was refused is terminated');
+	engine.extendBody('execute', { leak: '' });
+	assert.equal((await clientRequest(A, execMsg())).ok, true, 'no run quota is held for the refused answers');
+});
+
 test('R-unreceived a restart answer the realm cannot receive drops the run and ends the restarted token', async (tt) => {
 	const t = makeRoot();
 	tt.after(() => t.cleanup());

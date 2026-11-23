@@ -690,6 +690,11 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 						endOrphan(req, response);
 						throw err;
 					}
+					if (hit) {
+						// The choke point refuses this answer (a credential outside notes): the realm never learns of what it allocated.
+						unrecord(st, req, response);
+						endOrphan(req, response);
+					}
 					const envelope = { ok: true, value: encoded } satisfies IWireEnvelope;
 					verdicts.set(envelope, hit ? 'deny' : 'ok');
 					// The run is in the ledger now: events that came first are delivered (DA F8).
