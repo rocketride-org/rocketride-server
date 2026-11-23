@@ -109,6 +109,9 @@ export interface IPipelineEditorHost {
 	onContentChanged: (project: unknown) => void;
 	/** Saves the document (the host runs its own save-as/prompt flow). */
 	save(): void;
+	/** Puts the document back to its saved state and keeps it open (the
+	 *  PACKAGE page's Cancel). Absent = the host cannot revert. */
+	revert?(): void | Promise<void>;
 	/** Awaited save for the publish flow — MUST reject on failure so a
 	 *  failed save aborts the publish (a host whose publish path saves
 	 *  internally resolves immediately). */
@@ -898,6 +901,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				{...(host.pendingOAuthTokens !== undefined ? { pendingOAuthTokens: host.pendingOAuthTokens } : {})}
 				{...(host.clearPendingOAuthTokens ? { clearPendingOAuthTokens: host.clearPendingOAuthTokens } : {})}
 				onSave={host.save}
+				{...(host.revert ? { onRevert: host.revert } : {})}
 				{...(host.exportDocument ? { onExport: host.exportDocument } : {})}
 				{...(assetsHost ? { assetsHost } : {})}
 				envKeys={envKeys}

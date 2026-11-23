@@ -620,6 +620,10 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			onViewStateChange: (viewState: ViewState) => onViewStateChangeProp?.({ ...viewState }),
 			onContentChanged,
 			save: handleSave,
+			// Cancel on the PACKAGE page: the Documents model re-reads the saved
+			// file into the document and marks it clean. A document never saved
+			// has no file to go back to.
+			...(isNew ? {} : { revert: () => getDocs()?.revertDocument(uri) }),
 			// The publish flow awaits the save; a failed save MUST abort it.
 			saveDocument: () => performSave(filename, pipeline, { rethrow: true }),
 			publish: handlePublish,

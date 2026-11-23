@@ -28,11 +28,13 @@
  * `nodeId.configKey`, plan §5.2): the public name, the target picked from a
  * searchable list grouped by node (a field already exposed is greyed; picking
  * fills the public name with the field's name), the Default as its own
- * column (the .pipe config value, the node's default when unset — option 4C,
- * decided 2026-11-16), the type and description from the catalog ("int
+ * column (the .pipe config value, the node's default when unset; EDITABLE
+ * here since 2026-11-23: it is the same value the node's config panel on
+ * DESIGN edits, written into the component's config), the type and description from the catalog ("int
  * 256–4096 · Largest input edge"), and a remove. "+ Add parameter" opens a
- * new row. Defaults are the node's configured values and change on DESIGN,
- * never here. The live call examples (M-1.6) use the real public names and
+ * new row. A Default typed here is checked against the field's type, bounds
+ * and allowed values; emptied, the key leaves the config and the node's own
+ * default shows again. The live call examples (M-1.6) use the real public names and
  * stay pinned at the bottom of the pane while the table above them scrolls.
  * The page is the API Params side tab of the PACKAGE page, which gives it a
  * column of definite height to lay itself out in.
@@ -46,10 +48,12 @@
 import { CSSProperties, KeyboardEvent, ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ServiceParamDescriptor } from 'rocketride';
 
-import { AnchoredPopup, Button, commonStyles, InputField, ToggleGroup } from 'shell';
+import { AnchoredPopup, Button, commonStyles, InputField } from 'shell';
 
-import { getAtPath, publicNameProblem, PUBLIC_NAME_PATTERN } from '../../../../components/node-config';
-import { buildCallExamples, CALL_EXAMPLE_TABS, exampleValue, type CallExampleTabId } from './callExamples';
+import { deleteAtPath, getAtPath, publicNameProblem, PUBLIC_NAME_PATTERN, setAtPath } from '../../../../components/node-config';
+import { CallExamples } from './CallExamplesBlock';
+import { exampleValue } from './callExamples';
+import { parseDefault } from './paramDefault';
 
 // =============================================================================
 // Styles
@@ -129,6 +133,14 @@ const styles = {
 		height: 28,
 		fontSize: 12,
 		width: 170,
+	} as CSSProperties,
+
+	// The Default's field: the value a call gets when it omits the parameter.
+	defaultInput: {
+		...commonStyles.fontMono,
+		height: 28,
+		fontSize: 12,
+		width: 120,
 	} as CSSProperties,
 
 	nameInvalid: {
@@ -242,34 +254,6 @@ const styles = {
 		marginTop: 4,
 	} as CSSProperties,
 
-	examplesHeader: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		gap: 12,
-		margin: '12px 0 8px',
-	} as CSSProperties,
-
-	examplesControls: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-	} as CSSProperties,
-
-	code: {
-		...commonStyles.fontMono,
-		fontSize: 12,
-		lineHeight: 1.5,
-		margin: 0,
-		padding: 14,
-		borderRadius: 7,
-		background: 'var(--rr-bg-secondary)',
-		border: '1px solid var(--rr-border)',
-		whiteSpace: 'pre',
-		// A long example scrolls inside its block: the pinned strip never takes the table's room
-		maxHeight: 220,
-		overflow: 'auto',
-	} as CSSProperties,
 };
 
 // =============================================================================
@@ -668,6 +652,46 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 		[optionByTarget]
 	);
 
+	/**
+	 * Write a parameter's Default: the target component's config value, the
+	 * one its config panel on DESIGN edits. Undefined removes the key, so the
+	 * node's own default applies again.
+	 */
+	const commitDefault = useCallback(
+		(option: ITargetOption, value: unknown) => {
+			const next = (project.components ?? []).map((component) => {
+				if (component.id !== option.nodeId) return component;
+				const config = value === undefined ? deleteAtPath(component.config, option.descriptor.field) : setAtPath(component.config, option.descriptor.field, value);
+				return { ...component, config };
+			});
+			onContentChanged?.({ ...project, components: next, docRevision: (project.docRevision ?? 0) + 1 });
+		},
+		[onContentChanged, project]
+	);
+
+	// Defaults being typed: per target, until they commit
+	const [defaultDrafts, setDefaultDrafts] = useState<Record<string, string>>({});
+	const dropDefaultDraft = useCallback((target: string) => {
+		setDefaultDrafts((prev) => Object.fromEntries(Object.entries(prev).filter(([key]) => key !== target)));
+	}, []);
+	/** Commit a typed Default when the field accepts it; leave the draft showing its problem otherwise. */
+	const commitDefaultDraft = useCallback(
+		(option: ITargetOption) => {
+			const draft = Object.hasOwn(defaultDrafts, option.target) ? defaultDrafts[option.target].trim() : undefined;
+			if (draft === undefined) return;
+			if (draft === '') {
+				if (option.stored !== undefined) commitDefault(option, undefined);
+				dropDefaultDraft(option.target);
+				return;
+			}
+			const parsed = parseDefault(draft, option.descriptor);
+			if ('problem' in parsed) return;
+			if (JSON.stringify(parsed.value) !== JSON.stringify(option.stored)) commitDefault(option, parsed.value);
+			dropDefaultDraft(option.target);
+		},
+		[defaultDrafts, commitDefault, dropDefaultDraft]
+	);
+
 	/** Write a new map through the document (the canvas takes it, plan §5.5). */
 	const commit = useCallback(
 		(next: Record<string, string>) => {
@@ -722,22 +746,14 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 	);
 
 	// --- The examples ------------------------------------------------------------
-	const [tab, setTab] = useState<CallExampleTabId>('javascript');
-	const examples = useMemo(
+	const exampleParams = useMemo(
 		() =>
-			buildCallExamples({
-				address,
-				params: Object.entries(parameters).map(([name, target]) => {
-					const option = optionByTarget.get(target);
-					return { name, value: option ? exampleValue(option.descriptor, option.stored) : 'value' };
-				}),
-				host: serverHost,
+			Object.entries(parameters).map(([name, target]) => {
+				const option = optionByTarget.get(target);
+				return { name, value: option ? exampleValue(option.descriptor, option.stored) : 'value' };
 			}),
-		[address, parameters, optionByTarget, serverHost]
+		[parameters, optionByTarget]
 	);
-	const copy = useCallback(() => {
-		void navigator.clipboard?.writeText(examples[tab]);
-	}, [examples, tab]);
 
 	// --- Render ------------------------------------------------------------------
 	return (
@@ -792,10 +808,47 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 										<TargetPicker id={`${rowId}-target`} value={row.target} options={options} parameters={parameters} autoOpen={!row.target} disabled={readonly} onPick={(picked) => pick(row, picked)} />
 									</td>
 									{/* Default is its own column (option 4C, decided 2026-11-16):
-									    the node's config value as set on DESIGN, the node's own
-									    default when unset — what a caller gets when the parameter
-									    is omitted. Type and description stay prose beside it. */}
-									<td style={styles.cellDefault}>{option ? <span style={styles.infoStrong}>{showValue(option.stored ?? option.descriptor.default)}</span> : null}</td>
+									    the node's config value, the node's own default when unset —
+									    what a caller gets when the parameter is omitted. Editable:
+									    it writes the same config key the node's panel on DESIGN
+									    does; emptied, the node's default shows as the placeholder. */}
+									<td style={styles.cellDefault}>
+										{option &&
+											(readonly ? (
+												<span style={styles.infoStrong}>{showValue(option.stored ?? option.descriptor.default)}</span>
+											) : (
+												(() => {
+													const typed = Object.hasOwn(defaultDrafts, option.target) ? defaultDrafts[option.target] : undefined;
+													const shownDefault = typed ?? (option.stored === undefined || option.stored === null ? '' : typeof option.stored === 'string' ? option.stored : JSON.stringify(option.stored));
+													const check = typed !== undefined && typed.trim() !== '' ? parseDefault(typed.trim(), option.descriptor) : null;
+													const defaultProblem = check && 'problem' in check ? check.problem : null;
+													return (
+														<>
+															<InputField
+																type="text"
+																style={{ ...styles.defaultInput, ...(defaultProblem ? styles.nameInvalid : {}) }}
+																value={shownDefault}
+																placeholder={showValue(option.descriptor.default)}
+																aria-label={`Default of ${row.name ?? 'the parameter'}`}
+																aria-invalid={defaultProblem ? true : undefined}
+																aria-describedby={defaultProblem ? `${rowId}-default-problem` : undefined}
+																onChange={(event) => setDefaultDrafts((prev) => ({ ...prev, [option.target]: event.target.value }))}
+																onBlur={() => commitDefaultDraft(option)}
+																onKeyDown={(event) => {
+																	if (event.key === 'Enter') commitDefaultDraft(option);
+																	if (event.key === 'Escape') dropDefaultDraft(option.target);
+																}}
+															/>
+															{defaultProblem && (
+																<div id={`${rowId}-default-problem`} style={styles.problem}>
+																	{defaultProblem}
+																</div>
+															)}
+														</>
+													);
+												})()
+											))}
+									</td>
 									<td style={styles.cellInfo}>
 										{option ? (
 											<>
@@ -840,23 +893,14 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 					</div>
 				)}
 				<div style={styles.help}>
-					Each row is one entry of the .pipe <code style={commonStyles.fontMono}>parameters</code> map: public name → node.field. Defaults are the node's config values; change them on DESIGN.
+					Each row is one entry of the .pipe <code style={commonStyles.fontMono}>parameters</code> map: public name → node.field. A Default is the node's config value, the same one its panel on DESIGN edits.
 					{options.length === 0 && failedProviders.length === 0 && ' No node on this pipeline declares a per-call parameter.'}
 				</div>
 			</div>
 
 			{/* The call examples: pinned at the bottom of the pane. */}
 			<div style={styles.examples}>
-				<div style={styles.examplesHeader}>
-					<div style={commonStyles.labelUppercase}>Call examples</div>
-					<div style={styles.examplesControls}>
-						<ToggleGroup options={CALL_EXAMPLE_TABS.map((t) => ({ id: t.id, label: t.label }))} value={tab} onChange={setTab} small />
-						<Button variant="secondary" small onClick={copy} title="Copy to clipboard">
-							Copy
-						</Button>
-					</div>
-				</div>
-				<pre style={styles.code}>{examples[tab]}</pre>
+				<CallExamples address={address} params={exampleParams} host={serverHost} />
 			</div>
 		</div>
 	);
