@@ -145,6 +145,7 @@ const knownFree = ({
 	caller = PYBIND_CALLER,
 	after = [],
 	summary = true,
+	allocatedBy = 'allocated by thread T143 here:',
 } = {}) =>
 	text(
 		SEPARATOR,
@@ -154,7 +155,7 @@ const knownFree = ({
 		`    #2 0x7fdb16e46f63 in __cxa_end_catch (${binary(freeLib)}+0x29f63)`,
 		...caller,
 		'',
-		'allocated by thread T143 here:',
+		allocatedBy,
 		`    #0 0x563bc01478ed in operator new(unsigned long) (${binary('engine')}+0x1038ed)`,
 		`    #1 0x7fdb1115859f in std::runtime_error::runtime_error(char const*) (${binary(allocLib)}+0x5259f)`,
 		'',
@@ -264,6 +265,12 @@ describe('sanitizer report parsing', () => {
 			reports.map((report) => report.kind),
 			['SEGV', 'alloc-dealloc-mismatch']
 		);
+	});
+
+	it('counts the end of a fatal report with no report before it as other output', () => {
+		const reports = parseLog(text('', SEPARATOR, '==77==ABORTING'), 'asan.77', ROOT);
+		assert.equal(reports.length, 1);
+		assert.equal(reports[0].kind, 'other-output');
 	});
 
 	it('counts a thread trailer with no report before it as other output', () => {
@@ -578,6 +585,11 @@ describe('sanitizer report summary', () => {
 			assert.match(result.summary, /### Known third-party\n\n- `libcxxabi-exception-free`: 2 report\(s\)\. .*issues\/3338/);
 			const row = ['2', 'AddressSanitizer', 'alloc-dealloc-mismatch', 'libcxxabi-exception-free'];
 			assert.equal(result.stdout, `${row.join('\t')}\n`);
+		});
+
+		it('reads the allocating stack under a heading with the thread name', () => {
+			const log = knownFree({ allocatedBy: 'allocated by thread T143 (worker) here:' });
+			assert.equal(parseLog(log, 'report.1', ROOT)[0].known, KNOWN_THIRD_PARTY[0].id);
 		});
 
 		it('matches a release path other than __cxa_end_catch', () => {

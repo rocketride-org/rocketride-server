@@ -96,10 +96,12 @@ const SUMMARY_RE = /^SUMMARY: (\w*Sanitizer): (\S+)(.*)$/;
 const FRAME_RE = /^\s*#\d+ 0x[0-9a-f]+ (.*)$/;
 // The module a frame is in, with the offset into it: ` (/x/dist/server/engtest+0x2701032)`
 const MODULE_RE = /\s*\(([^()]*)\+0x[0-9a-f]+\)/g;
-const ALLOCATED_RE = /^allocated by thread T\d+ here:/;
-// What a sanitizer prints around a report, outside its block: the rest of a fatal report and the next one's lead-in
-const EPILOGUE_RE =
-	/^\s*$|^=+$|^==\d+==(?:HINT|ABORTING)|^Shadow byte|^(?:=>| {2})0x[0-9a-f]+:|^ {2}[A-Z][A-Za-z ]*:\s+[0-9a-f]{2}/;
+// `allocated by thread T5 here:`, with the thread's name when it has one: `T5 (worker)`
+const ALLOCATED_RE = /^allocated by thread T\d+(?: \(.*\))? here:/;
+// Blank lines and the separator before a report, which carry nothing
+const BLANK_RE = /^\s*$|^=+$/;
+// The rest of a fatal report after its block; with no report before it, it fails as other output
+const EPILOGUE_RE = /^==\d+==(?:HINT|ABORTING)|^Shadow byte|^(?:=>| {2})0x[0-9a-f]+:|^ {2}[A-Z][A-Za-z ]*:\s+[0-9a-f]{2}/;
 // `Thread T5 created by T0 here:`, which ASan prints after the report of a crash, then the frames of the creator
 const THREAD_RE = /^Thread T\d+\b.*(?:here:|unknown thread)$/;
 const DEADLY_SIGNAL_RE = /^\w*Sanitizer:DEADLYSIGNAL/;
@@ -291,7 +293,7 @@ export function parseLog(text, file, root = '') {
 		} else if (blocks.length && (THREAD_RE.test(line) || (inTrailer && FRAME_RE.test(line)))) {
 			// Epilogue: the thread trailer of the report before it; with no report before it, it fails as other output
 			trailer = true;
-		} else if (!EPILOGUE_RE.test(line)) {
+		} else if (!BLANK_RE.test(line) && !(blocks.length && EPILOGUE_RE.test(line))) {
 			loose.push(line);
 		}
 	}
