@@ -81,7 +81,9 @@ STORE_KEYS = ('tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode'
 
 #: The pipeline's own version, as an app's is in package.json: major.minor.patch
 #: with an optional pre-release tag.
-STORE_VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?')
+STORE_VERSION = re.compile(
+    r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?'
+)
 
 #: The monetization modes, the app model.
 STORE_MODES = ('free', 'subscription', 'paywall')
