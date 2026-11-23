@@ -6,6 +6,7 @@ without uv, pip, or a network. Every test redirects the "engine executable
 directory" into ``tmp_path`` so nothing touches a real engine cache.
 """
 
+import glob
 import os
 from types import SimpleNamespace
 
@@ -702,6 +703,37 @@ class TestRunConstraints:
     def test_a_run_with_no_python_node_files_keeps_the_servers_constraints(self, exe_dir, solver):
         assert depends.ensure_run_constraints([]) == depends._get_constraints_path()
         assert depends._run_state is None
+
+    def test_a_run_with_no_node_files_after_one_with_them_installs_with_the_servers_again(self, exe_dir, solver):
+        depends.ensure_run_constraints([self._node(exe_dir, 'llm_a', 'alpha==1\n')])
+
+        assert depends.ensure_run_constraints([]) == depends._get_constraints_path()
+        assert depends._run_state is None
+
+    def test_the_heartbeat_keeps_the_run_starting_while_it_solves(self, exe_dir, solver, monkeypatch):
+        order = []
+        compile_ = depends._compile_constraints
+        monkeypatch.setattr(depends, '_start_heartbeat', lambda: order.append('start'))
+        monkeypatch.setattr(depends, '_stop_heartbeat', lambda: order.append('stop'))
+        monkeypatch.setattr(depends, '_compile_constraints', lambda *a, **k: order.append('solve') or compile_(*a, **k))
+
+        depends.ensure_run_constraints([self._node(exe_dir, 'llm_a', 'alpha==1\n')])
+
+        # The server's own solve is cached already; only the run's runs under the heartbeat
+        assert order[-3:] == ['start', 'solve', 'stop']
+
+    def test_a_solve_cut_short_leaves_no_constraints_a_later_run_would_reuse(self, exe_dir, solver, monkeypatch):
+        a = self._node(exe_dir, 'llm_a', 'alpha==1\n')
+        depends.ensure_constraints()
+
+        def killed(src, dst):
+            raise KeyboardInterrupt  # the process stops between the solve and the move
+
+        monkeypatch.setattr(depends.os, 'replace', killed)
+        with pytest.raises(KeyboardInterrupt):
+            depends.ensure_run_constraints([a])
+
+        assert not glob.glob(str(exe_dir / 'cache' / '**' / 'runs' / '*' / 'constraints.txt'), recursive=True)
 
 
 def test_uvs_reason_is_given_whole_without_its_tree_glyphs():
