@@ -149,3 +149,27 @@ def test_an_unpublished_root_app_stops_serving_its_pages_after_the_rebuild(world
     llms = client.get('/llms.txt').text
     assert 'The blurb.' not in llms
     assert_no_leak(llms)
+
+
+@pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
+def test_rendered_public_pages_keep_shell_document_protection(world, ua):
+    """The public-page renderer must not bypass the shell's framing policy, cold or from a warm cache."""
+    _, client = world
+    expected = shell_mod.document_headers()
+    assert expected['Content-Security-Policy'].startswith('frame-ancestors')
+
+    def assert_protected(response):
+        for name, value in expected.items():
+            assert response.headers[name] == value
+
+    for path in ('/', '/pricing', '/marketplace'):
+        for _ in range(2):  # both the render and its warm-cache response
+            response = client.get(path, headers={'User-Agent': ua})
+            assert response.status_code == 200
+            assert_protected(response)
+    missing = client.get('/missing', headers={'User-Agent': ua, 'Accept': 'text/html'})
+    assert missing.status_code == 404
+    assert_protected(missing)
+    again = client.get('/missing', headers={'User-Agent': ua, 'Accept': 'text/html'})
+    assert again.status_code == 404
+    assert_protected(again)

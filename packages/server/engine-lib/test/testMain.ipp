@@ -221,7 +221,10 @@ Error TestMain(std::vector<const Utf8Chr*> arguments) noexcept {
         CmdLine& cmdline = application::cmdline();
         if (cmdline.argc() <= 0) return APERR(Ec::Failed, "Exec path missing");
 
-        cmdArguments.push_back(Text(cmdline[0]));
+        // cmdArguments holds only pointers and Catch2 reads them inside
+        // session.run, so the exec path string lives until it returns
+        const Text execPath(cmdline[0]);
+        cmdArguments.push_back(execPath);
 
         if (!arguments.empty())
             cmdArguments.insert(cmdArguments.end(), arguments.begin(),

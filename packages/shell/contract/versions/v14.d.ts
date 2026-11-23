@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV14 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-19T07:16:48.992Z
-// Source commit: c11f124f861a0ecfcbd19704cc66c72e7cc5c4b8
+// Generated:     2026-11-20T20:33:45.873Z
+// Source commit: 02ff0b3e799fb3d84357f57dea62b2b53995a205
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -182,6 +182,14 @@ export type LoginAttemptCancellationReason = "superseded" | "logout" | "detached
 export declare class LoginAttemptCancelledError extends Error {
     readonly reason: LoginAttemptCancellationReason;
     constructor(reason: LoginAttemptCancellationReason);
+}
+/**
+ * A command the server refused, such as starting or validating a pipeline.
+ *
+ * `code` says why, e.g. `NODE_NOT_ENTITLED`.
+ */
+export declare class CommandException extends RocketRideException {
+    constructor(dapResult: Record<string, unknown>);
 }
 /**
  * Exception raised for data pipe operations.
@@ -1950,11 +1958,6 @@ export interface RocketRideClientConfig {
     /** Client version sent during auth (e.g. "0.9.4") */
     clientVersion?: string;
     /**
-     * Shell capabilities sent with every `auth` (e.g. `['appIsolation:1']`).
-     * The server stores them on the connection; absent sends no key at all.
-     */
-    shellCaps?: string[];
-    /**
      * Optional trace callback invoked at the start and end of every `call()`.
      * Credential-bearing fields are redacted from the callback copy. Use for
      * logging, debugging, or telemetry.
@@ -2149,10 +2152,6 @@ interface AppManifestEntry {
     entry?: string;
     /** Registry version number the entry resolves to (the scope-walk winner). */
     registryVersion?: number;
-    /** The app runs in its own origin (separate-origin isolation, #1022). */
-    isolated?: boolean;
-    /** The app is first party and may run in the shell realm (#1022). */
-    firstParty?: boolean;
     /** App version string (semver). */
     version?: string;
     /** Visibility scope: "public", "org", "team", or "user". */
@@ -2258,17 +2257,6 @@ export interface ServerInfoResult {
         api: string;
         /** Absolute URL of the environment's web UI. */
         ui: string;
-    };
-    /**
-     * Separate-origin app isolation (#1022). Absent when the server runs
-     * with isolation `off`.
-     */
-    appIsolation?: {
-        mode: "optin" | "enforce";
-        /** e.g. `https://{label}.apps.example.com`. */
-        originTemplate: string;
-        protoMin: number;
-        protoMax: number;
     };
 }
 /**
@@ -5266,8 +5254,7 @@ export declare class RocketRideClient extends DAPClient {
      * capabilities, platform, and public apps without requiring credentials.
      *
      * @param uri - Server URI (e.g. ``"localhost:5565"``, ``"https://api.rocketride.ai"``)
-     * @param timeoutOrOptions - Optional timeout in ms for the entire operation, or
-     *   `{ timeout?, shellCaps? }` (the shell's capabilities go with the probe)
+     * @param timeout - Optional timeout in ms for the entire operation
      * @returns Server info including version and capability tags
      * @throws Error if the server is unreachable or does not support probes
      *
@@ -5279,10 +5266,7 @@ export declare class RocketRideClient extends DAPClient {
      * }
      * ```
      */
-    static getServerInfo(uri: string, timeoutOrOptions?: number | {
-        timeout?: number;
-        shellCaps?: string[];
-    }): Promise<ServerInfoResult>;
+    static getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult>;
     /**
      * Resolve a probe's `endpoints` block against the URI that was probed.
      *
@@ -5422,7 +5406,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.source - Optional override for the source component ID
      * @returns Promise resolving to validation result with errors, warnings,
      *          and resolved component
-     * @throws Error if the server returns a validation error
+     * @throws CommandException if the server refuses the command (`code` says why, when it sends one);
+     *         a pipeline that fails validation resolves, with its problems in `errors`
      *
      * @example
      * ```typescript
@@ -6407,7 +6392,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param args    - Key/value arguments forwarded in the request.
      * @param options - Optional token (for task-scoped calls) and timeout in ms.
      * @returns The `body` field of a successful DAP response.
-     * @throws Error if the server signals failure.
+     * @throws CommandException if the server signals failure; `code` says why, when the server sends one.
      */
     call<T = any>(command: string, args?: Record<string, unknown>, options?: {
         token?: string;
@@ -6941,7 +6926,7 @@ export declare function createToolChannel(peer: IToolPeer): ToolChannel;
 export interface ShellAppProps {
     /** Whether the RocketRide WebSocket is currently connected. */
     isConnected: boolean;
-    /** Authenticated user identity (with a blank `userToken`, #1022), or null when not logged in. */
+    /** Authenticated user identity, or null when not logged in. */
     identity: ConnectResult | null;
 }
 /**
@@ -7428,10 +7413,7 @@ export interface ShellAccountConfig {
 export interface ShellApiConfig {
     /** Base URI for the RocketRide WebSocket server. */
     ROCKETRIDE_URI?: string;
-    /**
-     * Hard-coded API key for service accounts / dev; bypasses OAuth2 when present.
-     * Host input only: `useShellApiConfig()` and `shell:init` omit it (#1022). Kept because the type is frozen in the shell-api contract.
-     */
+    /** Hard-coded API key for service accounts / dev; bypasses OAuth2 when present. */
     RR_APIKEY?: string;
     /** Stripe publishable key — required for Stripe Elements checkout. */
     RR_STRIPE_PUBLISHABLE_KEY?: string;
@@ -9500,34 +9482,6 @@ export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTML
  * new code.
  */
 export declare function getClient(): RocketRideClient | null;
-/** The shell capabilities sent with the probe and every `auth`. */
-export declare const SHELL_CAPS: readonly [
-    "appIsolation:1"
-];
-interface IIsolationView {
-    mode: "optin" | "enforce" | "unknown";
-    originTemplate: string | null;
-    isFirstParty(appId: string): boolean;
-}
-/** The v13 channel (`shellApi.getIsolation()`). */
-export declare function getIsolation(): IIsolationView | null;
-type DenyCode = "capability" | "ownership" | "schema" | "rate" | "too_large" | "namespace" | "unknown_op" | "credential" | "quota";
-interface ICapabilityDeniedFields {
-    code: DenyCode;
-    op: string;
-    command?: string;
-    subcommand?: string;
-    capability?: string;
-}
-/** A refused operation. */
-export declare class CapabilityDeniedError extends Error {
-    readonly code: DenyCode;
-    readonly op: string;
-    readonly command?: string;
-    readonly subcommand?: string;
-    readonly capability?: string;
-    constructor(message: string, fields: ICapabilityDeniedFields);
-}
 /** A topic subscriber. `undefined` delivers a retraction. */
 export type RetainedSubscriber = (snapshot: unknown) => void;
 /** The retained-topic registry — one per framework root, THE authority. */
@@ -9601,124 +9555,6 @@ export interface IRetainedPort {
  * @returns The port.
  */
 export declare function localRetainedPort(registry: IRetainedRegistry): IRetainedPort;
-/** How long a summoned owner gets to register before waiting requests fail. */
-export declare const DEFAULT_SUMMON_TIMEOUT_MS = 30000;
-/** One side of a transport between two realms. */
-export interface IBusEndpoint {
-    /** Sends one message to the other side. */
-    post(message: unknown): void;
-    /** Subscribes to messages from the other side; returns unsubscribe. */
-    subscribe(cb: (message: unknown) => void): () => void;
-}
-/** What attaching a realm yields: the detach function and the realm's
- *  retained-topic port (install it on the realm's ConnectionManager). */
-export interface IRealmAttachment {
-    /** Detach (rejects this realm's in-flight outbound requests). */
-    detach: () => void;
-    /** The realm's retained-topic transport (publish/subscribe/read over
-     *  the wire — the root's registry is the authority). */
-    retained: IRetainedPort;
-}
-/**
- * Attaches a realm's op bus to the framework root over one endpoint.
- *
- * Outbound: unresolved requests/emitOps forward to the root; local
- * registrations are announced (including ones made before attach — the bus
- * replays them into the forwarder); retained publishes and topic interest
- * ride their own wire kinds. Inbound: requests from the root (ops THIS
- * realm registered) run against local handlers and answer by id; topic
- * deliveries dispatch to local subscribers.
- *
- * @param bus - This realm's op bus.
- * @param endpoint - Transport to the root.
- * @returns The attachment (detach + retained port).
- */
-export declare function attachRealmToRoot(bus: IOpBus, endpoint: IBusEndpoint): IRealmAttachment;
-/** Summon lookup: an activation thunk when the op's owner is INSTALLED but
- *  not yet registered, null otherwise. Installed-only is the caller's
- *  contract (pinned store tools + enabled builtins); summon NEVER installs. */
-export type SummonLookup = (op: string) => (() => void) | null;
-/** Router options. */
-export interface IBusRouterOptions {
-    /** The summon table (see {@link SummonLookup}). Absent = no summoning. */
-    summon?: SummonLookup;
-    /** How long a summoned owner gets to register. */
-    summonTimeoutMs?: number;
-    /** The root's retained-topic registry — THE authority realms publish to
-     *  and subscribe through. Absent = retained traffic from realms is
-     *  dropped (a root without the lane). */
-    retained?: IRetainedRegistry;
-}
-/** The framework root's router. */
-export interface IBusRouter {
-    /**
-     * Attaches one realm. Returns a detach function — detaching clears the
-     * realm's registrations and rejects every in-flight request routed to it.
-     *
-     * @param endpoint - Transport to the realm.
-     * @param label - For diagnostics ('sidebar', 'page:account', ...).
-     */
-    addRealm(endpoint: IBusEndpoint, label: string): () => void;
-    /**
-     * Pushes one fire-and-forget op to EVERY attached realm — the broker's
-     * mirror feed (connection/account/services state into each realm's local
-     * bus). Realms that registered no handler for the op drop it silently;
-     * this is the ONE root→all path, outside the registration routing.
-     */
-    broadcastEmitOp(op: string, params: unknown): void;
-    /** Disposes every realm attachment. */
-    dispose(): void;
-}
-/**
- * Creates the router over the ROOT's own op bus. The root's bus gets a
- * forwarder too, so root-initiated requests reach realm-registered ops
- * through the same resolution path.
- *
- * @param rootBus - The framework root's op bus (the broker registers here).
- * @param options - Summon configuration.
- * @returns The router.
- */
-export declare function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): IBusRouter;
-/**
- * An in-process endpoint pair — the transport for two "realms" sharing one
- * JS realm (cloud root↔local attachments, tests). Delivery is a microtask,
- * matching postMessage semantics closely enough that code written against
- * one transport behaves on the other.
- *
- * @returns Two connected endpoints.
- */
-export declare function createLocalEndpointPair(): [
-    IBusEndpoint,
-    IBusEndpoint
-];
-type BridgeInit = {
-    type: "rr:bridge:init";
-    proto: number;
-    entryPrefix: string;
-    expiresAt: number;
-    theme: Record<string, string>;
-    identity: {
-        userId: string;
-        displayName: string;
-        organizations: {
-            id: string;
-            name: string;
-        }[];
-    } | null;
-    props: {
-        isConnected: boolean;
-        activeView: string;
-        activeActivity: string | null;
-        sidePanelOpen: boolean;
-        theme: string;
-    };
-    capabilities: string[];
-    appId: string;
-    appKey: string;
-    moduleId: string;
-    viewId: string;
-    engineHttpUrl: string;
-};
 /**
  * Options for ConnectionManager.initialize().
  */
@@ -9754,6 +9590,25 @@ export interface DebugLogEntry {
     payload: unknown;
 }
 type WildcardHandler = (event: string, payload: unknown) => void;
+/**
+ * Centralized connection manager for shell.
+ *
+ * Owns a single persistent RocketRideClient (created at initialize(), lives
+ * for the page lifetime). The SDK's persist mode handles reconnection
+ * automatically.
+ *
+ * Delegates connection backend to RemoteManager (mirrors VSCode's BaseManager
+ * pattern). Auth is handled externally by CloudAuthProvider/ApiKeyAuthProvider.
+ *
+ * @example
+ * ```ts
+ * import { ConnectionManager } from 'shell';
+ *
+ * const cm = ConnectionManager.getInstance();
+ * cm.on('shell:event', ({ event }) => console.log('Server pushed:', event));
+ * cm.emit('shell:switchApp', { appId: 'rocketride.home' });
+ * ```
+ */
 export declare class ConnectionManager implements IConnectionManager {
     /** Returns the singleton ConnectionManager instance. */
     static getInstance(): ConnectionManager;
@@ -10573,11 +10428,6 @@ on(event: 'store:changed', handler: (payload: ShellConnectionEventMap['store:cha
      */
     read(topic: string): Promise<unknown>;
     /**
-     * This realm's own retained registry: the isolated-app root (#1022)
-     * serves a gated realm's allowlisted retained reads from it.
-     */
-    retained(): IRetainedRegistry;
-    /**
      * Installs the realm's retained transport — called ONCE by the bus-realm
      * attachment with the wire port from attachRealmToRoot. Every existing
      * subscription re-points to the new port (and replays off the root's
@@ -10586,18 +10436,6 @@ on(event: 'store:changed', handler: (payload: ShellConnectionEventMap['store:cha
      * @param port - The wire-backed port.
      */
     setRetainedPort(port: IRetainedPort): void;
-    /**
-     * Enters guest mode: the realm of an isolated app frame (#1022, plan 4.8).
-     *
-     * The state comes from the accepted `rr:bridge:init` (connected flag, the
-     * engine's HTTP base, the identity aliases as account info with no token,
-     * key or app list) and later from the root's `shell.event.*` emitOps,
-     * which update it and re-emit the matching local `shell:*` events. The
-     * brokered client is built at once, with its `client.event` handler.
-     *
-     * @param init - The accepted bridge init.
-     */
-    enterGuestMode(init: BridgeInit): void;
     /** Returns a snapshot of the debug log (newest last). */
     getDebugLog(): DebugLogEntry[];
     /** Clears all entries from the debug log. */
@@ -11195,6 +11033,96 @@ export declare function useToolHost<T extends ToolHostServices = ToolHostService
  * @returns The loopback peer.
  */
 export declare function createLoopbackPeer(): IToolPeer;
+/** How long a summoned owner gets to register before waiting requests fail. */
+export declare const DEFAULT_SUMMON_TIMEOUT_MS = 30000;
+/** One side of a transport between two realms. */
+export interface IBusEndpoint {
+    /** Sends one message to the other side. */
+    post(message: unknown): void;
+    /** Subscribes to messages from the other side; returns unsubscribe. */
+    subscribe(cb: (message: unknown) => void): () => void;
+}
+/** What attaching a realm yields: the detach function and the realm's
+ *  retained-topic port (install it on the realm's ConnectionManager). */
+export interface IRealmAttachment {
+    /** Detach (rejects this realm's in-flight outbound requests). */
+    detach: () => void;
+    /** The realm's retained-topic transport (publish/subscribe/read over
+     *  the wire — the root's registry is the authority). */
+    retained: IRetainedPort;
+}
+/**
+ * Attaches a realm's op bus to the framework root over one endpoint.
+ *
+ * Outbound: unresolved requests/emitOps forward to the root; local
+ * registrations are announced (including ones made before attach — the bus
+ * replays them into the forwarder); retained publishes and topic interest
+ * ride their own wire kinds. Inbound: requests from the root (ops THIS
+ * realm registered) run against local handlers and answer by id; topic
+ * deliveries dispatch to local subscribers.
+ *
+ * @param bus - This realm's op bus.
+ * @param endpoint - Transport to the root.
+ * @returns The attachment (detach + retained port).
+ */
+export declare function attachRealmToRoot(bus: IOpBus, endpoint: IBusEndpoint): IRealmAttachment;
+/** Summon lookup: an activation thunk when the op's owner is INSTALLED but
+ *  not yet registered, null otherwise. Installed-only is the caller's
+ *  contract (pinned store tools + enabled builtins); summon NEVER installs. */
+export type SummonLookup = (op: string) => (() => void) | null;
+/** Router options. */
+export interface IBusRouterOptions {
+    /** The summon table (see {@link SummonLookup}). Absent = no summoning. */
+    summon?: SummonLookup;
+    /** How long a summoned owner gets to register. */
+    summonTimeoutMs?: number;
+    /** The root's retained-topic registry — THE authority realms publish to
+     *  and subscribe through. Absent = retained traffic from realms is
+     *  dropped (a root without the lane). */
+    retained?: IRetainedRegistry;
+}
+/** The framework root's router. */
+export interface IBusRouter {
+    /**
+     * Attaches one realm. Returns a detach function — detaching clears the
+     * realm's registrations and rejects every in-flight request routed to it.
+     *
+     * @param endpoint - Transport to the realm.
+     * @param label - For diagnostics ('sidebar', 'page:account', ...).
+     */
+    addRealm(endpoint: IBusEndpoint, label: string): () => void;
+    /**
+     * Pushes one fire-and-forget op to EVERY attached realm — the broker's
+     * mirror feed (connection/account/services state into each realm's local
+     * bus). Realms that registered no handler for the op drop it silently;
+     * this is the ONE root→all path, outside the registration routing.
+     */
+    broadcastEmitOp(op: string, params: unknown): void;
+    /** Disposes every realm attachment. */
+    dispose(): void;
+}
+/**
+ * Creates the router over the ROOT's own op bus. The root's bus gets a
+ * forwarder too, so root-initiated requests reach realm-registered ops
+ * through the same resolution path.
+ *
+ * @param rootBus - The framework root's op bus (the broker registers here).
+ * @param options - Summon configuration.
+ * @returns The router.
+ */
+export declare function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): IBusRouter;
+/**
+ * An in-process endpoint pair — the transport for two "realms" sharing one
+ * JS realm (cloud root↔local attachments, tests). Delivery is a microtask,
+ * matching postMessage semantics closely enough that code written against
+ * one transport behaves on the other.
+ *
+ * @returns Two connected endpoints.
+ */
+export declare function createLocalEndpointPair(): [
+    IBusEndpoint,
+    IBusEndpoint
+];
 declare const ERROR_MARKER = "__rrerr";
 interface IWireError {
     /** Discriminant — present only on a serialized error. */
@@ -12891,9 +12819,8 @@ export declare function createWorkspaceFs(bus: IWorkspaceFsBus): WorkspaceFs;
  * Sent by the shell to an iframe immediately after the iframe posts `view:ready`.
  *
  * Bootstraps the iframe's initial state: current CSS theme tokens, the
- * authenticated user (or null) with a blank `userToken`, the WebSocket
- * connection status, and the runtime API config values (RR_* keys) except
- * `RR_APIKEY` (#1022).
+ * authenticated user (or null), the WebSocket connection status, and all
+ * runtime API config values (RR_* keys).
  */
 export interface ShellInitMsg {
     type: "shell:init";
@@ -15922,11 +15849,6 @@ export declare const shellApi: {
     readonly getAppVersionOverride: typeof getAppVersionOverride;
     readonly applyAppVersionOverride: typeof applyAppVersionOverride;
     readonly versionedEntryUrl: typeof versionedEntryUrl;
-    readonly getIsolation: typeof getIsolation;
-    readonly SHELL_CAPS: readonly [
-        "appIsolation:1"
-    ];
-    readonly CapabilityDeniedError: typeof CapabilityDeniedError;
     readonly BxPlusSquare: IconComponent;
     readonly BxPlusSquareSolid: IconComponent;
     readonly BxLock: IconComponent;

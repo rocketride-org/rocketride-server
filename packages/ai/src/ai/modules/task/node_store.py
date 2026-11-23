@@ -92,8 +92,9 @@ def _served(index: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str], Dict
     for name, entry in index['nodes'].items():
         services = {file: json.loads(text) for file, text in entry['services'].items()}
         protocols = [service['protocol'].split(':')[0] for service in services.values() if 'protocol' in service]
-        # A node found on disk (a development tree, or the server still carries it) is the engine's own
-        if all(getServiceDefinition(provider) is not None for provider in protocols):
+        # A node found on disk (a development tree, or the server still carries it) is the engine's own;
+        # one with no service, a library others import, is placed only through their `requires`
+        if protocols and all(getServiceDefinition(provider) is not None for provider in protocols):
             continue
         for provider in protocols:
             if providers.setdefault(provider.lower(), name) != name:
@@ -122,9 +123,16 @@ def _replace_stale(index: Dict[str, Any]) -> None:
             continue
         try:
             with _unpacking:
-                node_packages.unpack(
-                    name, account.node_package(name, entry['sha256']), entry['sha256'], node_release.nodes_dir()
-                )
+                # The new copy may import a node not on disk, which no pipeline naming this one would place
+                for other in _with_requires([name], index['nodes']):
+                    sha256 = index['nodes'][other]['sha256']
+                    path = os.path.join(node_release.nodes_dir(), other)
+                    on_disk = node_packages.digest_of(path)
+                    # A folder with no digest is the server's own
+                    if other == name or (on_disk != sha256 and (on_disk is not None or not os.path.isdir(path))):
+                        node_packages.unpack(
+                            other, account.node_package(other, sha256), sha256, node_release.nodes_dir()
+                        )
         except Exception as e:
             warning(f"Node {name}: {folder} holds an earlier release's copy and could not be replaced ({e}); delete it")
             continue
@@ -197,9 +205,33 @@ def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
     return found
 
 
+def _with_requires(names: Iterable[str], nodes: Optional[Dict[str, Any]] = None) -> List[str]:
+    """The names with the nodes they import (the `requires` of nodes, by default the served ones), each after them.
+
+    A node is unpacked only once what it imports is, so a failed unpack never leaves one on disk without them:
+    after a restart the engine loads it as its own and nothing would place them.
+    """
+    nodes = _nodes if nodes is None else nodes
+    order: List[str] = []
+    seen: Set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in seen:
+            return
+        seen.add(name)
+        for other in sorted(nodes[name].get('requires', [])):
+            if other in nodes:
+                visit(other)
+        order.append(name)
+
+    for name in sorted(names):
+        visit(name)
+    return order
+
+
 def place(pipeline: Dict[str, Any]) -> List[str]:
     """Unpack into nodes/ each node the pipeline names that the server does not carry; the nodes placed."""
-    names = sorted({_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers})
+    names = _with_requires({_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers})
     with _unpacking:
         for name in names:
             sha256 = _nodes[name]['sha256']

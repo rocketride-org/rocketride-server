@@ -74,7 +74,11 @@ PLATFORM_DEVELOPER_ID = 'rocketride'
 # Paths no page may claim, segment-aware: every root route the engine serves
 # outside its public pages, and the three crawler files. test_reserved_routes
 # fails when a registered root route is missing here. /ping, /use, /shutdown,
-# /remote and /pipe belong to other server configurations.
+# /remote and /pipe belong to other server configurations; /db, /internal,
+# /marketplace/apps and /oauth to the SaaS extension, which that test does not
+# boot. Only /marketplace/apps: /marketplace itself is the home app's page.
+# A SaaS route missing here is still never a page (the live route check refuses
+# it); listing it reserves the whole prefix around it.
 RESERVED_PREFIXES = (
     '/.well-known',
     '/api',
@@ -82,10 +86,14 @@ RESERVED_PREFIXES = (
     '/auth',
     '/chat',
     '/client',
+    '/db',
     '/docs',
     '/dropper',
+    '/internal',
     '/llms.txt',
+    '/marketplace/apps',
     '/mcp',
+    '/oauth',
     '/openapi.json',
     '/ping',
     '/pipe',

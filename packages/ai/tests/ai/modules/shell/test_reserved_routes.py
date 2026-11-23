@@ -29,7 +29,13 @@ shadow the route or be shadowed by it.
 
 from __future__ import annotations
 
-from ai.modules.shell.contract import RESERVED_PREFIXES
+from fastapi.responses import PlainTextResponse
+
+import ai.modules.shell.public_pages as pp
+
+from ai.account import account
+from ai.modules.shell.contract import RESERVED_PREFIXES, check_manifest, reserved_error
+from ai.modules.shell.public_pages import Published
 
 from .engine_boot import boot_engine
 
@@ -48,3 +54,25 @@ def test_every_root_route_the_engine_serves_is_reserved(monkeypatch, tmp_path):
         if root != '/' and root not in RESERVED_PREFIXES and not all(o.startswith('ai.modules.shell') for o in owners)
     )
     assert not unreserved, f'add these root routes to RESERVED_PREFIXES: {unreserved}'
+
+
+def test_an_unreserved_account_route_is_still_never_claimable(monkeypatch, tmp_path):
+    # The SaaS overlay registers its routes in account.init_account, which the test
+    # above cannot boot. One missing from RESERVED_PREFIXES is still never a page:
+    # the publish gate and every aggregate build refuse a path a live route matches.
+    async def billing(request):
+        return PlainTextResponse('billing')
+
+    async def init_account(server):
+        server.add_route(path='/billing/{session}', routeHandler=billing, methods=['GET'])
+
+    monkeypatch.setattr(account, 'init_account', init_account)
+    manifest = {
+        'publicPages': [{'path': '/pricing', 'title': 'Pricing'}, {'path': '/billing/portal', 'title': 'Billing'}]
+    }
+    boot_engine(monkeypatch, tmp_path, [Published('rocketride.home', manifest)])
+
+    assert reserved_error('/billing/portal') is None
+    assert set(pp.current().exact) == {'/pricing'}
+    _, _, errors = check_manifest('rocketride.home', manifest, pp.live_conflict())
+    assert len(errors) == 1 and 'collides with the live server route GET /billing/{session}' in errors[0], errors

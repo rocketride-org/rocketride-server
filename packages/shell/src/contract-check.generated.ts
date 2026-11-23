@@ -863,8 +863,8 @@ import type { ConsentedReporter as Frozen_ConsentedReporter } from '../contract/
 import type { ConsentedReporter as Current_ConsentedReporter } from './api';
 import type { ConsentedCapture as Frozen_ConsentedCapture } from '../contract/versions/v12';
 import type { ConsentedCapture as Current_ConsentedCapture } from './api';
-import type { CapabilityDeniedError as Frozen_CapabilityDeniedError } from '../contract/versions/v14';
-import type { CapabilityDeniedError as Current_CapabilityDeniedError } from './api';
+import type { CommandException as Frozen_CommandException } from '../contract/versions/v14';
+import type { CommandException as Current_CommandException } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1735,5 +1735,5 @@ const _t_ConsentedReporter: Frozen_ConsentedReporter = {} as Current_ConsentedRe
 void _t_ConsentedReporter;
 const _t_ConsentedCapture: Frozen_ConsentedCapture = {} as Current_ConsentedCapture;
 void _t_ConsentedCapture;
-const _t_CapabilityDeniedError: Frozen_CapabilityDeniedError = {} as Current_CapabilityDeniedError;
-void _t_CapabilityDeniedError;
+const _t_CommandException: Frozen_CommandException = {} as Current_CommandException;
+void _t_CommandException;
