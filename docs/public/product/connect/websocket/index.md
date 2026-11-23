@@ -297,7 +297,10 @@ request.
 
 A text request therefore does its work while its `close` is in flight. A
 `cancel` reaches the request until that close returns, and the close then fails
-with `TASK_CANCELLED`; a request cancelled before its close is never run.
+with `TASK_CANCELLED`. A request cancelled before its close takes no more data
+(a later `write` fails with `TASK_CANCELLED`) and the text still held for it is
+never run. A cancel does not undo work already dispatched: the text a body over
+8 MiB sent on when it crossed the limit has reached the pipeline.
 
 ### When nothing reads the chosen lane
 
@@ -316,11 +319,13 @@ warning is the only signal that separates the two.
 Read the warnings from `get_task_status(token)['warnings']`, or subscribe to
 `apaevt_status_warning` (see [Observability](/connect/websocket/observability)).
 
-Note that the mismatch is symmetric: `text/plain` into a pipeline whose first
-component reads `json` fails exactly the way `application/json` fails into a
-`text`-first one. There is no single header that is correct for every pipeline,
-which is why the endpoint panel offers one example per lane and preselects the
-one the running pipeline reads.
+The fallback in the table covers one direction only. `application/json` into a
+pipeline that reads `text` and neither `json` nor raw is delivered on `text`.
+`text/plain` into a pipeline whose first component reads `json` still reaches
+nobody: a plain text body is never parsed into the `json` lane. There is no
+single header that is correct for every pipeline, which is why the endpoint
+panel offers one example per lane and preselects the one the running pipeline
+reads.
 
 ## Keepalive & timeouts
 

@@ -1096,6 +1096,26 @@ async def test_a_cancel_before_the_close_drops_the_held_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_write_after_a_cancel_is_refused_on_the_text_lane_too(monkeypatch):
+    """A cancelled request takes no more data. A text write never reaches the binder, so the frame refuses it itself."""
+    from ai.constants import CONST_TASK_CANCELLED_CODE
+    from ai.modules.data.data_conn import RequestCancelled
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn._cleanup_pipe = MagicMock()
+    await conn._write({}, {'pipeId': 1, 'data': b'first'})
+    await conn._cancel({}, {'pipeId': 1})
+
+    with pytest.raises(RequestCancelled) as err:
+        await conn._write({}, {'pipeId': 1, 'data': b'second'})
+    assert err.value.code == CONST_TASK_CANCELLED_CODE
+    assert not conn_pipe.has_failed, 'refused before dispatch: the refusal does not fail the pipe'
+
+    await conn._close({}, {'pipeId': 1})
+    conn_pipe.pipe.writeText.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_a_text_body_is_written_bound_to_its_request_tree(monkeypatch):
     """The held text runs the pipeline at the close: its metrics land in the request tree's bucket (plan 8.1)."""
     from ai.modules.data import data_conn as data_conn_mod

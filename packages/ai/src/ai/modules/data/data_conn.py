@@ -810,7 +810,9 @@ class DataConn(DAPConn):
         A pipe whose write already failed has reported its error, so it writes
         nothing and raises nothing here. A request cancelled before its close
         (``pipe.cancel()``) drops the held body the same way: the binder would
-        refuse it at the first node.
+        refuse it at the first node. What a body over ``TEXT_LANE_HOLD_BYTES``
+        already sent on is not undone: that text reached the pipeline when the
+        limit was crossed.
 
         This write is where a text request's pipeline work happens, so the
         caller runs it bound to the request tree (``_in_trace``) and keeps the
@@ -1167,6 +1169,14 @@ class DataConn(DAPConn):
         if not conn_pipe.is_open:
             raise ValueError(f'Write pipe with id {pipe_id} is not open')
 
+        # A cancelled request takes no more data, and says so with its own
+        # code. The binder would refuse the write at the first node, but a
+        # text write never reaches the binder: it is held until the close, so
+        # without this check it would be accepted and then dropped unseen.
+        # Refused before dispatch, so the pipe is not marked failed by it
+        if conn_pipe.cancelled:
+            raise RequestCancelled(f'Pipe {pipe_id}: the request was cancelled')
+
         if conn_pipe.has_failed:
             raise ValueError(f'Write pipe with id {pipe_id} has failed')
 
@@ -1294,8 +1304,9 @@ class DataConn(DAPConn):
         NOT removed. The write in flight fails with ``TASK_CANCELLED`` when the
         binder next crosses a node, and the client's close then runs as
         usual and releases the slot. A pipe with no write in flight is
-        flagged all the same: its next write fails at once. Cancel is
-        activity for the zombie timer.
+        flagged all the same: its next write fails at once, on every lane
+        (``_write`` refuses it before dispatch, so a text write is not
+        held for the close). Cancel is activity for the zombie timer.
 
         Args:
             request: The DAP request.
