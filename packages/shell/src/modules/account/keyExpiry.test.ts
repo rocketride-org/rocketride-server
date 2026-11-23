@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { revealedKeyExpiry, utcDay } from './keyExpiry';
+import { resolveCreateKey, revealedKeyExpiry, utcDay } from './keyExpiry';
 
 test('a "never expires" request capped by the server shows the granted date, marked as bounded', () => {
 	assert.deepEqual(revealedKeyExpiry(undefined, '2027-02-03T10:00:00'), { expiresAt: '2027-02-03T10:00:00', bounded: true });
@@ -49,4 +49,18 @@ test('the expiry day is the UTC day, not the viewer\'s local day', () => {
 	assert.equal(utcDay('2027-02-03T02:00:00Z'), '2027-02-03');
 	assert.equal(utcDay('2027-02-03T23:30:00-05:00'), '2027-02-04');
 	assert.equal(utcDay('not a date'), 'not a date');
+});
+
+test('a legacy key-only host callback that returns a numeric expiresAt is narrowed to the key', async () => {
+	const legacy = async () => ({ key: 'k1', expiresAt: 1893456000 });
+	const create = resolveCreateKey(undefined, legacy);
+	assert.deepEqual(await create({ name: 'n', permissions: [] }), { key: 'k1' });
+});
+
+test('an expiry-aware host callback is used as-is, for a timestamp, null or omitted expiry', async () => {
+	const legacy = async () => ({ key: 'legacy' });
+	for (const expiresAt of ['2027-02-03T10:00:00', null, undefined]) {
+		const create = resolveCreateKey(async () => ({ key: 'k2', expiresAt }), legacy);
+		assert.deepEqual(await create({ name: 'n', permissions: [] }), { key: 'k2', expiresAt });
+	}
 });

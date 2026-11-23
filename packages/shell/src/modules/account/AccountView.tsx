@@ -26,6 +26,7 @@ import type { ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ViewMenu } from '../../types/viewMenu';
 import type { IDataGridPageRequest } from '../../components/data-grid/DataGrid';
 import { commonStyles } from '../../themes/styles';
+import type { CreateKeyResult } from 'rocketride';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from './types';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
 import type { ActiveTask } from '../billing/components/BillingDashboard';
@@ -33,6 +34,7 @@ import { ProfilePanel } from './components/ProfilePanel';
 import { ProfileSection } from './components/ProfileSection';
 // EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';
+import { resolveCreateKey } from './keyExpiry';
 import { ApiKeysPanel } from './components/ApiKeysPanel';
 import { OrganizationPanel } from './components/OrganizationPanel';
 import { TeamsPanel } from './components/TeamsPanel';
@@ -244,8 +246,15 @@ export interface IAccountViewProps {
 	onDeleteAccount?: () => Promise<void>;
 	/** Persists an updated organization name. */
 	onSaveOrgName: (name: string) => Promise<void>;
-	/** Creates a new API key and returns the raw key string. `expiresAt` is the expiry the server granted: null means the key does not expire, absent means the server did not report it, a timestamp is the granted expiry (it may be earlier than requested). */
-	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string; expiresAt?: string | null }>;
+	/** Creates a new API key and returns the raw key string. Key-only: any extra fields a host returns are ignored (see `onCreateKeyWithExpiry`). */
+	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string }>;
+	/**
+	 * Expiry-aware variant of `onCreateKey`: resolves with the key and the expiry
+	 * the server GRANTED (a timestamp, null for none, or omitted when unreported).
+	 * When provided it is used instead of `onCreateKey`, so the reveal can show a
+	 * capped expiry.
+	 */
+	onCreateKeyWithExpiry?: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<CreateKeyResult>;
 	/** Revokes an API key by its ID. */
 	onRevokeKey: (keyId: string) => Promise<void>;
 	/** Sends an invitation to a new organization member. */
@@ -286,7 +295,10 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, embeddedSection, onNavigateSection, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, embeddedSection, onNavigateSection, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onCreateKeyWithExpiry, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+
+	/** Create-key callback: the expiry-aware one when the host gave it, else the key-only one. */
+	const createKey = useMemo(() => resolveCreateKey(onCreateKeyWithExpiry, onCreateKey), [onCreateKeyWithExpiry, onCreateKey]);
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -399,7 +411,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="API Keys" subtitle="Create and revoke keys for programmatic access." />
 						<div style={commonStyles.tabContent}>
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
+							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={createKey} onRevokeKey={onRevokeKey} />
 						</div>
 					</>
 				),
@@ -438,7 +450,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onCreateKeyWithExpiry, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================
@@ -514,7 +526,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<div style={commonStyles.tabContent}>
 							{chip}
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
+							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={createKey} onRevokeKey={onRevokeKey} />
 						</div>
 					</>
 				)}

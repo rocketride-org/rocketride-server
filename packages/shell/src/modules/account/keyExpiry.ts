@@ -67,3 +67,17 @@ export function utcDay(iso: string): string {
 	const ms = wireMillis(iso);
 	return Number.isNaN(ms) ? iso : new Date(ms).toISOString().slice(0, 10);
 }
+
+/** Parameters of a create-key request. */
+type CreateKeyParams = { name: string; permissions: string[]; expiresAt?: string; teamId?: string };
+
+/**
+ * Pick the create-key callback the panel calls. An expiry-aware host callback
+ * is used as-is. A legacy key-only callback is narrowed to `{ key }` so a
+ * stray extra field (an older host returned a numeric `expiresAt`) is never
+ * read as a granted expiry: the reveal then shows the requested one, as before.
+ */
+export function resolveCreateKey(withExpiry: ((params: CreateKeyParams) => Promise<{ key: string; expiresAt?: string | null }>) | undefined, legacy: (params: CreateKeyParams) => Promise<{ key: string }>): (params: CreateKeyParams) => Promise<{ key: string; expiresAt?: string | null }> {
+	if (withExpiry) return withExpiry;
+	return async (params) => ({ key: (await legacy(params)).key });
+}
