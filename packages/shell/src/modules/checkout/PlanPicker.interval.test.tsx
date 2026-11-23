@@ -48,16 +48,21 @@ test('an explicit interval toggle shows that interval even when the kept selecti
 	assert.doesNotMatch(text, /Starter month/);
 });
 
-test('a catalog refresh still keeps the selected plan visible', async (t) => {
+test('a kept selection stays visible at its own interval when the toggle starts elsewhere', async (t) => {
 	const dom = new JSDOM('<div id="app"></div>', { url: 'https://shell.example.invalid' });
 	Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
 	const container = dom.window.document.getElementById('app')!;
 	const root = createRoot(container);
 	t.after(() => act(() => root.unmount()));
 
-	// The selection was made from a yearly-only catalog; the refresh adds monthly prices and the toggle.
+	// Both intervals exist from the start and the picker defaults to monthly, so
+	// only keepSelectedPlanVisible can show the yearly selection.
 	const proYear = plan('Pro', 'year', 2);
-	await act(async () => root.render(<PlanPicker plans={[proYear]} selectedPlan={proYear} defaultInterval="month" keepSelectedPlanVisible />));
-	await act(async () => root.render(<PlanPicker plans={[plan('Pro', 'month', 2), proYear]} selectedPlan={proYear} defaultInterval="month" keepSelectedPlanVisible />));
+	const both = [plan('Pro', 'month', 2), proYear];
+	await act(async () => root.render(<PlanPicker plans={both} selectedPlan={proYear} defaultInterval="month" keepSelectedPlanVisible />));
 	assert.match(container.textContent ?? '', /Pro year/);
+	// A refreshed catalog (new array, same prices) keeps it too.
+	await act(async () => root.render(<PlanPicker plans={[...both]} selectedPlan={proYear} defaultInterval="month" keepSelectedPlanVisible />));
+	assert.match(container.textContent ?? '', /Pro year/);
+	assert.doesNotMatch(container.textContent ?? '', /Pro month/);
 });
