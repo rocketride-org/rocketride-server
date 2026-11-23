@@ -909,6 +909,9 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
     for dirpath, _dirs, files in os.walk(ws_dir):
         for name in files:
             path = os.path.join(dirpath, name)
+            # Case-insensitive: on a case-insensitive filesystem 'Postcss.config.js'
+            # is the file the loader finds. `path` keeps the real spelling.
+            name = name.lower()
             if name in names:
                 with open(path, 'w', encoding='utf-8') as handle:
                     handle.write(_inert_config(name, _package_is_module(path, ws_dir)))
@@ -948,7 +951,7 @@ def _remove_pnpm_configs(ws_dir: str) -> List[str]:
     removed: List[str] = []
     for dirpath, _dirs, files in os.walk(ws_dir):
         for name in files:
-            if name in _REMOVED_CONFIG_FILES:
+            if name.lower() in _REMOVED_CONFIG_FILES:
                 path = os.path.join(dirpath, name)
                 os.remove(path)
                 removed.append(os.path.relpath(path, ws_dir).replace(os.sep, '/'))
@@ -970,7 +973,7 @@ def _filter_env_files(app_dir: str) -> None:
         return
     for name in names:
         path = os.path.join(app_dir, name)
-        if not name.startswith('.env') or not os.path.isfile(path):
+        if not name.lower().startswith('.env') or not os.path.isfile(path):
             continue
         with open(path, 'r', encoding='utf-8', errors='replace') as handle:
             kept = []
@@ -1879,7 +1882,7 @@ class AppBuildWorker:
                 raise BuildFailure('materialize', f'zip entry has an unsafe path: {item.filename!r}')
             # A shipped package tree would be resolved (and its code run)
             # in place of what pnpm installs — the client never packs one.
-            if 'node_modules' in name.split('/'):
+            if 'node_modules' in [part.lower() for part in name.split('/')]:
                 raise BuildFailure(
                     'materialize', f'zip entry {item.filename!r} is inside node_modules — packs must not ship packages'
                 )

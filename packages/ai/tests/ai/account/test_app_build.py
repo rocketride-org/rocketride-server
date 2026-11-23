@@ -1033,6 +1033,16 @@ async def test_zip_entries_under_node_modules_are_refused(monkeypatch, build_sto
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['Node_Modules/typescript/bin/tsc', 'apps/brandy-ui/NODE_MODULES/x.js'])
+async def test_zip_node_modules_check_is_case_insensitive(monkeypatch, build_store, toolchain, entry):
+    zip_bytes = _hardening_zip({entry: '// inert placeholder'})
+    rail, fake = await _run_capturing(monkeypatch, zip_bytes)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
 async def test_zip_entries_with_a_bang_in_the_path_are_refused(monkeypatch, build_store, toolchain):
     """No app path may contain '!', the bundler's request separator, so a
     resolved request cannot be forged by a file or folder name.
@@ -1433,6 +1443,31 @@ def test_env_files_drop_public_lines_with_command_substitution(tmp_path):
     _write(app / '.env', 'PUBLIC_A=ok\nPUBLIC_B=$(id)\nPUBLIC_C=`id`\nexport PUBLIC_D=x$(y)\nPUBLIC_E=$VAR\n')
     app_build._filter_env_files(str(app))
     assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=ok', 'PUBLIC_E=$VAR']
+
+
+def test_config_and_env_name_checks_are_case_insensitive(tmp_path):
+    """Case-insensitive filesystems resolve 'Postcss.config.js', '.NPMRC',
+    'Package.json' and '.ENV.local' to the real tool files; every name check
+    folds case, and a lookalike directory name is left alone.
+    """
+    ws = tmp_path / 'ws'
+    _write(ws / 'Postcss.config.js', 'MARKER-plugin\n')
+    _write(ws / '.NPMRC', 'x\n')
+    _write(ws / 'node_modules_extra' / 'keep.txt', 'k')
+    _write(ws / '.ENV.local', 'PUBLIC_A=ok\nSECRET=x\n')
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert 'MARKER' not in (ws / 'Postcss.config.js').read_text(encoding='utf-8')
+    assert app_build._remove_pnpm_configs(str(ws)) == ['.NPMRC']
+    app_build._filter_env_files(str(ws))
+    assert (ws / '.ENV.local').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=ok']
+    assert (ws / 'node_modules_extra' / 'keep.txt').is_file()
+
+
+def test_package_json_name_is_matched_case_insensitively(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / 'Package.json', json.dumps({'name': 'x', 'dependencies': {'dep': 'link:../x'}}))
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
 
 
 def test_neutralize_reports_what_it_ignored_and_tolerates_a_bom(tmp_path):
