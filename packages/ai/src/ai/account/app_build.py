@@ -410,7 +410,9 @@ def _kill_tree(proc: Any) -> None:
             pass  # already gone
 
 
-async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) -> Tuple[int, str]:
+async def _exec(
+    argv: List[str], cwd: str, timeout: int, on_line: Any = None, pass_fds: Tuple[int, ...] = ()
+) -> Tuple[int, str]:
     """Run one toolchain command; ``(exit_code, combined_output)``.
 
     THE seam every external tool runs through (tests patch it). Windows
@@ -421,6 +423,7 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
     ARRIVES — the live build feed. Output is read incrementally either way;
     the returned transcript keeps the same head+tail truncation as before.
     The timeout is the OVERALL phase deadline, enforced across every read.
+    ``pass_fds`` (POSIX) are extra descriptors the child inherits.
 
     Raises:
         BuildInfraFailure: The command could not be SPAWNED (missing binary,
@@ -439,6 +442,7 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
             stderr=asyncio.subprocess.STDOUT,
             limit=_SUBPROCESS_BUFFER,
             start_new_session=(os.name != 'nt'),
+            **({'pass_fds': pass_fds} if pass_fds else {}),
         )
     except Exception as exc:
         raise BuildInfraFailure('spawn', f'could not start {argv[0]!r}: {exc}')
@@ -492,12 +496,38 @@ async def _exec_compiler(
         isolated = app_build_sandbox.command(argv, cwd, job_dir, env_dir)
     except app_build_sandbox.SandboxUnavailable as exc:
         raise BuildInfraFailure('sandbox', str(exc)) from exc
-    code, out = await _exec(isolated, cwd, timeout, on_line=on_line)
+    status_read = status_write = None
+    if os.path.basename(isolated[0]) == 'bwrap' and os.name != 'nt':
+        # bwrap writes its child pid here only once the sandbox is set up, so "exited non-zero
+        # and wrote no pid" is a startup failure, while anything else is the compiler's own
+        # result. The compiler's output is app-controlled and never decides this.
+        status_read, status_write = os.pipe()
+        isolated = [isolated[0], '--info-fd', str(status_write), *isolated[1:]]
+    try:
+        if status_write is None:
+            code, out = await _exec(isolated, cwd, timeout, on_line=on_line)
+        else:
+            code, out = await _exec(isolated, cwd, timeout, on_line=on_line, pass_fds=(status_write,))
+        started = None
+        if status_read is not None:
+            # The parent still holds the write end, so the pipe never reports EOF; the read is
+            # non-blocking and bounded by the few bytes bwrap wrote, so it cannot hang.
+            os.set_blocking(status_read, False)
+            try:
+                started = bool(os.read(status_read, 4096))
+            except BlockingIOError:
+                started = False
+    finally:
+        for fd in (status_read, status_write):
+            if fd is not None:
+                os.close(fd)
     # The sandbox itself failed to start (e.g. a kernel that denies user namespaces):
     # an infrastructure failure to retry or alert on, not a compile error for the developer.
-    failure = app_build_sandbox.startup_failure(isolated, code, out)
+    failure = app_build_sandbox.startup_failure(isolated, code, out, started)
     if failure is not None:
-        raise BuildInfraFailure('sandbox', f'app build sandbox could not start: {failure}')
+        # The provider's text can carry host paths: it goes to the operator log only.
+        error(f'[app_build] sandbox could not start (exit {code}): {failure}')
+        raise BuildInfraFailure('sandbox', 'app build sandbox could not start')
     return code, out
 
 

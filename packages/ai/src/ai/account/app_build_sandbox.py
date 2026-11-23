@@ -131,13 +131,14 @@ def command(argv: List[str], cwd: str, job_dir: str, toolchain_dir: str) -> List
     raise SandboxUnavailable('no filesystem sandbox provider is available on this platform')
 
 
-# Providers print their own startup failures as `<provider>: <message>` on stderr,
-# which the build merges into its transcript. A compiler diagnostic never begins
-# a line that way.
-_STARTUP_ERROR = re.compile(r'^(?:bwrap|sandbox-exec): (?P<message>.+)$')
+# sandbox-exec prints its own startup failures as `sandbox-exec: <message>`. It has no
+# status channel, so a message counts only when the output is nothing but such lines and
+# none of them is shaped like a compiler diagnostic (an app file may be named to look like one).
+_SEATBELT_ERROR = re.compile(r'^sandbox-exec: (?P<message>.+)$')
+_DIAGNOSTIC = re.compile(r'\(\d+,\d+\): (?:error|warning) |: error TS\d+')
 
 
-def startup_failure(argv: List[str], code: int, output: str) -> Optional[str]:
+def startup_failure(argv: List[str], code: int, output: str, started: Optional[bool] = None) -> Optional[str]:
     """The provider's own message when the sandbox failed to start, else None.
 
     A kernel that denies user namespaces (or a Seatbelt refusal) makes the
@@ -145,18 +146,29 @@ def startup_failure(argv: List[str], code: int, output: str) -> Optional[str]:
     fault, not the app's: callers raise an infrastructure failure, never a
     compile error the developer is asked to fix.
 
+    bwrap is decided by its own status channel, never by its text, because the
+    compiler's output is app-controlled: ``started`` says whether bwrap wrote
+    its child pid (``--info-fd``), which it does only once the sandbox is set up.
+
     Args:
         argv: The command line that ran (the sandboxed one, or the bare one).
         code: Its exit code.
         output: Its merged stdout and stderr.
+        started: For bwrap, whether it reported a child pid; None when unknown.
     """
-    if code == 0 or not argv or os.path.basename(argv[0]) not in ('bwrap', 'sandbox-exec'):
+    if code == 0 or not argv:
         return None
-    # The provider fails before the compiler runs, so its message is all there is. A line that
-    # only begins that way inside compiler output (a file of the app named "bwrap: ...") is a
-    # diagnostic, and any other line makes the whole output the compiler's.
-    lines = [line for line in output.splitlines() if line.strip()]
-    found = [_STARTUP_ERROR.match(line) for line in lines]
-    if not found or not all(found):
-        return None
-    return found[0].group('message').strip()[:500]
+    provider = os.path.basename(argv[0])
+    if provider == 'bwrap':
+        if started is not False:
+            return None
+        first = next((line.strip() for line in output.splitlines() if line.strip()), '')
+        first = first[len('bwrap: ') :] if first.startswith('bwrap: ') else first
+        return (first or f'bwrap exited with status {code} before the sandbox started')[:500]
+    if provider == 'sandbox-exec':
+        lines = [line for line in output.splitlines() if line.strip()]
+        found = [_SEATBELT_ERROR.match(line) for line in lines]
+        if not found or not all(found) or any(_DIAGNOSTIC.search(line) for line in lines):
+            return None
+        return found[0].group('message').strip()[:500]
+    return None
