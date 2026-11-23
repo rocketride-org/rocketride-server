@@ -90,6 +90,10 @@ def validate_credential_provider(account: Any) -> None:
     provider = getattr(account, 'live_credentials', None)
     if enabled and (not callable(provider) or getattr(provider, '__func__', None) is AccountBase.live_credentials):
         raise RuntimeError('Account overlay must implement live_credentials before enabling it')
+    # Live credentials alone leave every sys.* holder permanently gated: the
+    # authority stamp is only ever refreshed by a live_authority read.
+    if enabled and not getattr(account, 'supports_live_authority', False):
+        raise RuntimeError('Account overlay enabling live credentials must also enable live authority')
 
 
 class AuthzRecheck:
