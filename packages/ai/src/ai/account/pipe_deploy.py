@@ -554,6 +554,9 @@ def pipe_catalog_row(pipe_name: str, entry: Dict[str, Any]) -> Optional[Dict[str
         'mode': str(manifest.get('mode') or 'free'),
         'version': version,
     }
+    # The author's own version (the store block's semver), when the block declares one
+    if manifest.get('version'):
+        row['appVersion'] = str(manifest['version'])
     # Omitted (not None) when undeclared, as an app row omits them
     for key in ('icon', 'readme'):
         url = artifact_file_url('pipe', pipe_name, version, manifest.get(key))
@@ -782,8 +785,10 @@ def pipe_catalog_entry(pipe_name: str, entry: Optional[Dict[str, Any]], rung: st
     The catalog row (:func:`pipe_catalog_row`) in an app entry's shape, plus
     what launches it: ``kind: 'pipe'``, the address in ``pipe``, and the one
     host app in ``hostAppId`` (``CONST_PIPE_HOST_APP_ID``), whose module the
-    entry names as its ``moduleId``. The row's registry version number is
-    dropped: an app entry's ``version`` is a semver, and a
+    entry names as its ``moduleId``. ``version`` is the author's own version
+    (the store block's semver), absent when the block declares none, exactly
+    as an app entry's is its package version. The row's registry version
+    number is dropped: an app entry's ``version`` is a semver, and a
     ``registryVersion`` would make a client register the entry as a Module
     Federation remote of its own; an agent tile is a launcher of its host,
     never a remote. ``appStatus`` and ``onDesktop`` are the undecorated
@@ -802,6 +807,10 @@ def pipe_catalog_entry(pipe_name: str, entry: Optional[Dict[str, Any]], rung: st
     if row is None:
         return None
     row.pop('version', None)
+    # What a tile shows as the version is the author's semver, as an app's is
+    app_version = row.pop('appVersion', '')
+    if app_version:
+        row['version'] = app_version
     row.update(
         {
             'kind': 'pipe',

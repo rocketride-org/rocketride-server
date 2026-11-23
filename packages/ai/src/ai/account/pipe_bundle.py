@@ -47,6 +47,7 @@ door's (``app_deploy._zip_guard``): one bomb rule for every kind.
 
 import io
 import json
+import re
 import zipfile
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -71,7 +72,12 @@ MAX_PIPE_FILE_BYTES = 10 * 1024 * 1024
 PIPE_STORE_DIR = 'store'
 
 #: The keys of the root ``store`` block; anything else refuses the deploy.
-STORE_KEYS = frozenset({'tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode', 'billing'})
+STORE_KEYS = frozenset({'tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode', 'billing', 'version'})
+
+#: The pipeline's own version, set by its author as an app's is in package.json:
+#: major.minor.patch with an optional pre-release tag. It is what a tile shows;
+#: the registry's version NUMBER stays what a deploy or a pin names.
+STORE_VERSION = re.compile(r'^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')
 
 #: The listing modes, the app model (plan 8.4).
 STORE_MODES = ('free', 'subscription', 'paywall')
@@ -164,6 +170,10 @@ def validate_store_block(pipeline: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not isinstance(block['tagline'], str):
             raise ValueError('store.tagline must be a string')
         out['tagline'] = block['tagline']
+    if 'version' in block:
+        if not isinstance(block['version'], str) or not STORE_VERSION.match(block['version']):
+            raise ValueError('store.version must be a version such as 1.0.0 (major.minor.patch)')
+        out['version'] = block['version']
     for key in ('categories', 'tags'):
         if key in block:
             out[key] = _string_list(key, block[key])
@@ -195,10 +205,11 @@ def default_store_block() -> Dict[str, Any]:
     to store beside the artifact.
 
     Returns:
-        The block: ``tagline``, ``categories``, ``tags``, ``links``, ``mode``
-        and ``billing``.
+        The block: ``version``, ``tagline``, ``categories``, ``tags``,
+        ``links``, ``mode`` and ``billing``.
     """
     return {
+        'version': '1.0.0',
         'tagline': '',
         'categories': ['pipeline'],
         'tags': [],
@@ -310,6 +321,10 @@ def pipe_manifest(pipeline: Dict[str, Any], block: Dict[str, Any]) -> Dict[str, 
         'links': dict(block.get('links') or {}),
         'mode': str(block.get('mode') or 'free'),
     }
+    # The author's version, when the block declares one (a block written
+    # before the key existed declares none, and its tile shows none)
+    if block.get('version'):
+        manifest['version'] = str(block['version'])
     if block.get('billing'):
         manifest['billing'] = {'plans': list(block['billing'].get('plans') or [])}
     return manifest

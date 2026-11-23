@@ -145,9 +145,11 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 	const iconRef = useRef<HTMLImageElement | null>(null);
 
 	// Both or neither: reading an override we could never clear would strand
-	// the user — without the pair the version is a plain label.
+	// the user — without the pair the version is a plain label. An agent's
+	// version is always a plain label: the switcher repoints an app's bundle,
+	// and an agent has none of its own (it opens its host).
 	const versionOverridesSupported =
-		typeof adapter.getVersionOverride === 'function' && typeof adapter.applyVersionOverride === 'function';
+		!isAgent(app) && typeof adapter.getVersionOverride === 'function' && typeof adapter.applyVersionOverride === 'function';
 
 	// Browser-cached images may not fire onLoad; mark loaded if already complete.
 	useEffect(() => {
