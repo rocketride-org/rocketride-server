@@ -146,8 +146,11 @@ rendered public pages for browsers and crawlers, the shell's HTML 404 page,
 prerendered pages and any other HTML under the shell root) with
 `Content-Security-Policy: frame-ancestors 'self' vscode-webview: vscode-file:`
 and `Cross-Origin-Opener-Policy: same-origin-allow-popups`. `/apps/`,
-`/chat/`, `/dropper/` and static assets are unchanged. Only the shell's own
-origin and the desktop VS Code webview can frame the shell. Any VS Code
+`/chat/`, `/dropper/` and static assets are unchanged. When the engine serves the shell documents, only the shell's own
+origin and the desktop VS Code webview can frame the shell. A CDN or proxy in
+front of the shell that serves or caches these documents must be configured to
+send the same `Content-Security-Policy` and `Cross-Origin-Opener-Policy`
+headers; until it does, the guarantee does not hold for that deployment. Any VS Code
 extension's webview matches `vscode-webview:`, so any installed extension can
 frame it; the design accepts this. COOP severs the opener: a cross-origin
 page that opens the shell with `window.open` still opens it but gets no
