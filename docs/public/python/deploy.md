@@ -146,7 +146,9 @@ the zip or with a `.` or empty segment, two entries with one path, an icon
 outside the node or one that carries anything but a drawing, or a requirement
 line with an index, a URL or a local path. Those rules check what a package
 declares; its code runs inside the runs of everyone it is published to, with
-their keys, so publish a node only to people who trust it.
+their keys, so publish a node only to people who trust it. A run that uses a
+published node does not get the server's object store, its signing key or its AWS
+identity, so `tool_filesystem` and fetch URLs do not work in that run.
 
 A run gets, when it is launched, the version bound to the caller's own rung,
 else a team's, and keeps it until it ends. The catalogue and validation show the

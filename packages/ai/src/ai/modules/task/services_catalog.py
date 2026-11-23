@@ -213,11 +213,16 @@ async def _get_catalog(published: Optional[Dict[str, Dict[str, Any]]] = None) ->
     global _catalog
     if published:
         key = tuple(sorted((node_id, row['snapshot']['sha256']) for node_id, row in published.items()))
-        if key not in _published:
+        if key in _published:
+            return _published[key]
+        # As below: a build that invalidate() overtook answers its caller but is not cached
+        generation = _generation
+        built = await asyncio.to_thread(_build, published)
+        if generation == _generation:
             if len(_published) >= _PUBLISHED_MAX:
                 _published.clear()
-            _published[key] = await asyncio.to_thread(_build, published)
-        return _published[key]
+            _published[key] = built
+        return built
     if _catalog is not None:
         return _catalog
     async with _lock:

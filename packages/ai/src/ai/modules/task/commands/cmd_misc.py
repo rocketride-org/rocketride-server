@@ -480,7 +480,10 @@ class MiscCommands(DAPConn):
                 message = 'Pipeline has multiple source components, please specify one explicitly. ' + message
             self.debug_message(f'Pipeline validation failed: {message}')
             if substituted:
-                raise RuntimeError(message) from None
+                redacted = RuntimeError(message)
+                # A node error keeps its code, NODE_NOT_ENTITLED for one
+                redacted.code = getattr(e, 'code', None)
+                raise redacted from None
             raise
 
     async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:

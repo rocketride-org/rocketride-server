@@ -450,3 +450,19 @@ def test_a_published_node_the_run_was_not_resolved_for_is_refused_even_nested(se
 
     # Named as resolved, whatever the case
     node_store.place({'components': [{'provider': 'ACME.echo'}]}, {'acme__echo': ('v1', b'one')}, 'tk_a')
+
+
+def test_a_launch_that_fails_to_unpack_one_published_node_leaves_none_behind(server, in_use, monkeypatch):
+    def unpack(name, data, sha256, nodes_dir):
+        if name == 'acme__ping':
+            raise OSError('disk full')
+        _unpacked_before(server, name, sha256)
+
+    monkeypatch.setattr(node_store.node_packages, 'unpack', unpack)
+
+    with pytest.raises(OSError):
+        node_store.place({'components': []}, {'acme__echo': ('v1', b'one'), 'acme__ping': ('p1', b'p')}, 'tk_a')
+    node_store.release('tk_a')
+
+    assert not os.path.exists(os.path.join(server['nodes'], 'acme__echo'))
+    assert node_store._in_use == {}

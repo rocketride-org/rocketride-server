@@ -688,7 +688,8 @@ class TestPublishOwner:
             await backend.publish('org-1', 'acme.node', {'kind': 'node', 'v': 2}, other, owner='someone-else')
 
         assert [v['version'] for v in await backend.versions('org-1', 'acme.node')] == [1]
-        assert (await backend.publish('org-1', 'acme.node', {'kind': 'node', 'v': 2}, ACTOR, owner=ACTOR['userId']))['version'] == 2
+        mine = await backend.publish('org-1', 'acme.node', {'kind': 'node', 'v': 2}, ACTOR, owner=ACTOR['userId'])
+        assert mine['version'] == 2
 
     async def test_two_first_publishes_at_once_both_land(self, backend):
         await asyncio.gather(*(backend.publish('org-1', 'acme.p', {'n': n}, ACTOR) for n in range(5)))

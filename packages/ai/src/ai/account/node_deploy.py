@@ -178,7 +178,11 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
     if not developer_id:
         raise NodePackageInvalid('Uploading a node requires a registered developer id')
     # Lowercase only: the catalogue keys a node by its lowercased id, and some file systems ignore case
-    if not re.fullmatch(r'[a-z][a-z0-9_]*', module) or module_of(node_id) != module or not node_id.startswith(f'{developer_id}.'):
+    if (
+        not re.fullmatch(r'[a-z][a-z0-9_]*', module)
+        or module_of(node_id) != module
+        or not node_id.startswith(f'{developer_id}.')
+    ):
         raise NodePackageInvalid(f'The node id {node_id!r} must be {developer_id}.<name>, in lowercase')
 
     files = {entry.filename[len(module) + 1 :]: entry for entry in entries if not entry.is_dir()}
@@ -472,6 +476,24 @@ async def resolve_nodes(org_id: str, user_id: str, team_ids: List[str], names: L
     return {name: entitled[name] for name in wanted}
 
 
+async def resolve_pipeline_nodes(reach: Optional[tuple], pipeline: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    resolve_nodes for every provider an expanded pipeline names, nested ones (autopipe's steps) included.
+
+    Args:
+        reach: (org id, user id, team ids) the run resolves for; None resolves nothing.
+        pipeline: The pipeline after ``${...}`` expansion, the one that runs.
+    """
+    from ai.modules.task import node_store
+
+    if not reach:
+        return {}
+    org_id, user_id, team_ids = reach
+    return await resolve_nodes(
+        org_id, user_id, team_ids, sorted(node_store._providers_of(pipeline.get('components', [])))
+    )
+
+
 def _identity(conn: Any) -> tuple:
     """(org, user, team ids) of an authenticated connection."""
     return _org_of(conn), conn._account_info.userId, list(_team_ids_of(conn).values())
@@ -496,8 +518,10 @@ async def visible_nodes(conn: Any) -> Dict[str, Dict[str, Any]]:
 
 
 async def nodes_for(conn: Any, components: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """The published nodes a pipeline names, resolved for this caller; refuses one they cannot run."""
-    names = [component.get('provider', '') for component in components]
+    """The published nodes a pipeline names, nested ones included, resolved for this caller; refuses one they cannot run."""
+    from ai.modules.task import node_store
+
+    names = sorted(node_store._providers_of(components))
     if not getattr(conn, '_account_info', None):
         return await resolve_nodes('local', '', [], names)
     return await resolve_nodes(*_identity(conn), names)

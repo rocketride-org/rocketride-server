@@ -284,15 +284,15 @@ def place(
                     f'Another run on this server uses another version of {node_packages.node_of(module)}; '
                     'start this one when it ends'
                 )
+        # A restart keeps what it still names; held before unpacking, so release(run) removes a partial placement
+        _release(run, keep=published)
+        for module, (digest, _) in published.items():
+            _in_use.setdefault(module, {})[run] = digest
         for name in names + sorted(published):
             sha256, data = published.get(name) or (_nodes[name]['sha256'], None)
             # Already unpacked: the package is not read, so a launch does not open the node archive
             if node_packages.digest_of(os.path.join(nodes_dir, name)) != sha256:
                 node_packages.unpack(name, data or account.node_package(name, sha256), sha256, nodes_dir)
-        # A restart keeps what it still names
-        _release(run, keep=published)
-        for module, (digest, _) in published.items():
-            _in_use.setdefault(module, {})[run] = digest
     return names + sorted(published)
 
 
