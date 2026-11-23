@@ -142,7 +142,7 @@ through rsbuild's own HMR/live-reload client (`ws://localhost:<port>`), so no
 server push is involved.
 
 **Framing (#1022).** The engine serves shell documents (the SPA page,
-rendered public pages for browsers and crawlers, public HTML error pages,
+rendered public pages for browsers and crawlers, the shell's HTML 404 page,
 prerendered pages and any other HTML under the shell root) with
 `Content-Security-Policy: frame-ancestors 'self' vscode-webview: vscode-file:`
 and `Cross-Origin-Opener-Policy: same-origin-allow-popups`. `/apps/`,
@@ -188,9 +188,10 @@ only `/chat/` and `/dropper/` paths are framed. These are first-party engine
 pages and run with the shell's authority. `/apps/` and any `%2e`, `%2f` or
 `%5c` left in the path are refused there. Any other URL must be `https:` or
 `http:` on `localhost`, `127.0.0.1` or `[::1]`. Credentials in the URL,
-non-http schemes, relative and protocol-relative URLs and unparsable strings
-are refused and show the invalid-URI message. These rules apply only to the
-URL the `webview:` document names. The provider does not follow the frame's
+non-http schemes, relative and protocol-relative URLs, unparsable strings
+and any URL whose standalone parse differs from its parse against the shell
+(such as `https:host/../x`) are refused and show the invalid-URI message.
+These rules apply only to the URL the `webview:` document names. The provider does not follow the frame's
 later navigations, so an allowed `https:` page can redirect to any URL, the
 shell root included, and with `allow-same-origin` that frame then runs with
 the shell's authority. Treat every allowed external origin as trusted. A shell
