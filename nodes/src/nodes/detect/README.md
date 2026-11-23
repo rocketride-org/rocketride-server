@@ -19,12 +19,12 @@ The node buffers each completed image stream, runs the selected detector, and ca
 
 ## Profiles
 
-Default: **RF-DETR — Common Objects (COCO, 80 classes, default)** (`rfdetr`).
+Default: **RF-DETR - Common Objects (COCO, 80 classes, default)** (`rfdetr`).
 
 | Profile | Backend | Use |
 | --- | --- | --- |
-| RF-DETR — Common Objects (COCO, 80 classes, default) **(default)** | `rfdetr` | Closed-set common-object detection. |
-| MM-Grounding-DINO — Open-Vocabulary (any prompt) | `mmgdino` | Prompt-driven open-vocabulary detection. |
+| RF-DETR - Common Objects (COCO, 80 classes, default) **(default)** | `rfdetr` | Closed-set common-object detection. |
+| MM-Grounding-DINO - Open-Vocabulary (any prompt) | `mmgdino` | Prompt-driven open-vocabulary detection. |
 
 ## Configuration
 

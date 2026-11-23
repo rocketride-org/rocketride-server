@@ -27,18 +27,22 @@ In **index mode**, use the `text` lane for raw text and queries run BM25-style m
 
 ## Profiles
 
-The directory registers two backends and each keeps its own default: the
-Elasticsearch service defaults to **Self-managed Elasticsearch**
-(`self-managed`), the OpenSearch service to **Local OpenSearch** (`local`).
-Both are marked below; which one applies depends on the service you added
-to the pipeline.
+The directory registers two backends and each keeps its own default. The
+Elasticsearch service's profiles are its deployment types, and it defaults
+to **Self-managed Elasticsearch** (`self-managed`). The OpenSearch service
+has no deployment choice: its profiles are the two values of its
+**Authentication** selector, and it defaults to **Basic authentication**
+(`basic`). Both defaults are marked below; which one applies depends on the
+service you added to the pipeline. The Mode column is the store mode each
+service starts in.
 
 | Profile | Backend | Mode |
 | --- | --- | --- |
 | Self-managed Elasticsearch **(default)** | Elasticsearch | Vector store |
 | Elastic Cloud Hosted | Elasticsearch | Vector store |
 | Elastic Cloud Serverless | Elasticsearch | Vector store |
-| Local OpenSearch **(default)** | OpenSearch | Index |
+| Basic authentication **(default)** | OpenSearch | Index |
+| No authentication | OpenSearch | Index |
 
 ## Configuration
 
@@ -72,9 +76,9 @@ The node scans every matching text hit in batches of 500 with a one-minute scrol
 
 ### OpenSearch
 
-OpenSearch uses the configured host, collection, and optional basic-auth credentials. Its local profile starts in index mode, unlike Elasticsearch's vector-store default. The collection defaults to `rocketride` and allows lowercase letters, numbers, and underscores. Choose a new collection before switching a production workload between modes, rather than relying on a common name to be safe for both mappings.
+OpenSearch uses the configured host, collection, and the **Authentication** choice: `basic` (the default) sends the configured username and password, `none` sends no credentials. The service starts in index mode, unlike Elasticsearch's vector-store default. The collection defaults to `rocketride` and allows lowercase letters, numbers, and underscores. Choose a new collection before switching a production workload between modes, rather than relying on a common name to be safe for both mappings.
 
-When basic authentication is enabled, a host without a scheme gets `http://`, then an `http://` URL is upgraded to `https://`. The client also disables certificate verification in that branch. This accommodates self-managed clusters with self-signed certificates, but it means the host and authentication toggle jointly determine the connection—not just the text entered in **Host**.
+When **Authentication** is `basic`, a host without a scheme gets `http://`, then an `http://` URL is upgraded to `https://`. The client also disables certificate verification in that branch. This accommodates self-managed clusters with self-signed certificates, but it means the host and the authentication choice jointly determine the connection—not just the text entered in **Host**.
 
 ### OpenSearch Store Mode, embedding dimension, and score
 
@@ -92,7 +96,7 @@ The OpenSearch text path emits every matching hit it scans, as answers, text, an
 
 ## Authentication
 
-Elasticsearch cloud profiles use the configured API key. OpenSearch optionally uses the configured username and password when **Use basic auth** is enabled; the connection normalizes the host to HTTPS in that case. Self-managed Elasticsearch supplies no credentials to its client configuration. When OpenSearch authentication is disabled, the implementation does not pass the entered username or password to the client.
+Elasticsearch cloud profiles use the configured API key. OpenSearch uses the configured username and password when **Authentication** is `basic`, its default; the connection normalizes the host to HTTPS in that case. Self-managed Elasticsearch supplies no credentials to its client configuration. With OpenSearch **Authentication** set to `none`, the implementation passes no username or password to the client.
 
 ## Notes
 

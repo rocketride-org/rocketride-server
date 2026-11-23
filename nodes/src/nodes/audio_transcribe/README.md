@@ -32,30 +32,28 @@ sentence; the declared lanes remain the `text` outputs below.
 
 ## Profiles
 
-Default: **Default (Base)** (`default`), an alias for the `base` model.
+Default: **Base - Fast, low accuracy** (`base`).
 
 | Profile | Model | Context |
 | --- | --- | --- |
-| `default` **(default)** | `base` | Alias for the base model. |
 | `tiny` | `tiny` | Fastest, least accurate. |
-| `base` | `base` | Fast, low accuracy. |
+| `base` **(default)** | `base` | Fast, low accuracy. |
 | `small` | `small` | Medium speed and accuracy. |
 | `medium` | `medium` | Slower, high accuracy. |
 | `large-v3` | `large-v3` | Slowest, highest accuracy. |
 
-Each profile owns a full copy of the configuration fields below, stored under
-its own key, so editing `beam_size` on `medium` leaves `tiny`'s settings
-untouched. A config with no `profile` key keeps working: it resolves against
-`default`, whether its values sit at the top level or inside a
-`"default": { … }` object.
+The profile is the Whisper model itself: the selector's value is the model
+id, and no profile carries settings of its own. Every field below is shared
+by all models and stored once, so switching models leaves `language`,
+`beam_size` and the other values as they are.
 
 ## Configuration
 
-Pick a profile with the **Model Profile** selector; only the model and
-`language: en` differ between profiles, and everything else comes from the
-field defaults, which reproduce the behavior this node had before the
-decoding and VAD fields were exposed. Most users only need the profile and
-`language`. Models are downloaded from HuggingFace on first use, and the GPU
+Pick a model with the **Model** selector; the model is the only thing that
+differs between profiles, and everything else comes from the field defaults,
+which reproduce the behavior this node had before the decoding and VAD fields
+were exposed. Most users only need the model and `language`. Models are
+downloaded from HuggingFace on first use, and the GPU
 is used automatically when available. Before the first GPU load in a process,
 and on later loads until a check has given a clear answer, the node checks, in
 a separate process, that GPU transcription really works: it transcribes one
@@ -74,11 +72,11 @@ metadata, and runs on the CPU, where `float16` becomes `int8`.
 
 ### Model
 
-Declared once per profile and defaulted to that profile's own model;
-setting it overrides the profile's choice. It is deliberately not a single
-shared field: a shared field defaulted to `base` would be written into the
-selected profile's object on the first save and win the merge — silently
-downgrading `medium` to `base` with nothing logged.
+The Whisper model to load, and the node's profile selector: `tiny`, `base`
+(the default), `small`, `medium` or `large-v3`, from fastest and least
+accurate to slowest and most accurate. Together with **Compute Type** it
+identifies the weights the node loads once and shares across calls; the
+language and the decoding and VAD values travel with each request instead.
 
 ### Language
 
@@ -152,7 +150,10 @@ Two fixed bugs explain the current design. Before #1809 the profiles set
 `mode`, but the node reads `model` — so every profile silently loaded
 `base`, whichever one you picked. Before #2067 the profile selector was
 hidden and listed only `default`, so five of the six profiles were
-unreachable from the UI.
+unreachable from the UI. The sixth, `default`, was an alias for `base` and
+no longer exists: the selector now lists the five models themselves, and a
+pipeline saved with the old `default` profile is converted when it is
+validated, started or published, to `base` unless it had set another model.
 
 ## Upstream docs
 

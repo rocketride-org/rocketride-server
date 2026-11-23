@@ -32,23 +32,24 @@ The implementation is pure Python standard library (`subprocess`, `urllib`, JSON
 
 ## Profiles
 
-The directory registers two services and each keeps its own default: MCP Client
-defaults to **RocketRide MCP server (stdio)** (`RocketRide`), and the Butterbase
-MCP Client preset to **Butterbase MCP server** (`butterbase`). Both are marked
-below; which one applies depends on the service you added to the pipeline.
+The profile is the transport. MCP Client's **Transport** selector defaults to
+**HTTP (Streamable HTTP)** (`streamable-http`), marked below. The directory
+also registers the Butterbase MCP Client preset, which has no selector: it
+pins the transport to `streamable-http`, so it adds no row of its own (see
+Notes).
 
 | Profile | Transport | Notes |
 |---|---|---|
-| RocketRide MCP server (stdio) **(default)** | `stdio` | Launches `python -m rocketride_mcp` |
-| Generic MCP server (Streamable HTTP) | `streamable-http` | Enter endpoint URL |
-| Generic MCP server (legacy HTTP+SSE) | `sse` | Enter SSE endpoint URL |
-| Butterbase MCP server **(default)** | `streamable-http` | Branded Butterbase preset |
+| STDIO (subprocess) | `stdio` | Launches a command line; `python -m rocketride_mcp` unless changed |
+| HTTP (Streamable HTTP) **(default)** | `streamable-http` | Enter endpoint URL |
+| Legacy HTTP+SSE | `sse` | Enter SSE endpoint URL |
 
 ## Configuration
 
 Choose the transport first, then provide only the connection values it uses.
-The default profile starts the RocketRide MCP server over STDIO; use an HTTP
-profile when the server runs elsewhere.
+The default is Streamable HTTP, which needs the server's endpoint URL; choose
+STDIO to launch the server as a local subprocess, which starts the RocketRide
+MCP server unless the command line is changed.
 
 ### Server name
 
