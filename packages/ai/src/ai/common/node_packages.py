@@ -35,7 +35,7 @@ import shutil
 import tempfile
 import time
 import zipfile
-from typing import Optional
+from typing import Any, Dict, Iterable, Iterator, Optional, Set
 
 
 class NodePackageInvalid(RuntimeError):
@@ -106,6 +106,35 @@ def module_of(node_id: str) -> str:
 def node_of(module: str) -> str:
     """The node id a module name stands for; the inverse of module_of."""
     return module.replace('__', '.', 1)
+
+
+# Filters autopipe inserts while it runs (nodes/src/nodes/autopipe/IGlobal.py, getFilter), besides the
+# providers its own config names; a test keeps the two in step
+AUTOPIPE_FILTERS = ('parse', 'ocr', 'indexer')
+
+
+def nested_providers(value: Any) -> Iterator[str]:
+    """Every provider named inside a config value, in lower case."""
+    if isinstance(value, dict):
+        if isinstance(value.get('provider'), str):
+            yield value['provider'].lower()
+        for item in value.values():
+            yield from nested_providers(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from nested_providers(item)
+
+
+def providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
+    """Every provider a pipeline names, in lower case, with the filters autopipe would insert."""
+    found: Set[str] = set()
+    for component in components:
+        provider = str(component.get('provider', '')).lower()
+        found.add(provider)
+        if provider == 'autopipe':
+            found.update(AUTOPIPE_FILTERS)
+            found.update(nested_providers(component.get('config', {})))
+    return found
 
 
 def is_published(module: str) -> bool:
