@@ -205,6 +205,28 @@ test('T112c redacting a large engine error with many must-deny values and replac
 	}
 });
 
+test('T112d an engine error where the API key overlaps the realm\'s own project or task id is redacted whole, the deny winning over the replacement', async (tt) => {
+	for (const field of ['projectId', 'id'] as const) {
+		await tt.test(`the key's tail is the head of the run's real ${field}`, async () => {
+			const t = makeRoot();
+			try {
+				const A = t.open(ENTRY_A, { grant: GRANT_A });
+				const run = await startRun(A);
+				const real = lastRun(t.cm)[field];
+				// The key ends with the first 8 characters of the real id, so the two spans overlap in the error text.
+				const base = newKey();
+				const key = `${base}${real.slice(0, 8)}`;
+				t.cm.apiKey = key;
+				t.cm.engine.failWith('terminate', { message: `rejected ${base}${real} here` });
+				const text = engineErrorText(await call(A, 'terminate', { token: run.token }), 'an error whose key overlaps the own id');
+				assert.equal(text, 'rejected [redacted] here', `the whole overlapping group is redacted: no key, no id tail, no alias, got ${JSON.stringify(text)}`);
+			} finally {
+				t.cleanup();
+			}
+		});
+	}
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // T113 — inbound free strings (N1-f)
 // ─────────────────────────────────────────────────────────────────────────────
