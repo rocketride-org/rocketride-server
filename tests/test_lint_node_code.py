@@ -1048,9 +1048,18 @@ IDENTITY_PERSISTERS = {
     'tool_laserdata_memory': ['tool_laserdata_memory/IInstance.py: identity-persist'],
 }
 
+#: Test-only nodes that break a rule ON PURPOSE, each with the findings it
+#: exists to make: the doors probe writes into its own caller, and forges the
+#: caller of a sub-pipe it opens, so the rung test can show the runtime refuses
+#: (or only mislabels) what this lint refuses at build time. An entry never
+#: shrinks by a fix; it changes only when the probe's attempts do.
+BOUNDARY_PROBES = {
+    'doors_probe': ['doors_probe/IInstance.py: caller-write', 'doors_probe/IInstance.py: caller-write'],
+}
+
 
 @pytest.mark.parametrize('node', LINT.node_dirs(NODES_ROOT), ids=lambda p: p.name)
 def test_every_catalog_node_is_clean(node):
     findings = LINT.lint_node(node)
-    expected = IDENTITY_PERSISTERS.get(node.name, [])
+    expected = IDENTITY_PERSISTERS.get(node.name, []) + BOUNDARY_PROBES.get(node.name, [])
     assert [f'{f.path}: {f.rule}' for f in findings] == expected, '\n'.join(str(f) for f in findings)
