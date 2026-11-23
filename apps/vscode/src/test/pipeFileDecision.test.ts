@@ -24,8 +24,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { defaultStoreBlock } from 'rocketride';
-import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, withStoreBlock } from '../shared/util/pipeFileDecision';
+import { defaultStoreBlock, pipeReadmeStub } from 'rocketride';
+import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, starterReadme, withProjectId, withStoreBlock } from '../shared/util/pipeFileDecision';
 import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
 
 const FILE = '/ws/pipelines/a.pipe';
@@ -175,6 +175,22 @@ test('withProjectId refuses text that is not a pipeline', () => {
 
 test('the skeleton is a valid empty pipeline carrying the id and the default store block', () => {
 	assert.deepEqual(JSON.parse(emptyPipelineSkeleton(ID_A)), { project_id: ID_A, store: defaultStoreBlock(), components: [] });
+});
+
+test('the starter README is the file the default block names, titled by the pipeline name or the file stem', () => {
+	// The skeleton has no name yet: the file stem titles the README
+	const unnamed = starterReadme(emptyPipelineSkeleton(ID_A), 'invoices');
+	assert.equal(unnamed?.relPath, 'README.md');
+	assert.equal(unnamed?.content, pipeReadmeStub('invoices'));
+	// A named pipeline is titled by its name, bare or wrapped in { pipeline: ... }
+	assert.equal(starterReadme('{"name":"Doc brain","components":[]}', 'docBrain')?.content, pipeReadmeStub('Doc brain'));
+	assert.equal(starterReadme('{"pipeline":{"name":"Doc brain","components":[]}}', 'docBrain')?.content, pipeReadmeStub('Doc brain'));
+	assert.equal(starterReadme('{"name":"  ","components":[]}', 'docBrain')?.content, pipeReadmeStub('docBrain'));
+});
+
+test('no starter README for text that is not a pipeline', () => {
+	assert.equal(starterReadme('{ nope', 'x'), undefined);
+	assert.equal(starterReadme('{"name":"x"}', 'x'), undefined);
 });
 
 // --- Short ids: the file's name is the id; a dotted id is refused (plan §2.1, B5) ---

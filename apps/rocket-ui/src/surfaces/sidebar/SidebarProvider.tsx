@@ -54,6 +54,7 @@ import { getSidebarPeer, getToolChannel } from '../devtools/peer';
 import DevToolMount from '../devtools/DevToolMount';
 import { isPipelineFile, pipelineExtension } from '../workspace/projectStore';
 import { createProjectVfs } from '../workspace/projectVfs';
+import { ensurePipeReadme } from '../pipelines/scaffoldPipe';
 import { getWorkspaceVfs, storePathToVirtual } from '../workspace/vfs/workspace';
 import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
 import { downloadJson } from '../../utils/downloadFile';
@@ -327,7 +328,8 @@ const SidebarProvider: React.FC = () => {
 					case 'createFile': {
 						// The Explorer's inline create: ONE `.pipe` at the typed path (plan
 						// §9: no folder rule), carrying a freshly minted id and the default
-						// store block, nothing else. The name is not the id: the identity
+						// store block, with the starter README the block names beside it
+						// when the folder has none. The name is not the id: the identity
 						// lives inside the file and is chosen on PACKAGE › Identity (the
 						// New Pipeline form is the path that asks the id up front).
 						const file = path.endsWith('.pipe') ? path : `${path}.pipe`;
@@ -339,6 +341,14 @@ const SidebarProvider: React.FC = () => {
 							throw new Error(`"${file}" already exists; choose another name.`);
 						}
 						await projectVfs.write(file, { project_id: crypto.randomUUID(), store: defaultStoreBlock(), components: [] });
+						// The pipe exists from here on: a README that cannot be written is
+						// told as that, and the Explorer still refreshes to show the pipe.
+						try {
+							await ensurePipeReadme(file, file.slice(file.lastIndexOf('/') + 1, -'.pipe'.length));
+						} catch (err) {
+							console.error('[SidebarProvider] starter README failed:', err);
+							setActionError(`"${file}" was created, but its starter README could not be written: ${err instanceof Error ? err.message : String(err)}`);
+						}
 						break;
 					}
 				}

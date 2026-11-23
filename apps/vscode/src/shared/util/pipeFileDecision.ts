@@ -20,7 +20,7 @@
  * file on the way. Every write the watcher makes now goes through here first.
  */
 
-import { defaultStoreBlock } from 'rocketride';
+import { defaultStoreBlock, normalizePosixPath, pipeReadmeStub } from 'rocketride';
 
 /** Which watcher event the text was read for. */
 export type PipeFileEvent = 'created' | 'changed';
@@ -165,6 +165,24 @@ export function withStoreBlock(text: string): string | undefined {
  */
 export function emptyPipelineSkeleton(projectId: string): string {
 	return JSON.stringify({ project_id: projectId, store: defaultStoreBlock(), components: [] }, null, 2);
+}
+
+/**
+ * The starter README that goes with the default store block: the block names
+ * `./README.md`, and the file it names exists from the start. An author who
+ * wants no README removes the path from the block and deletes the file.
+ *
+ * @param text The pipeline text as it was just written (with the default block).
+ * @param fileStem The pipe file's name without `.pipe`: the README's title when the pipeline has no name yet.
+ * @returns The README's path relative to the pipe's folder and its content, or undefined when the text is not a pipeline.
+ */
+export function starterReadme(text: string, fileStem: string): { relPath: string; content: string } | undefined {
+	const parsed = pipeTarget(text);
+	if (typeof parsed === 'string') return undefined;
+	const relPath = normalizePosixPath(defaultStoreBlock().readme ?? '');
+	if (!relPath) return undefined;
+	const name = parsed.target.name;
+	return { relPath, content: pipeReadmeStub(typeof name === 'string' && name.trim() ? name : fileStem) };
 }
 
 // --- internals ---------------------------------------------------------------

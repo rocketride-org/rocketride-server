@@ -64,7 +64,8 @@
  *
  * Every pipeline has a `store` block (plan §9): the panes show the SDK's
  * default block where the document has none, and Save writes the block into
- * the document.
+ * the document, with the starter README it names when the folder has none
+ * (an author who wants no README removes the path and deletes the file).
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -905,6 +906,7 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 			// nor a verdict on a README path that is no longer the one declared.
 			let readmeChecked: string | undefined;
 			let readmePresent = false;
+			let wroteStarter = false;
 			for (;;) {
 				// Step 2: the files, each leaving the draft as it lands, so a retry
 				// writes only what is left. An entry rewritten while its write was in
@@ -921,12 +923,23 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 					readmeChecked = undefined;
 					continue;
 				}
-				// Step 3: a pipeline without a store block gets one at Save; whether the
-				// block being added may name its README is asked of the files, for the
-				// path the block names now.
+				// Step 3: a pipeline without a store block gets one at Save. The block
+				// being added names its README, and the file it names exists from the
+				// start: the starter README is written when the folder has none, for
+				// the path the block names now. A host that cannot reach the files
+				// cannot write it, and the block then names no README.
 				const readme = latest.current.project.store ? undefined : ((latest.current.pending.store as PipeStoreBlock | undefined) ?? defaultStoreBlock()).readme;
 				if (readme !== undefined && readme !== readmeChecked) {
-					readmePresent = assetsHost ? await assetsHost.readFile(readme).then((text) => text !== null, () => true) : false;
+					readmePresent = false;
+					if (assetsHost) {
+						const there = await assetsHost.readFile(readme).then((text) => text !== null, () => true);
+						if (!there) {
+							const shown = applyPatch(latest.current.project, latest.current.pending);
+							await assetsHost.writeFile(readme, pipeReadmeStub(shown.name || shown.project_id || 'this pipeline'));
+							wroteStarter = true;
+						}
+						readmePresent = true;
+					}
 					readmeChecked = readme;
 					continue;
 				}
@@ -952,6 +965,12 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 			setPatch(next);
 			onContentChanged({ ...applyPatch(document, next), docRevision: (document.docRevision ?? 0) + 1 });
 			setPhase('applied');
+			// The Assets pane read "no README" before the starter was written: a
+			// new generation of panes reads the file that is there now
+			if (wroteStarter) {
+				generation.current += 1;
+				setEpoch(generation.current);
+			}
 		} catch (err) {
 			setSaveError(`Could not save: ${err instanceof Error ? err.message : String(err)}. Nothing was discarded; Save tries again.`);
 			setPhase('idle');

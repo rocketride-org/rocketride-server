@@ -37,7 +37,7 @@ import { parsePipelineContent } from 'shared/tools/pipelines/utils/parse';
 import type { ParsedPipelineFile, ServiceClassInfo } from 'shared/tools/pipelines/utils/parse';
 import { checkMissingEnvVars } from '../../shared/util/envVarCheck';
 import { getLogger } from '../../shared/util/output';
-import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, withStoreBlock, EMPTY_FILE_SETTLE_MS } from '../../shared/util/pipeFileDecision';
+import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, starterReadme, withProjectId, withStoreBlock, EMPTY_FILE_SETTLE_MS } from '../../shared/util/pipeFileDecision';
 import type { PipeFileEvent } from '../../shared/util/pipeFileDecision';
 import { SerialQueue } from '../../shared/util/serialQueue';
 import { ReloadingCache, isUnderNodeModules } from '../../shared/util/reloadingCache';
@@ -299,7 +299,9 @@ export class PipelineFiles {
 				// The id lives INSIDE the file and is never derived from its name
 				// (the file may be called anything): a fresh one is minted here and
 				// the author picks the short id on PACKAGE › Identity.
-				await this.writePipeText(uri, emptyPipelineSkeleton(crypto.randomUUID()), 'new empty file, wrote the starter pipeline');
+				const skeleton = emptyPipelineSkeleton(crypto.randomUUID());
+				await this.writePipeText(uri, skeleton, 'new empty file, wrote the starter pipeline');
+				await this.ensureStarterReadme(uri, skeleton);
 				return;
 			}
 			case 'assign-id':
@@ -348,6 +350,35 @@ export class PipelineFiles {
 		const next = withStoreBlock(text);
 		if (next === undefined || next === text) return;
 		await this.writePipeText(uri, next, 'had no store block, wrote the default one');
+		await this.ensureStarterReadme(uri, next);
+	}
+
+	/**
+	 * Writes the starter README beside a pipeline that was just given the
+	 * default store block, when the folder has no such file: the block names
+	 * `./README.md`, and the file it names exists from the start. An author
+	 * who wants no README removes the path from the block and deletes the
+	 * file. A README that is already there is never replaced: two pipes may
+	 * share a folder and its README.
+	 */
+	private async ensureStarterReadme(uri: vscode.Uri, text: string): Promise<void> {
+		if (this.disposed) return;
+		const readme = starterReadme(text, path.basename(uri.fsPath).replace(/\.pipe$/i, ''));
+		if (!readme) return;
+		const target = vscode.Uri.joinPath(uri, '..', ...readme.relPath.split('/'));
+		try {
+			await vscode.workspace.fs.stat(target);
+			return;
+		} catch {
+			// Not there: written below
+		}
+		const file = vscode.workspace.asRelativePath(target);
+		try {
+			await vscode.workspace.fs.writeFile(target, Buffer.from(readme.content, 'utf8'));
+			this.logger.info(`Pipeline ${vscode.workspace.asRelativePath(uri)}: wrote the starter ${file}.`);
+		} catch (error) {
+			this.logger.error(`Pipeline ${vscode.workspace.asRelativePath(uri)}: the starter ${file} could not be written (${error instanceof Error ? error.message : String(error)}).`);
+		}
 	}
 
 	/** Reads a file as UTF-8, or null when unreadable (not there yet, or gone). */

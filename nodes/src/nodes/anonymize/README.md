@@ -36,14 +36,14 @@ GLiNER match supplies a more specific label.
 
 ## Profiles
 
-Default: **GLiNER Small - Lightweight general-purpose model** (`glinerSmall`).
+Default: **GLiNER Merged Large - Combined model from multiple datasets** (`glinerMergedLarge`).
 
 | Profile | Model |
 | --- | --- |
 | `glinerMultiPII` | `urchade/gliner_multi_pii-v1` |
 | `glinerPIILarge` | `knowledgator/gliner-pii-large-v1.0` |
-| `glinerMergedLarge` | `xomad/gliner-model-merge-large-v1.0` |
-| `glinerSmall` **(default)** | `urchade/gliner_small-v2.1` |
+| `glinerMergedLarge` **(default)** | `xomad/gliner-model-merge-large-v1.0` |
+| `glinerSmall` | `urchade/gliner_small-v2.1` |
 | `glinerMedium` | `urchade/gliner_medium-v2.1` |
 | `glinerLarge` | `urchade/gliner_large-v2.1` |
 | `glinerMulti` | `urchade/gliner_multi` |
@@ -64,8 +64,7 @@ Default: **GLiNER Small - Lightweight general-purpose model** (`glinerSmall`).
 Choose a profile when one of the supplied model choices suits the text you
 process, or choose `custom` and supply a model name. Most pipelines then only
 need to tailor the entity labels and decide whether retaining entity labels in
-the output is useful. The profile selected when adding the node is
-`glinerSmall`; the configuration field itself defaults to `glinerMergedLarge`.
+the output is useful. The **Model** selector defaults to `glinerMergedLarge`.
 
 ### Model
 
