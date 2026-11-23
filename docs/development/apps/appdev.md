@@ -279,3 +279,18 @@ checks. Absent/`true` = strict, the default.
   lands (a server switch invalidates the previous key), and the `requestId`
   echo lets it drop a stale reply from a prior server that races in after the
   re-request.
+
+## App-origin eligibility
+
+The app-origin path checks `Account.authorize_app_use(info, appId, version)`
+with the concrete positive registry version before minting a frame token and
+before serving an asset from a warm entitlement map. Anonymous public assets
+use the same check with `info=None`. The map caches publish/version resolution;
+it does not cache a paid seat, active user or organization membership. An
+unavailable hook or failed eligibility query denies access.
+
+A SaaS account must override this hook alongside the isolation account methods
+before an engine can start with app isolation enabled. Frame-token asset
+requests supply the user and organization ids from their authenticated claims;
+the SaaS hook validates their current database relationship. The guest-frame
+and browser acceptance work remains a separate gate for enabling isolation.
