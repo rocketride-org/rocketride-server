@@ -248,7 +248,8 @@ _WORKSPACE_YAML_KEYS = (
 
 # rsbuild copies the app dir's .env files into its OWN process env; only
 # PUBLIC_ entries are meant for the bundle, so only those survive.
-_ENV_PUBLIC_LINE = re.compile(r'^\s*(?:export\s+)?PUBLIC_[A-Za-z0-9_]*\s*=(.*)$')
+# Rsbuild's dotenv parser also accepts the colon form (`PUBLIC_X: value`).
+_ENV_PUBLIC_LINE = re.compile(r'^\s*(?:export\s+)?PUBLIC_[A-Za-z0-9_]*(?:\s*=|:\s)(.*)$')
 
 
 def _scratch_root() -> str:

@@ -1470,6 +1470,16 @@ def test_package_json_name_is_matched_case_insensitively(tmp_path):
         app_build._neutralize_tool_configs(str(ws), str(ws))
 
 
+def test_env_filter_accepts_the_colon_assignment_form(tmp_path):
+    """Rsbuild reads `KEY: value` too: PUBLIC_ colon lines are kept (with the
+    same value checks), every other colon line is dropped.
+    """
+    app = tmp_path / 'app'
+    _write(app / '.env', 'PUBLIC_API: https://x\nNODE_OPTIONS: --x\nPUBLIC_BAD: $(id)\nPUBLIC_TICK: `id`\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_API: https://x']
+
+
 def test_env_filter_only_touches_dotenv_names(tmp_path):
     """`.env` and `.env.*` are filtered; `.environment.json` is not an env file."""
     app = tmp_path / 'app'
