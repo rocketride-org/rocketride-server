@@ -31,15 +31,17 @@
 // under its basename, the readme and icon its `store` block declares, and
 // every file the README references (markdown images and links, HTML
 // `<img src>`), laid out relative to the PIPE's directory. Nothing else in
-// the folder is packed; two pipes in one folder are two pipes. A pipe without
-// a `store` block packs alone and deploys unlisted. The server reads and
+// the folder is packed; two pipes in one folder are two pipes. Every packed
+// pipe carries a `store` block: a pipe saved without one is packed WITH the
+// default block (its `readme` kept only when README.md is in the store beside
+// the pipe), and the stored file is left as it is. The server reads and
 // guards the zip again; this only serves bytes, like the app packer.
 // =============================================================================
 
 import { zipSync } from 'fflate';
 import type { Zippable } from 'fflate';
 import type { RocketRideClient } from 'shell';
-import { normalizePosixPath, pipeStoreFiles, validateStoreBlock } from 'rocketride';
+import { defaultStoreBlock, normalizePosixPath, pipeStoreFiles, validateStoreBlock } from 'rocketride';
 import type { PipeStoreBlock } from 'rocketride';
 import { getStagedWorkspace, toScopedStorePath } from '../workspace/vfs/workspace';
 
@@ -71,10 +73,10 @@ const ZIP_EPOCH = new Date(1980, 0, 1, 0, 0, 0);
 
 /** The packed pipeline: the pipe dict, its listing and the zip. */
 export interface PackedPipe {
-	/** The pipe's JSON (WITH its `store` block) and its display name filled. */
+	/** The packed pipe's JSON (WITH its `store` block) and its display name filled. */
 	pipeline: Record<string, unknown> & { name: string };
-	/** The validated store block, null when the pipe carries none (unlisted). */
-	store: PipeStoreBlock | null;
+	/** The validated store block: the pipe's own, or the default block the packer added. */
+	store: PipeStoreBlock;
 	/** Zip entry paths in zip order: the pipe first, then code-point order. */
 	files: string[];
 	/** The zip bytes for `client.deploy.add({ pipeline, data })`. */
@@ -86,14 +88,31 @@ export interface PackedPipe {
 // =============================================================================
 
 /**
- * Reads ONE store file raw (binaries included). The listing carries no sizes
- * and one fsReadMany call is capped at 32 MiB in total while a referenced
- * file may be 10 MiB, so every file goes in a call of its own.
+ * The store path of one file beside the pipe, refused when the file carries
+ * a pending change.
  *
  * The pack operates on COMMITTED files only (the app packer's commit-first
  * gate): in manual commit mode a save stages the change in the workspace
  * layer while the store keeps the committed text, so a file with a pending
  * change is refused by name instead of packed stale.
+ *
+ * @param pipeDir - The pipe's directory under the pipelines mount ('' at the root).
+ * @param rel - The file's path relative to the pipe's directory.
+ * @returns The file's store path in the active scope.
+ * @throws Error naming the file when it carries an uncommitted change.
+ */
+function committedStorePath(pipeDir: string, rel: string): string {
+	const full = pipeDir ? `${pipeDir}/${rel}` : rel;
+	if (getStagedWorkspace().changedPaths().has(`pipelines/${full}`)) {
+		throw new Error(`${rel} has an uncommitted change — commit it first (status bar: Commit all), then deploy.`);
+	}
+	return toScopedStorePath(`${PROJECTS_DIR}/${full}`);
+}
+
+/**
+ * Reads ONE store file raw (binaries included). The listing carries no sizes
+ * and one fsReadMany call is capped at 32 MiB in total while a referenced
+ * file may be 10 MiB, so every file goes in a call of its own.
  *
  * @param client - The connected client.
  * @param pipeDir - The pipe's directory under the pipelines mount ('' at the root).
@@ -102,13 +121,29 @@ export interface PackedPipe {
  * @throws Error naming the file when it carries an uncommitted change or cannot be read.
  */
 async function readOne(client: RocketRideClient, pipeDir: string, rel: string): Promise<Uint8Array> {
-	const full = pipeDir ? `${pipeDir}/${rel}` : rel;
-	if (getStagedWorkspace().changedPaths().has(`pipelines/${full}`)) {
-		throw new Error(`${rel} has an uncommitted change — commit it first (status bar: Commit all), then deploy.`);
-	}
-	const [entry] = await client.fsReadMany([toScopedStorePath(`${PROJECTS_DIR}/${full}`)]);
+	const [entry] = await client.fsReadMany([committedStorePath(pipeDir, rel)]);
 	if (!entry?.ok || !entry.data) throw new Error(`The pipeline's store listing names ${rel}, but there is no such file beside the pipe (${entry?.error ?? 'unreadable'}).`);
 	return entry.data;
+}
+
+/**
+ * The store block the packer adds to a pipe that has none: the default
+ * block, its `readme` kept only when the store holds that file beside the
+ * pipe (nobody declared it, so its absence is not an error). It names no
+ * icon. The commit-first gate applies to the README as to every packed file.
+ *
+ * @param client - The connected client.
+ * @param pipeDir - The pipe's directory under the pipelines mount ('' at the root).
+ * @returns The block to add.
+ * @throws Error naming the README when it carries an uncommitted change.
+ */
+async function addedStoreBlock(client: RocketRideClient, pipeDir: string): Promise<PipeStoreBlock> {
+	const block = defaultStoreBlock();
+	if (block.readme !== undefined) {
+		const stat = await client.fsStat(committedStorePath(pipeDir, normalizePosixPath(block.readme)));
+		if (!stat.exists || stat.type !== 'file') delete block.readme;
+	}
+	return block;
 }
 
 /**
@@ -142,6 +177,11 @@ function requireUnderCap(rel: string, bytes: Uint8Array, cap: number): void {
 /**
  * Packs one open pipeline document for deploy.
  *
+ * A pipe with a `store` block is packed as its stored bytes. A pipe without
+ * one is packed with the default block appended as its last key, serialized
+ * with two-space indentation and a trailing newline; the returned dict
+ * carries the same block, so the dict and the zip's `.pipe` are one pipeline.
+ *
  * @param client - The connected client (raw store reads).
  * @param pipePath - The document's path under the pipelines mount (`<dir>/<name>.pipe`).
  * @returns The pipe dict, its store block and the zip.
@@ -165,13 +205,20 @@ export async function packPipe(client: RocketRideClient, pipePath: string): Prom
 	}
 	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${pipeName} must hold a JSON object`);
 	const pipe = parsed as Record<string, unknown>;
-	const pipeline = { ...pipe, name: String(pipe.name || stem) } as Record<string, unknown> & { name: string };
 
-	// Step 2: the store block; absent = unlisted, the pipe packs alone
-	const store = pipe.store === undefined ? null : validateStoreBlock(pipe.store);
+	// Step 2: the store block — every packed pipe carries one. An authored
+	// block rides in the stored bytes; a pipe without one is packed with the
+	// default block appended, so the zip's .pipe and the dict sent beside it
+	// are the same pipeline (the display-name fill stays the dict's alone:
+	// the server fills the bundle's name before it compares)
+	const authored = pipe.store !== undefined;
+	const packedPipe = authored ? pipe : { ...pipe, store: await addedStoreBlock(client, pipeDir) };
+	const packedBytes = authored ? pipeBytes : new TextEncoder().encode(`${JSON.stringify(packedPipe, null, 2)}\n`);
+	const store = validateStoreBlock(packedPipe.store);
+	const pipeline = { ...packedPipe, name: String(pipe.name || stem) } as Record<string, unknown> & { name: string };
 
 	// Step 3: the README (one read) and the files it and the block name
-	const readmeRel = store?.readme ? normalizePosixPath(store.readme) : null;
+	const readmeRel = store.readme ? normalizePosixPath(store.readme) : null;
 	const bytes = new Map<string, Uint8Array>();
 	let readmeText: string | null = null;
 	if (readmeRel !== null) {
@@ -182,7 +229,7 @@ export async function packPipe(client: RocketRideClient, pipePath: string): Prom
 		readmeText = new TextDecoder().decode(readme);
 	}
 	const { declared, referenced } = pipeStoreFiles(store, readmeText, readmeRel);
-	const iconRel = store?.icon ? normalizePosixPath(store.icon) : null;
+	const iconRel = store.icon ? normalizePosixPath(store.icon) : null;
 	for (const rel of [...declared, ...referenced]) {
 		if (rel === pipeName || bytes.has(rel)) continue;
 		requireContained(rel);
@@ -195,7 +242,7 @@ export async function packPipe(client: RocketRideClient, pipePath: string): Prom
 	// `sorted()`): two packs of one pipe hash the same in both languages
 	const files = [pipeName, ...[...bytes.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))];
 	const tree: Zippable = {};
-	tree[pipeName] = [pipeBytes, { mtime: ZIP_EPOCH }];
+	tree[pipeName] = [packedBytes, { mtime: ZIP_EPOCH }];
 	for (const rel of files.slice(1)) tree[rel] = [bytes.get(rel) as Uint8Array, { mtime: ZIP_EPOCH }];
 	const data = zipSync(tree, { level: 6 });
 	if (data.byteLength > MAX_ZIP_BYTES) {

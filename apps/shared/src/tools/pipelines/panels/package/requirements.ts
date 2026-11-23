@@ -118,7 +118,8 @@ export function publicParametersOf(project: IRequirementsProject): IPublicParame
 /**
  * The "To deploy" rows: the identity the registry accepts, the parameters map
  * the door validates, the developer namespace the address needs, and the
- * `store` block that makes the deploy listable (absent = deploys unlisted).
+ * store listing every pipeline carries (the default block where the document
+ * has none) with the README it declares.
  *
  * @param project - The pipeline document.
  * @param developerId - The org's developer id, '' while none is claimed.
@@ -153,16 +154,18 @@ export function deployRequirements(project: IRequirementsProject, developerId: s
 	if (developerId) items.push({ id: 'developer', state: 'pass', label: 'Developer id claimed', note: `published as ${developerId}.${shortId || '{pipeId}'}` });
 	else items.push({ id: 'developer', state: 'fail', label: 'Your organization has no developer id', note: 'claim one above' });
 
-	// step: the store block decides listable vs unlisted; its declared files ride along
+	// step: every pipeline carries a store listing; the default block stands in
+	// until the document has its own (a save or a deploy writes it)
 	const store = project.store;
 	if (!store) {
-		items.push({ id: 'store', state: 'warn', label: 'No store block: deploys unlisted', note: 'Store stamps the default block' });
+		items.push({ id: 'store', state: 'pass', label: 'Store listing: the default', note: 'written when you save or deploy' });
 		return items;
 	}
-	items.push({ id: 'store', state: 'pass', label: 'Store block present: listable' });
-	const missing = [!store.icon ? 'icon' : '', !store.readme ? 'README' : ''].filter(Boolean);
-	if (missing.length === 0) items.push({ id: 'assets', state: 'pass', label: 'Icon and README declared', note: `${store.icon}, ${store.readme}` });
-	else items.push({ id: 'assets', state: 'warn', label: `No ${missing.join(' or ')} declared`, note: 'Assets' });
+	items.push({ id: 'store', state: 'pass', label: 'Store listing set' });
+	// step: the README is the store page; an icon is optional (a listing
+	// without one shows the first letter of its name)
+	if (store.readme) items.push({ id: 'assets', state: 'pass', label: store.icon ? 'README and icon declared' : 'README declared', note: [store.readme, store.icon].filter(Boolean).join(', ') });
+	else items.push({ id: 'assets', state: 'warn', label: 'No README declared', note: 'Assets' });
 	return items;
 }
 
@@ -196,16 +199,12 @@ export function storeLadder(project: IRequirementsProject, versions: IRequiremen
 	if (newest) items.push({ id: 'deployed', state: 'pass', label: 'Deployed to the server', note: `v${newest.registryVersion} is the newest` });
 	else items.push({ id: 'deployed', state: 'pending', label: 'Deploy a version', note: 'DEPLOY' });
 
-	// step: pricing is set (free counts; a paid mode needs a plan)
-	const store = project.store;
-	if (!store) items.push({ id: 'pricing', state: 'pending', label: 'Pricing set', note: 'no store block' });
-	else {
-		const mode = store.mode ?? 'free';
-		const plans = store.billing?.plans?.length ?? 0;
-		if (mode === 'free') items.push({ id: 'pricing', state: 'pass', label: 'Pricing set', note: 'Free' });
-		else if (plans > 0) items.push({ id: 'pricing', state: 'pass', label: 'Pricing set', note: `${MODE_LABELS[mode] ?? mode}, ${plans} plan${plans === 1 ? '' : 's'}` });
-		else items.push({ id: 'pricing', state: 'fail', label: `Mode ${MODE_LABELS[mode] ?? mode} needs at least one plan`, note: 'Store' });
-	}
+	// step: pricing is set (free counts, and is the default listing's mode; a paid mode needs a plan)
+	const mode = project.store?.mode ?? 'free';
+	const plans = project.store?.billing?.plans?.length ?? 0;
+	if (mode === 'free') items.push({ id: 'pricing', state: 'pass', label: 'Pricing set', note: 'Free' });
+	else if (plans > 0) items.push({ id: 'pricing', state: 'pass', label: 'Pricing set', note: `${MODE_LABELS[mode] ?? mode}, ${plans} plan${plans === 1 ? '' : 's'}` });
+	else items.push({ id: 'pricing', state: 'fail', label: `Mode ${MODE_LABELS[mode] ?? mode} needs at least one plan`, note: 'Store' });
 
 	// step: the review ladder on the newest version
 	const state = newest?.state ?? 'private';
@@ -229,6 +228,6 @@ export function requirementsLead(deploy: IRequirementItem[]): string {
 	const failing = deploy.filter((c) => c.state === 'fail').length;
 	const warning = deploy.filter((c) => c.state === 'warn').length;
 	if (failing > 0) return `${failing} item${failing === 1 ? ' needs' : 's need'} fixing before this pipeline can deploy.`;
-	if (warning > 0) return `Everything deploying needs is in place. ${warning} optional item${warning === 1 ? '' : 's'} would make it listable.`;
+	if (warning > 0) return `Everything deploying needs is in place. ${warning} optional item${warning === 1 ? '' : 's'} would complete its listing.`;
 	return 'Everything is in place. Deploy it from DEPLOY whenever you like.';
 }

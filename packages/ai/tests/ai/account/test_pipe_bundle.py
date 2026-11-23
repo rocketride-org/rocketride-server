@@ -35,6 +35,8 @@ from ai.account.pipe_bundle import (
     MAX_PIPE_ICON_BYTES,
     MAX_PIPE_README_BYTES,
     PIPE_STORE_DIR,
+    declared_files,
+    default_store_block,
     is_listed,
     pipe_manifest,
     read_pipe_bundle,
@@ -77,6 +79,27 @@ def test_the_block_is_returned_with_its_paths_normalised():
 
 def test_a_pipe_without_a_block_validates_to_none():
     assert validate_store_block(PIPE) is None
+
+
+def test_the_default_block_names_no_file_and_lists_the_pipe_as_free():
+    """What the door gives a pipe without a block: no icon, no readme, a fresh dict each call."""
+    block = default_store_block()
+    assert block == {
+        'tagline': '',
+        'categories': ['pipeline'],
+        'tags': [],
+        'links': {},
+        'mode': 'free',
+        'billing': {'plans': []},
+    }
+    assert 'icon' not in block and 'readme' not in block
+    assert default_store_block() is not block
+    # It passes its own door, declares nothing to store, and shapes a listed manifest
+    checked = validate_store_block({**PIPE, 'store': block})
+    assert checked == block and declared_files(checked) == {}
+    manifest = pipe_manifest(PIPE, checked)
+    assert is_listed(manifest) and manifest['mode'] == 'free'
+    assert manifest['icon'] == '' and manifest['readme'] == '' and manifest['categories'] == ['pipeline']
 
 
 @pytest.mark.parametrize(
@@ -238,6 +261,24 @@ def test_a_block_declaring_nothing_writes_nothing(monkeypatch):
     fs = _fs(monkeypatch)
     assert asyncio.run(write_pipe_content('org-1', 'user-1', ENTRY, None, {'tagline': 'x'})) == []
     fs.write.assert_not_awaited()
+
+
+def test_a_block_declaring_nothing_stores_none_of_the_zips_entries(monkeypatch):
+    """A pipe deployed without a block gets one that declares no file: nothing in its zip becomes servable."""
+    fs = _fs(monkeypatch)
+    bundle = read_pipe_bundle(_zip({'docBrain.pipe': json.dumps(PIPE), 'notes.txt': 'private', 'assets/a.png': 'x'}))
+    assert asyncio.run(write_pipe_content('org-1', 'user-1', ENTRY, bundle, default_store_block())) == []
+    fs.write.assert_not_awaited()
+
+
+def test_without_a_readme_only_the_declared_icon_is_stored(monkeypatch):
+    """The zip's other entries are a README's references; with no README declared they are nobody's declaration."""
+    fs = _fs(monkeypatch)
+    pipe = {**PIPE, 'store': {'icon': 'icon.svg', 'mode': 'free'}}
+    bundle = read_pipe_bundle(_zip({'docBrain.pipe': json.dumps(pipe), 'icon.svg': '<svg/>', 'notes.txt': 'private'}))
+    written = asyncio.run(write_pipe_content('org-1', 'user-1', ENTRY, bundle, validate_store_block(pipe)))
+    assert written == [f'{store_home_of("org-1", ENTRY)}/icon.svg']
+    assert [call.args[0] for call in fs.write.await_args_list] == written
 
 
 def test_a_failed_write_rolls_back_what_landed(monkeypatch):

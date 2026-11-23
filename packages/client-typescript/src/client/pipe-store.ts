@@ -27,11 +27,13 @@
 // A pipeline's store listing is a ROOT block `store` inside the `.pipe` JSON,
 // beside `project_id`, `name`, `description` and `source` (never duplicated in
 // the block). It mirrors an app's `appManifest` listing fields: tagline,
-// categories, tags, icon, readme, links, mode and billing. The block present
-// = the pipeline is listable; without it a pipe still runs and deploys as an
-// unlisted artifact. `icon` and `readme` are paths relative to the pipe
-// file's directory, and the README's own image/link references name the
-// files the pack carries beside it.
+// categories, tags, icon, readme, links, mode and billing. Every pipeline
+// carries the block: the scaffolds write it, and the packers and the deploy
+// door add the default one to a pipe that has none. `icon` and `readme` are
+// paths relative to the pipe file's directory, and the README's own
+// image/link references name the files the pack carries beside it. `icon` is
+// optional: a pipe without one leaves it unset and each UI shows its own
+// fallback; a declared icon must be in the pack.
 //
 // PURE: no Node imports, so the browser (the store VFS, the editor) and the
 // Node packer (`rocketride/app-pack`) share the one rule set. The Python twin
@@ -103,11 +105,15 @@ export interface PipeStoreBlock {
 // DEFAULTS
 // =============================================================================
 
-/** The placeholder icon every scaffolded pipeline ships — the app scaffold's. */
+/**
+ * The app scaffold's placeholder icon, for a pipeline that wants one. The
+ * pipeline scaffold writes no icon file and the default block names none.
+ */
 export const PIPE_ICON_SVG = PLACEHOLDER_ICON_SVG;
 
 /**
- * The block a new pipeline is stamped with — a fresh object each call.
+ * The block a new pipeline is stamped with — a fresh object each call. It
+ * names no icon: a pipeline without one leaves `icon` unset.
  *
  * @returns The scaffold's default store block.
  */
@@ -116,7 +122,6 @@ export function defaultStoreBlock(): PipeStoreBlock {
 		tagline: '',
 		categories: ['pipeline'],
 		tags: [],
-		icon: './icon.svg',
 		readme: './README.md',
 		links: {},
 		mode: 'free',

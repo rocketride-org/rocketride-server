@@ -127,16 +127,25 @@ describe('deployRequirements', () => {
 		assert.equal(row(deployRequirements(COMPLETE, ''), 'developer').state, 'fail');
 	});
 
-	it('warns (not fails) without a store block: the deploy is unlisted, and the assets row is not asked', () => {
+	it('passes without a store block: the default listing stands in, and the assets row is not asked', () => {
 		const items = deployRequirements({ ...COMPLETE, store: undefined }, 'acme');
-		assert.equal(row(items, 'store').state, 'warn');
+		assert.equal(row(items, 'store').state, 'pass');
+		assert.equal(row(items, 'store').label, 'Store listing: the default');
 		assert.equal(items.some((i) => i.id === 'assets'), false);
 	});
 
-	it('warns on a block that declares no icon or README', () => {
-		const items = deployRequirements({ ...COMPLETE, store: { mode: 'free' } as IRequirementsProject['store'] }, 'acme');
+	it('warns on a block that declares no README', () => {
+		const items = deployRequirements({ ...COMPLETE, store: { mode: 'free', icon: 'icon.png' } as IRequirementsProject['store'] }, 'acme');
 		assert.equal(row(items, 'assets').state, 'warn');
-		assert.equal(row(items, 'assets').label, 'No icon or README declared');
+		assert.equal(row(items, 'assets').label, 'No README declared');
+	});
+
+	it('passes a block with a README and no icon: an icon is optional', () => {
+		const items = deployRequirements({ ...COMPLETE, store: { mode: 'free', readme: 'README.md' } as IRequirementsProject['store'] }, 'acme');
+		assert.equal(row(items, 'assets').state, 'pass');
+		assert.equal(row(items, 'assets').label, 'README declared');
+		assert.equal(row(items, 'assets').note, 'README.md');
+		assert.equal(row(deployRequirements(COMPLETE, 'acme'), 'assets').label, 'README and icon declared');
 	});
 
 	it('never mentions engine sharing', () => {
@@ -172,19 +181,21 @@ describe('storeLadder', () => {
 		assert.equal(row(items, 'submitted').state, 'pass');
 	});
 
-	it('reads pricing off the block: paid without plans fails, paid with plans passes, no block pends', () => {
+	it('reads pricing off the block: paid without plans fails, paid with plans passes, no block is the default Free', () => {
 		const paid = { ...COMPLETE, store: { mode: 'subscription' } as IRequirementsProject['store'] };
 		assert.equal(row(storeLadder(paid, []), 'pricing').state, 'fail');
 		const planned = { ...COMPLETE, store: { mode: 'subscription', billing: { plans: [{}] } } as unknown as IRequirementsProject['store'] };
 		assert.equal(row(storeLadder(planned, []), 'pricing').state, 'pass');
-		assert.equal(row(storeLadder({ ...COMPLETE, store: undefined }, []), 'pricing').state, 'pending');
+		const unblocked = row(storeLadder({ ...COMPLETE, store: undefined }, []), 'pricing');
+		assert.equal(unblocked.state, 'pass');
+		assert.equal(unblocked.note, 'Free');
 	});
 });
 
 describe('requirementsLead', () => {
 	it('counts failures first, then warnings, then says all is in place', () => {
 		assert.match(requirementsLead(deployRequirements(COMPLETE, '')), /^1 item needs fixing/);
-		assert.match(requirementsLead(deployRequirements({ ...COMPLETE, store: undefined }, 'acme')), /1 optional item/);
+		assert.match(requirementsLead(deployRequirements({ ...COMPLETE, store: { mode: 'free' } as IRequirementsProject['store'] }, 'acme')), /1 optional item would complete its listing/);
 		assert.match(requirementsLead(deployRequirements(COMPLETE, 'acme')), /^Everything is in place/);
 	});
 });

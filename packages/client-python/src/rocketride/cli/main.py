@@ -553,7 +553,7 @@ def setup_parser() -> argparse.ArgumentParser:
 
     pipe_new_parser = pipe_subparsers.add_parser(
         'new',
-        help='Scaffold a new pipeline under ./pipelines/<id>/: the .pipe with its store block, icon.svg, README.md and assets/',
+        help='Scaffold a new pipeline under ./pipelines/<id>/: the .pipe with its store block, README.md and assets/',
     )
     _add_json_arg(pipe_new_parser)
     pipe_new_parser.add_argument('id', help='Pipeline id: one dot-free segment of letters, digits, _ or -')

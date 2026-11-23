@@ -692,9 +692,10 @@ const SERIES = [42, 55, 38, 64, 71, 52, 60, 78, 66, 83, 74, 90];
 #: The scaffolded placeholder icon — a neutral rounded tile with an abstract
 #: rocket mark. Deliberately generic: it exists so the PACKAGE tab's icon
 #: readiness starts green and tiles never render the bare fallback glyph;
-#: replacing it is the developer's first branding act. Apps and pipelines
-#: (``_pipe_bundle.PIPE_ICON_SVG``) scaffold the same bytes; the TypeScript
-#: scaffold (app-scaffold/index.ts, PLACEHOLDER_ICON_SVG) mirrors it.
+#: replacing it is the developer's first branding act. The app scaffold writes
+#: it; the pipeline scaffold writes no icon (``_pipe_bundle.PIPE_ICON_SVG``
+#: names the same bytes). The TypeScript scaffold (app-scaffold/index.ts,
+#: PLACEHOLDER_ICON_SVG) mirrors it.
 PLACEHOLDER_ICON_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">\n'
     '\t<rect width="64" height="64" rx="14" fill="#4F46E5"/>\n'

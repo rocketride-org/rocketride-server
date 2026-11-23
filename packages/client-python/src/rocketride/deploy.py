@@ -255,8 +255,9 @@ class DeployApi:
         The pipe rides as the artifact; the zip beside it carries the pipe
         at its root plus the readme and icon its ``store`` block declares and
         every file the README references, laid out relative to the pipe
-        file's directory. A pipe without a ``store`` block deploys as an
-        UNLISTED artifact (the zip is the pipe alone). A declared or
+        file's directory. A pipe without a ``store`` block is packed with the
+        default block added (its ``readme`` kept only when README.md sits
+        beside the pipe); the file on disk is left as it is. A declared or
         referenced file that is missing, or that resolves outside the pipe's
         directory, is refused by name before any call; :meth:`add` with
         ``kind='pipe'`` stays the raw door for a pipeline dict. Mirrors the
@@ -381,8 +382,8 @@ class DeployApi:
         Scaffold a new pipeline in the workspace — the programmatic twin of
         ``rocketride pipe new`` and :meth:`create_app`'s pipeline
         counterpart. Writes ``<dir>/<pipe_id>/<pipe_id>.pipe`` carrying the
-        default ``store`` block, the placeholder ``icon.svg``, a
-        ``README.md`` stub and an empty ``assets/`` directory. Scaffolding
+        default ``store`` block, a ``README.md`` stub and an empty
+        ``assets/`` directory; no icon file is written. Scaffolding
         only — nothing is deployed; the normal lifecycle (edit ->
         :meth:`add_pipe` -> publish) follows. Mirrors the TypeScript
         ``client.deploy.createPipe``.
@@ -404,7 +405,7 @@ class DeployApi:
 
         Raises:
             ValueError: On an invalid id, a ``dir`` outside the workspace,
-                or an existing output file (the pipe, the icon, the README).
+                or an existing output file (the pipe, the README).
         """
         from ._pipe_bundle import scaffold_pipe
 

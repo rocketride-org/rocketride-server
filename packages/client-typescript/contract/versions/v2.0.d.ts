@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 09759ea928209f1eab72c96e9821db39abe84b30
+// Source commit: b98d99ddd8940352a5af31735b87f43b73166323
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1176,10 +1176,14 @@ export interface PipeStoreBlock {
         plans: BillingPlan[];
     };
 }
-/** The placeholder icon every scaffolded pipeline ships — the app scaffold's. */
+/**
+ * The app scaffold's placeholder icon, for a pipeline that wants one. The
+ * pipeline scaffold writes no icon file and the default block names none.
+ */
 export declare const PIPE_ICON_SVG: string;
 /**
- * The block a new pipeline is stamped with — a fresh object each call.
+ * The block a new pipeline is stamped with — a fresh object each call. It
+ * names no icon: a pipeline without one leaves `icon` unset.
  *
  * @returns The scaffold's default store block.
  */
@@ -1313,8 +1317,10 @@ export interface PipelineConfig {
     /** Project identifier for organization and permissions */
     project_id?: string;
     /** The store listing (tagline, categories, tags, icon, readme, links,
-        mode, billing). Present = the pipeline is listable; absent = it
-        deploys unlisted. The engine never sees it. */
+        mode, billing). A pipeline carries one when it is deployed: the
+        packers and the deploy door add the default block to a pipe that has
+        none (a version stored by an earlier release can lack it). The engine
+        never sees it. */
     store?: PipeStoreBlock;
     /** Per-call params: public name -> `nodeId.configKey` */
     parameters?: Record<string, string>;
@@ -4933,8 +4939,9 @@ declare class DeployApi {
      * The pipe rides as the artifact; the zip beside it carries the pipe at
      * its root plus the readme and icon its `store` block declares and every
      * file the README references, laid out relative to the pipe file's
-     * directory. A pipe without a `store` block deploys as an UNLISTED
-     * artifact (the zip is the pipe alone). A declared or referenced file
+     * directory. A pipe without a `store` block is packed with the default
+     * block added (its `readme` kept only when README.md sits beside the
+     * pipe); the file on disk is left as it is. A declared or referenced file
      * that is missing, or that resolves outside the pipe's directory, is
      * refused by name before any call; `deploy.add({ kind: 'pipe', pipeline })`
      * stays the raw door for a pipeline dict.
@@ -4983,8 +4990,8 @@ declare class DeployApi {
      * Scaffolds a new pipeline in the workspace — the programmatic twin of
      * `rocketride pipe new` and `createApp`'s pipeline counterpart (Node.js
      * only). Writes `<dir>/<pipeId>/<pipeId>.pipe` carrying the default
-     * `store` block, the placeholder `icon.svg`, a `README.md` stub and an
-     * empty `assets/` directory. Scaffolding only — nothing is deployed; the
+     * `store` block, a `README.md` stub and an empty `assets/` directory; no
+     * icon file is written. Scaffolding only — nothing is deployed; the
      * normal lifecycle (edit → `addPipe` → publish) follows.
      *
      * @param pipeId - The pipeline id: one dot-free segment of letters,

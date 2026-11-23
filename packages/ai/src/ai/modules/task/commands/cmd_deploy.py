@@ -77,7 +77,13 @@ from ai.account.audience import (
 )
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, audience_handle
 from ai.account.models import resolve_team_permissions, team_id_of_name
-from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, validate_store_block, write_pipe_content
+from ai.account.pipe_bundle import (
+    default_store_block,
+    pipe_manifest,
+    read_pipe_bundle,
+    validate_store_block,
+    write_pipe_content,
+)
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 
@@ -613,6 +619,10 @@ class DeployCommands(_DeployBase):
     async def _deploy_add_pipe(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Snapshot the pipeline into the org registry; optionally deploy in one step.
 
+        Every version carries a ``store`` block: a pipeline sent without one
+        is stored with the default block (``default_store_block``), so its
+        version has a listing manifest like any other.
+
         ``deployTo`` (an optional target, as ``teamId`` takes on ``deploy``:
         ``@me``, ``@<team>``, ``=team/<tid>``, ``@public``) is the
         OSS/two-man convenience: publish and point that target at the new
@@ -678,9 +688,14 @@ class DeployCommands(_DeployBase):
         # row below is keyed by the full name; the artifact keeps the short id.
         validate_segment(project_id, 'project_id')
         validate_component_ids(pipeline)
-        # The store block (plan 9): present = the pipe is publishable and
-        # listed; absent = an unlisted artifact. Checked before any registry
-        # write so an unknown key or a bad mode refuses the deploy by name.
+        # The store block (plan 9): every pipe version carries one. A pipe
+        # sent without it gets the default block here, after the comparison
+        # with the bundle's pipe, so the stored artifact, the manifest and
+        # the content stage all see one pipeline. An authored block is
+        # checked before any registry write so an unknown key or a bad mode
+        # refuses the deploy by name.
+        if 'store' not in pipeline:
+            pipeline = {**pipeline, 'store': default_store_block()}
         store_block = validate_store_block(pipeline)
         full_name = self._registry_id(project_id)
         project_id = full_name
@@ -699,14 +714,11 @@ class DeployCommands(_DeployBase):
         org_id = self._org_id()
         caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
         # The listing manifest the publish row snapshots (plan 9): the store
-        # block plus the pipe's own root keys, only when a block exists;
-        # never a publisher or author (derived, plan S7). An unlisted deploy
-        # carries no manifest (the backends synthesize the display name), so
-        # a caller-supplied one is dropped: the block is the ONE source of a
-        # listing, and `is_listed` reads the manifest's `mode`.
-        metadata = {key: value for key, value in caller_meta.items() if key != 'manifest'}
-        if store_block is not None:
-            metadata['manifest'] = pipe_manifest(pipeline, store_block)
+        # block plus the pipe's own root keys; never a publisher or author
+        # (derived, plan S7). It replaces a caller-supplied one: the block is
+        # the ONE source of a listing, and `is_listed` reads the manifest's
+        # `mode`.
+        metadata = {**caller_meta, 'manifest': pipe_manifest(pipeline, store_block)}
         # Born state (plan S8): every version is born 'private' (team and
         # personal rungs serve it; @public needs 'ready' after review). On a
         # server WITHOUT a review ladder the developer IS the admin, so the
@@ -721,25 +733,24 @@ class DeployCommands(_DeployBase):
             comment=str(args.get('comment') or ''),
             metadata=metadata,
         )
-        if store_block is not None:
-            # The content beside the artifact: the files the block declares
-            # and the readme references, in their layout. The registry row
-            # was allocated first because the version names the content
-            # paths; a declared file the zip lacks, or a failed write, flips
-            # the row 'failed' (the rail refuses to serve that state) and
-            # surfaces the cause by name, as the app door does.
+        # The content beside the artifact: the files the block declares and
+        # the readme references, in their layout. The registry row was
+        # allocated first because the version names the content paths; a
+        # declared file the zip lacks, or a failed write, flips the row
+        # 'failed' (the rail refuses to serve that state) and surfaces the
+        # cause by name, as the app door does.
+        try:
+            await write_pipe_content(org_id, self._account_info.userId, entry, bundle, store_block)
+        except Exception as exc:
             try:
-                await write_pipe_content(org_id, self._account_info.userId, entry, bundle, store_block)
-            except Exception as exc:
-                try:
-                    await account.set_artifact_state(org_id, project_id, entry['version'], 'failed', self._actor())
-                    marked = 'marked failed'
-                except Exception as flip_exc:
-                    debug(f'[DEPLOY] could not flip {project_id} v{entry["version"]} to failed: {flip_exc}')
-                    marked = f'could not be marked failed: {flip_exc}'
-                raise ValueError(
-                    f'deploy failed while storing the bundle content (version {entry["version"]} {marked}): {exc}'
-                ) from exc
+                await account.set_artifact_state(org_id, project_id, entry['version'], 'failed', self._actor())
+                marked = 'marked failed'
+            except Exception as flip_exc:
+                debug(f'[DEPLOY] could not flip {project_id} v{entry["version"]} to failed: {flip_exc}')
+                marked = f'could not be marked failed: {flip_exc}'
+            raise ValueError(
+                f'deploy failed while storing the bundle content (version {entry["version"]} {marked}): {exc}'
+            ) from exc
         if not account.review_ladder:
             # No reviewer exists: the deployer's version is approved as it is
             # stored, the same posture the app door takes on OSS

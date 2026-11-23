@@ -60,7 +60,24 @@ function pipeJson(store?: Record<string, unknown>): string {
 	return JSON.stringify({ components: [], project_id: 'docBrain', name: 'Doc Brain', ...(store !== undefined ? { store } : {}) });
 }
 
-const STORE = { ...defaultStoreBlock(), tagline: 'Reads documents' };
+const STORE = { ...defaultStoreBlock(), tagline: 'Reads documents', icon: './icon.svg' };
+
+/** The default block without its readme: what the packer adds when no README.md sits beside the pipe. */
+function defaultBlockWithoutReadme(): Record<string, unknown> {
+	const block: Record<string, unknown> = { ...defaultStoreBlock() };
+	delete block.readme;
+	return block;
+}
+
+describe('defaultStoreBlock', () => {
+	it('names a README and no icon, a fresh object each call', () => {
+		expect(defaultStoreBlock()).toEqual({ tagline: '', categories: ['pipeline'], tags: [], readme: './README.md', links: {}, mode: 'free', billing: { plans: [] } });
+		expect('icon' in defaultStoreBlock()).toBe(false);
+		expect(defaultStoreBlock()).not.toBe(defaultStoreBlock());
+		// The placeholder stays exported for a pipeline that wants one
+		expect(PIPE_ICON_SVG).toBe(PLACEHOLDER_ICON_SVG);
+	});
+});
 
 describe('validateStoreBlock', () => {
 	it('accepts the default block and names an unknown key, a bad mode, a bad path', () => {
@@ -170,7 +187,8 @@ describe('packPipe', () => {
 		});
 		const packed = packPipe(path.join(folder, 'docBrain.pipe'));
 		expect(packed.files).toEqual(['docBrain.pipe', 'docs/README.md', 'images/a.png']);
-		expect(packed.warnings).toEqual(['store.icon is not declared, so tiles show a generic glyph']);
+		// A block without an icon is the normal case: nothing to warn about
+		expect(packed.warnings).toEqual([]);
 	});
 
 	it('packs two pipes in one folder independently, sharing the icon', () => {
@@ -180,17 +198,62 @@ describe('packPipe', () => {
 			'b.md': '# B\n',
 			'icon.svg': '<svg/>',
 		});
-		expect(packPipe(path.join(folder, 'a.pipe')).files).toEqual(['a.pipe', 'icon.svg']);
+		const a = packPipe(path.join(folder, 'a.pipe'));
+		expect(a.files).toEqual(['a.pipe', 'icon.svg']);
+		expect(a.warnings).toEqual(['store.readme is not declared, so the listing has no page']);
 		expect(packPipe(path.join(folder, 'b.pipe')).files).toEqual(['b.pipe', 'b.md', 'icon.svg']);
 	});
 
-	it('packs a pipe without a store block as the pipe alone, named after its stem', () => {
-		const folder = folderOf('bare', { 'bare.pipe': JSON.stringify({ components: [] }), 'README.md': 'ignored' });
+	it('adds the default block to a pipe without one, with the README that sits beside it', () => {
+		const source = JSON.stringify({ components: [], project_id: 'bare' });
+		const folder = folderOf('bare', {
+			'bare.pipe': source,
+			'README.md': '# Bare\n![flow](assets/flow.png)\n',
+			'assets/flow.png': Buffer.from([1]),
+			'icon.svg': '<svg/>',
+		});
 		const packed = packPipe(path.join(folder, 'bare.pipe'));
-		expect(packed.store).toBeNull();
-		expect(packed.files).toEqual(['bare.pipe']);
-		expect(packed.pipeline.name).toBe('bare');
+		const block = defaultStoreBlock();
+		expect(packed.store).toEqual(block);
+		// The README and what it references are packed as for an authored block; no icon is
+		expect(packed.files).toEqual(['bare.pipe', 'README.md', 'assets/flow.png']);
 		expect(packed.warnings).toEqual([]);
+		// The zip's .pipe is the pipe plus the block as its last key: two-space JSON, a trailing newline
+		const entry = new AdmZip(Buffer.from(packed.data)).readAsText('bare.pipe');
+		expect(entry).toBe(`${JSON.stringify({ components: [], project_id: 'bare', store: block }, null, 2)}\n`);
+		// The dict sent beside the zip is that pipe; only the dict has its display name filled (from the stem)
+		expect(JSON.parse(entry).name).toBeUndefined();
+		expect(packed.pipeline).toEqual({ ...JSON.parse(entry), name: 'bare' });
+		// The file on disk is left as it is, and two packs are the same bytes
+		expect(fs.readFileSync(path.join(folder, 'bare.pipe'), 'utf8')).toBe(source);
+		expect(Buffer.from(packPipe(path.join(folder, 'bare.pipe')).data).equals(Buffer.from(packed.data))).toBe(true);
+	});
+
+	it('adds the default block without a readme when no README.md sits beside the pipe', () => {
+		const folder = folderOf('lone', { 'lone.pipe': JSON.stringify({ components: [], name: 'Lone' }), 'icon.svg': '<svg/>' });
+		const packed = packPipe(path.join(folder, 'lone.pipe'));
+		const block = defaultBlockWithoutReadme();
+		expect(packed.store).toEqual(block);
+		expect(packed.files).toEqual(['lone.pipe']);
+		expect(packed.warnings).toEqual(['store.readme is not declared, so the listing has no page']);
+		const entry = JSON.parse(new AdmZip(Buffer.from(packed.data)).readAsText('lone.pipe'));
+		expect(entry).toEqual({ components: [], name: 'Lone', store: block });
+		expect(Object.keys(entry).pop()).toBe('store');
+		expect(packed.pipeline).toEqual(entry);
+		// A folder named README.md is not the file the block would name
+		const dir = folderOf('dir', { 'dir.pipe': JSON.stringify({ components: [] }), 'README.md/notes.txt': 'x' });
+		expect(packPipe(path.join(dir, 'dir.pipe')).store).toEqual(block);
+	});
+
+	it('packs a pipe that has a store block as its bytes on disk', () => {
+		// Compact, oddly spaced JSON: an authored pipe is never re-serialized
+		const source = '{"components":[],  "project_id":"docBrain","name":"Doc Brain","store":{"tagline":"As written"}}';
+		const folder = folderOf('raw', { 'raw.pipe': source, 'README.md': 'not declared, not packed' });
+		const packed = packPipe(path.join(folder, 'raw.pipe'));
+		expect(new AdmZip(Buffer.from(packed.data)).readFile('raw.pipe')?.equals(Buffer.from(source))).toBe(true);
+		expect(packed.files).toEqual(['raw.pipe']);
+		expect(packed.pipeline).toEqual(JSON.parse(source));
+		expect(packed.store).toEqual({ tagline: 'As written' });
 	});
 
 	it('refuses a missing declared file, a missing referenced file and an upward escape by name', () => {
@@ -228,17 +291,20 @@ describe('packPipe', () => {
 });
 
 describe('scaffoldPipe', () => {
-	it('writes the pipe with the default block, the shared icon, a README and assets/', () => {
+	it('writes the pipe with the default block, a README and assets/, and no icon', () => {
 		const created = scaffoldPipe(ws, 'ingest', { name: 'Document ingest' });
-		expect(created).toEqual({ folder: 'pipelines/ingest', pipePath: 'pipelines/ingest/ingest.pipe', files: ['pipelines/ingest/ingest.pipe', 'pipelines/ingest/icon.svg', 'pipelines/ingest/README.md'] });
+		expect(created).toEqual({ folder: 'pipelines/ingest', pipePath: 'pipelines/ingest/ingest.pipe', files: ['pipelines/ingest/ingest.pipe', 'pipelines/ingest/README.md'] });
 		const pipe = JSON.parse(fs.readFileSync(path.join(ws, 'pipelines', 'ingest', 'ingest.pipe'), 'utf8'));
 		expect(pipe).toEqual({ components: [], project_id: 'ingest', name: 'Document ingest', description: '', store: defaultStoreBlock() });
-		expect(fs.readFileSync(path.join(ws, 'pipelines', 'ingest', 'icon.svg'), 'utf8')).toBe(PLACEHOLDER_ICON_SVG);
-		expect(PIPE_ICON_SVG).toBe(PLACEHOLDER_ICON_SVG);
+		// No icon: the block names none and the folder holds none
+		expect('icon' in pipe.store).toBe(false);
+		expect(fs.readdirSync(path.join(ws, 'pipelines', 'ingest')).sort()).toEqual(['README.md', 'assets', 'ingest.pipe']);
 		expect(fs.readFileSync(path.join(ws, 'pipelines', 'ingest', 'README.md'), 'utf8')).toMatch(/^# Document ingest\n[\s\S]*store listing/);
 		expect(fs.statSync(path.join(ws, 'pipelines', 'ingest', 'assets')).isDirectory()).toBe(true);
-		// The scaffold packs as-is: the block's declared files resolve
-		expect(packPipe(path.join(ws, created.pipePath)).files).toEqual(['ingest.pipe', 'README.md', 'icon.svg']);
+		// The scaffold packs as-is: the block's declared file resolves
+		const packed = packPipe(path.join(ws, created.pipePath));
+		expect(packed.files).toEqual(['ingest.pipe', 'README.md']);
+		expect(packed.warnings).toEqual([]);
 	});
 
 	it('refuses an invalid id and an existing pipe, and honours --dir', () => {
@@ -256,6 +322,12 @@ describe('scaffoldPipe', () => {
 		expect(() => scaffoldPipe(ws, 'shared')).toThrow(/"pipelines\/shared\/README\.md" already exists/);
 		expect(fs.readFileSync(path.join(folder, 'README.md'), 'utf8')).toBe('# Mine\n');
 		expect(fs.existsSync(path.join(folder, 'shared.pipe'))).toBe(false);
+		// An icon already in the folder is no output of the scaffold: it is left as it is
+		const branded = path.join(ws, 'pipelines', 'branded');
+		fs.mkdirSync(branded, { recursive: true });
+		fs.writeFileSync(path.join(branded, 'icon.svg'), '<svg id="mine"/>');
+		expect(scaffoldPipe(ws, 'branded').files).toEqual(['pipelines/branded/branded.pipe', 'pipelines/branded/README.md']);
+		expect(fs.readFileSync(path.join(branded, 'icon.svg'), 'utf8')).toBe('<svg id="mine"/>');
 		// A dir outside the workspace is refused before any write
 		expect(() => scaffoldPipe(path.join(ws, 'inner'), 'ingest', { dir: '../outside' })).toThrow(/must resolve to a folder inside the workspace/);
 		expect(fs.existsSync(path.join(ws, 'outside'))).toBe(false);

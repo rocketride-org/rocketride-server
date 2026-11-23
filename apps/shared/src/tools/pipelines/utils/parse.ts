@@ -59,8 +59,9 @@ export interface Pipeline {
 	source?: string;
 	project_id?: string;
 	/**
-	 * The store manifest (plan §9, C.17b): present = the pipeline is listable
-	 * when published; absent = it runs and deploys unlisted. Its shape is the
+	 * The store listing (plan §9, C.17b). Every pipeline carries one: a save
+	 * from PACKAGE, the packers and the deploy door each add the default
+	 * block to a pipeline that has none. Its shape is the
 	 * SDK's `PipeStoreBlock` (`rocketride`); kept loose here because this
 	 * parser compiles in the VS Code extension host too and never validates
 	 * the block (the publish door does).

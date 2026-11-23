@@ -247,6 +247,15 @@ const styles = {
 		minWidth: 0,
 		minHeight: 0,
 	} as CSSProperties,
+	// The tab-content gutters around a page that fills the panel's height
+	// and scrolls inside itself.
+	docPanelFill: {
+		...commonStyles.tabContent,
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+		minHeight: 0,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -476,6 +485,10 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		onSave?.();
 	}, [onSave]);
 
+	// Whether the PACKAGE page holds a draft (its own Save has not run): the
+	// DEPLOY page refuses to deploy a pipeline behind pending changes.
+	const [packagePending, setPackagePending] = useState(false);
+
 	// --- Open link -----------------------------------------------------------
 
 	const handleOpenLink = useCallback(
@@ -541,16 +554,20 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 
 	/**
 	 * Wraps a non-canvas page's body in the standard page grammar: the
-	 * 24px-gutter tab-content body. Save lives ONLY on the Design page
-	 * (inside the canvas) — the monitoring pages carry no document actions.
+	 * 24px-gutter tab-content body. Save lives on the Design page (inside
+	 * the canvas) and in the PACKAGE page's own save bar — the monitoring
+	 * pages carry no document actions.
 	 *
 	 * @param inner - The page's body content.
+	 * @param fill - The page fills the panel's height and scrolls inside itself.
 	 * @returns The composed panel node.
 	 */
-	const renderDocPanel = (inner: ReactNode): ReactNode => (
+	const renderDocPanel = (inner: ReactNode, fill = false): ReactNode => (
 		// The page title is PINNED above the scroll region (rendered once at
 		// the view level, not here) — panels carry only their scrolling body.
-		<div style={commonStyles.tabContent}>{inner}</div>
+		// A page that lays out its own height (PACKAGE: its panes scroll, its
+		// save bar stays at the bottom) fills the panel instead of scrolling it.
+		<div style={fill ? styles.docPanelFill : commonStyles.tabContent}>{inner}</div>
 	);
 
 	// --- Per-source live event routing + stream bindings ----------------------
@@ -658,10 +675,11 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			content: renderDocPanel(renderSections('dev')),
 		},
 		package: {
-			// The pipeline described (named-pipes mockups 2.3–2.10, 1.8b): Identity
-			// and the per-call API Params (plan §5.5) write the document; the
-			// canvas takes a new map through its project reload path. Assets and
-			// Store write the store block; Requirements reads the document and
+			// The pipeline described (named-pipes mockups 2.3–2.10, 1.8b): Identity,
+			// the per-call API Params (plan §5.5), Assets and Store hold their
+			// changes as the page's draft until its Save, which writes the
+			// document (the canvas takes a new map through its project reload
+			// path) and runs the host's save; Requirements reads the draft and
 			// the rail; Review mounts the store thread over the review adapter.
 			content: renderDocPanel(
 				project ? (
@@ -671,6 +689,8 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 						servicesJson={servicesJson}
 						getNodeSchema={getNodeSchema ? handleGetNodeSchema : undefined}
 						onContentChanged={isReadonly ? undefined : handleContentChanged}
+						onSave={isReadonly ? undefined : handleSave}
+						onPendingChange={setPackagePending}
 						developerId={developerId ?? ''}
 						serverHost={serverHost}
 						assetsHost={assetsHost}
@@ -678,7 +698,8 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 					/>
 				) : (
 					<div style={commonStyles.empty}>No pipeline loaded</div>
-				)
+				),
+				true
 			),
 		},
 		deploy: {
@@ -694,6 +715,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 					isReadonly={isReadonly}
 					isDirty={isDirty}
 					isNew={isNew}
+					packagePending={packagePending}
 					artifactContext={{ servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) }}
 				/>
 			),

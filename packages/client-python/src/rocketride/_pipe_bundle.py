@@ -25,9 +25,11 @@
 A pipeline's store listing is a ROOT block ``store`` inside the ``.pipe``
 JSON, beside ``project_id``, ``name``, ``description`` and ``source`` (never
 duplicated in the block): tagline, categories, tags, icon, readme, links,
-mode and billing, mirroring an app's ``appManifest`` listing fields. The
-block present = the pipeline is listable; without it a pipe still runs and
-deploys as an unlisted artifact.
+mode and billing, mirroring an app's ``appManifest`` listing fields. Every
+pipeline carries the block: the scaffold writes it, and the packer and the
+deploy door add the default one to a pipe that has none. ``icon`` is
+optional: a pipe without one leaves it unset and each UI shows its own
+fallback; a declared icon must be in the pack.
 
 A pipeline publishes PER PIPE, BY REFERENCE: :func:`pack_pipe` takes the
 path of one ``.pipe`` and builds the zip the deploy door takes as ``data``
@@ -35,8 +37,11 @@ beside the pipeline dict — the pipe at the root under its own basename, the
 declared readme and icon, and every file the README references (markdown
 images and links, HTML ``<img src>``), laid out relative to the pipe file's
 directory. There is no folder rule: two pipes in one folder are two pipes and
-may share files. The TypeScript twins are ``client/pipe-store.ts`` (the pure
-rules) and ``app-pack/pipe-bundle.ts`` (the Node packer).
+may share files. A pipe written without a ``store`` block is packed WITH the
+default block (its ``readme`` kept only when README.md sits beside the pipe);
+the file on disk is left as it is. The TypeScript twins are
+``client/pipe-store.ts`` (the pure rules) and ``app-pack/pipe-bundle.ts``
+(the Node packer).
 """
 
 from __future__ import annotations
@@ -77,7 +82,8 @@ STORE_KEYS = ('tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode'
 #: The monetization modes, the app model.
 STORE_MODES = ('free', 'subscription', 'paywall')
 
-#: The placeholder icon every scaffolded pipeline ships — the app scaffold's.
+#: The app scaffold's placeholder icon, for a pipeline that wants one. The
+#: pipeline scaffold writes no icon file and the default block names none.
 PIPE_ICON_SVG = PLACEHOLDER_ICON_SVG
 
 #: Pipe id grammar: one dot-free address segment (the developer id is attached at deploy).
@@ -115,6 +121,8 @@ _SCHEME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*:')
 def default_store_block() -> PipeStoreBlock:
     """The block a new pipeline is stamped with — a fresh dict each call.
 
+    It names no icon: a pipeline without one leaves ``icon`` unset.
+
     Returns:
         The scaffold's default store block.
     """
@@ -122,7 +130,6 @@ def default_store_block() -> PipeStoreBlock:
         'tagline': '',
         'categories': ['pipeline'],
         'tags': [],
-        'icon': './icon.svg',
         'readme': './README.md',
         'links': {},
         'mode': 'free',
@@ -456,15 +463,15 @@ class PackedPipe:
     """The result of :func:`pack_pipe`."""
 
     pipeline: Dict[str, Any]
-    """The pipeline dict (the ``.pipe`` JSON, display ``name`` filled)."""
+    """The pipeline dict (the packed ``.pipe`` JSON, display ``name`` filled)."""
     store: Optional[PipeStoreBlock]
-    """The validated store block, or None when the pipe carries none (unlisted)."""
+    """The validated store block, always set: the pipe's own, or the default block the packer added."""
     files: List[str] = field(default_factory=list)
     """Paths packed, relative to the pipe file's directory, in zip order."""
     data: bytes = b''
     """The zip bytes to pass as ``deploy.add(pipeline, kind='pipe', data=...)``."""
     warnings: List[str] = field(default_factory=list)
-    """Advisory notes (an undeclared icon or readme)."""
+    """Advisory notes (an undeclared readme)."""
 
 
 # ==== Reads ===================================================================
@@ -511,6 +518,27 @@ def _read_contained(pipe_dir: str, rel: str, cap: int) -> bytes:
 # ==== Pack ====================================================================
 
 
+def _added_store_block(pipe_dir: str) -> PipeStoreBlock:
+    """The store block the packer adds to a pipe that has none.
+
+    The default block, its ``readme`` kept only when that file sits beside
+    the pipe (nobody declared it, so its absence is not an error). It names
+    no icon.
+
+    Args:
+        pipe_dir: The pipe file's directory.
+
+    Returns:
+        The block to add.
+    """
+    block = default_store_block()
+    if 'readme' in block:
+        readme = os.path.join(pipe_dir, *normalize_posix_path(block['readme']).split('/'))
+        if not os.path.isfile(readme):
+            del block['readme']
+    return block
+
+
 def pack_pipe(pipe_path: str) -> PackedPipe:
     """Pack one pipeline into the deploy zip.
 
@@ -518,6 +546,12 @@ def pack_pipe(pipe_path: str) -> PackedPipe:
     code-point order — the declared readme and icon and every file the
     README references, each at its path relative to the pipe file's
     directory.
+
+    A pipe with a ``store`` block is packed as its bytes on disk. A pipe
+    without one is packed with the default block appended as its last key,
+    serialized as UTF-8 JSON with two-space indentation and a trailing
+    newline; the returned dict carries the same block, so the dict and the
+    zip's ``.pipe`` are one pipeline.
 
     Args:
         pipe_path: The ``.pipe`` file.
@@ -546,25 +580,32 @@ def pack_pipe(pipe_path: str) -> PackedPipe:
     if not isinstance(pipe, dict):
         raise ValueError(f'{base} must hold a JSON object')
     stem = base[: -len('.pipe')]
-    pipeline = {**pipe, 'name': str(pipe.get('name') or stem)}
 
-    # Step 2: the store block — present = listable, absent = unlisted
-    store = validate_store_block(pipe['store']) if 'store' in pipe else None
+    # Step 2: the store block — every packed pipe carries one. An authored
+    # block rides in the file's own bytes; a pipe without one is packed with
+    # the default block appended, so the zip's .pipe and the dict sent beside
+    # it are the same pipeline (the display-name fill stays the dict's alone:
+    # the server fills the bundle's name before it compares)
+    authored = 'store' in pipe
+    packed_pipe = pipe if authored else {**pipe, 'store': _added_store_block(pipe_dir)}
+    packed_bytes = (
+        pipe_bytes if authored else (json.dumps(packed_pipe, indent=2, ensure_ascii=False) + '\n').encode('utf-8')
+    )
+    store = validate_store_block(packed_pipe['store'])
+    pipeline = {**packed_pipe, 'name': str(pipe.get('name') or stem)}
     warnings: List[str] = []
-    if store is not None and not store.get('icon'):
-        warnings.append('store.icon is not declared, so tiles show a generic glyph')
-    if store is not None and not store.get('readme'):
+    if not store.get('readme'):
         warnings.append('store.readme is not declared, so the listing has no page')
 
     # Step 3: the declared files, each under its cap (checked before the read)
     entries: Dict[str, bytes] = {}
-    readme_rel = normalize_posix_path(store['readme']) if store and store.get('readme') else None
+    readme_rel = normalize_posix_path(store['readme']) if store.get('readme') else None
     readme_text: Optional[str] = None
     if readme_rel:
         readme = _read_contained(pipe_dir, readme_rel, MAX_PIPE_README_BYTES)
         entries[readme_rel] = readme
         readme_text = readme.decode('utf-8', errors='replace')
-    if store and store.get('icon'):
+    if store.get('icon'):
         icon_rel = normalize_posix_path(store['icon'])
         entries[icon_rel] = _read_contained(pipe_dir, icon_rel, MAX_ICON_BYTES)
 
@@ -592,7 +633,7 @@ def pack_pipe(pipe_path: str) -> PackedPipe:
             zf.writestr(info, data)
             files.append(rel)
 
-        add(base, pipe_bytes)
+        add(base, packed_bytes)
         for rel in sorted(entries):
             add(rel, entries[rel])
     return PackedPipe(pipeline=pipeline, store=store, files=files, data=buffer.getvalue(), warnings=warnings)
@@ -606,8 +647,8 @@ def scaffold_pipe(workspace_root: str, pipe_id: str, *, name: Optional[str] = No
     and ``client.deploy.create_pipe()``.
 
     Writes ``<dir>/<pipe_id>/<pipe_id>.pipe`` with the default ``store``
-    block, the placeholder ``icon.svg`` the app scaffold ships, a
-    ``README.md`` stub, and an empty ``assets/`` directory.
+    block, a ``README.md`` stub, and an empty ``assets/`` directory. No icon
+    file is written: the default block names none.
 
     Args:
         workspace_root: The workspace folder that owns ``<dir>``.
@@ -651,12 +692,11 @@ def scaffold_pipe(workspace_root: str, pipe_id: str, *, name: Optional[str] = No
     }
     files = [
         (f'{pipe_id}.pipe', json.dumps(pipe, indent=2) + '\n'),
-        ('icon.svg', PIPE_ICON_SVG),
         ('README.md', pipe_readme_stub(display_name)),
     ]
     # step: every output is checked before the first write, and each is
-    # created exclusively — an existing README or icon is never replaced
-    # (two pipes may share a folder; a fresh scaffold in an empty one is fine)
+    # created exclusively — an existing README is never replaced (two pipes
+    # may share a folder; a fresh scaffold in an empty one is fine)
     for rel, _ in files:
         if os.path.exists(os.path.join(folder_abs, rel)):
             raise ValueError(f'"{folder_rel}/{rel}" already exists — pick another id or remove the file.')

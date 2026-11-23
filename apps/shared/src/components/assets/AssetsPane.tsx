@@ -36,8 +36,10 @@
  * caller's setter, which stores them (the pipe's store block, the app's
  * manifest).
  *
- * The README text goes to the file as it is typed (debounced), so the
- * footer's Unsaved/Saved is the file's state, not the document's.
+ * The README text goes to the host as it is typed (debounced), so the
+ * footer's Unsaved/Saved is the file's state, not the document's. A caller
+ * whose host holds the writes until its own Save says so with `deferred`:
+ * the footer then names that Save instead of reporting each write as saved.
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -82,6 +84,8 @@ export interface IAssetsPaneProps {
 	readmeStub: string;
 	/** Read-only hosts: the pane shows, never writes. */
 	readonly?: boolean;
+	/** The host holds the pane's writes until the caller's own Save: the footer names that Save, not a file write. */
+	deferred?: boolean;
 }
 
 /** The editor tabs, in the order they are drawn: Preview first. */
@@ -113,7 +117,7 @@ const README_TABS: ViewMenu = { entries: [{ id: 'preview', label: 'Preview' }, {
 const KIND_WORDS: Record<AssetsKind, { noun: string; glyph: string; packedNote: (referenced: number, missing: number) => string }> = {
 	pipeline: {
 		noun: 'pipeline',
-		glyph: 'the generic pipeline glyph',
+		glyph: 'the first letter of its name',
 		packedNote: (referenced, missing) => {
 			const count = referenced === 0 ? 'No files referenced yet' : `${referenced} file${referenced === 1 ? '' : 's'} referenced`;
 			const gap = missing === 0 ? '' : `; ${missing === 1 ? 'one is' : `${missing} are`} missing — fix the link or drop the file in`;
@@ -392,7 +396,7 @@ function messageOf(err: unknown): string {
  * @param props - {@link IAssetsPaneProps}.
  * @returns The pane.
  */
-export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, paths, onPathsChange, readmeStub, readonly = false }) => {
+export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, paths, onPathsChange, readmeStub, readonly = false, deferred = false }) => {
 	const words = KIND_WORDS[kind];
 	const iconPath = paths.icon || '';
 	const readmePath = paths.readme || '';
@@ -950,15 +954,16 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 					</div>
 				)}
 				<div style={styles.foot}>
-					{dirty ? <span style={styles.footDirty}>● Unsaved</span> : <span>Saved</span>}
+					{/* A deferred host answers every write at once: the file's state is the caller's Save to report, not this footer's. */}
+					{!deferred && (dirty ? <span style={styles.footDirty}>● Unsaved</span> : <span>Saved</span>)}
 					{saveFailed && !readonly && (
 						<Button variant="ghost" small onClick={retrySave}>Retry</Button>
 					)}
-					<span>·</span>
+					{!deferred && <span>·</span>}
 					<span>
 						{posixBasename(readmePath || DEFAULT_README_PATH)} · {lineCount(text)} {lineCount(text) === 1 ? 'line' : 'lines'}
 					</span>
-					<span style={styles.footRight}>{tab === 'edit' ? `Saved to ${posixBasename(readmePath || DEFAULT_README_PATH)} as you type` : 'This is what the store page shows'}</span>
+					<span style={styles.footRight}>{tab === 'edit' ? (deferred ? `Written to ${posixBasename(readmePath || DEFAULT_README_PATH)} when you save` : `Saved to ${posixBasename(readmePath || DEFAULT_README_PATH)} as you type`) : 'This is what the store page shows'}</span>
 				</div>
 			</div>
 		);

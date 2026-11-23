@@ -250,20 +250,79 @@ class TestPublish:
         assert resp['body']['artifact']['version'] == 3
 
     @pytest.mark.asyncio
-    async def test_a_dict_deploy_without_a_block_is_an_unlisted_artifact(self, account_stub, monkeypatch):
-        """No block: no manifest in the metadata (a caller-supplied one is dropped), no content stage, the registry still takes the version."""
+    async def test_a_dict_deploy_without_a_block_gets_the_default_block(self, account_stub, monkeypatch):
+        """No block: the door adds the default one, so the artifact, the manifest (a caller-supplied one is replaced) and the content stage all see it."""
+        from ai.account.pipe_bundle import default_store_block, is_listed
         from ai.modules.task.commands import cmd_deploy
 
-        written = AsyncMock()
+        written = AsyncMock(return_value=[])
         monkeypatch.setattr(cmd_deploy, 'write_pipe_content', written)
         conn = _make_conn(_account_info())
         resp = await conn._deploy_add_pipe(
-            {}, {'pipeline': PIPE, 'metadata': {'ci': 'run-7', 'manifest': {'mode': 'free', 'name': 'Forged'}}}
+            {}, {'pipeline': PIPE, 'metadata': {'ci': 'run-7', 'manifest': {'mode': 'paywall', 'name': 'Forged'}}}
         )
 
-        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'ci': 'run-7'}
-        written.assert_not_awaited()
+        publish = account_stub.deployments_publish.await_args
+        # The stored artifact is the pipe WITH the block; the caller's dict is left as sent
+        assert publish.args[2] == {**PIPE, 'store': default_store_block()}
+        assert 'store' not in PIPE
+        metadata = publish.kwargs['metadata']
+        assert metadata == {
+            'ci': 'run-7',
+            'manifest': {
+                'name': 'P',
+                'description': '',
+                'defaultSource': '',
+                'tagline': '',
+                'categories': ['pipeline'],
+                'tags': [],
+                'icon': '',
+                'readme': '',
+                'links': {},
+                'mode': 'free',
+                'billing': {'plans': []},
+            },
+        }
+        assert is_listed(metadata['manifest'])
+        # The content stage runs with no zip and a block that declares no file
+        written.assert_awaited_once()
+        bundle, block = written.await_args.args[3:]
+        assert bundle is None and block == default_store_block()
         assert resp['body']['artifact']['version'] == 3
+
+    @pytest.mark.asyncio
+    async def test_a_dict_deploy_without_a_block_stores_no_content_and_does_not_fail(self, account_stub):
+        """The REAL content stage: the default block declares no file, so a deploy without a zip writes nothing."""
+        conn = _make_conn(_account_info())
+        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+
+        assert account_stub.deployments_publish.await_args.kwargs['metadata']['manifest']['mode'] == 'free'
+        account_stub.set_artifact_state.assert_not_awaited()
+        assert resp['body']['artifact']['version'] == 3
+
+    @pytest.mark.asyncio
+    async def test_a_bundle_whose_pipe_has_no_block_gets_the_default_block_after_the_comparison(
+        self, account_stub, monkeypatch
+    ):
+        """The dict and the bundle's .pipe are compared as sent; the block is added to the pipe both describe."""
+        from ai.account.pipe_bundle import default_store_block
+        from ai.modules.task.commands import cmd_deploy
+
+        written = AsyncMock(return_value=[])
+        monkeypatch.setattr(cmd_deploy, 'write_pipe_content', written)
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'data': _bundle(PIPE, {'notes.txt': 'x'})})
+
+        assert account_stub.deployments_publish.await_args.args[2] == {**PIPE, 'store': default_store_block()}
+        bundle, block = written.await_args.args[3:]
+        assert bundle.entries == ['notes.txt'] and block == default_store_block()
+        # A dict that carries the block is not the bundle's pipe without it: a packer adds it to both
+        account_stub.deployments_publish.reset_mock()
+        with pytest.raises(ValueError, match="differs from the bundle's .pipe"):
+            await conn._deploy_add_pipe(
+                {}, {'pipeline': {**PIPE, 'store': default_store_block()}, 'data': _bundle(PIPE)}
+            )
+        account_stub.deployments_publish.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_an_unknown_store_key_refuses_the_deploy_by_name(self, account_stub):

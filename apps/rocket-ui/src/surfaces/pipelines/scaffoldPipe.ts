@@ -26,13 +26,13 @@
 //
 // The browser twin of the SDK's Node-only `scaffoldPipe`, over the workspace
 // store's pipelines mount: `<dir>/<pipeId>/` holding `<pipeId>.pipe` (the id,
-// the display name, the default store block), `icon.svg` (the app scaffold's
-// placeholder), `README.md` (the SDK's stub) and an empty `assets/` — the same
-// files the CLI and VS Code write, so a pipeline looks the same wherever it
-// was born.
+// the display name, the default store block), `README.md` (the SDK's stub)
+// and an empty `assets/` — the same files the CLI and VS Code write, so a
+// pipeline looks the same wherever it was born. No icon file is written: the
+// default block names none.
 // =============================================================================
 
-import { defaultStoreBlock, PIPE_ICON_SVG, pipeReadmeStub } from 'rocketride';
+import { defaultStoreBlock, pipeReadmeStub } from 'rocketride';
 import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
 import { getWorkspaceVfs } from '../workspace/vfs/workspace';
 
@@ -78,9 +78,7 @@ export async function scaffoldPipe(dir: string, pipeId: string, displayName: str
 		const pipe = { ...base, project_id: pipeId, name: displayName, store: defaultStoreBlock(), components: Array.isArray(base.components) ? base.components : [] };
 		await view.write(pipePath, `${JSON.stringify(pipe, null, 2)}\n`);
 		files.push(pipePath);
-		// Step 3: what the block points at — the icon, the README — and assets/
-		await view.write(`${folder}/icon.svg`, PIPE_ICON_SVG);
-		files.push(`${folder}/icon.svg`);
+		// Step 3: what the block points at — the README — and assets/
 		await view.write(`${folder}/README.md`, pipeReadmeStub(displayName));
 		files.push(`${folder}/README.md`);
 		await view.mkdir(`${folder}/assets`);

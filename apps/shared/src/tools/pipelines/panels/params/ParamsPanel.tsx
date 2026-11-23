@@ -32,8 +32,10 @@
  * decided 2026-11-16), the type and description from the catalog ("int
  * 256–4096 · Largest input edge"), and a remove. "+ Add parameter" opens a
  * new row. Defaults are the node's configured values and change on DESIGN,
- * never here. Below the table, the live call examples (M-1.6) use the real
- * public names. The page is the API Params side tab of the PACKAGE page.
+ * never here. The live call examples (M-1.6) use the real public names and
+ * stay pinned at the bottom of the pane while the table above them scrolls.
+ * The page is the API Params side tab of the PACKAGE page, which gives it a
+ * column of definite height to lay itself out in.
  *
  * Built on the shell's controls and style surface: `InputField`, `Button`,
  * `ToggleGroup`, `AnchoredPopup`, `commonStyles` (table header and cells,
@@ -54,6 +56,29 @@ import { buildCallExamples, CALL_EXAMPLE_TABS, exampleValue, type CallExampleTab
 // =============================================================================
 
 const styles = {
+	// The pane: the map editor scrolls, the call examples stay at the bottom.
+	// In a window too short for both, the editor keeps a usable height and
+	// the pane itself scrolls, so the table and Add parameter stay reachable.
+	page: {
+		display: 'flex',
+		flexDirection: 'column',
+		flex: 1,
+		minHeight: 0,
+		overflowY: 'auto',
+	} as CSSProperties,
+
+	editor: {
+		flex: '1 1 auto',
+		minHeight: 160,
+		overflowY: 'auto',
+		paddingBottom: 12,
+	} as CSSProperties,
+
+	examples: {
+		flexShrink: 0,
+		borderTop: '1px solid var(--rr-border)',
+	} as CSSProperties,
+
 	table: {
 		width: '100%',
 		borderCollapse: 'collapse',
@@ -222,7 +247,7 @@ const styles = {
 		alignItems: 'center',
 		justifyContent: 'space-between',
 		gap: 12,
-		margin: '22px 0 8px',
+		margin: '12px 0 8px',
 	} as CSSProperties,
 
 	examplesControls: {
@@ -241,7 +266,9 @@ const styles = {
 		background: 'var(--rr-bg-secondary)',
 		border: '1px solid var(--rr-border)',
 		whiteSpace: 'pre',
-		overflowX: 'auto',
+		// A long example scrolls inside its block: the pinned strip never takes the table's room
+		maxHeight: 220,
+		overflow: 'auto',
 	} as CSSProperties,
 };
 
@@ -714,117 +741,123 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 
 	// --- Render ------------------------------------------------------------------
 	return (
-		<div>
-			<table style={styles.table}>
-				<thead>
-					<tr>
-						<th style={commonStyles.tableHeader}>Public name</th>
-						<th style={commonStyles.tableHeader}>Target (node.field)</th>
-						<th style={commonStyles.tableHeader}>Default</th>
-						<th style={commonStyles.tableHeader}>Type · description</th>
-						<th style={styles.removeHeader} />
-					</tr>
-				</thead>
-				<tbody>
-					{rows.map((row) => {
-						const option = row.target ? optionByTarget.get(row.target) : undefined;
-						const draft = Object.hasOwn(drafts, row.key) ? drafts[row.key] : undefined;
-						const shown = draft ?? row.name ?? '';
-						const problem = draft !== undefined && draft !== row.name ? publicNameProblem(draft, row.target ?? '', parameters, describeTarget) : null;
-						const rowId = `rr-param-${row.key.replace(/[^A-Za-z0-9_-]/g, '-')}`;
-						return (
-							<tr key={row.key}>
-								<td style={styles.cellTop}>
-									<InputField
-										id={rowId}
-										type="text"
-										style={{ ...styles.nameInput, ...(problem ? styles.nameInvalid : {}) }}
-										value={shown}
-										disabled={readonly}
-										placeholder="publicName"
-										aria-label={row.target ? `Public name of ${describeTarget(row.target)}` : 'Public name of the new parameter'}
-										aria-invalid={problem ? true : undefined}
-										aria-describedby={problem ? `${rowId}-problem` : undefined}
-										pattern={PUBLIC_NAME_PATTERN.source}
-										onChange={(event) => setDrafts((prev) => ({ ...prev, [row.key]: event.target.value }))}
-										onBlur={() => commitName(row)}
-										onKeyDown={(event) => {
-											if (event.key === 'Enter') commitName(row);
-											if (event.key === 'Escape') dropDraft(row.key);
-										}}
-									/>
-									{problem && (
-										<div id={`${rowId}-problem`} style={styles.problem}>
-											{problem}
-										</div>
-									)}
-								</td>
-								<td style={styles.cellTop}>
-									<TargetPicker id={`${rowId}-target`} value={row.target} options={options} parameters={parameters} autoOpen={!row.target} disabled={readonly} onPick={(picked) => pick(row, picked)} />
-								</td>
-								{/* Default is its own column (option 4C, decided 2026-11-16):
-								    the node's config value as set on DESIGN, the node's own
-								    default when unset — what a caller gets when the parameter
-								    is omitted. Type and description stay prose beside it. */}
-								<td style={styles.cellDefault}>{option ? <span style={styles.infoStrong}>{showValue(option.stored ?? option.descriptor.default)}</span> : null}</td>
-								<td style={styles.cellInfo}>
-									{option ? (
-										<>
-											<span style={styles.infoStrong}>{typeAndBounds(option.descriptor)}</span>
-											{(option.descriptor.description || option.descriptor.title) && <> · {option.descriptor.description || option.descriptor.title}</>}
-										</>
-									) : row.target ? (
-										<span>{row.target.split('.')[0]} is not on this pipeline, or its field is not a per-call parameter</span>
-									) : (
-										<span>Pick the node field this name sets</span>
-									)}
-								</td>
-								<td style={styles.cellRemove}>
-									{!readonly && (
-										<Button variant="ghost" small onClick={() => remove(row)} title="Remove this parameter" aria-label={`Remove ${row.name ?? 'the new parameter'}`}>
-											✕
-										</Button>
-									)}
+		<div style={styles.page}>
+			{/* The map editor: the only part of the pane that scrolls. */}
+			<div style={styles.editor}>
+				<table style={styles.table}>
+					<thead>
+						<tr>
+							<th style={commonStyles.tableHeader}>Public name</th>
+							<th style={commonStyles.tableHeader}>Target (node.field)</th>
+							<th style={commonStyles.tableHeader}>Default</th>
+							<th style={commonStyles.tableHeader}>Type · description</th>
+							<th style={styles.removeHeader} />
+						</tr>
+					</thead>
+					<tbody>
+						{rows.map((row) => {
+							const option = row.target ? optionByTarget.get(row.target) : undefined;
+							const draft = Object.hasOwn(drafts, row.key) ? drafts[row.key] : undefined;
+							const shown = draft ?? row.name ?? '';
+							const problem = draft !== undefined && draft !== row.name ? publicNameProblem(draft, row.target ?? '', parameters, describeTarget) : null;
+							const rowId = `rr-param-${row.key.replace(/[^A-Za-z0-9_-]/g, '-')}`;
+							return (
+								<tr key={row.key}>
+									<td style={styles.cellTop}>
+										<InputField
+											id={rowId}
+											type="text"
+											style={{ ...styles.nameInput, ...(problem ? styles.nameInvalid : {}) }}
+											value={shown}
+											disabled={readonly}
+											placeholder="publicName"
+											aria-label={row.target ? `Public name of ${describeTarget(row.target)}` : 'Public name of the new parameter'}
+											aria-invalid={problem ? true : undefined}
+											aria-describedby={problem ? `${rowId}-problem` : undefined}
+											pattern={PUBLIC_NAME_PATTERN.source}
+											onChange={(event) => setDrafts((prev) => ({ ...prev, [row.key]: event.target.value }))}
+											onBlur={() => commitName(row)}
+											onKeyDown={(event) => {
+												if (event.key === 'Enter') commitName(row);
+												if (event.key === 'Escape') dropDraft(row.key);
+											}}
+										/>
+										{problem && (
+											<div id={`${rowId}-problem`} style={styles.problem}>
+												{problem}
+											</div>
+										)}
+									</td>
+									<td style={styles.cellTop}>
+										<TargetPicker id={`${rowId}-target`} value={row.target} options={options} parameters={parameters} autoOpen={!row.target} disabled={readonly} onPick={(picked) => pick(row, picked)} />
+									</td>
+									{/* Default is its own column (option 4C, decided 2026-11-16):
+									    the node's config value as set on DESIGN, the node's own
+									    default when unset — what a caller gets when the parameter
+									    is omitted. Type and description stay prose beside it. */}
+									<td style={styles.cellDefault}>{option ? <span style={styles.infoStrong}>{showValue(option.stored ?? option.descriptor.default)}</span> : null}</td>
+									<td style={styles.cellInfo}>
+										{option ? (
+											<>
+												<span style={styles.infoStrong}>{typeAndBounds(option.descriptor)}</span>
+												{(option.descriptor.description || option.descriptor.title) && <> · {option.descriptor.description || option.descriptor.title}</>}
+											</>
+										) : row.target ? (
+											<span>{row.target.split('.')[0]} is not on this pipeline, or its field is not a per-call parameter</span>
+										) : (
+											<span>Pick the node field this name sets</span>
+										)}
+									</td>
+									<td style={styles.cellRemove}>
+										{!readonly && (
+											<Button variant="ghost" small onClick={() => remove(row)} title="Remove this parameter" aria-label={`Remove ${row.name ?? 'the new parameter'}`}>
+												✕
+											</Button>
+										)}
+									</td>
+								</tr>
+							);
+						})}
+						{rows.length === 0 && (
+							<tr>
+								<td colSpan={5} style={styles.cellEmpty}>
+									No public parameters yet.
 								</td>
 							</tr>
-						);
-					})}
-					{rows.length === 0 && (
-						<tr>
-							<td colSpan={5} style={styles.cellEmpty}>
-								No public parameters yet.
-							</td>
-						</tr>
-					)}
-				</tbody>
-			</table>
-			{!readonly && (
-				<div style={styles.actions}>
-					<Button variant="ghost" small onClick={() => setAdding((prev) => [...prev, `new-${Date.now()}-${prev.length}`])} disabled={options.length === 0}>
-						+ Add parameter
-					</Button>
-					{failedProviders.length > 0 && (
-						<Button variant="secondary" small onClick={retryFailed} title={failedProviders.join(', ')}>
-							Retry loading {failedProviders.length} node definition{failedProviders.length === 1 ? '' : 's'}
+						)}
+					</tbody>
+				</table>
+				{!readonly && (
+					<div style={styles.actions}>
+						<Button variant="ghost" small onClick={() => setAdding((prev) => [...prev, `new-${Date.now()}-${prev.length}`])} disabled={options.length === 0}>
+							+ Add parameter
 						</Button>
-					)}
+						{failedProviders.length > 0 && (
+							<Button variant="secondary" small onClick={retryFailed} title={failedProviders.join(', ')}>
+								Retry loading {failedProviders.length} node definition{failedProviders.length === 1 ? '' : 's'}
+							</Button>
+						)}
+					</div>
+				)}
+				<div style={styles.help}>
+					Each row is one entry of the .pipe <code style={commonStyles.fontMono}>parameters</code> map: public name → node.field. Defaults are the node's config values; change them on DESIGN.
+					{options.length === 0 && failedProviders.length === 0 && ' No node on this pipeline declares a per-call parameter.'}
 				</div>
-			)}
-			<div style={styles.help}>
-				Each row is one entry of the .pipe <code style={commonStyles.fontMono}>parameters</code> map: public name → node.field. Defaults are the node's config values; change them on DESIGN.
-				{options.length === 0 && failedProviders.length === 0 && ' No node on this pipeline declares a per-call parameter.'}
 			</div>
 
-			<div style={styles.examplesHeader}>
-				<div style={commonStyles.labelUppercase}>Call examples</div>
-				<div style={styles.examplesControls}>
-					<ToggleGroup options={CALL_EXAMPLE_TABS.map((t) => ({ id: t.id, label: t.label }))} value={tab} onChange={setTab} small />
-					<Button variant="secondary" small onClick={copy} title="Copy to clipboard">
-						Copy
-					</Button>
+			{/* The call examples: pinned at the bottom of the pane. */}
+			<div style={styles.examples}>
+				<div style={styles.examplesHeader}>
+					<div style={commonStyles.labelUppercase}>Call examples</div>
+					<div style={styles.examplesControls}>
+						<ToggleGroup options={CALL_EXAMPLE_TABS.map((t) => ({ id: t.id, label: t.label }))} value={tab} onChange={setTab} small />
+						<Button variant="secondary" small onClick={copy} title="Copy to clipboard">
+							Copy
+						</Button>
+					</div>
 				</div>
+				<pre style={styles.code}>{examples[tab]}</pre>
 			</div>
-			<pre style={styles.code}>{examples[tab]}</pre>
 		</div>
 	);
 }

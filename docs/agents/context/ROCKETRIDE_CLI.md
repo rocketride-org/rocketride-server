@@ -48,7 +48,7 @@ exported in your shell takes precedence over the same one in `.env`.
 | See what is running, stop it | `rocketride list`, `rocketride stop --token TOKEN` |
 | Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
 | Files in the account store | `rocketride store` with `dir`, `type`, `write`, `rm`, `mkdir`, or `stat` |
-| Start a new pipeline | `rocketride pipe new <id> [--name <text>]` — `pipelines/<id>/<id>.pipe` with its `store` block, `icon.svg`, `README.md` and `assets/` (no connection) |
+| Start a new pipeline | `rocketride pipe new <id> [--name <text>]` — `pipelines/<id>/<id>.pipe` with its `store` block, `README.md` and `assets/` (no connection) |
 | Move a custom node to the current `services.json` format | `rocketride node convert nodes/<node>/services*.json` — rewrites an old-format definition in place and adds its `legacy` block (no connection) |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target); a pipeline deploys from its `.pipe`: `rocketride deploy add pipelines/<id>/<id>.pipe` |
 | Apps | `rocketride app` with `create`, `dev`, `verify`, `deploy`, `publish`, `versions`, `where`, and more (`dev` uses the development connection; lifecycle verbs use the deployment target; the Python package has only `create`, `verify`, and `deploy`) |
@@ -146,27 +146,29 @@ Workspace operations on pipelines; deploying and publishing them is
   — scaffold a new pipeline under `./pipelines/<id>/` (or `--dir`): the
   `<id>.pipe` carrying `components: []`, `project_id: <id>`, `name`,
   `description` and the default `store` block (`tagline: ""`,
-  `categories: ["pipeline"]`, `tags: []`, `icon: "./icon.svg"`,
-  `readme: "./README.md"`, `links: {}`, `mode: "free"`,
-  `billing: { plans: [] }`), the placeholder `icon.svg` the app scaffold
-  ships, a `README.md` stub, and an empty `assets/` directory. `<id>` is
-  one dot-free segment of letters, digits, `_` or `-`; the organization
-  that deploys the pipeline attaches its developer id. Needs no connection.
-  Refuses an existing `<id>.pipe`.
+  `categories: ["pipeline"]`, `tags: []`, `readme: "./README.md"`,
+  `links: {}`, `mode: "free"`, `billing: { plans: [] }`), a `README.md`
+  stub, and an empty `assets/` directory. The block names no icon and no
+  icon file is written. `<id>` is one dot-free segment of letters, digits,
+  `_` or `-`; the organization that deploys the pipeline attaches its
+  developer id. Needs no connection. Refuses an existing `<id>.pipe`.
 
 ```bash
 rocketride pipe new ingest --name "Document ingest"
 rocketride deploy add pipelines/ingest/ingest.pipe --deploy-to @me
 ```
 
-The `store` block is the pipeline's store listing: present = listable,
-absent = the pipe deploys as an unlisted artifact. `icon` and `readme` are
-paths relative to the pipe file; the pack carries the pipe, those two
-files, and every file the README references (markdown images and links,
-HTML `<img src>`), laid out as they sit beside the pipe. A declared or
-referenced file that is missing, or that resolves outside the pipe's
-directory, fails the deploy by name (ROCKETRIDE_PIPELINES.md, "The
-`store` block").
+The `store` block is the pipeline's store listing, and every deployed
+pipeline carries one: `rocketride deploy add` packs a pipe that has no
+block with the default block added (its `readme` kept only when
+`README.md` sits beside the pipe; the file on disk is not rewritten).
+`icon` and `readme` are paths relative to the pipe file; `icon` is
+optional, and a pipeline without one leaves it unset. The pack carries the
+pipe, the declared files, and every file the README references (markdown
+images and links, HTML `<img src>`), laid out as they sit beside the pipe.
+A declared or referenced file that is missing, or that resolves outside
+the pipe's directory, fails the deploy by name (ROCKETRIDE_PIPELINES.md,
+"The `store` block").
 
 ## Node commands (`rocketride node ...`)
 

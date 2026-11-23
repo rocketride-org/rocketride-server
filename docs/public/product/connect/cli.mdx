@@ -684,10 +684,11 @@ Sub-commands:
 ### pipe
 
 Use `pipe new` to start a pipeline that the store can list: it writes
-`pipelines/<id>/<id>.pipe` with its `store` block (tagline, categories, tags,
-icon, readme, links, mode, billing), the placeholder `icon.svg`, a `README.md`
-stub, and an empty `assets/` directory. It needs no connection. Deploy the
-result with `deploy add`.
+`pipelines/<id>/<id>.pipe` with its default `store` block (tagline,
+categories, tags, readme, links, mode, billing), a `README.md` stub, and an
+empty `assets/` directory. The block names no icon and no icon file is
+written; set `store.icon` when the pipeline has one. It needs no connection.
+Deploy the result with `deploy add`.
 
 ```bash
 rocketride pipe new ingest --name "Document ingest"   # scaffold ./pipelines/ingest/
