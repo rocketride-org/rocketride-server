@@ -363,6 +363,11 @@ class MonitorCommands(DAPConn):
             source (str, optional): Source component identifier used alongside
                 project_id when control is None.
         """
+        # Live authority re-check (#972): a stale gate gets no catch-up sends
+        authz = getattr(self._server, '_authz', None)
+        if authz is not None and not authz.gate_ok(self):
+            return
+
         # Figure out what was just turned on
         new = curr & ~prev  # Bits that are in curr but NOT in prev
 

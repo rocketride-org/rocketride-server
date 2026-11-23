@@ -504,13 +504,19 @@ class TaskConn(
         ``rrext_public_*`` commands are accepted. The WebSocket stays
         open — callers can re-authenticate later via ``auth``. Event
         subscriptions are dropped with the identity (#972): a deauthed
-        socket receives nothing. Open write handles are left as they are.
+        socket receives nothing. The connection is also detached as the
+        debugger of every task, so a later re-auth as another user does not
+        inherit the debugger stream. Open write handles are left as they are.
         """
         # Nothing to do if not authenticated
         if not self._authenticated:
             return self.build_response(request, body={})
 
         self._drop_authority()
+
+        # detach_task is a no-op for a task this connection is not debugging
+        for control in list(self._server._task_control.values()):
+            await control.task.detach_task(self)
 
         return self.build_response(request, body={})
 
