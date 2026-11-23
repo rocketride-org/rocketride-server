@@ -823,9 +823,10 @@ class AccountBase(ABC):
         publish_of_app (read-your-writes), and the row's ``createdAt`` is set
         once and survives repoints. The re-check also compares ``createdAt``
         across engines, so those timestamps must be comparable: a clock shared
-        by all engines, or store-assigned timestamps. A back-out writes
-        'removed' through publish_set_state even when the audience's previous
-        row was disabled.
+        by all engines, or store-assigned timestamps. A back-out restores the
+        audience's prior row (publish_set with its version and snapshot, then
+        publish_set_state with its state, so a disabled row stays disabled) and
+        writes 'removed' only when no prior row existed.
         """
         return await self._deployment_backend().publish_set(org_id, kind, app_id, audience, version, snapshot, actor)
 

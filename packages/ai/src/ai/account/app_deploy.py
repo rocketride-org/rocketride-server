@@ -592,9 +592,15 @@ async def _back_out(
 def _back_out_note(app_id: str, undone: str, prior: Optional[Dict[str, Any]]) -> str:
     """What the response adds about a back-out, beyond why it happened."""
     if undone == 'restored-enabled':
+        version = (prior or {}).get('version')
+        if (prior or {}).get('state') == 'removed':
+            return (
+                f'The previous binding v{version} of this audience was restored but is now enabled: '
+                'remove it (rrext_deploy_app remove) if it should stay off.'
+            )
         return (
-            f'The previous binding v{(prior or {}).get("version")} of this audience was restored but is now '
-            f'enabled: disable it (rrext_deploy_app disable) if it should stay off.'
+            f'The previous binding v{version} of this audience was restored but is now '
+            'enabled: disable it (rrext_deploy_app disable) if it should stay off.'
         )
     if undone == 'restored':
         return 'The previous binding of this audience was restored.'

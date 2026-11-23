@@ -915,7 +915,6 @@ class FileDeploymentBackend:
         listed here (app_deploy's container-name re-check depends on it). A
         'removed' row is not live and holds no container name.
 
-
         The scope-walk / store-browse feed. Scans the org's project metas
         (same pattern as list_team) — the SaaS DB edition answers this with
         one indexed query instead.
