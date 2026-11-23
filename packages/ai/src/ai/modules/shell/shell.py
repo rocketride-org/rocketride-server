@@ -640,6 +640,12 @@ async def apps_session(request: Request):
     return resp
 
 
+# The only files the unversioned /apps/<dir>/<file> route serves on SaaS: the
+# listing assets seeded manifests point at ('/apps/<dir>/icon.svg', og images,
+# readmes). Never a script, stylesheet or other executable bundle part.
+_LISTING_ASSET_SUFFIXES = frozenset({'.svg', '.png', '.jpg', '.jpeg', '.webp', '.ico', '.md'})
+
+
 async def apps_static(request: Request):
     """
     Serve MF remote app bundles (versioned, store-backed) + app assets.
@@ -656,7 +662,8 @@ async def apps_static(request: Request):
       JSON document saying what a bundle fetch would serve this caller
       (see ``_app_entry_info``). The deploy smoke test's probe.
     - anything else — the static assets tree on disk: the icons/readmes the
-      app manifests point at (``/apps/<dir>/icon.svg``).
+      app manifests point at (``/apps/<dir>/icon.svg``). On SaaS only those
+      top-level listing assets are served, never a bundle file.
 
     Raises:
         HTTPException: 404 if file not found, 503 if apps dir missing.
@@ -718,6 +725,13 @@ async def apps_static(request: Request):
         token = request.cookies.get(_APP_COOKIE, '')
         if not await _authorize_app(token, app_id):
             raise HTTPException(status_code=403, detail=f'Not authorized for app {app_id}')
+        # _authorize_app is catalog visibility, not the per-version entitlement
+        # the versioned route enforces, so a bundle served from here would skip
+        # the paid-app gate. Serve only the listing assets (icons, readmes) the
+        # manifests point at, directly under the app directory; bundles come
+        # from /apps/<id>/v<N>/ alone.
+        if len(rel_parts) != 2 or file_path.suffix.lower() not in _LISTING_ASSET_SUFFIXES:
+            raise HTTPException(status_code=404, detail='Not found')
 
     # Serve the file if it exists
     if file_path.exists() and file_path.is_file():
