@@ -30,15 +30,19 @@ actionable message; storage failures fail closed.
 from __future__ import annotations
 
 import copy
+import json
+from types import SimpleNamespace
 
 import pytest
 
 import ai.modules.shell.public_pages as pp
 
+from ai.account.store import IStore, StorageNotFoundError, Store
+from ai.account.store_providers.memory import MemoryStore
 from ai.modules.shell.contract import MAX_SNAPSHOT_BYTES
 
 # Bound at import, before conftest swaps the module attribute for the FILES double.
-from ai.modules.shell.public_pages import artifact_file_info, gate_errors
+from ai.modules.shell.public_pages import artifact_file_info, gate_errors, page_manifest, read_artifact_file
 
 from .hostile_fixtures import FILES, HOME_MANIFEST, hostile_account
 
@@ -258,8 +262,6 @@ class _RawStore:
         self.stats = []
 
     async def get_file_info(self, path):
-        from ai.account.store import StorageNotFoundError
-
         self.stats.append(path)
         if path not in self.files:
             raise StorageNotFoundError(f'File not found: {path}')
@@ -270,16 +272,25 @@ class _RawStore:
 
 
 async def test_artifact_file_info_stats_through_the_raw_store(monkeypatch):
-    from types import SimpleNamespace
-
-    from ai.account.store import Store, StorageNotFoundError
-
     raw = _RawStore({'a/dist/pages/x.html': b'12345'})
     monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: SimpleNamespace(raw_store=lambda: raw)))
     assert await artifact_file_info('a/dist/pages/x.html') == {'size': 5, 'modified': 1.0}
     with pytest.raises(StorageNotFoundError):
         await artifact_file_info('a/dist/pages/missing.html')
     assert raw.stats == ['a/dist/pages/x.html', 'a/dist/pages/missing.html']
+
+
+async def test_a_non_ascii_manifest_survives_a_store_without_its_own_byte_io(monkeypatch):
+    # Like the Azure store, MemoryStore keeps IStore's write_bytes / read_bytes (latin-1 through
+    # write_file / read_file). The build writes the manifest with write_bytes, so reading it back
+    # with read_bytes and decoding UTF-8 recovers the original text; read_file would not.
+    assert MemoryStore.write_bytes is IStore.write_bytes and MemoryStore.read_bytes is IStore.read_bytes
+    raw = MemoryStore()
+    site = {'title': 'Caf\u00e9 \u2014 RocketRide'}
+    await raw.write_bytes(f'{DIST}/app-manifest.json', json.dumps({'site': site}, ensure_ascii=False).encode('utf-8'))
+    monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: SimpleNamespace(raw_store=lambda: raw)))
+    monkeypatch.setattr(pp, 'read_artifact_file', read_artifact_file)  # the real reader, not the FILES double
+    assert await page_manifest({}, DIST) == {'site': site}
 
 
 async def test_storage_failure_fails_closed():

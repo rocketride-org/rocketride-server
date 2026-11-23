@@ -24,6 +24,9 @@ LABEL org.opencontainers.image.source="https://github.com/rocketride-org/rocketr
 
 COPY --chown=rocketride:rocketride dist/server/static/ /opt/rocketride/static/
 
+# The node archive EaaS hands runs their nodes from, beside the server where it reads it
+COPY --chown=rocketride:rocketride dist/nodes/ /opt/nodes/
+
 # The server's task data persists; engine-base created it writable. See #1295.
 VOLUME /opt/data
 

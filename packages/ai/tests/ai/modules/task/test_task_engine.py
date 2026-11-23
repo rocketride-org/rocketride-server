@@ -1985,6 +1985,46 @@ async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_an_engine_that_ends_while_the_run_log_opens_ends_the_start(monkeypatch):
+    """An engine that exits at once closes its stdout while start_task waits on
+    the run log, and the stdout reader starts _terminated(). The start leaves the
+    state to it: no metrics, no status loop, no INITIALIZING update, no begin event.
+    """
+    import ai.account
+    import ai.modules.task.task_engine as engine
+
+    t, _ = _startable_task(monkeypatch)
+    t._status.name = ''
+    t._run_trigger = 'manual'
+    t._server.get_task_control = MagicMock(return_value=None)
+    t._forward_task_event = AsyncMock()
+    t._status_update_loop = AsyncMock()
+    sent = []
+    t._send_status_update = AsyncMock(side_effect=lambda: sent.append(t._status.state))
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', AsyncMock(return_value=SimpleNamespace(pid=4321)))
+    monkeypatch.setattr(Task, 'TaskDbgStdio', MagicMock(return_value=SimpleNamespace(connect=AsyncMock())))
+    monkeypatch.setattr(ai.account.Store, 'file_store', MagicMock())
+
+    async def open_while_the_engine_ends(**_):
+        # what the stdout reader's _terminated() sets first when the engine exits now
+        t._terminated_called = True
+        t._status.state = TASK_STATE.STOPPING.value
+
+    run_log = SimpleNamespace(open=open_while_the_engine_ends, chapter_begin_seq=1)
+    monkeypatch.setattr(engine, 'RunLogWriter', MagicMock(return_value=run_log))
+    metrics = MagicMock()
+    monkeypatch.setattr(engine, 'TaskMetrics', metrics)
+
+    await Task.start_task(t)
+
+    assert t._status.state == TASK_STATE.STOPPING.value
+    metrics.assert_not_called()
+    t._status_update_loop.assert_not_called()
+    t._forward_task_event.assert_not_awaited()
+    assert sent == [TASK_STATE.STARTING.value]
+
+
+@pytest.mark.asyncio
 async def test_a_second_restart_while_one_runs_is_refused():
     """Two restarts of one task would share _restart_env: the second is refused
     before it loads anything, the first starts with its own values, and a later

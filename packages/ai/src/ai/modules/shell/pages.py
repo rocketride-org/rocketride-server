@@ -462,6 +462,8 @@ _snapshot_reads: Dict[str, 'asyncio.Task[bytes]'] = {}
 # while S3 retries a black-holed request), and that executor serves every
 # asyncio.to_thread in the engine; a read waiting for a slot holds none.
 # Requests keep their own deadline (_SNAPSHOT_READ_SECONDS) while it waits.
+# The semaphore binds to the first loop that waits on it: fine with the
+# engine's single loop, but a contended wait on another loop raises RuntimeError.
 _SNAPSHOT_READ_SLOTS = 4
 _snapshot_read_slots = asyncio.Semaphore(_SNAPSHOT_READ_SLOTS)
 
@@ -558,7 +560,7 @@ async def _snapshot_bytes(page: Page, path: str, where: str = '') -> bytes:
     Raises:
         _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
         StorageError: a storage failure (``StorageNotFoundError`` included),
-            or no answer from the store within ``_SNAPSHOT_READ_SECONDS``.
+            or no snapshot within ``_SNAPSHOT_READ_SECONDS``.
     """
     raw = _snapshot_cache.get(path)
     if raw is not None:
@@ -572,7 +574,7 @@ async def _snapshot_bytes(page: Page, path: str, where: str = '') -> bytes:
     try:
         return await asyncio.wait_for(asyncio.shield(read), _SNAPSHOT_READ_SECONDS)
     except asyncio.TimeoutError as exc:
-        failure = StorageError(f'the store did not answer within {_SNAPSHOT_READ_SECONDS:g} s')
+        failure = StorageError(f'no snapshot within {_SNAPSHOT_READ_SECONDS:g} s')
         _storage_failures.put(path, monotonic(), 1)
         if _storage_warning_due(path, 'deadline'):
             _warn_fallback(page, failure, where)
@@ -622,7 +624,8 @@ async def _from_store(call: Callable[[str], Awaitable[_T]], path: str) -> _T:
     except StorageError:
         raise
     except Exception as exc:
-        # shortcut: develop drivers raise raw provider errors; remove when the storage PR lands
+        # shortcut: develop drivers raise raw provider errors; drop this wrapper when the storage PR,
+        # rocketride-org/rocketride-server#3269, lands
         raise StorageError(f'the store failed reading {path}: {type(exc).__name__}: {exc}') from exc
 
 
@@ -693,7 +696,7 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any], *, where: str =
     snapshot, a malformed snapshot path or no production version, a snapshot
     over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
     two are remembered by store path and warned about once). A storage
-    failure (a snapshot the store does not have yet, or no answer within
+    failure (a snapshot the store does not have yet, or no snapshot within
     ``_SNAPSHOT_READ_SECONDS``, included) falls back uncached, and is warned
     about at most once per store path per ``_STORAGE_WARNING_INTERVAL``; for
     ``_STORAGE_BACKOFF_SECONDS`` after it, a snapshot the cache does not hold
