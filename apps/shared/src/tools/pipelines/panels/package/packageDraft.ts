@@ -105,6 +105,23 @@ export function patchOf(document: object, next: object): PackagePatch {
 }
 
 /**
+ * The draft after one pane's write. The pane hands the whole document with
+ * its change; what it changed is what differs from the document it was
+ * SHOWN, and only those keys are merged over the draft as it is now. A pane
+ * that finishes late (its write began before another pane's edit) then adds
+ * its own keys without undoing that edit.
+ *
+ * @param current - The draft as it is now.
+ * @param shown - The drafted document the pane was shown when its write began.
+ * @param next - The document the pane asked for.
+ * @returns The SAME patch object when the pane changed nothing, else the merged patch.
+ */
+export function mergeChange(current: PackagePatch, shown: object, next: object): PackagePatch {
+	const changed = patchOf(shown, next);
+	return isEmptyPatch(changed) ? current : { ...current, ...changed };
+}
+
+/**
  * The patch without the keys the document already agrees with: after a Save
  * the host's document catches up and the draft empties by itself.
  *

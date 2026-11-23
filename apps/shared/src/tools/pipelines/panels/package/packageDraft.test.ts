@@ -26,7 +26,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import type { IAssetsHost } from '../../../../components/assets';
-import { applyPatch, isEmptyPatch, overlayAssetsHost, patchOf, pendingDataUri, prunePatch } from './packageDraft';
+import { applyPatch, isEmptyPatch, mergeChange, overlayAssetsHost, patchOf, pendingDataUri, prunePatch } from './packageDraft';
 import type { PendingFiles } from './packageDraft';
 
 /** A document with one of every key the panes write, plus the canvas's own. */
@@ -82,6 +82,36 @@ describe('patchOf', () => {
 		const document = { ...DOCUMENT, parameters: { a: 'llm_1.a', b: 'llm_1.b' } };
 		const next = { ...document, parameters: { b: 'llm_1.b', a: 'llm_1.a' } };
 		assert.deepEqual(Object.keys(patchOf(document, next)), ['parameters']);
+	});
+});
+
+describe('mergeChange', () => {
+	it('adds the keys a pane changed and keeps the rest of the draft', () => {
+		const shown = { ...DOCUMENT, name: 'Brain' };
+		const next = { ...shown, description: 'New words', docRevision: 5 };
+		assert.deepEqual(mergeChange({ name: 'Brain' }, shown, next), { name: 'Brain', description: 'New words' });
+	});
+
+	it('keeps an edit made since a late pane was shown its document', () => {
+		// The Assets pane was shown the document before a name was typed on Identity; its icon path arrives after
+		const shown = DOCUMENT;
+		const next = { ...shown, store: { ...shown.store, icon: './icon.png' } };
+		const merged = mergeChange({ name: 'Typed since' }, shown, next);
+		assert.deepEqual(merged, { name: 'Typed since', store: { tagline: '', mode: 'free', readme: './README.md', icon: './icon.png' } });
+	});
+
+	it('answers the same draft when the pane wrote back what it was shown', () => {
+		const draft = { name: 'Brain' };
+		assert.equal(mergeChange(draft, DOCUMENT, { ...DOCUMENT, docRevision: 9 }), draft);
+	});
+
+	it('merges a removal as a pending removal', () => {
+		const next: Record<string, unknown> = { ...DOCUMENT };
+		delete next.source;
+		const merged = mergeChange({ name: 'Brain' }, DOCUMENT, next);
+		assert.equal('source' in merged, true);
+		assert.equal(merged.source, undefined);
+		assert.equal(merged.name, 'Brain');
 	});
 });
 

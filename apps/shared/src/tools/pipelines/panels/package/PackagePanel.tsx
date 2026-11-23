@@ -81,7 +81,7 @@ import { ReviewView } from '../../../appdev/views/builder/panels/review/ReviewVi
 import type { IReviewHost } from '../../../appdev/views/builder/panels/review/ReviewView';
 import { ParamsPanel } from '../params';
 import type { IParamsProject } from '../params';
-import { applyPatch, isEmptyPatch, overlayAssetsHost, patchOf, prunePatch } from './packageDraft';
+import { applyPatch, isEmptyPatch, mergeChange, overlayAssetsHost, prunePatch } from './packageDraft';
 import type { PackagePatch, PendingFiles } from './packageDraft';
 import { callerNeedsOf, deployRequirements, isShortId, publicParametersOf, requirementsLead, SHORT_ID_PATTERN, storeLadder } from './requirements';
 import type { IRequirementsVersion } from './requirements';
@@ -840,19 +840,24 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 	const latest = useRef({ project, pending, files, section, onSave });
 	latest.current = { project, pending, files, section, onSave };
 
-	// The draft's intake: a pane hands the whole document with its change; the
-	// keys that differ from the document are kept. Each generation of panes
-	// gets its own intake, and one that Cancel ended takes nothing: an icon
-	// drop still reading its file when Cancel ran would otherwise declare the
-	// icon path into the new draft, with the document it was drawn from.
-	const draftChanged = useMemo(() => {
+	// The draft's intake: a pane hands the whole document with its change.
+	// The change is what differs from the document THAT PANE WAS SHOWN, and
+	// only those keys are merged into the draft as it is now: a pane that
+	// finishes late (an icon drop whose file read outlived a name typed on
+	// another tab) adds its own key and leaves the rest of the draft alone.
+	// Each generation of panes gets its own intake, and one that Cancel ended
+	// takes nothing: an icon drop still reading its file when Cancel ran
+	// would otherwise declare the icon path into the new draft.
+	const intake = useMemo(() => {
 		const own = epoch;
-		return (next: IPackageProject): void => {
+		return (shown: IPackageProject, next: IPackageProject): void => {
 			if (generation.current !== own) return;
 			setSaveError('');
-			setPatch(patchOf(latest.current.project, next));
+			setPatch((current) => mergeChange(current, shown, next));
 		};
 	}, [epoch]);
+	// The panes' write callback, bound to the drafted document they are shown at this render
+	const draftChanged = useMemo(() => (next: IPackageProject): void => intake(drafted, next), [intake, drafted]);
 
 	// The Assets pane's host: its writes are held in `files` until Save. A
 	// write into a map Cancel replaced changes nothing the page counts.
