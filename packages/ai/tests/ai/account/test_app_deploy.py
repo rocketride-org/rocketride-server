@@ -2529,6 +2529,81 @@ async def test_publish_serializes_claim_check_and_binding_per_container_name(reg
     assert len(registry.set_calls) == 1
 
 
+async def _race_two_engines(registry, monkeypatch, created):
+    """Publish two apps that derive one container name from two 'engines'.
+
+    The per-name lock is process-local, so two engines each hold their own:
+    here every publish gets a fresh lock, which serializes nothing. Both
+    pre-checks run before either write (the first write waits for both
+    arrivals) and both writes land before either re-check can read (each
+    publish_set returns only once both rows exist). ``created`` maps app id
+    to the createdAt its row gets, as the backend would stamp it.
+    """
+    import asyncio
+
+    from ai.account import app_deploy
+
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    monkeypatch.setattr(app_deploy, '_container_lock', lambda module_id: asyncio.Lock())
+    original = account_singleton.publish_set
+    arrived = asyncio.Event()
+    written = asyncio.Event()
+    counts = {'arrived': 0, 'written': 0}
+
+    async def racing_publish_set(org_id, kind, app_id, audience, *rest):
+        counts['arrived'] += 1
+        if counts['arrived'] == 2:
+            arrived.set()
+        await arrived.wait()
+        row = await original(org_id, kind, app_id, audience, *rest)
+        row['createdAt'] = created[app_id]
+        counts['written'] += 1
+        if counts['written'] == 2:
+            written.set()
+        await written.wait()
+        return row
+
+    monkeypatch.setattr(account_singleton, 'publish_set', racing_publish_set, raising=False)
+    a = _FakeConn(teams=_TEAMS, developer_id='acme')
+    b = _FakeConn(teams=_TEAMS, developer_id='acme_foo')
+    req_a = _request('publish', version=1, target='@public')
+    req_a['arguments']['appId'] = 'acme.foo_bar'
+    req_b = _request('publish', version=1, target='@public')
+    req_b['arguments']['appId'] = 'acme_foo.bar'
+    return await asyncio.gather(handle_deploy_app(a, req_a), handle_deploy_app(b, req_b))
+
+
+@pytest.mark.asyncio
+async def test_two_engines_first_publishes_for_one_container_name_cannot_both_bind(registry, quiet_push, monkeypatch):
+    """Two engines share one registry, so no process lock orders their first
+    publishes: both pass the pre-check before either write lands. The first
+    bound keeps the name; the other re-checks after writing, sees the rival,
+    backs its row out ('removed') and reports the holder error.
+    """
+    results = await _race_two_engines(registry, monkeypatch, {'acme.foo_bar': 100.0, 'acme_foo.bar': 200.0})
+
+    assert [r['success'] for r in results] == [True, False]
+    assert "'acme.foo_bar' already holds" in results[1]['message']
+    assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'enabled'
+    assert registry.publishes[('acme_foo.bar', 'public~')]['state'] == 'removed'
+
+
+@pytest.mark.asyncio
+async def test_two_engines_tied_first_publishes_both_back_out(registry, quiet_push, monkeypatch):
+    """A tie cannot be ordered (resolve would withhold both), so both
+    publishes see the other, back out and report the holder error: neither
+    reports success for a binding that serves nothing. A retry settles it.
+    """
+    results = await _race_two_engines(registry, monkeypatch, {'acme.foo_bar': 100.0, 'acme_foo.bar': 100.0})
+
+    assert [r['success'] for r in results] == [False, False]
+    assert "'acme_foo.bar' already holds" in results[0]['message']
+    assert "'acme.foo_bar' already holds" in results[1]['message']
+    assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'removed'
+    assert registry.publishes[('acme_foo.bar', 'public~')]['state'] == 'removed'
+
+
 @pytest.mark.asyncio
 async def test_resolve_keeps_the_earlier_bound_app_on_a_derived_collision(registry, monkeypatch):
     """Two apps deriving one name: the one bound first keeps it, the later one
