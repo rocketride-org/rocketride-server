@@ -97,7 +97,7 @@ from ai.web import WebServer
 from ai.account.models import AccountInfo, public_key_reaches, resolve_run_permissions
 from ai.account.store import Store
 from .task_conn import NOTICE_SEND_TIMEOUT, TaskConn, authority_narrowed, authority_subject
-from .authz_recheck import AuthzRecheck, validate_credential_provider
+from .authz_recheck import REBUILD_TIMEOUT, AuthzRecheck, validate_credential_provider
 from .task_engine import Task
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
@@ -1231,7 +1231,9 @@ class TaskServer(DAPBase):
         found) revokes the connection. Any other exception revokes it when
         there is no live re-check; with one (``_authz``) the connection is
         marked unverified, so the gate refuses it at once, and the next sweep
-        decides. For every connection, a good result replaces the identity
+        decides. A rebuild that does not finish within REBUILD_TIMEOUT counts as
+        such an error (so a stalled read cannot hold the connection's lock or
+        the rest of a push fan-out). For every connection, a good result replaces the identity
         only if the connection is still authenticated and still holds
         ``info`` (a deauth or newer auth during the rebuild wins), and stamps
         it verified as of the clock read before the rebuild. Other
@@ -1245,7 +1247,7 @@ class TaskServer(DAPBase):
         authz = self._authz
         t0 = authz.clock() if authz is not None else None
         try:
-            fresh = await account.rebuild_account_info(info)
+            fresh = await asyncio.wait_for(account.rebuild_account_info(info), REBUILD_TIMEOUT)
         except ValueError as e:
             if subject:
                 await conn.revoke(info, f'{label}: user not found ({e})')
