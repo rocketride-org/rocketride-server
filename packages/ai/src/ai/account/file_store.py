@@ -86,7 +86,10 @@ def _configured_signing_key() -> str:
     try:
         return raw.decode('utf-8')
     except UnicodeDecodeError:
-        raise ValueError('RR_SIGNING_KEY must be valid UTF-8') from None
+        pass
+    # Raised outside the handler: inside it, the UnicodeDecodeError (whose .object
+    # holds the raw key bytes) would stay reachable as __context__ even with `from None`.
+    raise ValueError('RR_SIGNING_KEY must be valid UTF-8')
 
 
 def fetch_signing_key() -> str:

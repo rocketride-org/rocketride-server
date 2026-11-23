@@ -937,6 +937,16 @@ class TestFetchSigningKeyStaysInTheEngine:
             file_store.fetch_signing_key()
         assert 'xff' not in str(error.value).lower()
 
+    def test_the_refusal_keeps_no_decode_error_that_holds_the_key_bytes(self, monkeypatch):
+        """A UnicodeDecodeError carries the raw bytes in .object; neither __cause__ nor __context__ may keep it."""
+        _set_signing_key(monkeypatch, b'\xff\xfe' * 20)
+        if not os.supports_bytes_environ:
+            pytest.skip('Windows keeps the environment as text: there is no raw byte view')
+        with pytest.raises(ValueError, match='must be valid UTF-8') as error:
+            file_store.fetch_signing_key()
+        assert error.value.__cause__ is None
+        assert error.value.__context__ is None
+
     @pytest.mark.asyncio
     async def test_the_engine_signs_with_no_channel_and_no_task(self, store):
         # The engine side of store.url: a view not built from a task file signs locally
