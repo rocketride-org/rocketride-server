@@ -625,8 +625,9 @@ class RocketRideDriver(AgentBase):
         except Exception as exc:
             # The model cannot be reached for the answer either. Hand the user what
             # was gathered, as it stands, rather than only the error. The log keeps the
-            # full text, with the engine location the report leaves out.
-            error(f'rocketride wave synthesis failed run_id={context.run_id}: {type(exc).__name__}: {safe_str(exc)}')
+            # full text, with the engine location the report leaves out. Debug only: the
+            # run still answers, and error() or warning() would add a task status entry.
+            debug(f'rocketride wave synthesis failed run_id={context.run_id}: {type(exc).__name__}: {safe_str(exc)}')
             return _partial_report(f'the model call failed ({error_text(exc, with_type=True)})', lines, scratch)
         if not safe_str(answer).strip():
             # An empty reply is no answer either; the gathered facts still are.

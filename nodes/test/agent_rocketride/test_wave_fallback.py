@@ -291,6 +291,22 @@ def test_a_reply_cannot_remove_the_result_its_own_call_gets(wave, driver, monkey
     assert seen['waves'][0]['results'] == [READ]
 
 
+def test_a_failed_synthesis_adds_no_status_entry_and_the_debug_log_keeps_the_path(wave, driver, monkeypatch):
+    """The run still answers. error() and warning() become task status entries; the report loses the path."""
+    errors, warnings, debugged = [], [], []
+    monkeypatch.setattr(wave.rocketride_agent, 'error', errors.append)
+    monkeypatch.setattr(wave.rocketride_agent, 'warning', warnings.append)
+    monkeypatch.setattr(wave.rocketride_agent, 'debug', debugged.append)
+    driver.reply = Exception('Exception: Rate limited. at (/opt/rocketride/ai/common/chat.py:412)')
+    setattr(driver.reply, '__formatted', True)
+
+    answer = synthesize(wave, driver, [READ])
+
+    assert answer.startswith('I could not finish: the model call failed (Exception: Rate limited.)')
+    assert errors == [] and warnings == []
+    assert any('/opt/rocketride/ai/common/chat.py:412' in line for line in debugged)
+
+
 def test_a_model_error_whose_text_cannot_be_read_still_leaves_a_report(wave, driver):
     """Logging the failure must not cost the user the report, even when str(exc) raises."""
     driver.reply = Unprintable()
