@@ -1991,7 +1991,11 @@ class AppBuildWorker:
             raise BuildFailure('install', 'pnpm install did not write pnpm-lock.yaml')
         with open(lock_path, 'r', encoding='utf-8') as handle:
             installed_lock = handle.read()
-        _refuse_lockfile_paths(installed_lock)
+        try:
+            _refuse_lockfile_paths(installed_lock)
+        except BuildFailure as exc:
+            # The install wrote this lockfile, so the failure belongs to the install phase.
+            raise BuildFailure('install', str(exc)) from exc
         if pins_before:
             drift = _drift_of(pins_before, _lockfile_importer_pins(installed_lock))
             if drift:

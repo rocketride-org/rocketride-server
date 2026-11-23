@@ -1810,8 +1810,27 @@ async def test_install_lockfile_is_checked_before_typecheck_and_bundle(monkeypat
     worker = AppBuildWorker(server=None)
     await worker._run_job('org1', 'acme.brandy', 1)
 
-    assert rail.stamps[-1]['status'] == 'failed'
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'install')
     assert not any(any('tsc' in str(a) for a in c['argv']) or 'build' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+async def test_packed_lockfile_with_an_escaping_path_fails_in_materialize(monkeypatch, build_store, toolchain):
+    """The same check on the PACKED lockfile (before install) reports materialize."""
+    lock = (
+        "lockfileVersion: '9.0'\n"
+        'packages:\n  evil@1.0.0:\n    resolution: {directory: ../../outside, type: directory}\n'
+    )
+    rail = _FakeRail(_app_source_zip(with_lock=True, lock_text=lock), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
 
 
 @pytest.mark.parametrize('depth', [400, 3000])
