@@ -132,6 +132,26 @@ def test_r972_1a_version_dirs_auth_exception_is_not_cached(monkeypatch):
     assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=1)) == {1: 'app.x/v1/dist'}
 
 
+def test_authorize_app_unavailable_error_tuple_is_not_cached(monkeypatch):
+    """A 503 error tuple is an outage: denied once, never cached, allowed after recovery."""
+    account = _Account(error_tuples=[(503, 'unavailable')])
+    _setup(monkeypatch, account)
+
+    assert _authorize() is False
+    assert _authorize() is True
+    assert account.authentications == 2
+
+
+def test_authorize_app_denial_error_tuple_is_cached(monkeypatch):
+    """A 401 error tuple is a definite denial: the False verdict is cached."""
+    account = _Account(error_tuples=[(401, 'invalid')])
+    _setup(monkeypatch, account)
+
+    assert _authorize() is False
+    assert _authorize() is False
+    assert account.authentications == 1
+
+
 def test_version_dirs_unavailable_error_tuple_is_not_cached(monkeypatch):
     """A 503 error tuple is an outage: answered anonymously once, never cached.
 
