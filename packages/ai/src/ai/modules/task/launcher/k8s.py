@@ -36,8 +36,8 @@ whatever the task did; a pod gone before it showed one gets
 
 Nothing of a task is kept in the cluster: the Job's manifest holds neither the
 task file nor a value of the environment. Both travel in one tar stream on the
-attach's stdin, which the container's command (``BOOTSTRAP``) unpacks before
-it becomes the engine. What follows the archive on that stdin is the engine's
+attach's stdin, with the run's packaged nodes, which the container's command
+(``BOOTSTRAP``) unpacks before it becomes the engine. What follows the archive on that stdin is the engine's
 own, and its staying open is what ``--autoterm`` watches.
 """
 
@@ -53,7 +53,6 @@ import re
 import shlex
 import signal
 import socket
-import stat
 import tarfile
 import time
 import uuid
@@ -68,6 +67,7 @@ from .base import Launch, Launcher, LaunchSpec
 from .docker import (
     CONST_CLI_TIMEOUT,
     CONST_CONTAINER_DATA_PATH,
+    CONST_CONTAINER_NODES_PATH,
     CONST_IMAGE_GID,
     CONST_IMAGE_UID,
     CONST_TASK_DATA_PORT_CONTAINER,
@@ -76,10 +76,13 @@ from .docker import (
     CliResult,
     DockerLauncher,
     StoreUnavailableError,
+    add_directory,
+    add_nodes,
     engine_version,
     is_host_only,
     rewrite_loopback,
     rewrite_loopback_dsns,
+    tar_member,
     web_identity_only,
 )
 
@@ -97,6 +100,9 @@ CONST_MOUNT_DIR = 'mounts'
 
 # The most those directories may take, headers included: they travel in the start stream of every task
 CONST_MOUNT_SIZE_LIMIT = 16 * 1024 * 1024
+
+# Where the run's packaged nodes land, under the data directory, before the bootstrap moves them into the image's
+CONST_NODES_DIR = '.rr-nodes'
 
 # The exit code of a task whose pod is gone before it showed one, as after SIGKILL
 CONST_LOST_EXIT_CODE = -9
@@ -154,8 +160,10 @@ ENV_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 # is the engine's and stays open. A stream that ends early (nobody attached within `t`
 # seconds and `timeout` ended the wait, or the attach dropped) fails tar or lacks its last
 # member, the environment file, and the pod fails without starting the engine. What is
-# unpacked is private (umask 077); the engine gets the image's own umask back. After `exec`
-# it is tini's child: tini passes SIGTERM on and reaps what the task leaves.
+# unpacked is private (umask 077); the engine gets the image's own umask back. The run's
+# packaged nodes then move into the image's nodes folder, each in place of a folder of its
+# name, after the environment file is gone. After `exec` it is tini's child: tini passes
+# SIGTERM on and reaps what the task leaves.
 BOOTSTRAP = '\n'.join(
     [
         'set -eu',
@@ -164,10 +172,14 @@ BOOTSTRAP = '\n'.join(
         'timeout "$t" head -c "$n" | tar -xf - -C {data}',
         '[ -f {data}/{env} ] || {{ echo "rr-task: the start stream ended early" >&2; exit 1; }}',
         'set -a; . {data}/{env}; set +a; rm -f {data}/{env}',
+        'if [ -d {data}/{nodes} ]; then for d in {data}/{nodes}/*; do rm -rf {image_nodes}/"${{d##*/}}";'
+        ' mv "$d" {image_nodes}/; done; rmdir {data}/{nodes}; fi',
         'umask 022',
         'exec "$@"',
     ]
-).format(data=CONST_CONTAINER_DATA_PATH, env=CONST_ENV_FILE)
+).format(
+    data=CONST_CONTAINER_DATA_PATH, env=CONST_ENV_FILE, nodes=CONST_NODES_DIR, image_nodes=CONST_CONTAINER_NODES_PATH
+)
 
 # k8s.* settings, their RR_K8S_* variables and defaults ('' = derived, or not set)
 DEFAULT_CONFIG: Dict[str, str] = {
@@ -382,121 +394,53 @@ def env_file(env: Mapping[str, str]) -> bytes:
     return ''.join(lines).encode('utf-8', 'surrogateescape')
 
 
-def _tar_member(name: str, mode: int, size: int = 0, directory: bool = False) -> tarfile.TarInfo:
-    """
-    The header of one member of the start stream, owned by the image's user.
-
-    Args:
-        name: The member's path under the data directory.
-        mode: Its permissions.
-        size: Its length, for a file.
-        directory: Whether it is a directory.
-
-    Returns:
-        The header.
-    """
-    info = tarfile.TarInfo(name)
-    info.size = size
-    info.mode = mode
-    info.uid, info.gid = CONST_IMAGE_UID, CONST_IMAGE_GID
-    info.uname = info.gname = 'rocketride'
-    info.mtime = int(time.time())
-    if directory:
-        info.type = tarfile.DIRTYPE
-    return info
-
-
-def _add_directory(tar: tarfile.TarFile, source: str, target: str, budget: int) -> int:
-    """
-    Put a host directory into the start stream: its directories and its regular files, not links.
-
-    Args:
-        tar: The archive being written.
-        source: The directory on this host.
-        target: Its path in the archive.
-        budget: The bytes of the archive the mounted directories may still take, headers included.
-
-    Returns:
-        What is left of the budget.
-
-    Raises:
-        K8sError: If the directory does not fit, or a directory in it cannot be read.
-    """
-
-    def unreadable(error: OSError) -> None:
-        # os.walk skips a directory it cannot list: the task would get part of the mount, or none, without a word
-        if not isinstance(error, FileNotFoundError) or error.filename == source:
-            raise K8sError(f'A directory in k8s.mounts cannot be read: {error.filename} ({error.strerror})') from error
-
-    end = tar.offset + budget
-    for root, directories, files in os.walk(source, onerror=unreadable):
-        # os.walk enters a Windows junction, which is a link to a directory
-        directories[:] = sorted(name for name in directories if not os.path.isjunction(os.path.join(root, name)))
-        relative = os.path.relpath(root, source).replace(os.sep, '/')
-        base = target if relative == '.' else f'{target}/{relative}'
-        tar.addfile(_tar_member(base, 0o755, directory=True))
-        for name in sorted(files):
-            if tar.offset > end:
-                break
-            path = os.path.join(root, name)
-            try:
-                seen = os.stat(path, follow_symlinks=False)
-            except FileNotFoundError:
-                continue
-            if not stat.S_ISREG(seen.st_mode):
-                continue
-            try:
-                f = open(path, 'rb')
-            except FileNotFoundError:
-                # Removed after its look: left out, as one removed before it
-                continue
-            with f:
-                # A link swapped in after the look is not followed: only the file looked at is read
-                opened = os.fstat(f.fileno())
-                if (opened.st_dev, opened.st_ino) != (seen.st_dev, seen.st_ino):
-                    continue
-                # One byte more than fits shows a file is too big without reading all of it
-                data = f.read(end - tar.offset + 1)
-            mode = 0o755 if seen.st_mode & 0o100 else 0o644
-            tar.addfile(_tar_member(f'{base}/{name}', mode, len(data)), io.BytesIO(data))
-        if tar.offset > end:
-            raise K8sError(
-                f'The directories named in k8s.mounts take more than {CONST_MOUNT_SIZE_LIMIT // 2**20} MiB '
-                f'(at {source}); they are sent to every task as it starts'
-            )
-    return end - tar.offset
-
-
-def payload_tar(task_file: bytes, env: Mapping[str, str], directories: Mapping[str, str]) -> bytes:
+def payload_tar(
+    task_file: bytes, env: Mapping[str, str], directories: Mapping[str, str], nodes: Sequence[str] = ()
+) -> bytes:
     """
     The start stream: what a task's pod reads from stdin before it becomes the engine.
 
     One tar archive with ``task.json``, each directory of ``k8s.mounts`` under
-    ``mounts/<NAME>``, and last the environment file, which the bootstrap
-    needs before it starts the engine; both files are 0600. It has no member
-    for the root: unpacking one would change ``/opt/data`` itself.
+    ``mounts/<NAME>``, the run's packaged nodes under ``.rr-nodes/<name>``,
+    and last the environment file, which the bootstrap needs before it starts
+    the engine; both files are 0600. It has no member for the root: unpacking
+    one would change ``/opt/data`` itself.
 
     Args:
         task_file: The task file.
         env: The task's environment.
         directories: Host directories, by the name of the variable that names each.
+        nodes: The node folders the run loads, on the engine's disk.
 
     Returns:
         The tar archive.
 
     Raises:
-        K8sError: If the directories take more than ``CONST_MOUNT_SIZE_LIMIT``.
+        K8sError: If the directories take more than ``CONST_MOUNT_SIZE_LIMIT``, or one cannot be read.
+        ValueError: If the nodes take more than ``CONST_NODES_SIZE_LIMIT``.
     """
     buffer = io.BytesIO()
     # GNU headers: a long path stays one member for any tar
     with tarfile.open(fileobj=buffer, mode='w', format=tarfile.GNU_FORMAT) as tar:
-        tar.addfile(_tar_member('task.json', 0o600, len(task_file)), io.BytesIO(task_file))
+        tar.addfile(tar_member('task.json', 0o600, len(task_file)), io.BytesIO(task_file))
         budget = CONST_MOUNT_SIZE_LIMIT
         for variable in sorted(directories):
-            budget = _add_directory(tar, directories[variable], f'{CONST_MOUNT_DIR}/{variable}', budget)
+            source = directories[variable]
+            try:
+                budget = add_directory(tar, source, f'{CONST_MOUNT_DIR}/{variable}', budget)
+            except OSError as error:
+                raise K8sError(
+                    f'A directory in k8s.mounts cannot be read: {error.filename} ({error.strerror})'
+                ) from error
+            if budget < 0:
+                raise K8sError(
+                    f'The directories named in k8s.mounts take more than {CONST_MOUNT_SIZE_LIMIT // 2**20} MiB '
+                    f'(at {source}); they are sent to every task as it starts'
+                )
+        add_nodes(tar, nodes, CONST_IMAGE_UID, CONST_IMAGE_GID, f'{CONST_NODES_DIR}/')
         # Last: a stream cut short lacks this file or fails tar, and the bootstrap does not start the engine
         environment = env_file(env)
-        tar.addfile(_tar_member(CONST_ENV_FILE, 0o600, len(environment)), io.BytesIO(environment))
+        tar.addfile(tar_member(CONST_ENV_FILE, 0o600, len(environment)), io.BytesIO(environment))
     return buffer.getvalue()
 
 
@@ -1676,6 +1620,7 @@ class K8sLauncher(Launcher):
         Raises:
             K8sError: If the cluster or the image cannot be used, or an address of this host has no alias.
             StoreUnavailableError: If the pipeline needs a store this pod cannot have.
+            ValueError: If the run's nodes take more than ``CONST_NODES_SIZE_LIMIT``.
         """
         await self.prepare()
         self.check_store(spec)
@@ -1684,7 +1629,9 @@ class K8sLauncher(Launcher):
             spec, spec.modelserver and self.host_address(spec.modelserver, '--modelserver')
         )
         directories, overrides = self.mounted_directories(spec)
-        payload = await asyncio.to_thread(payload_tar, spec.task_file, self.task_env(spec, overrides), directories)
+        payload = await asyncio.to_thread(
+            payload_tar, spec.task_file, self.task_env(spec, overrides), directories, spec.nodes
+        )
 
         job = job_name(spec.task_id)
         # Followed before it exists, so no event of its pod is missed
