@@ -251,7 +251,11 @@ class AccountApi:
         result: CreateKeyResult = {'key': body['key']}
         record = body.get('record')
         if isinstance(record, dict) and 'expiresAt' in record:
-            result['expiresAt'] = record['expiresAt']
+            granted = record['expiresAt']
+            # None is "never expires"; anything but a timestamp string is not a
+            # usable expiry, so it is reported as absent.
+            if granted is None or isinstance(granted, str):
+                result['expiresAt'] = granted
         return result
 
     async def revoke_key(self, key_id: str) -> None:

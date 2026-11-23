@@ -44,7 +44,9 @@ function wireMillis(iso: string): number {
  * @returns The expiry to show, and whether it is earlier than requested.
  */
 export function revealedKeyExpiry(requested: string | undefined, granted: string | null | undefined): RevealedKeyExpiry {
-	if (granted === undefined) return { expiresAt: requested ?? null, bounded: false };
+	// The wire value is untyped: anything but a timestamp string (or null) is read as
+	// "not reported" rather than thrown on, since the key is already minted.
+	if (granted === undefined || (granted !== null && typeof granted !== 'string')) return { expiresAt: requested ?? null, bounded: false };
 	if (granted === null) return { expiresAt: null, bounded: false };
 	// The server stores the requested timestamp as sent, so an uncapped key comes
 	// back equal to it. A second of slack only absorbs storage rounding; a session

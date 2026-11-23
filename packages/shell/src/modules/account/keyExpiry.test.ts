@@ -33,6 +33,13 @@ test('an older server that does not report the expiry falls back to the requeste
 	assert.deepEqual(revealedKeyExpiry('2027-01-01T00:00:00.000Z', undefined), { expiresAt: '2027-01-01T00:00:00.000Z', bounded: false });
 });
 
+test('an expiry that is not a timestamp is treated as not reported and never throws (the key is already minted)', () => {
+	for (const odd of [1798761600000, { when: 'soon' }, ['2027-01-01'], true]) {
+		assert.deepEqual(revealedKeyExpiry(undefined, odd as never), { expiresAt: null, bounded: false });
+		assert.deepEqual(revealedKeyExpiry('2027-01-01T00:00:00.000Z', odd as never), { expiresAt: '2027-01-01T00:00:00.000Z', bounded: false });
+	}
+});
+
 test('the expiry day is the UTC day, not the viewer\'s local day', () => {
 	assert.equal(utcDay('2027-02-03T02:00:00'), '2027-02-03');
 	assert.equal(utcDay('2027-02-03T02:00:00Z'), '2027-02-03');
