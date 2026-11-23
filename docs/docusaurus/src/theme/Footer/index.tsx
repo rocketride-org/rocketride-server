@@ -48,7 +48,6 @@ const COLUMNS: FooterColumn[] = [
 			{ label: 'Home', href: 'https://rocketride.ai' },
 			{ label: 'Cloud', href: 'https://rocketride.ai/cloud' },
 			{ label: 'About us', href: 'https://rocketride.ai/about' },
-			{ label: 'Blog', href: 'https://rocketride.ai/blog' },
 			{ label: 'Events', href: 'https://events.rocketride.ai' },
 			{ label: 'Careers', href: 'https://app.trinethire.com/companies/1071922-rocketride-inc/jobs' },
 		],
