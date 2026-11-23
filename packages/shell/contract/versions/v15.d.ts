@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV15 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-23T15:57:22.367Z
-// Source commit: efeb9bfb5f1e0912b76c751d5bffe20cb1286072
+// Generated:     2026-11-23T16:40:41.990Z
+// Source commit: 4a950f6746c3526993f2e944aa37122296696df5
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -15098,19 +15098,39 @@ export declare function formatDayTime(timestamp: number): string;
 export declare function formatTimeAgo(timestamp: number): string;
 /** Format a number with locale-appropriate thousands separators. */
 export declare function formatNumber(n: number): string;
-interface PlanChangePreview {
-    direction: "upgrade" | "downgrade" | "interval_change" | "unchanged";
-    timing: "immediate" | "next_renewal" | "unchanged";
+type PlanChangeTiming = "immediate" | "next_renewal" | "unchanged";
+type PlanChangePreview = {
+    direction: "upgrade";
+    timing: "immediate";
     billingIntervalChanges?: boolean;
-}
-interface PlanChangeOutcome {
-    status: string;
-    timing?: PlanChangePreview["timing"];
+} | {
+    direction: "downgrade";
+    timing: "next_renewal";
+    billingIntervalChanges?: boolean;
+} | {
+    direction: "interval_change";
+    timing: "immediate" | "next_renewal";
+    billingIntervalChanges?: true;
+} | {
+    direction: "unchanged";
+    timing: "unchanged";
+    billingIntervalChanges?: false;
+};
+type PlanChangeStatus = "payment_failed" | "failed" | "requires_payment_method" | "payment_pending" | "requires_action" | "downgrade_scheduled" | "scheduled" | "unchanged" | "upgraded" | "applied";
+interface PlanChangeOutcomeFields {
+    timing?: PlanChangeTiming;
     clientSecret?: string | null;
     stripePublishableKey?: string;
     /** Host guard called immediately before Stripe confirmation. */
     assertPaymentScope?: () => void;
 }
+type PlanChangeOutcome = (PlanChangeOutcomeFields & {
+    status: "requires_action";
+    clientSecret: string;
+    stripePublishableKey: string;
+}) | (PlanChangeOutcomeFields & {
+    status: Exclude<PlanChangeStatus, "requires_action">;
+});
 interface ActiveTask {
     /** Task identifier. */
     taskId: string;

@@ -3,20 +3,47 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-export interface PlanChangePreview {
-	direction: 'upgrade' | 'downgrade' | 'interval_change' | 'unchanged';
-	timing: 'immediate' | 'next_renewal' | 'unchanged';
-	billingIntervalChanges?: boolean;
-}
+/** When a plan change takes effect. */
+export type PlanChangeTiming = 'immediate' | 'next_renewal' | 'unchanged';
 
-export interface PlanChangeOutcome {
-	status: string;
-	timing?: PlanChangePreview['timing'];
+/**
+ * A server preview. Only the direction, timing and interval-change
+ * combinations that `parsePlanChangePreview` accepts type-check.
+ */
+export type PlanChangePreview =
+	| { direction: 'upgrade'; timing: 'immediate'; billingIntervalChanges?: boolean }
+	| { direction: 'downgrade'; timing: 'next_renewal'; billingIntervalChanges?: boolean }
+	| { direction: 'interval_change'; timing: 'immediate' | 'next_renewal'; billingIntervalChanges?: true }
+	| { direction: 'unchanged'; timing: 'unchanged'; billingIntervalChanges?: false };
+
+/** A plan-change status that `parsePlanChangeOutcome` recognizes. */
+export type PlanChangeStatus =
+	| 'payment_failed'
+	| 'failed'
+	| 'requires_payment_method'
+	| 'payment_pending'
+	| 'requires_action'
+	| 'downgrade_scheduled'
+	| 'scheduled'
+	| 'unchanged'
+	| 'upgraded'
+	| 'applied';
+
+interface PlanChangeOutcomeFields {
+	timing?: PlanChangeTiming;
 	clientSecret?: string | null;
 	stripePublishableKey?: string;
 	/** Host guard called immediately before Stripe confirmation. */
 	assertPaymentScope?: () => void;
 }
+
+/**
+ * A server outcome. A `requires_action` outcome carries both Stripe fields,
+ * since the modal cannot authenticate the payment without them.
+ */
+export type PlanChangeOutcome =
+	| (PlanChangeOutcomeFields & { status: 'requires_action'; clientSecret: string; stripePublishableKey: string })
+	| (PlanChangeOutcomeFields & { status: Exclude<PlanChangeStatus, 'requires_action'> });
 
 /** Read a preview from a connected server before enabling confirmation. */
 export function parsePlanChangePreview(value: unknown): PlanChangePreview {
@@ -34,13 +61,13 @@ export function parsePlanChangePreview(value: unknown): PlanChangePreview {
 			(direction !== 'unchanged' || !billingIntervalChanges)
 		);
 		if (validTransition && validIntervalChange) {
-			return { direction, timing, billingIntervalChanges };
+			return { direction, timing, billingIntervalChanges } as PlanChangePreview;
 		}
 	}
 	throw new Error('The server returned an invalid plan change preview. Try again.');
 }
 
-const planChangeTimings = new Map<string, PlanChangePreview['timing'] | null>([
+const planChangeTimings = new Map<string, PlanChangeTiming | null>([
 	['payment_failed', null],
 	['failed', null],
 	['requires_payment_method', null],

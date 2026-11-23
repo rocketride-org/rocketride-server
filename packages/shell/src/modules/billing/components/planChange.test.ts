@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parsePlanChangeOutcome, parsePlanChangePreview, planChangeCompletion } from './planChange';
+import type { PlanChangeOutcome, PlanChangePreview } from './planChange';
 
 test('requires a recognized response to complete an authenticated attempt', () => {
 	for (const status of ['applied', 'upgraded', 'downgrade_scheduled', 'payment_pending']) {
@@ -35,7 +36,7 @@ test('uses neutral copy for legacy callbacks without a result', () => {
 test('only reports scheduling after the server confirms it', () => {
 	assert.match(planChangeCompletion({ status: 'downgrade_scheduled' }).message, /scheduled/);
 	assert.match(planChangeCompletion({ status: 'scheduled' }).message, /renewal/);
-	assert.match(planChangeCompletion({ status: 'unknown', timing: 'next_renewal' }).message, /requested/);
+	assert.match(planChangeCompletion({ status: 'unknown', timing: 'next_renewal' } as never).message, /requested/);
 });
 
 test('displays the actual applied or unchanged result', () => {
@@ -45,7 +46,7 @@ test('displays the actual applied or unchanged result', () => {
 
 test('keeps authentication and payment states pending', () => {
 	for (const status of ['payment_pending', 'requires_action', 'requires_payment_method']) {
-		assert.equal(planChangeCompletion({ status }).pending, true);
+		assert.equal(planChangeCompletion({ status } as never).pending, true);
 	}
 });
 
@@ -75,4 +76,15 @@ test('rejects empty, malformed and contradictory preview responses', () => {
 	]) {
 		assert.throws(() => parsePlanChangePreview(response), /invalid plan change preview/);
 	}
+});
+
+test('the preview and outcome types admit only what the parsers accept', () => {
+	// @ts-expect-error A downgrade never takes effect immediately.
+	const downgradeNow: PlanChangePreview = { direction: 'downgrade', timing: 'immediate' };
+	// @ts-expect-error requires_action needs the publishable key to open Stripe.
+	const noKey: PlanChangeOutcome = { status: 'requires_action', clientSecret: 'intent_secret' };
+	const authenticate: PlanChangeOutcome = { status: 'requires_action', clientSecret: 'intent_secret', stripePublishableKey: 'publishable_key' };
+	assert.throws(() => parsePlanChangePreview(downgradeNow), /invalid plan change preview/);
+	assert.throws(() => parsePlanChangeOutcome(noKey), /invalid plan change result/);
+	assert.deepEqual(parsePlanChangeOutcome(authenticate), authenticate);
 });

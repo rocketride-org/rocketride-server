@@ -483,6 +483,9 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 }) => {
 	// ── Internal interval state ──────────────────────────────────────────
 	const [interval, setInterval] = useState<'month' | 'year'>(defaultInterval);
+	// The selection (by price ID) in place when the user last toggled the
+	// interval: an explicit toggle overrides keeping that selection visible.
+	const [toggledWithPriceId, setToggledWithPriceId] = useState<string | null | undefined>(undefined);
 
 	// Keep the selected interval while the refreshed catalog still offers it.
 	useEffect(() => {
@@ -517,7 +520,8 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// refresh introduces a toggle that was absent when the choice was made.
 	const selectedInterval = selectedPlan?.interval;
 	const displayedInterval = keepSelectedPlanVisible && (selectedInterval === 'month' || selectedInterval === 'year') &&
-		plans.some((plan) => plan.stripePriceId === selectedPlan?.stripePriceId)
+		plans.some((plan) => plan.stripePriceId === selectedPlan?.stripePriceId) &&
+		toggledWithPriceId !== (selectedPlan?.stripePriceId ?? null)
 		? selectedInterval
 		: interval;
 
@@ -559,6 +563,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		(newInterval: 'month' | 'year') => {
 			if (intervalDisabled) return;
 			setInterval(newInterval);
+			setToggledWithPriceId(selectedPlan?.stripePriceId ?? null);
 			onIntervalChange?.(newInterval);
 
 			if (!onSelectPlan) return;
