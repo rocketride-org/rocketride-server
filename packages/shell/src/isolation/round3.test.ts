@@ -245,6 +245,21 @@ test('G4R3-L3 a hung engine call is dropped from teardown tracking after a timed
 // Review round — orphan and lost-run termination, stale status, unreceived answers, monitor counts
 // =============================================================================
 
+/**
+ * What a request waiting across a logout gets. Every logout detaches the realm (PR2b, plan 5.3), so the
+ * answer is a denial or none at all; what matters is that the request is never sent.
+ */
+const deniedOrSilent = async (pending: Promise<{ ok: boolean }>): Promise<void> => {
+	const answer = await Promise.race([
+		pending.then(
+			(v) => ({ v }),
+			() => ({ v: 'rejected' as const })
+		),
+		new Promise<{ v: 'silent' }>((resolve) => setTimeout(() => resolve({ v: 'silent' }), 300)),
+	]);
+	if (answer.v !== 'silent' && answer.v !== 'rejected') assert.equal(answer.v.ok, false, 'a request waiting across a logout is not answered ok');
+};
+
 const terminatedTokens = (t: ITestRoot): string[] => t.cm.engine.messagesFor('terminate').map((r) => String((r.message.arguments as { token?: string }).token));
 
 test('R-orphan a late run whose terminate answers success:false is retried, not forgotten', async (tt) => {
@@ -518,13 +533,13 @@ test('R-gate a request waiting on the API key is not sent once its realm detache
 		const run = await startRun(A);
 		const release = t.cm.holdApiKey();
 		st.after(() => release());
-		t.cm.emit('shell:login', { user: {} });
+		t.cm.emit('shell:login', { user: { userId: t.cm.engine.userId } });
 		const before = t.cm.engine.received.length;
 		const pending = clientRequest(A, dap('rrext_get_task_status', { token: run.token }));
 		await settle();
 		t.cm.emit('shell:logout', {});
 		release();
-		assertDenied(await pending, 'capability', 'a status request sent before logout');
+		await deniedOrSilent(pending);
 		assert.equal(t.cm.engine.received.length, before, "nothing is sent for the earlier session's run");
 	});
 });
@@ -542,7 +557,7 @@ test('R-gate2 a request waiting on the API key is not sent once a terminate, an 
 		await settle();
 		const releaseKey = t.cm.holdApiKey();
 		st.after(() => releaseKey());
-		t.cm.emit('shell:login', { user: {} });
+		t.cm.emit('shell:login', { user: { userId: t.cm.engine.userId } });
 		const waiting = clientRequest(A, dap('rrext_get_task_status', { token: run.token }));
 		await settle();
 		releaseEngine();
@@ -565,7 +580,7 @@ test('R-gate2 a request waiting on the API key is not sent once a terminate, an 
 		await settle();
 		const releaseKey = t.cm.holdApiKey();
 		st.after(() => releaseKey());
-		t.cm.emit('shell:login', { user: {} });
+		t.cm.emit('shell:login', { user: { userId: t.cm.engine.userId } });
 		const waiting = clientRequest(A, dap('rrext_store', { subcommand: 'fs_read', handle, offset: 0, length: 16 }));
 		await settle();
 		releaseEngine();
@@ -581,13 +596,13 @@ test('R-gate2 a request waiting on the API key is not sent once a terminate, an 
 		const A = t.open(ENTRY_A);
 		const releaseKey = t.cm.holdApiKey();
 		st.after(() => releaseKey());
-		t.cm.emit('shell:login', { user: {} });
+		t.cm.emit('shell:login', { user: { userId: t.cm.engine.userId } });
 		const before = t.cm.engine.received.length;
 		const waiting = clientRequest(A, execMsg());
 		await settle();
 		t.cm.emit('shell:logout', {});
 		releaseKey();
-		assertDenied(await waiting, 'capability', 'an execute asked before a logout');
+		await deniedOrSilent(waiting);
 		assert.equal(t.cm.engine.received.length, before, 'nothing is started for the earlier session');
 	});
 });

@@ -168,13 +168,15 @@ test('T112b a host.apiKey answer that arrives after logout does not re-add the p
 		release();
 		await settle();
 		t.cm.apiKey = newKey();
-		t.cm.emit('shell:login', { user: {} });
+		t.cm.emit('shell:login', { user: { userId: t.cm.engine.userId } });
 		await settle();
-		const run = await startRun(A);
+		// The logout detached the first realm (PR2b, plan 5.3): the new session's realm is a new one.
+		const B = t.open(ENTRY_A, { grant: GRANT_A });
+		const run = await startRun(B);
 		t.cm.engine.setStatus({ name: `old ${oldKey}` });
-		assert.equal(expectOk(await status(A, run.token), 'status naming the old key').name, `old ${oldKey}`, 'the previous session key is no longer in the backstop');
+		assert.equal(expectOk(await status(B, run.token), 'status naming the old key').name, `old ${oldKey}`, 'the previous session key is no longer in the backstop');
 		t.cm.engine.setStatus({ name: `new ${t.cm.apiKey}` });
-		expectDenied(await status(A, run.token), 'credential', 'the new session key is');
+		expectDenied(await status(B, run.token), 'credential', 'the new session key is');
 	} finally {
 		t.cleanup();
 	}
