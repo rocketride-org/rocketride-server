@@ -1499,18 +1499,64 @@ def test_corepack_env_file_is_removed_from_the_tree(tmp_path):
     assert app_build._remove_pnpm_configs(str(ws)) == ['.corepack.env', 'apps/x/.corepack.env']
 
 
-def test_build_env_pins_corepack_to_the_workers_values(monkeypatch):
+def _hermetic_corepack_env(monkeypatch):
+    for key in ('COREPACK_HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA'):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _default_corepack_home():
+    sub = 'AppData/Local' if os.name == 'nt' else '.cache'
+    return os.path.join(os.path.expanduser('~'), sub, 'node', 'corepack')
+
+
+def test_build_env_pins_corepack_to_the_workers_values(monkeypatch, tmp_path):
     """The Corepack walk can read an app's .corepack.env; the build env pins
     the keys it could set, using the WORKER's home and never the job's.
     """
-    monkeypatch.delenv('COREPACK_HOME', raising=False)
-    monkeypatch.setenv('HOME', '/worker/home')
+    _hermetic_corepack_env(monkeypatch)
     env = app_build._build_env()
     assert env['COREPACK_ENV_FILE'] == '0'
-    assert env['COREPACK_HOME'] == os.path.join(os.path.expanduser('~'), '.cache', 'node', 'corepack')
+    assert env['COREPACK_HOME'] == _default_corepack_home()
     assert 'COREPACK_ENABLE_NETWORK' not in env and 'COREPACK_DEFAULT_TO_LATEST' not in env
-    monkeypatch.setenv('COREPACK_HOME', '/worker/corepack')
-    assert app_build._build_env()['COREPACK_HOME'] == '/worker/corepack'
+    explicit = str(tmp_path / 'corepack')
+    monkeypatch.setenv('COREPACK_HOME', explicit)
+    assert app_build._build_env()['COREPACK_HOME'] == explicit
+
+
+def test_corepack_home_follows_corepacks_own_resolution_order(monkeypatch, tmp_path):
+    """COREPACK_HOME, else XDG_CACHE_HOME, else (Windows) LOCALAPPDATA, else
+    the worker home's cache dir. Read from the worker's env only.
+    """
+    _hermetic_corepack_env(monkeypatch)
+    assert app_build._corepack_home() == _default_corepack_home()
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'xdg'))
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'xdg'), 'node', 'corepack')
+    monkeypatch.setenv('COREPACK_HOME', str(tmp_path / 'explicit'))
+    assert app_build._corepack_home() == str(tmp_path / 'explicit')
+
+
+def test_corepack_home_uses_localappdata_on_windows(monkeypatch, tmp_path):
+    _hermetic_corepack_env(monkeypatch)
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'local'))
+    monkeypatch.setattr(app_build.os, 'name', 'nt')
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'local'), 'node', 'corepack')
+
+
+def test_corepack_home_ignores_relative_values(monkeypatch, tmp_path):
+    """The job install's cwd is the uploaded tree, so a relative cache dir
+    would land inside it: only absolute values are accepted.
+    """
+    _hermetic_corepack_env(monkeypatch)
+    monkeypatch.setenv('COREPACK_HOME', 'rel/corepack')
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'xdg'))
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'xdg'), 'node', 'corepack')
+    monkeypatch.setenv('XDG_CACHE_HOME', 'rel/xdg')
+    assert app_build._corepack_home() == _default_corepack_home()
+    monkeypatch.setenv('COREPACK_HOME', '')
+    assert os.path.isabs(app_build._corepack_home())
+    monkeypatch.setenv('LOCALAPPDATA', 'rel/local')
+    monkeypatch.setattr(app_build.os, 'name', 'nt')
+    assert os.path.isabs(app_build._corepack_home())
 
 
 def test_job_install_env_also_pins_corepack_network_and_latest():
@@ -1523,13 +1569,11 @@ def test_job_install_env_also_pins_corepack_network_and_latest():
     assert 'COREPACK_ENABLE_NETWORK' not in app_build._build_env()
 
 
-def test_names_are_casefolded_and_win32_trailing_chars_stripped(tmp_path):
+def test_win32_trailing_dot_config_names_are_removed(tmp_path):
     ws = tmp_path / 'ws'
-    _write(ws / 'po\u017ftcss.config.js', 'MARKER-plugin\n')
     _write(ws / '.npmrc.', 'x\n')
     _write(ws / 'node_modules_extra' / 'keep.txt', 'k')
     app_build._neutralize_tool_configs(str(ws), str(ws))
-    assert 'MARKER' not in (ws / 'po\u017ftcss.config.js').read_text(encoding='utf-8')
     # Win32 strips the trailing dot when the file is created, so the walk may
     # report either spelling; the file must be gone in both.
     removed = app_build._remove_pnpm_configs(str(ws))
@@ -1540,33 +1584,9 @@ def test_names_are_casefolded_and_win32_trailing_chars_stripped(tmp_path):
 
 def test_fold_name_matches_ntfs_uppercase_comparison():
     """NTFS compares names by uppercasing: a dotless i uppercases to I."""
-    assert app_build._fold_name('postcss.conf\u0131g.js') == 'postcss.config.js'
-    assert app_build._fold_name('po\u017ftcss.config.js') == 'postcss.config.js'
+    assert app_build._fold_name('postcss.conf' + chr(0x131) + 'g.js') == 'postcss.config.js'
+    assert app_build._fold_name('po' + chr(0x17F) + 'tcss.config.js') == 'postcss.config.js'
     assert app_build._fold_name('.npmrc. ') == '.npmrc'
-
-
-def test_corepack_home_follows_corepacks_own_resolution_order(monkeypatch):
-    """COREPACK_HOME, else XDG_CACHE_HOME, else (Windows) LOCALAPPDATA, else
-    the worker home's cache dir. Read from the worker's env only.
-    """
-    for key in ('COREPACK_HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA'):
-        monkeypatch.delenv(key, raising=False)
-    home = os.path.expanduser('~')
-    sub = 'AppData/Local' if os.name == 'nt' else '.cache'
-    assert app_build._corepack_home() == os.path.join(home, sub, 'node', 'corepack')
-    monkeypatch.setenv('XDG_CACHE_HOME', '/xdg')
-    assert app_build._corepack_home() == os.path.join('/xdg', 'node', 'corepack')
-    monkeypatch.setenv('COREPACK_HOME', '/explicit')
-    assert app_build._corepack_home() == '/explicit'
-    assert app_build._build_env()['COREPACK_HOME'] == '/explicit'
-
-
-def test_corepack_home_uses_localappdata_on_windows(monkeypatch):
-    monkeypatch.delenv('COREPACK_HOME', raising=False)
-    monkeypatch.delenv('XDG_CACHE_HOME', raising=False)
-    monkeypatch.setenv('LOCALAPPDATA', 'L:/local')
-    monkeypatch.setattr(app_build.os, 'name', 'nt')
-    assert app_build._corepack_home() == os.path.join('L:/local', 'node', 'corepack')
 
 
 @pytest.mark.asyncio

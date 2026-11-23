@@ -372,18 +372,22 @@ def _corepack_home() -> str:
     """Corepack's cache dir as the WORKER's own environment resolves it.
 
     Corepack's order: COREPACK_HOME, XDG_CACHE_HOME, (Windows) LOCALAPPDATA,
-    then the home directory's cache dir.
+    then the home directory's cache dir. A relative value is ignored (the
+    job install runs inside the uploaded tree, which would then hold the
+    cache), so every result is absolute.
     """
     explicit = os.environ.get('COREPACK_HOME')
-    if explicit:
+    if explicit and os.path.isabs(explicit):
         return explicit
     xdg = os.environ.get('XDG_CACHE_HOME')
-    if xdg:
+    if xdg and os.path.isabs(xdg):
         return os.path.join(xdg, 'node', 'corepack')
     local = os.environ.get('LOCALAPPDATA')
-    if os.name == 'nt' and local:
+    if os.name == 'nt' and local and os.path.isabs(local):
         return os.path.join(local, 'node', 'corepack')
-    return os.path.join(os.path.expanduser('~'), 'AppData/Local' if os.name == 'nt' else '.cache', 'node', 'corepack')
+    return os.path.join(
+        os.path.abspath(os.path.expanduser('~')), 'AppData/Local' if os.name == 'nt' else '.cache', 'node', 'corepack'
+    )
 
 
 def _build_env() -> Dict[str, str]:
