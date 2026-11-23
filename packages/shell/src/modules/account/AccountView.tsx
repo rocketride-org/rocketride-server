@@ -244,7 +244,7 @@ export interface IAccountViewProps {
 	onDeleteAccount?: () => Promise<void>;
 	/** Persists an updated organization name. */
 	onSaveOrgName: (name: string) => Promise<void>;
-	/** Creates a new API key and returns the raw key string. */
+	/** Creates a new API key and returns the raw key string. `expiresAt` is the expiry the server granted: null means the key does not expire, absent means the server did not report it, a timestamp is the granted expiry (it may be earlier than requested). */
 	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string; expiresAt?: string | null }>;
 	/** Revokes an API key by its ID. */
 	onRevokeKey: (keyId: string) => Promise<void>;

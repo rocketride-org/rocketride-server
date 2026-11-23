@@ -181,7 +181,7 @@ export interface ApiKeysPanelProps {
 	keys: ApiKeyRecord[];
 	/** Teams available for the create form's scope select. */
 	teams: TeamRecord[];
-	/** Creates a key; resolves with the one-time raw key value. */
+	/** Creates a key; resolves with the one-time raw key value. `expiresAt` is the expiry the server granted: null means the key does not expire, absent means the server did not report it, a timestamp is the granted expiry (it may be earlier than requested). */
 	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string; expiresAt?: string | null }>;
 	/** Revokes a key by id. */
 	onRevokeKey: (keyId: string) => Promise<void>;
