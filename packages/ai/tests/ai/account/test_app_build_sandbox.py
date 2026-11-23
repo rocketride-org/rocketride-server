@@ -219,6 +219,7 @@ def _exec_stub(monkeypatch, app_build, code, output, report_pid):
     return seen
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='bwrap and its --info-fd status channel are POSIX-only')
 async def test_exec_compiler_raises_an_infrastructure_failure_when_the_sandbox_cannot_start(monkeypatch, tmp_path):
     from ai.account import app_build
 
@@ -242,6 +243,7 @@ async def test_exec_compiler_raises_an_infrastructure_failure_when_the_sandbox_c
     assert any('/srv/host/path' in line for line in errors)
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='bwrap and its --info-fd status channel are POSIX-only')
 async def test_a_compile_error_that_names_bwrap_stays_a_compile_error(monkeypatch, tmp_path):
     from ai.account import app_build
 
