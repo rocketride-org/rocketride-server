@@ -271,3 +271,95 @@ async def test_exec_compiler_passes_other_results_through(monkeypatch, tmp_path)
     )
     _exec_stub(monkeypatch, app_build, 0, 'ok\n', report_pid=True)
     assert await app_build._exec_compiler(['/usr/bin/node', 'tsc'], str(job), 5, str(job), str(tools)) == (0, 'ok\n')
+
+
+def _streaming_stub(monkeypatch, app_build, code, lines, report_pid):
+    """A process seam that streams ``lines`` to ``on_line`` as they arrive, as the real ``_exec`` does.
+
+    A started bwrap has written its child pid before the compiler prints anything.
+    """
+
+    async def fake_exec(argv, cwd, timeout, on_line=None, pass_fds=()):
+        if report_pid and '--info-fd' in argv:
+            os.write(int(argv[argv.index('--info-fd') + 1]), b'{"child-pid": 4242}')
+        for line in lines:
+            if on_line is not None:
+                await on_line(line)
+        return code, '\n'.join(lines) + '\n'
+
+    monkeypatch.setattr(app_build, '_exec', fake_exec)
+
+
+def _provider(monkeypatch, app_build, name):
+    monkeypatch.setattr(
+        app_build.app_build_sandbox, 'command', lambda argv, cwd, job_dir, env_dir: [f'/usr/bin/{name}', '--', *argv]
+    )
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='bwrap and its --info-fd status channel are POSIX-only')
+async def test_a_sandbox_that_cannot_start_leaks_nothing_into_the_live_feed(monkeypatch, tmp_path):
+    from ai.account import app_build
+
+    _provider(monkeypatch, app_build, 'bwrap')
+    monkeypatch.setattr(app_build, 'error', lambda message: None)
+    _streaming_stub(
+        monkeypatch, app_build, 1, ['bwrap: cannot open /srv/host/path: Permission denied'], report_pid=False
+    )
+    fed = []
+
+    async def on_line(line):
+        fed.append(line)
+
+    with pytest.raises(app_build.BuildInfraFailure) as raised:
+        await app_build._exec_compiler(
+            ['/usr/bin/node', 'tsc'], str(tmp_path), 5, str(tmp_path), str(tmp_path), on_line=on_line
+        )
+    assert fed == []
+    assert '/srv/host/path' not in str(raised.value)
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='bwrap and its --info-fd status channel are POSIX-only')
+async def test_a_started_sandbox_streams_every_compiler_line_in_order(monkeypatch, tmp_path):
+    from ai.account import app_build
+
+    _provider(monkeypatch, app_build, 'bwrap')
+    lines = [
+        "a.ts(1,1): error TS2304: Cannot find name 'x'.",
+        'b.ts(2,2): error TS2304: Cannot find name y.',
+        'Found 2 errors.',
+    ]
+    _streaming_stub(monkeypatch, app_build, 2, lines, report_pid=True)
+    fed = []
+
+    async def on_line(line):
+        fed.append(line)
+
+    code, _ = await app_build._exec_compiler(
+        ['/usr/bin/node', 'tsc'], str(tmp_path), 5, str(tmp_path), str(tmp_path), on_line=on_line
+    )
+    assert code == 2 and fed == lines
+
+
+async def test_a_seatbelt_startup_line_is_held_but_compiler_output_streams(monkeypatch, tmp_path):
+    from ai.account import app_build
+
+    _provider(monkeypatch, app_build, 'sandbox-exec')
+    monkeypatch.setattr(app_build, 'error', lambda message: None)
+    fed = []
+
+    async def on_line(line):
+        fed.append(line)
+
+    _streaming_stub(monkeypatch, app_build, 71, ['sandbox-exec: cannot read /Users/host/profile'], report_pid=False)
+    with pytest.raises(app_build.BuildInfraFailure):
+        await app_build._exec_compiler(
+            ['/usr/bin/node', 'tsc'], str(tmp_path), 5, str(tmp_path), str(tmp_path), on_line=on_line
+        )
+    assert fed == []
+
+    lines = ["a.ts(1,1): error TS2304: Cannot find name 'x'.", 'Found 1 error.']
+    _streaming_stub(monkeypatch, app_build, 2, lines, report_pid=False)
+    await app_build._exec_compiler(
+        ['/usr/bin/node', 'tsc'], str(tmp_path), 5, str(tmp_path), str(tmp_path), on_line=on_line
+    )
+    assert fed == lines
