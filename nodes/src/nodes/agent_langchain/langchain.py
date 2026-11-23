@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import ToolDescriptor, debug
+from rocketlib import ToolDescriptor, error
 
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
@@ -303,11 +303,9 @@ class LangChainDriver(AgentBase):
                 config={'callbacks': [_SSECallbackHandler(_send_sse)]},
             )
         except Exception as e:
-            debug(f'langchain agent {stage} failed: {type(e).__name__}: {safe_str(e)}')
+            error(f'langchain agent {stage} failed: {type(e).__name__}: {safe_str(e)}')
             # This text becomes the answer: no engine source path (the log above keeps it).
-            raise RuntimeError(
-                'LangChain agent {} failed: {}: {}'.format(stage, type(e).__name__, error_text(e))
-            ) from e
+            raise RuntimeError(f'LangChain agent {stage} failed: {error_text(e, with_type=True)}') from e
 
         final_text = ''
         try:

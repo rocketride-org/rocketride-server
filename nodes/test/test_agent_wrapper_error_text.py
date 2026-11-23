@@ -6,7 +6,7 @@
 """The LangChain and Deep Agent wrappers turn a failed model call into the answer text.
 
 An engine error's str() ends in " at (<engine source path>:<line>)". The wrapper's
-message becomes the answer a user reads, so it must not carry that path; the debug
+message becomes the answer a user reads, so it must not carry that path; the error
 log keeps the full text. The frameworks are stand-ins, so this runs without them.
 """
 
@@ -83,7 +83,7 @@ def frameworks(monkeypatch):
 def test_the_langchain_answer_for_a_failed_model_call_has_no_engine_path(monkeypatch, frameworks):
     module = _load('_langchain_wrapper_error_text', 'agent_langchain/langchain.py')
     logged = []
-    monkeypatch.setattr(module, 'debug', logged.append)
+    monkeypatch.setattr(module, 'error', logged.append)
     monkeypatch.setattr(module, '_build_langchain_llm', lambda *args: object())
     monkeypatch.setattr(module, '_build_langchain_tools', lambda *args: [])
     driver = module.LangChainDriver.__new__(module.LangChainDriver)
@@ -91,14 +91,14 @@ def test_the_langchain_answer_for_a_failed_model_call_has_no_engine_path(monkeyp
     with pytest.raises(RuntimeError) as caught:
         driver._run(context=_context(), question=_question())
 
-    assert str(caught.value) == 'LangChain agent invoke failed: Exception: Exception: Invalid API key.'
+    assert str(caught.value) == 'LangChain agent invoke failed: Exception: Invalid API key.'
     assert any(LOCATION in line for line in logged), 'the log lost the engine location'
 
 
 def test_the_deep_agent_answer_for_a_failed_model_call_has_no_engine_path(monkeypatch, frameworks):
     module = _load('_deepagent_wrapper_error_text', 'agent_deepagent/deepagent.py')
     logged = []
-    monkeypatch.setattr(module, 'debug', logged.append)
+    monkeypatch.setattr(module, 'error', logged.append)
     monkeypatch.setattr(module, '_build_deepagent_llm', lambda *args: object())
     monkeypatch.setattr(module, '_build_deepagent_tools', lambda *args: [])
     driver = module.DeepAgentDriver.__new__(module.DeepAgentDriver)
@@ -109,5 +109,5 @@ def test_the_deep_agent_answer_for_a_failed_model_call_has_no_engine_path(monkey
     with pytest.raises(RuntimeError) as caught:
         driver._run(context=_context(), question=_question())
 
-    assert str(caught.value) == 'Deep agent invoke failed: Exception: Exception: Invalid API key.'
+    assert str(caught.value) == 'Deep agent invoke failed: Exception: Invalid API key.'
     assert any(LOCATION in line for line in logged), 'the log lost the engine location'
