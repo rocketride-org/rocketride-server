@@ -110,6 +110,10 @@ engine:
 
   # -- Extra environment variables for engine pods (key-value pairs added to ConfigMap)
   env:
+    # -- Keep Linux engine/task environments private from same-UID processes.
+    # Explicit operator opt-out is possible for local debugging; never disable
+    # this on a host that executes another user's pipeline code.
+    RR_PROC_PRIVATE: '1'
     # -- Log level (debug, info, warn, error)
     LOG_LEVEL: 'info'
     # -- Number of worker threads
@@ -157,6 +161,9 @@ engine:
     # Set it explicitly there: with it unset the engine mints an ephemeral
     # per-process key, so every previously issued download URL stops
     # verifying the moment the pod restarts.
+    # A value set on the filesystem backend must be at least 32 UTF-8 bytes, or
+    # task-module startup refuses it; remove or replace a shorter legacy value
+    # before upgrading. Cloud backends (s3:// / azureblob://) do not check it.
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     # RR_SIGNING_KEY: ""
     #
