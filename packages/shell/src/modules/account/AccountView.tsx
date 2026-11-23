@@ -19,7 +19,7 @@
 
 import type { PlanChangeOutcome, PlanChangePreview } from '../billing/components/planChange';
 import { canManageOrganizationBilling } from '../../connection/connection';
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { TabControl } from '../../components/tab-control/TabControl';
@@ -326,12 +326,18 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	// PORTAL ERROR HANDLING
 	// =========================================================================
 
-	/** Wraps the portal callback with local error handling. */
+	/** Why the last portal open failed, or null — shown in the billing
+	 *  panel's error banner so a failed click never goes silent. */
+	const [portalError, setPortalError] = useState<string | null>(null);
+
+	/** Wraps the portal callback, surfacing any failure on screen. */
 	const handlePortal = async () => {
+		setPortalError(null);
 		try {
 			await onOpenPortal();
 		} catch (e) {
-			console.log('open portal error:', e);
+			console.error('open portal error:', e);
+			setPortalError(`Couldn't open the payment portal: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	};
 
@@ -394,7 +400,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<>
 						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
 						<div style={commonStyles.tabContent}>
-							<BillingPanel key={billingPanelKey} isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isBillingOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} onPreviewSubscriptionChange={onPreviewSubscriptionChange} />
+							<BillingPanel key={billingPanelKey} isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={portalError ?? billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isBillingOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} onPreviewSubscriptionChange={onPreviewSubscriptionChange} />
 						</div>
 					</>
 				),
@@ -444,7 +450,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, billingPanelKey, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onPreviewSubscriptionChange, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isBillingOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, billingPanelKey, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, portalError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onPreviewSubscriptionChange, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isBillingOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================
@@ -510,7 +516,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
 						<div style={commonStyles.tabContent}>
 							{chip}
-							<BillingPanel key={billingPanelKey} isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isBillingOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} onPreviewSubscriptionChange={onPreviewSubscriptionChange} />
+							<BillingPanel key={billingPanelKey} isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={portalError ?? billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isBillingOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} onPreviewSubscriptionChange={onPreviewSubscriptionChange} />
 						</div>
 					</>
 				)}
