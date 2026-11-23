@@ -320,6 +320,10 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
     return frozenset(names), tuple(prefixes)
 
 
+# Deployment secret used to derive the parameter token key.
+CONST_PARAM_TOKEN_SECRET_ENV = 'RR_PARAM_TOKEN_SECRET'
+
+
 # Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
 # token key would let pipeline code mint any run's private token. The datacore
@@ -330,6 +334,7 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
 CONST_SUBPROCESS_ENV_NEVER = frozenset(
     {
         CONST_TASK_TOKEN_KEY_ENV,
+        CONST_PARAM_TOKEN_SECRET_ENV,
         'RR_DATACORE_GRANT_KEY',
         'RR_DB_BROKER_TOKEN',
         'ROCKETRIDE_DB_BROKER_TOKEN',
@@ -354,11 +359,6 @@ def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
         if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
             allowed[name] = value
     return allowed
-
-
-# Deployment secret the engine derives the parameter token key from. Like the
-# other deployment keys it is not in the subprocess allowlist above.
-CONST_PARAM_TOKEN_SECRET_ENV = 'RR_PARAM_TOKEN_SECRET'
 
 
 def resolve_parameter_tokens(pipeline: Dict[str, Any], environ: Mapping[str, str] = os.environ) -> Dict[str, Any]:
