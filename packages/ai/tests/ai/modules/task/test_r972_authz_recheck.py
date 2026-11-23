@@ -635,14 +635,22 @@ async def test_catchup_gate_going_stale_during_summary_stops_task_list(monkeypat
     """A gate that goes stale during the summary send is re-checked before the task list."""
     account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
     conn = _admin(server, clock)
-    calls = []
+    state = {'stale': False}
 
-    def gate_ok(c):
-        calls.append(c)
-        return len(calls) == 1  # fresh at the top, stale afterwards
-
+    # The gate is asked an arbitrary number of times (the catch-up entry check,
+    # every outbound event in TaskConn.send, the task-list re-check), so it is
+    # flipped by what happens, not by how many times it was asked: the moment
+    # the summary event reaches the transport, authority goes stale.
     server._authz = MagicMock()
-    server._authz.gate_ok = gate_ok
+    server._authz.gate_ok = lambda c: not state['stale']
+    deliver = conn._transport.send.side_effect
+
+    async def deliver_then_go_stale(message):
+        await deliver(message)
+        if message.get('event') == 'apaevt_status_update':
+            state['stale'] = True
+
+    conn._transport.send.side_effect = deliver_then_go_stale
     control = MagicMock()
     control.id = 'run-1'
 
