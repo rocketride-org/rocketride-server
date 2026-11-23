@@ -70,6 +70,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import rocketlib
 from rocketlib import APERR, Ec, IGlobalBase
 
+from ai.account.audience import compose_owner
 from ai.account.state_store import MemoryStateStore, install_state_store
 from ai.account.store import Store
 from ai.account.store_providers.filesystem import FilesystemStore
@@ -123,6 +124,11 @@ class Owner:
     def owner_id(self) -> str:
         """The owning user or team (the server's TaskControl.owner_id)."""
         return self.teamId if self.owner_kind == 'team' else self.userId
+
+    @property
+    def owner(self) -> str:
+        """The kind-qualified owner the state doors key by (the server's TaskControl.owner)."""
+        return compose_owner(self.owner_type, self.owner_id) if self.owner_id else ''
 
     @property
     def key(self) -> str:

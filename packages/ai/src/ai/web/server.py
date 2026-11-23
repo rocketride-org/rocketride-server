@@ -148,6 +148,38 @@ def _build_signal_safe_capture(server: uvicorn.Server):
     return capture_signals
 
 
+def _build_bound_port_publisher(server: uvicorn.Server, on_bound: Callable[[], Any]):
+    """
+    Wrap ``server.startup`` so ``on_bound`` runs as soon as the listening sockets exist.
+
+    uvicorn binds its sockets inside ``Server.startup``, after the lifespan
+    startup hook, so with ``port=0`` the port the OS assigned is unknown until
+    that call returns. Without this, the real port (and ``RR_BASE_URL``, which
+    ``FileStore.get_url`` needs for a local store's fetch links) was resolved
+    only when an HTTP task route happened to call ``WebServer.get_port``; a
+    server driven over DAP alone (the test launchers and the IDE start engines
+    with ``--port=0``) never had it, and every ``files.url`` failed.
+
+    Args:
+        server: The uvicorn server whose ``startup`` is wrapped.
+        on_bound: Called once ``startup`` has bound at least one socket.
+
+    Returns:
+        The replacement coroutine function for ``server.startup``.
+    """
+    startup = server.startup
+
+    async def startup_then_publish(*args, **kwargs):
+        # Step 1: uvicorn's own startup: the lifespan hook, then the bind
+        await startup(*args, **kwargs)
+
+        # Step 2: the sockets exist; a startup that bound none has nothing to publish
+        if getattr(server, 'servers', None):
+            on_bound()
+
+    return startup_then_publish
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """
@@ -483,7 +515,8 @@ class WebServer:
             if port != 0:
                 os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{port}'
             # When port is 0 the OS assigns the real port at bind time;
-            # RR_BASE_URL will be set lazily by get_port() once resolved.
+            # get_port() publishes RR_BASE_URL once uvicorn has bound (the
+            # startup wrapper below calls it then).
 
         # RR_SIGNING_KEY (the FileStore URL-signing secret) is deliberately
         # NOT provisioned here: the operator sets it in .env/.config like
@@ -517,6 +550,10 @@ class WebServer:
         signal_safe_capture = _build_signal_safe_capture(server)
         if signal_safe_capture is not None:
             server.capture_signals = signal_safe_capture
+
+        # Resolve the bound port (and publish RR_BASE_URL) the moment the
+        # sockets exist, not when the first HTTP task route asks for it
+        server.startup = _build_bound_port_publisher(server, self.get_port)
 
         return server
 
@@ -808,9 +845,11 @@ class WebServer:
         """
         Get the port number on which the server is running.
 
-        Resolved lazily from the bound socket on first use: with port=0 the OS
+        Resolved from the bound socket on first use: with port=0 the OS
         assigns the real port at bind time, which uvicorn does *after* the
-        lifespan startup hook, so self._port is still 0 until a request arrives.
+        lifespan startup hook. The startup wrapper
+        (``_build_bound_port_publisher``) calls this right after the bind, so
+        the port and ``RR_BASE_URL`` are known before the first request.
 
         Returns:
             int: The port number actually bound by uvicorn.

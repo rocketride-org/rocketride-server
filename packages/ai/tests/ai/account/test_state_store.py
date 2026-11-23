@@ -45,8 +45,8 @@ from ai.constants import (
 # ==== Constants ==================================================================
 
 #: Two nodes of one owner's pipeline.
-SCOPE = state_scope('org-1', 'user-1', 'acme.mon.webhook', 'node_1')
-OTHER = state_scope('org-1', 'user-1', 'acme.mon.webhook', 'node_2')
+SCOPE = state_scope('org-1', '=user/user-1', 'acme.mon.webhook', 'node_1')
+OTHER = state_scope('org-1', '=user/user-1', 'acme.mon.webhook', 'node_2')
 
 #: The expiry and the per-node limit the writes below name unless a test is about them.
 TTL = 60.0
@@ -62,53 +62,76 @@ def _k(name, scope=SCOPE):
 
 
 def test_the_physical_key_is_owner_and_node_prefixed_and_escaped():
-    assert state_scope('org-1', 'user-1', 'acme.mon.webhook', 'anomaly_1') == 'org-1/user-1/acme.mon.webhook/anomaly_1'
     assert (
-        state_key('org-1', 'user-1', 'acme.mon.webhook', 'anomaly_1', 'series:cpu')
-        == 'org-1/user-1/acme.mon.webhook/anomaly_1/series%3Acpu'
+        state_scope('org-1', '=user/user-1', 'acme.mon.webhook', 'anomaly_1')
+        == 'org-1/%3Duser%2Fuser-1/acme.mon.webhook/anomaly_1'
+    )
+    assert (
+        state_key('org-1', '=user/user-1', 'acme.mon.webhook', 'anomaly_1', 'series:cpu')
+        == 'org-1/%3Duser%2Fuser-1/acme.mon.webhook/anomaly_1/series%3Acpu'
     )
 
 
 def test_a_key_is_its_scope_then_the_escaped_key():
-    parts = ('org 1', 'team/1', 'acme.mon.webhook', 'node:1')
+    parts = ('org 1', '=team/1', 'acme.mon.webhook', 'node:1')
     scope = state_scope(*parts)
-    assert scope == 'org%201/team%2F1/acme.mon.webhook/node%3A1'
+    assert scope == 'org%201/%3Dteam%2F1/acme.mon.webhook/node%3A1'
     assert state_key(*parts, 'a/b') == scope + '/a%2Fb'
 
 
+def test_a_user_a_team_and_an_org_of_one_id_have_three_scopes():
+    # A standalone server names its one user, team and org 'local': the
+    # owner's kind alone keeps @me, @team and @org apart
+    scopes = {
+        state_scope('local', f'={kind}/local', 'rocketride.probe.webhook_1', 'probe_1')
+        for kind in ('user', 'team', 'org')
+    }
+    assert len(scopes) == 3
+
+
+@pytest.mark.parametrize('owner', ['local', 'user-1', '', None, '@me', '@public', '=public', '=user/', 'user/local'])
+def test_an_owner_without_its_kind_is_refused(owner):
+    with pytest.raises(StateError, match='state owner'):
+        state_scope('o', owner, 'a', 'n')
+    with pytest.raises(StateError, match='state owner'):
+        state_key('o', owner, 'a', 'n', 'k')
+
+
 def test_two_nodes_naming_one_key_have_two_physical_keys():
-    first = state_key('org-1', 'user-1', 'acme.mon.webhook', 'anomaly_1', 'series:cpu')
-    second = state_key('org-1', 'user-1', 'acme.mon.webhook', 'anomaly_2', 'series:cpu')
+    first = state_key('org-1', '=user/user-1', 'acme.mon.webhook', 'anomaly_1', 'series:cpu')
+    second = state_key('org-1', '=user/user-1', 'acme.mon.webhook', 'anomaly_2', 'series:cpu')
     assert first != second
 
 
 def test_a_slash_in_any_segment_never_forges_another_owners_prefix():
-    forged = state_key('org-1', 'user-1', 'acme.mon.webhook', 'n', '../../org-2/user-2/acme.mon.webhook/n/k')
+    forged = state_key(
+        'org-1', '=user/user-1', 'acme.mon.webhook', 'n', '../../org-2/=user/user-2/acme.mon.webhook/n/k'
+    )
     assert forged.count('/') == 4
-    assert forged.startswith('org-1/user-1/acme.mon.webhook/n/')
-    assert state_key('org-1', 'a/b', 'x', 'n', 'k') != state_key('org-1', 'a', 'b/x', 'n', 'k')
+    assert forged.startswith('org-1/%3Duser%2Fuser-1/acme.mon.webhook/n/')
+    assert state_key('org-1', '=user/u', 'a/b', 'n', 'k') != state_key('org-1', '=user/u', 'a', 'b/n', 'k')
 
 
 def test_a_slash_in_the_node_id_never_forges_another_nodes_scope():
     # A node id that spells another node's id and key stays one segment
-    forged = state_key('o', 'u', 'a', 'node_2/k', 'x')
+    forged = state_key('o', '=user/u', 'a', 'node_2/k', 'x')
     assert forged.count('/') == 4
-    assert not forged.startswith(state_scope('o', 'u', 'a', 'node_2') + '/')
-    assert state_key('o', 'u', 'a', 'n/k', 'x') != state_key('o', 'u', 'a', 'n', 'k/x')
+    assert not forged.startswith(state_scope('o', '=user/u', 'a', 'node_2') + '/')
+    assert state_key('o', '=user/u', 'a', 'n/k', 'x') != state_key('o', '=user/u', 'a', 'n', 'k/x')
 
 
 @pytest.mark.parametrize('key', ['', None, 7, 'k' * (CONST_STATE_MAX_KEY_LENGTH + 1)])
 def test_a_bad_key_is_refused(key):
     with pytest.raises(StateError):
-        state_key('o', 'u', 'a', 'n', key)
+        state_key('o', '=user/u', 'a', 'n', key)
 
 
 @pytest.mark.parametrize('node_id', ['', None, 7])
 def test_a_bad_node_id_is_refused(node_id):
     with pytest.raises(StateError, match='node id'):
-        state_scope('o', 'u', 'a', node_id)
+        state_scope('o', '=user/u', 'a', node_id)
     with pytest.raises(StateError, match='node id'):
-        state_key('o', 'u', 'a', node_id, 'k')
+        state_key('o', '=user/u', 'a', node_id, 'k')
 
 
 def test_values_are_json_and_capped():

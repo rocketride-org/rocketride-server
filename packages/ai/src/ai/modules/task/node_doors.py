@@ -149,7 +149,11 @@ def _key(control: 'TaskControl', arguments: Dict[str, Any], command: str) -> Tup
     The scope and physical key of the node's key.
 
     Org, owner and address come from the control; the request names only the
-    node (``nodeId``) and its key.
+    node (``nodeId``) and its key. The owner is the control's kind-qualified
+    owner (``=user/<uid>``, ``=team/<tid>``, ``=org/<oid>``), never its bare
+    id: a user, a team and an org of the same id (all ``local`` on a
+    standalone server) answer the same address from three different rungs,
+    and each keeps its own values.
 
     Args:
         control: The control that owns the binding.
@@ -160,14 +164,18 @@ def _key(control: 'TaskControl', arguments: Dict[str, Any], command: str) -> Tup
         ``(scope, key)``: the node's scope and the physical key inside it.
 
     Raises:
-        ChannelRefused: ``nodeId`` or ``key`` is missing, not a string, empty or too long.
+        ChannelRefused: ``nodeId`` or ``key`` is missing, not a string, empty
+            or too long, or the control has no owner.
     """
+    # Step 1: the node, the one part of the prefix the engine side names
     node_id = arguments.get('nodeId')
     if not isinstance(node_id, str) or not node_id:
         raise ChannelRefused(f'{command}: "nodeId" is a non-empty string')
+
+    # Step 2: org, owner (with its kind) and address from the server's record
     try:
-        scope = state_scope(control.orgId, control.owner_id, control.address, node_id)
-        return scope, state_key(control.orgId, control.owner_id, control.address, node_id, arguments.get('key'))
+        scope = state_scope(control.orgId, control.owner, control.address, node_id)
+        return scope, state_key(control.orgId, control.owner, control.address, node_id, arguments.get('key'))
     except StateError as e:
         raise ChannelRefused(f'{command}: {e}') from None
 

@@ -1,0 +1,135 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Doors Probe",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "doors_probe://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "internal" keeps the probe out of the catalog (the pipeline
+	//		builder never offers it) while a pipeline that names it still loads
+	//		and resolves it: it exists for the rung and boundary tests only.
+	//		"experimental" marks it as not production-ready either way.
+	//
+	"capabilities": ["internal", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.doors_probe",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "doors_probe",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A test node that exercises every door a node reads through: self.config, self.settings, ", "self.caller, config.node, self.state, self.files and self.logger(). Each call's text is a ", "JSON script of operations; the node runs them in order and answers with a JSON report of ", "each one's value or refusal. Used by the rung and boundary tests; never shown in the catalog."],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["text"]
+	},
+	//
+	// Optional:
+	//		Local property definitions. One of each kind the doors tell apart:
+	//		the label is the control's (config, read once in beginGlobal); the
+	//		greeting is a plain per-call parameter; the mode is a selector
+	//		parameter whose branches each carry their own parameter leaf, so a
+	//		call that switches the mode re-resolves its settings.
+	//
+	"propertyDefinitions": {
+		"doors_probe.label": {
+			"type": "string",
+			"title": "Label",
+			"description": "A value of the control, read once by the IGlobal; the env test fills it from a ${ROCKETRIDE_*} path",
+			"default": "probe",
+			"minLength": 1,
+			"maxLength": 1024
+		},
+		"doors_probe.greeting": {
+			"type": "string",
+			"title": "Greeting",
+			"description": "A per-call value, served only by self.settings",
+			"default": "hello",
+			"minLength": 1,
+			"maxLength": 64,
+			"param": true
+		},
+		"doors_probe.alphaValue": {
+			"type": "integer",
+			"title": "Alpha value",
+			"description": "The alpha mode's own per-call value",
+			"default": 1,
+			"minimum": 0,
+			"maximum": 1000,
+			"param": true
+		},
+		"doors_probe.betaValue": {
+			"type": "string",
+			"title": "Beta value",
+			"description": "The beta mode's own per-call value",
+			"default": "b",
+			"minLength": 1,
+			"maxLength": 64,
+			"param": true
+		}
+	},
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
+		"doors_probe.label",
+		"doors_probe.greeting",
+		{
+			"name": "mode",
+			"type": "string",
+			"title": "Mode",
+			"description": "A selector parameter: the branch a call selects decides which value it reads",
+			"default": "alpha",
+			"param": true,
+			"enum": {
+				"alpha": {
+					"title": "Alpha",
+					"properties": ["doors_probe.alphaValue"]
+				},
+				"beta": {
+					"title": "Beta",
+					"properties": ["doors_probe.betaValue"]
+				}
+			}
+		}
+	]
+}
