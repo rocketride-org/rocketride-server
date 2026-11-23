@@ -208,10 +208,16 @@ def test_frame_ancestors_extra_env_is_appended(shell_root, reload_shell, monkeyp
         'javascript:',
         'https://example.com:0',
         'https://example.com:99999',
-        'https://example.com:' + chr(0xFF14) + chr(0xFF14) + chr(0xFF13),
     ],
 )
 def test_invalid_frame_ancestors_extra_refuses_import(reload_shell, bad):
     """T6: a malformed value stops startup and names the offending token."""
     with pytest.raises(ValueError, match='invalid RR_SHELL_FRAME_ANCESTORS_EXTRA'):
         reload_shell(bad)
+
+
+def test_frame_ancestor_sources_refuses_non_ascii_digit_ports():
+    """Fullwidth digits are not a valid port; checked directly because os.environ cannot hold them on an ASCII locale."""
+    bad = 'https://example.com:' + chr(0xFF14) + chr(0xFF14) + chr(0xFF13)
+    with pytest.raises(ValueError, match='invalid RR_SHELL_FRAME_ANCESTORS_EXTRA'):
+        shell_mod._frame_ancestor_sources(bad)
