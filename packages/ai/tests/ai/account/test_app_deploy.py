@@ -2404,6 +2404,9 @@ async def test_publish_dates_a_rival_from_every_row_the_caller_sees(registry, qu
     """
     registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
     registry.seed_publish(AUD_PUBLIC, 1)
+    # Disabled: publishing re-enables it, so it is a claim (a serving row
+    # repointed under the same name claims nothing and is not checked).
+    registry.publishes[('acme.brandy', 'public~')]['state'] = 'disabled'
     registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 80.0
     _foreign_public_row(registry, 'acme_brandy', 100.0)
     registry.publishes[('acme_brandy', 'team~t1')] = {

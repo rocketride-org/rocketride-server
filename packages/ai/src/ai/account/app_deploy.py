@@ -1251,31 +1251,44 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
             if developer:
                 await stack.enter_async_context(_container_lock(module_id))
                 try:
-                    claims = await _container_claims(account, home, conn, app_id, module_id)
-                    # Only the publisher's own rows every viewer of the proposed
-                    # binding sees, and that the caller can see, date it.
                     mine = await account.publish_of_app(home, 'app', app_id)
-                    own_rows = [r for r in mine if _scope_sees(audience, r) and _caller_sees(conn, r)]
-                    own_first = _first_bound_at(own_rows) if claims else None
                     # This audience's row before the write. One that already serves
-                    # holds the name in this scope, so repointing it claims nothing
-                    # new and needs no re-check (a failed one must never unpublish a
-                    # live binding). A new scope, or a row that did not serve, is a
-                    # claim: re-check it, and put the prior row back on a back-out.
+                    # holds the name in this scope, so repointing it under the same
+                    # name claims nothing new: createdAt survives the repoint, so
+                    # resolve's outcome is unchanged, and neither a claim lookup (one
+                    # artifact read per other app) nor a re-check is needed, which a
+                    # failing read could only turn into a refusal or a back-out of a
+                    # live binding. A new scope, or a row that did not serve, is a
+                    # claim: check it, re-check it after the write, and put the prior
+                    # row back on a back-out.
                     prior = next((r for r in mine if _same_audience(r, audience)), None)
                     needs_recheck = prior is None or bool(serving_block_of(prior, account.review_ladder))
                     if not needs_recheck:
-                        # A serving row holds only the name it served under: a
-                        # version that changes the container name is a new claim.
-                        served = await account.deployments_artifact(
-                            str(prior.get('orgId') or home), app_id, int(prior.get('version') or 0)
-                        )
-                        served_name = str(served.get('moduleId') or '') if isinstance(served, dict) else ''
-                        needs_recheck = (served_name or module_id_of(app_id)) != module_id
+                        # A serving row holds only the name it served under: a version
+                        # that changes the container name is a new claim. An unreadable
+                        # prior artifact cannot show the name, so it counts as one too
+                        # (the re-check fails closed) rather than refusing the publish.
+                        try:
+                            served = await account.deployments_artifact(
+                                str(prior.get('orgId') or home), app_id, int(prior.get('version') or 0)
+                            )
+                            served_name = str(served.get('moduleId') or '') if isinstance(served, dict) else ''
+                            needs_recheck = (served_name or module_id_of(app_id)) != module_id
+                        except Exception as exc:
+                            warning(f'[app_deploy] could not read the served artifact of {app_id}: {exc}')
+                            needs_recheck = True
+                    claims: Dict[str, Any] = {}
+                    own_first = None
+                    if needs_recheck:
+                        claims = await _container_claims(account, home, conn, app_id, module_id)
+                        # Only the publisher's own rows every viewer of the proposed
+                        # binding sees, and that the caller can see, date it.
+                        own_rows = [r for r in mine if _scope_sees(audience, r) and _caller_sees(conn, r)]
+                        own_first = _first_bound_at(own_rows) if claims else None
                 except Exception as exc:
                     debug(f'[app_deploy] container-name check failed: {exc}')
                     return conn.build_error(request, 'could not check the app id against existing apps; try again')
-                holder = _container_holder(app_id, module_id, own_first, claims)
+                holder = _container_holder(app_id, module_id, own_first, claims) if needs_recheck else None
                 if holder:
                     return conn.build_error(request, _holder_error(app_id, module_id, holder))
             row = await account.publish_set(
