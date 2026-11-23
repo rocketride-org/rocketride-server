@@ -109,7 +109,10 @@ test('T105 knownProjects: foreign ids are aliased wherever they appear, short id
 			keys.every((k) => RE.projectAlias.test(k)),
 			`every key is an alias, got ${brief(keys)}`
 		);
+		assert.equal(keys.length, 2, `the own and the foreign project keep distinct entries, got ${brief(keys)}`);
 		assert.equal(map[run.projectId]?.n, 1, 'values are kept');
+		const foreignKey = keys.find((k) => k !== run.projectId);
+		assert.equal(map[foreignKey as string]?.n, 2, 'the foreign project entry survives under its own alias');
 		assertNoReal(A, t.cm, [foreign]);
 	});
 
