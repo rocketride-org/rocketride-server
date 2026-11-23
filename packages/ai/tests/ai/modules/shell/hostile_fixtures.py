@@ -396,7 +396,7 @@ def install(monkeypatch, acct: HostileAccount) -> HostileAccount:
     """
     from ai.account import account as singleton
 
-    for name in ('publish_list', 'deployments_artifact', 'get_public_plans'):
+    for name in ('publish_list', 'deployments_artifact', 'get_public_plans', 'authorize_app_use'):
         monkeypatch.setattr(singleton, name, getattr(acct, name), raising=False)
     monkeypatch.setattr(singleton, 'capabilities', acct.capabilities, raising=False)
     monkeypatch.setattr(singleton, 'review_ladder', acct.review_ladder, raising=False)
