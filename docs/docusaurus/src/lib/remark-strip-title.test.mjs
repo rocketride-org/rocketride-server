@@ -102,6 +102,18 @@ describe('remarkStripTitle', () => {
 		assert.deepEqual(run([note, h(1, 'Title'), p('Body')], { frontMatter: { title: 'T' } }), [note, p('Body')]);
 	});
 
+	it('skips a comment-only expression before the title when the front matter has a title', () => {
+		const expr = { type: 'mdxFlowExpression', value: ' /* one */ /* two */ ' };
+		assert.deepEqual(run([expr, h(1, 'Title'), p('Body')], { frontMatter: { title: 'T' } }), [expr, p('Body')]);
+	});
+
+	it('demotes an h1 that follows an expression which renders content', () => {
+		// `{<p>Introduction</p>}` is a paragraph on the page, so the heading after it is a section, not the title
+		const expr = { type: 'mdxFlowExpression', value: '<p>Introduction</p>' };
+		const out = run([expr, h(1, 'Troubleshooting'), p('x')], { frontMatter: { title: 'Guide' } });
+		assert.deepEqual(out, [expr, h(2, 'Troubleshooting'), p('x')]);
+	});
+
 	it('does not need a value string to leave a page alone', () => {
 		const tree = [h(1, 'Title')];
 		const before = clone(tree);

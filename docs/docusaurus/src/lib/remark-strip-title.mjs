@@ -71,9 +71,22 @@ function hasContentTitle(file) {
 	return Boolean(parseMarkdownContentTitle(text, { removeContentTitle: false }).contentTitle);
 }
 
-/** True for nodes that render nothing visible before the title: front matter, imports and exports, expressions, comments. */
+/** True for nodes that render nothing visible before the title: front matter, imports and exports, comment-only expressions, comments. */
 function isSilent(node) {
-	return node.type === 'yaml' || node.type === 'mdxjsEsm' || node.type === 'mdxFlowExpression' || (node.type === 'html' && /^\s*<!--/.test(node.value));
+	return (
+		node.type === 'yaml' ||
+		node.type === 'mdxjsEsm' ||
+		(node.type === 'mdxFlowExpression' && isCommentOnlyExpression(node)) ||
+		(node.type === 'html' && /^\s*<!--/.test(node.value))
+	);
+}
+
+/**
+ * True for an MDX expression that renders nothing: empty, or block comments only, as in `{/* note *\/}`.
+ * Any other expression can render elements (`{<p>Intro</p>}`), so it counts as content before the heading.
+ */
+function isCommentOnlyExpression(node) {
+	return /^\s*(?:\/\*[\s\S]*?\*\/\s*)*$/.test(node.value ?? '');
 }
 
 /** True when nothing but silent nodes come before the heading, at every level of the wrappers that hold it. */
