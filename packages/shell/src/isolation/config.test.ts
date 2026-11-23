@@ -22,7 +22,7 @@
 // =============================================================================
 
 // =============================================================================
-// ISOLATION CONFIG, THE v14 CONTRACT AND SHELL_CAPS — T77 and the stamp rule (T62, T68)
+// ISOLATION CONFIG, THE v15 CONTRACT AND SHELL_CAPS — T77 and the stamp rule (T62, T68)
 // =============================================================================
 //
 // Seams pinned here (plan sections 3.3, 3.6, 4.6):
@@ -39,7 +39,7 @@
 //     isFirstPartyId(appId: string): boolean
 //     noteFirstParty(appId: string): void    called by registerAndMapApps for firstParty-stamped entries
 //   src/api.ts: `getIsolation`, `SHELL_CAPS`, `CapabilityDeniedError` as named exports and shellApi members
-//   src/apiver.ts: SHELL_API_VERSION = 13; contract/versions/v13.d.ts frozen
+//   src/apiver.ts: SHELL_API_VERSION = 15; contract/versions/v15.d.ts frozen
 //
 // The install state is module-level and node:test runs each FILE in its own
 // process, so the tests are ordered: the state only moves forward
@@ -118,7 +118,7 @@ test('T77 SHELL_CAPS lives in a leaf module and says appIsolation:1', async () =
 	assert.deepEqual([...c.SHELL_CAPS], ['appIsolation:1'], 'config.ts re-exports it');
 });
 
-test('T77 the shell API exposes getIsolation, SHELL_CAPS and CapabilityDeniedError as named exports AND shellApi members, and the contract moves to v14', async () => {
+test('T77 the shell API exposes getIsolation, SHELL_CAPS and CapabilityDeniedError as named exports AND shellApi members, and the contract moves to v15', async () => {
 	const { installDom } = await import('../test/domHarness');
 	installDom();
 	const api = (await import('../api')) as unknown as Record<string, unknown> & { shellApi: Record<string, unknown> };
@@ -131,12 +131,12 @@ test('T77 the shell API exposes getIsolation, SHELL_CAPS and CapabilityDeniedErr
 	assert.equal(typeof api.getIsolation, 'function');
 
 	const apiver = readFileSync(path.join(SHELL_ROOT, 'src', 'apiver.ts'), 'utf8');
-	assert.match(apiver, /SHELL_API_VERSION\s*=\s*14\s+as const/);
-	const v14 = path.join(SHELL_ROOT, 'contract', 'versions', 'v14.d.ts');
-	assert.ok(existsSync(v14), 'contract/versions/v14.d.ts is written by shell:freeze');
-	const frozen = readFileSync(v14, 'utf8');
-	for (const name of ['getIsolation', 'SHELL_CAPS', 'CapabilityDeniedError']) assert.ok(frozen.includes(name), `${name} is in the frozen v14`);
-	assert.ok(existsSync(path.join(SHELL_ROOT, 'contract', 'versions', 'v13.d.ts')), 'additive: v13 stays');
+	assert.match(apiver, /SHELL_API_VERSION\s*=\s*15\s+as const/);
+	const v15 = path.join(SHELL_ROOT, 'contract', 'versions', 'v15.d.ts');
+	assert.ok(existsSync(v15), 'contract/versions/v15.d.ts is written by shell:freeze');
+	const frozen = readFileSync(v15, 'utf8');
+	for (const name of ['getIsolation', 'SHELL_CAPS', 'CapabilityDeniedError']) assert.ok(frozen.includes(name), `${name} is in the frozen v15`);
+	assert.ok(existsSync(path.join(SHELL_ROOT, 'contract', 'versions', 'v14.d.ts')), 'additive: v14 stays');
 	const check = readFileSync(path.join(SHELL_ROOT, 'src', 'contract-check.generated.ts'), 'utf8');
-	assert.match(check, /ShellApiV14/, 'the conformance file checks v14 (shell:contract-check)');
+	assert.match(check, /ShellApiV15/, 'the conformance file checks v15 (shell:contract-check)');
 });

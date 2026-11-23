@@ -743,7 +743,7 @@ export const shellApi = {
 	// Stable versioned entry URL (constructed, never minted — the server
 	// enforces entitlement per request on the /apps/<id>/v<N>/ route)
 	get versionedEntryUrl() { return versionedEntryUrl; },
-	// Separate-origin app isolation (#1022, v14): the isolation state
+	// Separate-origin app isolation (#1022, v15): the isolation state
 	// (null under `off`), the shell's capabilities, and the one error an
 	// isolated app sees for a refused operation.
 	get getIsolation() { return getIsolation; },
@@ -795,7 +795,7 @@ export {
 	TelemetryProvider, useReport, useConsent, openConsentBanner,
 	// Module-level consent/experiment seams (roulette, signup attribution, replay resume)
 	getConsentState, subscribeConsent, consentExpiresAt, getConsentedCapture, resumeSignedOutCapture,
-	// Separate-origin app isolation (v14)
+	// Separate-origin app isolation (v15)
 	getIsolation, SHELL_CAPS, CapabilityDeniedError,
 };
 

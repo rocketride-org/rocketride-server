@@ -2345,7 +2345,7 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param init - The accepted bridge init.
 	 */
 	public enterGuestMode(init: BridgeInit): void {
-		// Frozen in v14: on the root it would replace the real session state (G4, DA LOW 3).
+		// Frozen in v15: on the root it would replace the real session state (G4, DA LOW 3).
 		if (!isGuestRealm()) throw new Error('enterGuestMode: not an isolated app guest realm');
 		this.mirrorConnected = init.props.isConnected === true;
 		this.serverUri = init.engineHttpUrl;
