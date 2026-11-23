@@ -1426,6 +1426,28 @@ class AccountBase(ABC):
         org_id = org.get('id') if isinstance(org, dict) else getattr(org, 'id', None)
         return str(org_id or 'local')
 
+    @staticmethod
+    def catalog_order(entries: list) -> list:
+        """
+        The Catalog's order: by display name, ascending, whatever the case.
+
+        Both editions' ``rrext_public_catalog`` order the whole list with
+        this before they cut a page, so the pages of one catalog follow one
+        another and a client that shows the list as sent shows it by name.
+        Apps and agents sort as one list. An entry without a name sorts by
+        its id; two entries of one name are ordered by id.
+
+        Args:
+            entries: The catalog entries (apps and ``kind: 'pipe'`` agents).
+
+        Returns:
+            A new list in catalog order; ``entries`` is left as it was.
+        """
+        return sorted(
+            entries,
+            key=lambda e: (str(e.get('name') or e.get('id') or '').lower(), str(e.get('id') or '')),
+        )
+
     async def handle_public(self, conn, request):
         """
         Dispatch an ``rrext_public_*`` DAP command.
@@ -1442,7 +1464,9 @@ class AccountBase(ABC):
         A signed-in caller's page also lists the agents: every listed pipe
         they reach, as a ``kind: 'pipe'`` entry (``catalog_pipes``, plan 9.1),
         decorated the same way. SaaS queries the catalog DB with pagination
-        and optional subscription overlay for authenticated callers.
+        and optional subscription overlay for authenticated callers. Both
+        editions answer the list by name, ascending (``catalog_order``),
+        sorted before the page is cut.
 
         Args:
             conn:    ``TaskConn`` instance.
@@ -1480,7 +1504,8 @@ class AccountBase(ABC):
         if shell:
             apps = [a for a in apps if a.get('shells') is None or shell in (a.get('shells') or [])]
 
-        # Basic client-side pagination for OSS
+        # By name, then the page: a page is a slice of the sorted catalog
+        apps = self.catalog_order(apps)
         total = len(apps)
         page = apps[offset : offset + limit]
 

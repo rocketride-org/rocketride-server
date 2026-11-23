@@ -164,7 +164,9 @@ class PublicCommands(DAPConn):
         (SaaS: the catalog DB; OSS: the public publish rung). A signed-in
         caller's Catalog also lists the agents: every listed pipe they reach
         as a ``kind: 'pipe'`` entry carrying ``pipe`` (the address) and
-        ``hostAppId`` (the app that opens it), plan 9.1.
+        ``hostAppId`` (the app that opens it), plan 9.1. The Catalog is
+        answered by name, ascending and whatever the case, apps and agents
+        as one list, sorted before the page is cut.
 
         ``'pipe'`` is the pipe picker's feed (plan 3.6), edition-neutral
         over the one publish table and signed-in only. Without a search
