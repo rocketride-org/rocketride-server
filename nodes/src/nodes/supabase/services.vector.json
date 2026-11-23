@@ -1,0 +1,79 @@
+{
+	//
+	// Supabase Vector: store_postgres's pgvector store on a Supabase project.
+	// Connects to the project's Postgres pooler with the shared
+	// supabase.pooler.* fields (core/services.common.supabase.json), always
+	// over TLS (sslmode=require). supabase.access decides which agent tools
+	// exist: read the reading ones, write also upsert (which can replace,
+	// and so overwrite, any stored document), admin also delete,
+	// soft_delete and restore.
+	//
+	"title": "Supabase Vector",
+	"protocol": "supabase_vector://",
+	"classType": ["store", "tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.supabase.vector",
+	"prefix": "Supabase Vector Store",
+	"icon": "supabase.svg",
+	"documentation": "https://docs.rocketride.org/nodes/supabase/vector",
+	"description": ["Store document chunks and their embeddings in a Supabase project with pgvector, and search them by meaning.", "Works as a vector store in pipelines (documents in, questions answered with matching documents) and as an agent tool (search, get, objdir, stats, list_documents; upsert at the write access level; delete, soft_delete and restore at the admin access level). Connects to the project's Postgres pooler over TLS."],
+	"tile": ["Supabase Vector (${parameters.supabase.access})"],
+	//
+	//	Same lanes as store_postgres: documents are stored, questions are answered
+	//	with the matching documents.
+	//
+	"lanes": {
+		"documents": [],
+		"questions": ["documents", "answers", "questions"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Supabase Vector",
+				"host": "",
+				"user": "",
+				"password": "",
+				"database": "postgres",
+				"access": "read",
+				"table": "rocketride",
+				"similarity": "cosine",
+				// Same default as store_postgres.
+				"score": 0.5
+			}
+		}
+	},
+	"fields": {
+		"supabase.access": {
+			"description": "What the agent may do. read: search, get, objdir, stats and list_documents. write: also upsert, which adds documents and replaces any stored document it names, so write can overwrite stored content. admin: also delete, soft_delete and restore (only those need admin). Documents arriving on the documents lane are always stored; this setting only limits the agent tools."
+		},
+		"supabase_vector.table": {
+			"type": "string",
+			"title": "Table",
+			"description": "Table that holds the vectors, created on the first write if it does not exist. A plain PostgreSQL name: a letter or _ first, then letters, digits or _, at most 63 characters.",
+			"default": "rocketride",
+			"minLength": 1,
+			"maxLength": 63
+		},
+		"supabase_vector.similarity": {
+			"type": "string",
+			"title": "Similarity metric",
+			"description": "How vectors are compared in a search. Use the metric your embedding model was trained for; cosine suits most models.",
+			"default": "cosine",
+			"enum": [
+				["cosine", "Cosine"],
+				["l2", "Euclidean (L2)"],
+				["inner_product", "Inner product"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Supabase Vector",
+			"properties": ["supabase.pooler.host", "supabase.pooler.user", "supabase.pooler.password", "supabase.pooler.database", "supabase_vector.table", "vector.score", "supabase_vector.similarity", "supabase.access"]
+		}
+	]
+}

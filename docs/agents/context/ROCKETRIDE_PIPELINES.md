@@ -399,6 +399,16 @@ LLM/tool/memory node declares which component invokes it — `from` points at th
   pipeline that only stores or reads data with SQL should wire no LLM and no agent. Storing
   through an agent ties every save to that agent's LLM provider and key: a missing key stops
   the save.
+- Supabase is a family of separate nodes (one per service, all from `nodes/src/nodes/supabase/`):
+  `db_supabase` (Database: the SQL node above, same settings as before), `supabase_vector`
+  (a pgvector store, wired like `postgres`), and the agent-only tools `tool_supabase_auth`,
+  `tool_supabase_storage`, `tool_supabase_messaging`, `tool_supabase_functions` (Edge
+  Functions) and `tool_supabase_cron`. Every service except `db_supabase` has an access level
+  (`access`: `read` by default, `write`, `admin`); a tool above it is not offered to the agent.
+  `db_supabase` has none (its guard is `allow_execute`). `tool_supabase_cron` takes only `read`
+  or `admin`: `write` stops the node at start-up. `tool_supabase_messaging` and
+  `tool_supabase_functions` offer no tools below `write`. On `supabase_vector`, `upsert` needs
+  `write` (and can replace any stored document); `delete`, `soft_delete`, `restore` need `admin`.
 
 ### Invoke requirements by agent type
 
@@ -1074,8 +1084,8 @@ you already operate Postgres.
 
 | You need | Family | Providers | Wiring shape |
 | --- | --- | --- | --- |
-| 'Find content like this' — semantic similarity over chunks | Vector | `qdrant`, `postgres` (pgvector), `pinecone`, `milvus`, `chroma`, `weaviate`, `rocketride_vector` (built-in) | `documents` in via embedding (ingest); `questions` in via embedding (search). No LLM port |
-| Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase`, `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control for natural-language questions (crafts SQL), not needed for raw SQL via `execute`. No ingestion lanes — data already lives in the DB |
+| 'Find content like this' — semantic similarity over chunks | Vector | `qdrant`, `postgres` (pgvector), `supabase_vector` (pgvector on Supabase), `pinecone`, `milvus`, `chroma`, `weaviate`, `rocketride_vector` (built-in) | `documents` in via embedding (ingest); `questions` in via embedding (search). No LLM port |
+| Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase` (Supabase Database), `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control for natural-language questions (crafts SQL), not needed for raw SQL via `execute`. No ingestion lanes — data already lives in the DB |
 | 'How is A connected to B' — relationship traversal | Graph | `graph_neo4j`, `graph_falkordb`, `rocketride_graph` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED (crafts Cypher). Queries an EXISTING graph (Pattern 14) |
 
 Rules of thumb: unstructured documents you must search → vector (Patterns 1/3). Numbers,

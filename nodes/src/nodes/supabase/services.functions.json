@@ -1,0 +1,73 @@
+{
+	//
+	// Supabase Edge Functions: one agent tool, invoke_function (write).
+	// Connects with the Project URL + secret key (shared fields in
+	// core/services.common.supabase.json). sb_secret_ keys are not JWTs:
+	// functions deployed with "Verify JWT" on refuse them.
+	//
+	"title": "Supabase Edge Functions",
+	"protocol": "tool_supabase_functions://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.supabase.functions",
+	"prefix": "supabase_functions",
+	"icon": "supabase.svg",
+	"documentation": "https://docs.rocketride.org/nodes/supabase/functions",
+	"description": ["Call your Supabase project's Edge Functions as an agent tool.", "Tool: invoke_function (needs the write access level) sends a request to a deployed function and returns its status and response body. Functions with 'Verify JWT' on refuse the secret key; turn that check off for functions the agent calls."],
+	"tile": ["Supabase Edge Functions (${parameters.supabase.access})", "Tools need write or admin"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Supabase Edge Functions",
+				// Keep "key": the runtime reads a missing authType as key too (OAuth comes later).
+				"authType": "key",
+				"url": "",
+				"secretKey": "",
+				"access": "read",
+				"timeoutSeconds": 60,
+				"maxResponseKb": 256,
+				"maxRequestKb": 1024
+			}
+		}
+	},
+	"fields": {
+		"supabase.access": {
+			"description": "What the agent may do. invoke_function needs write: a function can change data. At read (the default) this node offers the agent no tools: set write to turn invoke_function on."
+		},
+		"supabase_functions.timeoutSeconds": {
+			"type": "integer",
+			"title": "Timeout (s)",
+			"description": "How long one function call may take before it fails.",
+			"default": 60,
+			"minimum": 1,
+			"maximum": 400
+		},
+		"supabase_functions.maxResponseKb": {
+			"type": "integer",
+			"title": "Max response size (KB)",
+			"description": "Largest response body returned to the agent. A longer body is cut to this size and marked truncated.",
+			"default": 256,
+			"minimum": 1,
+			"maximum": 10240
+		},
+		"supabase_functions.maxRequestKb": {
+			"type": "integer",
+			"title": "Max request size (KB)",
+			"description": "Largest request body the agent may send to a function.",
+			"default": 1024,
+			"minimum": 1,
+			"maximum": 10240
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Supabase Edge Functions",
+			"properties": ["supabase.authType", "supabase.access", "supabase_functions.timeoutSeconds", "supabase_functions.maxResponseKb", "supabase_functions.maxRequestKb"]
+		}
+	]
+}

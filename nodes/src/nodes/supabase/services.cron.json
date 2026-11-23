@@ -1,0 +1,60 @@
+{
+	//
+	// Supabase Cron: pg_cron scheduled jobs as agent tools.
+	// Connects to the project's Postgres pooler with the shared
+	// supabase.pooler.* fields (core/services.common.supabase.json), always
+	// over TLS. list_jobs and job_runs need read; schedule_job and
+	// unschedule_job need admin (schedule_job stores SQL that runs later).
+	//
+	"title": "Supabase Cron",
+	"protocol": "tool_supabase_cron://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.supabase.cron",
+	"prefix": "supabase_cron",
+	"icon": "supabase.svg",
+	"documentation": "https://docs.rocketride.org/nodes/supabase/cron",
+	"description": ["List, inspect, create and remove scheduled database jobs (pg_cron) in a Supabase project as agent tools.", "Tools: list_jobs and job_runs (read access level), schedule_job and unschedule_job (admin access level). Needs the pg_cron extension turned on in the project. Connects to the project's Postgres pooler over TLS."],
+	"tile": ["Supabase Cron (${parameters.supabase.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Supabase Cron",
+				"host": "",
+				"user": "",
+				"password": "",
+				"database": "postgres",
+				"access": "read",
+				"maxRows": 100
+			}
+		}
+	},
+	"fields": {
+		"supabase.access": {
+			"description": "What the agent may do. read: list_jobs and job_runs. admin: also schedule_job and unschedule_job, which store and remove SQL that pg_cron runs later as the database user. Cron has no write level: no Cron tool needs it.",
+			"enum": [
+				["read", "Read"],
+				["admin", "Admin"]
+			]
+		},
+		"supabase_cron.maxRows": {
+			"type": "integer",
+			"title": "Max rows",
+			"description": "Most jobs list_jobs returns, and most runs job_runs returns. The answer says when it was cut.",
+			"default": 100,
+			"minimum": 1,
+			"maximum": 1000
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Supabase Cron",
+			"properties": ["supabase.pooler.host", "supabase.pooler.user", "supabase.pooler.password", "supabase.pooler.database", "supabase.access", "supabase_cron.maxRows"]
+		}
+	]
+}
