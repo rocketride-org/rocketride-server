@@ -120,8 +120,12 @@ _CATALOGUE_SECONDS = 10.0
 _catalogue: Dict[tuple, tuple] = {}
 
 
+# What a node upload or publish gets on a server whose rail is off
+_RAIL_OFF = 'Publishing nodes is off on this server (it runs without RR_NODE_RAIL_ENABLED=1)'
+
+
 def rail_enabled() -> bool:
-    """Published nodes serve only with RR_NODE_RAIL_ENABLED=1; otherwise only the release's nodes do."""
+    """The rail (upload, publish, serving) is on only with RR_NODE_RAIL_ENABLED=1; otherwise only the release's nodes run."""
     # Off unless asked for: without a container per run, a published node runs on the EaaS host
     return os.environ.get('RR_NODE_RAIL_ENABLED') == '1'
 
@@ -318,6 +322,8 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     """The node branch of ``rrext_deploy add``: check the package and add it to the rail as a new version."""
     from ai.account import account
 
+    if not rail_enabled():
+        return conn.build_error(request, _RAIL_OFF)
     args = request.get('arguments', {}) or {}
     data = args.get('data')
     if not isinstance(data, (bytes, bytearray, memoryview)) or not data:
@@ -369,6 +375,8 @@ async def handle_deploy_node(conn: Any, request: Dict[str, Any]) -> Dict[str, An
     """
     from ai.account import account
 
+    if not rail_enabled():
+        return conn.build_error(request, _RAIL_OFF)
     args = request.get('arguments', {}) or {}
     node_id = str(args.get('nodeId') or '')
     developer_id = _developer_id_of(conn)
