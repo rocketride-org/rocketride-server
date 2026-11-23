@@ -129,10 +129,28 @@ class TestDeploy:
         pipeline = make_pipeline(project)
         await self.client.deploy.add(pipeline)
         fetched = await self.client.deploy.artifact(project, 1)
-        # Byte-for-byte the published definition (sha-verified server-side).
-        assert fetched == pipeline
+        # The published definition (sha-verified server-side). It was sent
+        # without a store block, so the door stored it with the default one:
+        # every version carries a block.
+        assert fetched == {
+            **pipeline,
+            'store': {
+                'tagline': '',
+                'categories': ['pipeline'],
+                'tags': [],
+                'links': {},
+                'mode': 'free',
+                'billing': {'plans': []},
+            },
+        }
         with pytest.raises(RuntimeError):
             await self.client.deploy.artifact(project, 9)
+
+        # A pipeline that carries its own block is stored exactly as sent.
+        listed = fresh_project()
+        own = {**make_pipeline(listed), 'store': {'tagline': 'Mine', 'mode': 'free'}}
+        await self.client.deploy.add(own)
+        assert await self.client.deploy.artifact(listed, 1) == own
 
     @pytest.mark.asyncio
     async def test_publish_with_deploy_to_is_one_step(self):
