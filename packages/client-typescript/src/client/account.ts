@@ -205,10 +205,10 @@ export class AccountApi {
 		const body = await this.client.call('rrext_account_keys', { subcommand: 'create', ...params });
 		const record = body.record;
 		// null (or a missing value on a present record) is "never expires"; anything
-		// but a timestamp string is not a usable expiry, so it is reported as absent.
+		// but a non-blank string is not a usable expiry, so it is reported as absent.
 		if (record && typeof record === 'object' && 'expiresAt' in record) {
 			const granted = record.expiresAt ?? null;
-			if (granted === null || typeof granted === 'string') return { key: body.key, expiresAt: granted };
+			if (granted === null || (typeof granted === 'string' && granted.trim() !== '')) return { key: body.key, expiresAt: granted };
 		}
 		return { key: body.key };
 	}

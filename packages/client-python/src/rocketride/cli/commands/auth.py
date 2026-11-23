@@ -477,7 +477,7 @@ def minted_key_expiry_note(minted: dict) -> str:
         timestamp: the key is already minted, so the login must not fail here).
     """
     expires_at = minted.get('expiresAt', '')
-    if expires_at is not None and (not isinstance(expires_at, str) or not expires_at):
+    if expires_at is not None and (not isinstance(expires_at, str) or not expires_at.strip()):
         return ''
     return describe_login_key_expiry(expires_at)
 

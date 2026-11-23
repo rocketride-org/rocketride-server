@@ -58,7 +58,7 @@ describe('AccountApi.createKey', () => {
 	});
 
 	it('treats an expiresAt that is not a timestamp as not reported (never as "never expires")', async () => {
-		for (const odd of [1798761600000, { when: 'soon' }, true]) {
+		for (const odd of [1798761600000, { when: 'soon' }, true, '', '  ']) {
 			const { api } = apiReturning({ key: 'rr_x', record: { id: 'k1', expiresAt: odd } });
 			const result = await api.createKey({ name: 'ci', permissions: [] });
 			expect(result).toEqual({ key: 'rr_x' });
@@ -84,6 +84,8 @@ describe('describeLoginKeyExpiry', () => {
 	it('says the key does not expire only when the server said so, and says nothing when it did not report', () => {
 		expect(describeLoginKeyExpiry(null)).toBe(' It does not expire.');
 		expect(describeLoginKeyExpiry(undefined)).toBe('');
+		expect(describeLoginKeyExpiry('')).toBe('');
+		expect(describeLoginKeyExpiry('  ')).toBe('');
 	});
 
 	it('reads an offset-less server timestamp as UTC, and keeps an unreadable one as is', () => {

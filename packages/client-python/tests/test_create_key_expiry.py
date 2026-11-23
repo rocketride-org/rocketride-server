@@ -68,7 +68,7 @@ def test_create_key_leaves_expires_at_absent_when_the_server_did_not_report_it()
 
 
 def test_create_key_leaves_expires_at_absent_when_it_is_not_a_timestamp():
-    for odd in (1798761600000, {'when': 'soon'}, True):
+    for odd in (1798761600000, {'when': 'soon'}, True, '', '  '):
         result, _ = _create({'key': 'rr_x', 'record': {'id': 'k1', 'expiresAt': odd}})
         assert result == {'key': 'rr_x'}
 
@@ -99,3 +99,4 @@ def test_the_login_line_says_nothing_for_an_expiry_that_is_not_a_timestamp():
     # The key is already minted when this runs, so an odd value must not fail the login.
     assert minted_key_expiry_note({'key': 'rr_x', 'expiresAt': 1767225600}) == ''
     assert minted_key_expiry_note({'key': 'rr_x', 'expiresAt': {'at': 'x'}}) == ''
+    assert minted_key_expiry_note({'key': 'rr_x', 'expiresAt': '  '}) == ''

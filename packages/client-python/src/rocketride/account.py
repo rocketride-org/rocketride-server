@@ -252,9 +252,9 @@ class AccountApi:
         record = body.get('record')
         if isinstance(record, dict) and 'expiresAt' in record:
             granted = record['expiresAt']
-            # None is "never expires"; anything but a timestamp string is not a
+            # None is "never expires"; anything but a non-blank string is not a
             # usable expiry, so it is reported as absent.
-            if granted is None or isinstance(granted, str):
+            if granted is None or (isinstance(granted, str) and granted.strip()):
                 result['expiresAt'] = granted
         return result
 

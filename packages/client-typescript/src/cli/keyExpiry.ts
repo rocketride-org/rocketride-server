@@ -38,7 +38,7 @@
  * @returns A sentence to append to the "minted API key" line ('' when unknown).
  */
 export function describeLoginKeyExpiry(expiresAt: string | null | undefined): string {
-	if (expiresAt === undefined) return '';
+	if (expiresAt === undefined || (expiresAt !== null && (typeof expiresAt !== 'string' || expiresAt.trim() === ''))) return '';
 	if (expiresAt === null) return ' It does not expire.';
 	return ` It expires on ${utcDay(expiresAt)} (bounded by your sign-in session); to renew it, remove ROCKETRIDE_APIKEY from .env or the shell and run \`rocketride login\` before then.`;
 }
