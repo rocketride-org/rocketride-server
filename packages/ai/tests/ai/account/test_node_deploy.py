@@ -510,27 +510,49 @@ def _control(*providers, user_id='u1'):
     )
 
 
+async def _resolve(control, conn):
+    """The versions a start resolves for this launch's caller."""
+    from ai.modules.task.task_server import _node_reach
+
+    return await node_deploy.resolve_pipeline_nodes(_node_reach(control, conn), control.pipeline)
+
+
 @pytest.mark.asyncio
 async def test_a_launch_fixes_the_version_of_each_published_node_it_names(rail):
-    from ai.modules.task.task_server import _resolve_nodes
-
     await _published('@me')
 
-    control = _control('webhook', 'acme.echo')
-    versions = await _resolve_nodes(control.pipeline, control, _Conn())
+    versions = await _resolve(_control('webhook', 'acme.echo'), _Conn())
 
     assert list(versions) == ['acme.echo'] and versions['acme.echo']['version'] == 1
 
 
 @pytest.mark.asyncio
-async def test_a_launch_naming_a_node_the_caller_cannot_run_is_refused(rail):
-    from ai.modules.task.task_server import _resolve_nodes
+async def test_a_node_an_autopipe_step_names_is_resolved_too(rail):
+    await _published('@me')
+    control = _control('webhook')
+    control.pipeline['components'].append(
+        {'id': 'auto', 'provider': 'autopipe', 'config': {'steps': [{'provider': 'acme.echo'}]}}
+    )
 
+    versions = await _resolve(control, _Conn())
+
+    assert list(versions) == ['acme.echo']
+
+
+@pytest.mark.asyncio
+async def test_validation_resolves_a_node_an_autopipe_step_names(rail):
+    await _published('@me')
+    autopipe = {'id': 'auto', 'provider': 'autopipe', 'config': {'steps': [{'provider': 'acme.echo'}]}}
+
+    assert list(await node_deploy.nodes_for(_Conn(), [autopipe])) == ['acme.echo']
+
+
+@pytest.mark.asyncio
+async def test_a_launch_naming_a_node_the_caller_cannot_run_is_refused(rail):
     await _published('@me')
 
     with pytest.raises(NodeNotEntitled) as refused:
-        control = _control('acme.echo', user_id='u2')
-        await _resolve_nodes(control.pipeline, control, _Conn(user_id='u2', teams=()))
+        await _resolve(_control('acme.echo', user_id='u2'), _Conn(user_id='u2', teams=()))
     assert refused.value.code == 'NODE_NOT_ENTITLED'
 
 
@@ -632,22 +654,17 @@ async def test_the_catalogue_reads_the_rail_once_a_moment_and_again_after_a_publ
 
 @pytest.mark.asyncio
 async def test_a_restart_takes_the_restarters_reach_not_the_launchers(rail):
-    from ai.modules.task.task_server import _resolve_nodes
-
     await _published('@me')
-    control = _control('acme.echo')
 
     with pytest.raises(NodeNotEntitled):
-        await _resolve_nodes(control.pipeline, control, _Conn(user_id='u2', teams=()))
+        await _resolve(_control('acme.echo'), _Conn(user_id='u2', teams=()))
 
 
 @pytest.mark.asyncio
 async def test_a_team_run_uses_only_what_is_published_to_the_team(rail):
-    from ai.modules.task.task_server import _resolve_nodes
-
     await _published('@me')
     control = _control('acme.echo')
     control.owner_kind, control.teamId = 'team', TEAM['id']
 
     with pytest.raises(NodeNotEntitled):
-        await _resolve_nodes(control.pipeline, control, _Conn())
+        await _resolve(control, _Conn())

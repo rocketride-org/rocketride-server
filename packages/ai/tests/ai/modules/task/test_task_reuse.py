@@ -13,12 +13,11 @@ and reads as a successful measurement of the wrong thing.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ai.account import node_deploy
-from ai.common.node_packages import NodeNotEntitled
 from ai.modules.task.task_server import TaskServer, TASK_CONTROL
 
 
@@ -246,13 +245,25 @@ def _with_published_node(pipeline):
     return {**pipeline, 'components': pipeline['components'] + [{'id': 'pub', 'provider': 'acme.echo', 'config': {}}]}
 
 
-async def _not_entitled(org_id, user_id, team_ids, names):
-    raise NodeNotEntitled('acme.echo is not published to you or any of your teams')
-
-
 @pytest.mark.asyncio
-async def test_a_launch_naming_a_node_the_caller_cannot_run_starts_nothing(monkeypatch):
-    monkeypatch.setattr(node_deploy, 'resolve_nodes', _not_entitled)
+async def test_a_second_launch_of_a_token_whose_run_is_starting_is_refused(monkeypatch):
+    import ai.modules.task.task_server as server
+
+    started, finish = [], asyncio.Event()
+
+    class Starting:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self._stop_requested = False
+
+        async def start_task(self, credential=None):
+            started.append(self)
+            await finish.wait()
+
+        def is_task_complete(self):
+            return False
+
+    monkeypatch.setattr(server, 'Task', Starting)
     ts = _make_server()
     conn = MagicMock()
     conn._account_info = None
@@ -261,26 +272,32 @@ async def test_a_launch_naming_a_node_the_caller_cannot_run_starts_nothing(monke
         'arguments': {'token': 'tk_' + 'n' * 32, 'pipeline': _with_published_node(_pipeline())},
     }
 
-    with pytest.raises(NodeNotEntitled):
-        await ts.start_task(request, conn=conn)
-    assert ts._task_control == {}
+    # Both launches run until they wait: an await between the token check and the
+    # registration would let the second one through, and it would wait for finish too
+    first = asyncio.ensure_future(ts.start_task(request, conn=conn))
+    second = asyncio.ensure_future(ts.start_task(request, conn=conn))
+    with pytest.raises(ValueError, match='already running'):
+        await asyncio.wait_for(second, 1)
+    finish.set()
+    await first
+
+    (task,) = started
+    assert task.kwargs['node_reach'] == ('local', task.kwargs['client_id'], [task.kwargs['team_id']])
 
 
 @pytest.mark.asyncio
-async def test_a_restart_to_a_node_the_caller_cannot_run_keeps_the_running_pipeline(monkeypatch):
-    monkeypatch.setattr(node_deploy, 'resolve_nodes', _not_entitled)
+async def test_a_restart_hands_the_task_the_restarters_reach(monkeypatch):
     ts = _make_server()
     control = _running(_pipeline())
-    control.teamId = ''
+    control.teamId, control.orgId, control.client_id = 'team-1', 'org1', 'launcher'
     ts.get_task_control = lambda token: control
     control.task.restart_task = AsyncMock()
     control.task.has_attached_debugger.return_value = False
     conn = MagicMock()
-    conn._account_info = None
+    conn._account_info.userId = 'restarter'
+    monkeypatch.setattr('ai.account.app_deploy._team_ids_of', lambda conn: {'research': 'team-r'})
+    monkeypatch.setattr('ai.modules.task.task_server.resolve_run_permissions', lambda info, control: {'task.control'})
 
-    with pytest.raises(NodeNotEntitled):
-        await ts.restart_task(
-            {'arguments': {'token': 'tk_test', 'pipeline': _with_published_node(_pipeline())}}, conn=conn
-        )
-    control.task.restart_task.assert_not_awaited()
-    assert control.pipeline == _pipeline()
+    await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': _with_published_node(_pipeline())}}, conn=conn)
+
+    assert control.task.restart_task.await_args.kwargs['node_reach'] == ('org1', 'restarter', ['team-r'])

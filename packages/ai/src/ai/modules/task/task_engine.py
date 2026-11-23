@@ -63,6 +63,7 @@ from ai.constants import (
     CONST_CHANNEL_MAX_INFLIGHT,
     CONST_CHANNEL_REDIAL_DELAY,
 )
+from ai.account import node_deploy
 from ai.account.base import OutOfCreditsError
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.model_gateway import GATEWAY_ENV, PASS_RENEW_INTERVAL_S, no_pass_marker, wants_hosted_openai
@@ -265,6 +266,10 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'XTRACE_ORG_ID',
     }
 )
+
+# What a run that loads a published node's code does not get: the server's store and its keys
+CONST_PUBLISHED_RUN_WITHHELD = ('RR_STORE_URL', 'RR_STORE_SECRET_KEY', 'RR_SIGNING_KEY')
+CONST_PUBLISHED_RUN_WITHHELD_PREFIXES = ('AWS_',)
 
 CONST_SUBPROCESS_ENV_PREFIXES = (
     # The pipeline-facing namespace (same rule as ${VAR} expansion, see
@@ -679,7 +684,7 @@ class Task(DAPBase):
         owner_kind: str = '',
         trigger: str = 'manual',
         env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
-        node_versions: Optional[Dict[str, Dict[str, Any]]] = None,
+        node_reach: Optional[Tuple[str, str, List[str]]] = None,
         **kwargs,
     ) -> None:
         """
@@ -704,8 +709,8 @@ class Task(DAPBase):
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
-            node_versions: Published node id -> the publish row resolved for
-                this run at launch; exactly these versions are unpacked for it
+            node_reach: (org id, user id, team ids) the run's published nodes are
+                resolved for at each start, from the expanded pipeline; None resolves none
             **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication
@@ -717,7 +722,9 @@ class Task(DAPBase):
         self.client_id = client_id
         self.team_id = team_id
         self.org_id = org_id
-        self.node_versions = node_versions or {}
+        self.node_reach = node_reach
+        # Published node id -> the publish row resolved at the last start; exactly these are unpacked
+        self.node_versions: Dict[str, Dict[str, Any]] = {}
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds
@@ -897,6 +904,7 @@ class Task(DAPBase):
 
         # Values a restart loaded before stopping the old process, for the next start only
         self._restart_env: Optional[Dict[str, str]] = None
+        self._restart_versions: Optional[Dict[str, Dict[str, Any]]] = None
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
@@ -1209,7 +1217,9 @@ class Task(DAPBase):
         identity provider, platform database, encryption keys — stays behind.
         Note the allowlist deliberately includes RR_STORE_SECRET_KEY,
         RR_SIGNING_KEY and AWS_*: the child opens the object store and mints
-        fetch URLs itself, so pipeline code can read those values.
+        fetch URLs itself, so pipeline code can read those values. A run that
+        loads a published node does not get them (CONST_PUBLISHED_RUN_WITHHELD):
+        that node's code is not the server's, so the run has no object store.
 
         Credential hygiene for the RocketRide cloud DB path (these live in the
         ROCKETRIDE_* namespace, so the allowlist alone does not cover them):
@@ -1226,6 +1236,10 @@ class Task(DAPBase):
         the ROCKETRIDE_* env namespace is caller-influenced by design).
         """
         subprocess_env = filter_subprocess_env(os.environ)
+        if self.node_versions:
+            for key in list(subprocess_env):
+                if key in CONST_PUBLISHED_RUN_WITHHELD or key.startswith(CONST_PUBLISHED_RUN_WITHHELD_PREFIXES):
+                    del subprocess_env[key]
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
@@ -2003,7 +2017,8 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up metrics: {e}')
 
         # Another version of the published nodes it used may be unpacked now
-        node_store.release(self.token)
+        # In a thread: it waits for the lock a launch holds while it unpacks
+        await asyncio.to_thread(node_store.release, self.token)
 
         try:
             # Give back what the launch holds: the task file and port, or the container
@@ -3004,6 +3019,7 @@ class Task(DAPBase):
         provider: str,
         *,
         credential: Optional[str] = None,
+        node_reach: Optional[Tuple[str, str, List[str]]] = None,
     ) -> None:
         """
         Restart the task with new pipeline configuration.
@@ -3020,6 +3036,8 @@ class Task(DAPBase):
                 this new pipeline (the restarter, not the original starter),
                 used only to authorize its cloud databases. Passed on to
                 ``start_task`` as an argument; never stored.
+            node_reach: Whom the new pipeline's published nodes are resolved for
+                (the restarter); kept only once the restart goes ahead.
 
         Raises:
             RuntimeError: If debugger attached or restart fails
@@ -3049,6 +3067,11 @@ class Task(DAPBase):
             # nothing has changed yet: a failed load leaves the task as it was
             stops_before = self._stop_count
             self._restart_env = await self._load_env(pipeline)
+            # Its published nodes too, from the pipeline as it will run: a node it cannot use refuses it here
+            reach = node_reach or self.node_reach
+            self._restart_versions = await node_deploy.resolve_pipeline_nodes(
+                reach, resolve_pipeline_env(pipeline, self._restart_env)
+            )
 
             # A stop that arrived while the values loaded wins: nothing has
             # changed yet, so the task stays stopped instead of starting again
@@ -3060,6 +3083,7 @@ class Task(DAPBase):
 
             # Update internal task configuration
             self._pipeline = pipeline
+            self.node_reach = reach
             # The new pipeline's databases are not known until it starts
             self._db_seen = None
             self._pipeline['source'] = source
@@ -3095,12 +3119,16 @@ class Task(DAPBase):
 
         except Exception as e:
             self._server.debug_message(f'Task "{self.id}" restart failed: {str(e)}')
-            raise RuntimeError(f'Failed to restart task: {str(e)}')
+            failed = RuntimeError(f'Failed to restart task: {str(e)}')
+            # A node error keeps its code, NODE_NOT_ENTITLED for one
+            failed.code = getattr(e, 'code', None)
+            raise failed
 
         finally:
             # Always reset these
             self._is_restarting = False
             self._restart_env = None
+            self._restart_versions = None
             self._restart_in_progress = False
 
     async def start_task(self, *, credential: Optional[str] = None) -> None:
@@ -3155,6 +3183,12 @@ class Task(DAPBase):
             # Resolve ${...} placeholders into a local variable — never stored on self
             # so secrets are not retained in memory beyond the launch.
             resolved = await self._resolve_pipeline(self._pipeline)
+
+            # The published nodes it names once expanded; a restart resolved them before it stopped the old run
+            versions, self._restart_versions = self._restart_versions, None
+            if versions is None:
+                versions = await node_deploy.resolve_pipeline_nodes(self.node_reach, resolved)
+            self.node_versions = versions
 
             # Check it - throws on error
             self._check_pipeline(resolved)

@@ -600,6 +600,22 @@ def _validate_conn(monkeypatch, env=None):
     return _make_conn(account_info=SimpleNamespace(userId='user-1', devTeam='', organization=None))
 
 
+@pytest.mark.asyncio
+async def test_on_rrext_validate_keeps_the_node_code_when_it_hides_substituted_values(monkeypatch):
+    async def nodes_for(conn, components):
+        raise NodeNotEntitled('acme.other is not published to you or any of your teams')
+
+    monkeypatch.setattr(cmd_misc.node_deploy, 'nodes_for', nodes_for)
+    conn = _validate_conn(monkeypatch)
+    component = {'id': 'x', 'provider': 'acme.other', 'config': {'apikey': SERVICE_TOKEN_REF}}
+
+    with pytest.raises(RuntimeError) as refused:
+        await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': [component]}}})
+
+    assert refused.value.code == 'NODE_NOT_ENTITLED'
+    assert SERVICE_TOKEN_VALUE not in str(refused.value)
+
+
 def _llm(component_id, provider):
     """An LLM component that uses the references in fields, an inactive profile, text and a key name."""
     return {

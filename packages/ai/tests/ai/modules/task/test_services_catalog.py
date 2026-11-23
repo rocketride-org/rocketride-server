@@ -181,5 +181,28 @@ async def test_a_callers_published_nodes_get_a_catalogue_of_their_own_kept_per_d
     assert len(asked) == 3
 
 
+@pytest.mark.asyncio
+async def test_a_published_catalogue_an_invalidate_overtook_answers_its_caller_but_is_not_kept(monkeypatch, tmp_path):
+    raw = _fake_definitions(tmp_path)
+    builds = []
+
+    def custom(published=None):
+        builds.append(published)
+        if len(builds) == 1:
+            # A node changed while this build ran
+            services_catalog.invalidate()
+        return []
+
+    monkeypatch.setattr(services_catalog.node_store, 'custom', custom)
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
+    rows = {'acme.echo': {'snapshot': {'sha256': 'v1'}}}
+
+    assert (await services_catalog.get_summary(rows))['services']
+    await services_catalog.get_summary(rows)
+    await services_catalog.get_summary(rows)
+
+    assert len(builds) == 2
+
+
 def test_an_inline_icon_that_is_not_base64_is_read_too():
     assert services_catalog._read_icon('data:image/svg+xml;utf8,%3Csvg%20id%3D%22x%22%2F%3E') == '<svg id="x"/>'

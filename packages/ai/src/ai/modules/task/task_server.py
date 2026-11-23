@@ -80,7 +80,7 @@ import uuid
 from typing import List
 from fastapi import WebSocket
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, Any, Mapping, Optional, Set
+from typing import Awaitable, Callable, Dict, Any, Mapping, Optional, Set, Tuple
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
@@ -251,16 +251,10 @@ def _owner_identity(control: 'TASK_CONTROL') -> tuple:
     return (kind, control.owner_id, control.run_kind)
 
 
-async def _resolve_nodes(
-    pipeline: Dict[str, Any], control: 'TASK_CONTROL', conn: Optional['TaskConn']
-) -> Dict[str, Dict[str, Any]]:
-    """The publish row of each published node the pipeline names, for the caller who runs it."""
+def _node_reach(control: 'TASK_CONTROL', conn: Optional['TaskConn']) -> Tuple[str, str, List[str]]:
+    """Whom a run's published nodes are resolved for: (org id, user id, team ids)."""
     from ai.account.app_deploy import _team_ids_of
-    from ai.account.node_deploy import resolve_nodes
 
-    providers = [component.get('provider', '') for component in pipeline.get('components', [])]
-    if not any('.' in provider for provider in providers):
-        return {}
     info = getattr(conn, '_account_info', None)
     if control.owner_kind == 'team':
         # A team's run uses what is published to the team, whoever started it
@@ -270,7 +264,7 @@ async def _resolve_nodes(
         user_id, team_ids = info.userId, list(_team_ids_of(conn).values())
     else:
         user_id, team_ids = control.client_id, [control.teamId]
-    return await resolve_nodes(control.orgId or 'local', user_id, team_ids, providers)
+    return (control.orgId or 'local', user_id, team_ids)
 
 
 class TaskServer(DAPBase):
@@ -1798,9 +1792,6 @@ class TaskServer(DAPBase):
                 'least 32 letters, digits, "-" or "_" (tk_ plus a random UUID, for example)'
             )
 
-        # The published nodes this run may use, fixed now; a node the caller cannot run refuses the launch
-        node_versions = await _resolve_nodes(control.pipeline, control, conn)
-
         try:
             # Create new Task instance with complete configuration
             control.task = Task(
@@ -1823,7 +1814,7 @@ class TaskServer(DAPBase):
                 run_kind=run_kind,
                 owner_kind=control.owner_kind,
                 trigger=trigger,
-                node_versions=node_versions,
+                node_reach=_node_reach(control, conn),
             )
 
             # Register task in central registry
@@ -2000,9 +1991,6 @@ class TaskServer(DAPBase):
             # by Task.restart_task, and control.pipeline still naming the old one.
             pipeline = _apply_source_defaults(pipeline, control.source)
 
-            # The new pipeline's published nodes, resolved before anything is restarted
-            control.task.node_versions = await _resolve_nodes(pipeline, control, conn)
-
             # Call the Task's restart method to restart the engine process
             # This preserves all statistics and monitoring while restarting the subprocess
             await control.task.restart_task(
@@ -2013,6 +2001,8 @@ class TaskServer(DAPBase):
                 # The restarter supplied this pipeline, so the restarter's
                 # credential, not the original starter's, authorizes its databases.
                 credential=self._presenting_credential(conn),
+                # And the restarter's reach picks its published nodes
+                node_reach=_node_reach(control, conn),
             )
 
             # The control now describes the pipeline that is running: without this the
