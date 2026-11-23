@@ -480,3 +480,36 @@ test('R-ledger an expired run no longer counts its monitor keys against the quot
 	t.clock.advance(121_000);
 	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: second.token }, types: ['extra'] }))).ok, true, 'the expired run holds no monitor slots');
 });
+
+test('R-gate a request waiting on the API key is not sent once its realm detached or its run went', async (tt) => {
+	await tt.test('detach', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const release = t.cm.holdApiKey();
+		st.after(() => release());
+		const A = t.open(ENTRY_A);
+		const pending = clientRequest(A, execMsg()).catch(() => undefined);
+		await settle();
+		A.detach();
+		release();
+		await pending;
+		await settle();
+		assert.equal(t.cm.engine.messagesFor('execute').length, 0, 'the detached realm\'s request never reaches the engine');
+	});
+	await tt.test('logout', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const A = t.open(ENTRY_A);
+		const run = await startRun(A);
+		const release = t.cm.holdApiKey();
+		st.after(() => release());
+		t.cm.emit('shell:login', { user: {} });
+		const before = t.cm.engine.received.length;
+		const pending = clientRequest(A, dap('rrext_get_task_status', { token: run.token }));
+		await settle();
+		t.cm.emit('shell:logout', {});
+		release();
+		assertDenied(await pending, 'capability', 'a status request sent before logout');
+		assert.equal(t.cm.engine.received.length, before, 'nothing is sent for the earlier session\'s run');
+	});
+});
