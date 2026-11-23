@@ -1443,20 +1443,102 @@ def test_filter_subprocess_env_is_an_allowlist():
     }
 
 
+def test_a_run_naming_a_published_node_inherits_only_the_process_runtime():
+    """Code from outside the catalog never sees a RocketRide or host credential:
+    no store or signing key, no AWS identity, no ROCKETRIDE_* (the engine's own
+    API key lives there), no host API key, and no operator opt-in.
+    """
+    env = filter_subprocess_env(
+        {
+            'PATH': '/usr/bin',
+            'http_proxy': 'http://proxy:3128',
+            'PYTHONPATH': '/opt/rocketride/ai',
+            'HF_HOME': '/cache/hf',
+            'RR_BASE_URL': 'https://engine.example',
+            'RR_PROC_PRIVATE': '1',
+            'ROCKETRIDE_CRASHPAD_HANDLER': '/opt/rocketride/crashpad_handler',
+            'ROCKETRIDE_APIKEY': 'engine-key',
+            'ROCKETRIDE_OPENAI_KEY': 'sk-operator',
+            'RR_STORE_URL': 's3://bucket',
+            'RR_STORE_SECRET_KEY': 'store',
+            'RR_SIGNING_KEY': 'sign',
+            'RR_OAUTH_BROKER_URL': 'https://broker.example',
+            'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
+            'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token',
+            'OPENAI_API_KEY': 'sk-host',
+            'aws_secret_access_key': 'lower-aws',
+            'rocketride_openai_key': 'lower-operator',
+            'RR_SUBPROCESS_ENV': 'SLACK_BOT_TOKEN, gh_*',
+            'SLACK_BOT_TOKEN': 'xoxb',
+            'gh_token': 'ghp',
+            'RR_MASTER_KEY': 'fernet',
+        },
+        published=True,
+    )
+    assert env == {
+        'PATH': '/usr/bin',
+        'http_proxy': 'http://proxy:3128',
+        'PYTHONPATH': '/opt/rocketride/ai',
+        'HF_HOME': '/cache/hf',
+        'RR_BASE_URL': 'https://engine.example',
+        'RR_PROC_PRIVATE': '1',
+        'ROCKETRIDE_CRASHPAD_HANDLER': '/opt/rocketride/crashpad_handler',
+        'RR_OAUTH_BROKER_URL': 'https://broker.example',
+    }
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize('published', [False, True])
-async def test_a_run_that_loads_a_published_node_gets_no_server_store_or_keys(monkeypatch, published):
-    withheld = {'RR_STORE_URL': 's3://bucket', 'RR_STORE_SECRET_KEY': 'store', 'RR_SIGNING_KEY': 'sign'}
-    for key, value in {**withheld, 'AWS_ROLE_ARN': 'arn', 'RR_BASE_URL': 'https://engine.example'}.items():
+async def test_a_task_with_a_published_node_builds_the_runtime_only_env(monkeypatch):
+    service = {
+        'RR_SIGNING_KEY': 'sign',
+        'ROCKETRIDE_APIKEY': 'engine-key',
+        'AWS_ROLE_ARN': 'arn',
+        'OPENAI_API_KEY': 'sk',
+    }
+    for key, value in service.items():
         monkeypatch.setenv(key, value)
+    catalogue, published = _env_task(), _env_task()
+    published.node_versions = {'acme.echo': {'version': 1}}
+
+    assert set(service) <= set(await _build_env(catalogue))
+    assert not set(service) & set(await _build_env(published))
+
+
+@pytest.mark.asyncio
+async def test_a_task_with_a_published_node_still_resolves_the_keys_its_pipeline_names():
+    t = _env_task(
+        {'components': [{'id': 'llm', 'provider': 'llm_openai', 'config': {'apikey': '${ROCKETRIDE_OPENAI_KEY}'}}]}
+    )
+    t._restart_env = {'ROCKETRIDE_OPENAI_KEY': 'sk-user'}
+    t.node_versions = {'acme.echo': {'version': 1}}
+
+    assert (await Task._resolve_pipeline(t, t._pipeline))['components'][0]['config']['apikey'] == 'sk-user'
+
+
+@pytest.mark.asyncio
+async def test_a_task_with_a_published_node_never_falls_back_to_a_local_store(monkeypatch):
+    from ai.account.store import Store
+
+    monkeypatch.setenv('RR_STORE_URL', 's3://bucket')
     t = _env_task()
-    t.node_versions = {'acme.echo': {}} if published else {}
+    t.node_versions = {'acme.echo': {'version': 1}}
 
     env = await _build_env(t)
 
-    names = {*withheld, 'AWS_ROLE_ARN'}
-    assert names & set(env) == (set() if published else names)
-    assert env['RR_BASE_URL'] == 'https://engine.example'
+    assert env['RR_STORE_URL'] == 'channel://'
+    with pytest.raises(ValueError, match='published node has no direct access to the file store'):
+        Store.create(url=env['RR_STORE_URL'])
+
+
+@pytest.mark.asyncio
+async def test_a_task_with_a_published_node_still_gets_the_databases_authorized_for_it(monkeypatch):
+    _fake_db_account(monkeypatch)
+    t = _env_task(_SCOPED_PIPELINE)
+    t.node_versions = {'acme.echo': {'version': 1}}
+
+    env = await _build_env(t)
+
+    assert 'ROCKETRIDE_DB_DSNS' in env
 
 
 def test_filter_subprocess_env_opt_in_names_and_prefixes():

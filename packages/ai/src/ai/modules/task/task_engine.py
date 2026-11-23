@@ -229,22 +229,36 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'PROCESSOR_IDENTIFIER',
         'PROCESSOR_LEVEL',
         'PROCESSOR_REVISION',
-        # RocketRide services the child reaches itself: the object store
-        # behind tool_filesystem (Store.create reads the URL and secret), the
-        # public address + signing key FileStore.get_url needs to mint fetch
-        # URLs the engine will accept, the child's own web server CORS policy,
-        # and the OAuth broker the Google/Microsoft nodes dial directly.
-        'RR_STORE_URL',
-        'RR_STORE_SECRET_KEY',
+        # Non-secret RocketRide settings: the public address, the child's own
+        # web server CORS policy and the OAuth broker the Google/Microsoft nodes dial
         'RR_BASE_URL',
-        'RR_SIGNING_KEY',
         'RR_CORS_ORIGINS',
         'RR_OAUTH_BROKER_URL',
         # Operator opt-in that makes task processes hide their /proc entries
         # (ai.proc_privacy); non-secret, and tasks must see it to act on it
         'RR_PROC_PRIVATE',
-        # Executable override for the media toolkit nodes
+        # Executable override for the media toolkit nodes, and their ffmpeg time limit
         'MEDIA_TOOLKIT_FFMPEG',
+        'ROCKETRIDE_MEDIA_FFMPEG_TIMEOUT',
+        # Where the child engine reports a crash (minidump.hpp)
+        'ROCKETRIDE_CRASHPAD_HANDLER',
+        'ROCKETRIDE_CRASHDB_DIR',
+        # The test harness's mock switch (ai.node)
+        'ROCKETRIDE_MOCK',
+    }
+)
+
+# Credentials and addresses of RocketRide services and of the host. A run whose
+# pipeline names a published node, code from outside the catalog, gets none.
+CONST_SUBPROCESS_SERVICE_ENV_NAMES = frozenset(
+    {
+        # RocketRide services the child reaches itself: the object store
+        # behind tool_filesystem (Store.create reads the URL and secret) and
+        # the signing key FileStore.get_url needs to mint fetch URLs the
+        # engine will accept.
+        'RR_STORE_URL',
+        'RR_STORE_SECRET_KEY',
+        'RR_SIGNING_KEY',
         # Bare names individual node READMEs document as engine-host fallbacks
         # for their API keys (directly, or through the vendor SDK's own
         # default). New nodes should read ROCKETRIDE_* instead.
@@ -267,14 +281,18 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
     }
 )
 
-# What a run that loads a published node's code does not get: the server's store and its keys
-CONST_PUBLISHED_RUN_WITHHELD = ('RR_STORE_URL', 'RR_STORE_SECRET_KEY', 'RR_SIGNING_KEY')
-CONST_PUBLISHED_RUN_WITHHELD_PREFIXES = ('AWS_',)
+CONST_SUBPROCESS_SERVICE_ENV_PREFIXES = (
+    # The pipeline-facing namespace (same rule as ${VAR} expansion, see
+    # pipeline.ALLOWED_ENV_PREFIX); the engine's own API key is in it
+    'ROCKETRIDE_',
+    # The S3 store backend authenticates through boto3's environment chain —
+    # static keys, or the web-identity role Kubernetes injects — and the
+    # child opens the store itself (tool_filesystem), so it needs the same
+    # AWS identity the engine has.
+    'AWS_',
+)
 
 CONST_SUBPROCESS_ENV_PREFIXES = (
-    # The pipeline-facing namespace (same rule as ${VAR} expansion, see
-    # pipeline.ALLOWED_ENV_PREFIX)
-    'ROCKETRIDE_',
     # Interpreter and package tooling
     'PYTHON',
     'UV_',
@@ -283,11 +301,6 @@ CONST_SUBPROCESS_ENV_PREFIXES = (
     # Locale and XDG base dirs
     'LC_',
     'XDG_',
-    # The S3 store backend authenticates through boto3's environment chain —
-    # static keys, or the web-identity role Kubernetes injects — and the
-    # child opens the store itself (tool_filesystem), so it needs the same
-    # AWS identity the engine has.
-    'AWS_',
     # ML runtime caches and thread tuning
     'HF_',
     'HUGGINGFACE_',
@@ -341,21 +354,33 @@ CONST_SUBPROCESS_ENV_NEVER = frozenset(
 )
 
 
-def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
+def filter_subprocess_env(environ: Mapping[str, str], published: bool = False) -> Dict[str, str]:
     """Return the subset of ``environ`` a task subprocess may inherit.
 
     Names are matched case-insensitively: Windows treats them that way, and the
     POSIX proxy variables are conventionally lowercase. Original spelling is
     kept in the result. Names in CONST_SUBPROCESS_ENV_NEVER are never passed.
+
+    Args:
+        environ: The engine's environment.
+        published: The pipeline names a published node: only the process
+            runtime passes, no service credential and no operator opt-in.
+
+    Returns:
+        Dict[str, str]: What the child inherits.
     """
-    opt_names, opt_prefixes = _subprocess_env_opt_in(environ)
-    prefixes = CONST_SUBPROCESS_ENV_PREFIXES + opt_prefixes
+    names = CONST_SUBPROCESS_ENV_NAMES
+    prefixes = CONST_SUBPROCESS_ENV_PREFIXES
+    if not published:
+        opt_names, opt_prefixes = _subprocess_env_opt_in(environ)
+        names = names | CONST_SUBPROCESS_SERVICE_ENV_NAMES | opt_names
+        prefixes = prefixes + CONST_SUBPROCESS_SERVICE_ENV_PREFIXES + opt_prefixes
     allowed: Dict[str, str] = {}
     for name, value in environ.items():
         key = name.upper()
         if key in CONST_SUBPROCESS_ENV_NEVER:
             continue
-        if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
+        if key in names or key.startswith(prefixes):
             allowed[name] = value
     return allowed
 
@@ -1218,8 +1243,9 @@ class Task(DAPBase):
         Note the allowlist deliberately includes RR_STORE_SECRET_KEY,
         RR_SIGNING_KEY and AWS_*: the child opens the object store and mints
         fetch URLs itself, so pipeline code can read those values. A run that
-        loads a published node does not get them (CONST_PUBLISHED_RUN_WITHHELD):
-        that node's code is not the server's, so the run has no object store.
+        loads a published node gets only the process runtime (filter_subprocess_env
+        with ``published``): that node's code is not the server's, so the run has
+        no object store, no service credential and no operator opt-in.
 
         Credential hygiene for the RocketRide cloud DB path (these live in the
         ROCKETRIDE_* namespace, so the allowlist alone does not cover them):
@@ -1235,11 +1261,10 @@ class Task(DAPBase):
         through the environment (it rides the task file's 'identity' block —
         the ROCKETRIDE_* env namespace is caller-influenced by design).
         """
-        subprocess_env = filter_subprocess_env(os.environ)
+        subprocess_env = filter_subprocess_env(os.environ, published=bool(self.node_versions))
         if self.node_versions:
-            for key in list(subprocess_env):
-                if key in CONST_PUBLISHED_RUN_WITHHELD or key.startswith(CONST_PUBLISHED_RUN_WITHHELD_PREFIXES):
-                    del subprocess_env[key]
+            # Never the default local folder: a store the user cannot see
+            subprocess_env['RR_STORE_URL'] = 'channel://'
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
