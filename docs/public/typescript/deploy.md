@@ -117,4 +117,49 @@ request (registry ints ONLY — semver is display).
 
 Full signatures: [API reference](/clients/typescript/reference#app-publish-ladder).
 
+## Node publishing
+
+A Python node is published the way an app is: upload its `.rrnode`, then bind a
+version to `@me` or a team. A published node's id is `<developerId>.<name>`: it
+is the provider a pipeline names, and the `protocol` in its `services.json`
+(`<developerId>.<name>://`). Its folder and module are `<developerId>__<name>`, so
+its `path` is `nodes.<developerId>__<name>`. The `.rrnode` is a zip of that one
+folder with a `.rrnode` marker holding `{"name", "contract"}`.
+
+A server takes, publishes and serves nodes only when it runs with
+`RR_NODE_RAIL_ENABLED=1`. Without it, uploading or publishing a node is refused,
+only the release's nodes run, and a pipeline that names a published node gets
+`NODE_NOT_FOUND`.
+
+```typescript
+const added = await client.deploy.add({ kind: 'node', data: await readFile('acme__echo.rrnode') });
+await client.call('rrext_deploy_node', {
+	subcommand: 'publish',
+	nodeId: 'acme.echo',
+	version: added.artifact?.version,
+	target: '@team/research',
+});
+```
+
+`rrext_deploy_node` also takes `versions`, and `unpublish` with a `target`. A
+node belongs to whoever uploaded its first version: only they can add a version,
+publish it or unpublish it. A node cannot be published to `@public` yet. An upload is refused with
+`NODE_PACKAGE_INVALID`, the message naming the rule, for a C++ node, an id
+outside your developer namespace or not in lowercase, a symlink, a path outside
+the zip or with a `.` or empty segment, two entries with one path, an icon
+outside the node or one that carries anything but a drawing, or a requirement
+line with an index, a URL or a local path. Those rules check what a package
+declares; its code runs inside the runs of everyone it is published to, with
+their keys, so publish a node only to people who trust it. A run that uses a
+published node does not get the server's object store, its signing key or its AWS
+identity, so `tool_filesystem` and fetch URLs do not work in that run.
+
+A run gets, when it is launched, the version bound to the caller's own rung,
+else a team's, and keeps it until it ends. The catalogue and validation show the
+node only to callers it is published to; a caller who cannot run it gets a
+`CommandException` with `NODE_NOT_ENTITLED`, or `NODE_NOT_FOUND` when no one in
+the org uploaded it. One server runs one version of a node at a time: while a run
+uses one, a launch that resolves another gets `NODE_VERSION_IN_USE`, and can
+start once that run ends.
+
 See the [Shell API guide](/guides/apps) for the app model itself.

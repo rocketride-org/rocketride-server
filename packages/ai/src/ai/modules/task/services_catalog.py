@@ -96,6 +96,9 @@ _catalog: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
 _lock = asyncio.Lock()
 # Bumped by invalidate() so an in-flight build can detect staleness.
 _generation = 0
+# The catalogue with a caller's published nodes, by the (node id, digest) pairs it holds
+_published: Dict[tuple, Tuple[Dict[str, Any], Dict[str, Any]]] = {}
+_PUBLISHED_MAX = 64
 
 
 def invalidate() -> None:
@@ -109,6 +112,7 @@ def invalidate() -> None:
     global _catalog, _generation
     _generation += 1
     _catalog = None
+    _published.clear()
 
 
 def _read_icon(icon_path: Any) -> Optional[str]:
@@ -140,7 +144,7 @@ def _read_icon(icon_path: Any) -> Optional[str]:
         return None
 
 
-def _build() -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _build(published: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Build the master list and the summary response from the engine.
 
@@ -149,10 +153,13 @@ def _build() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     view with its deduplicated icon table. Runs in a worker thread (see
     :func:`_get_catalog`) so the event loop stays responsive.
 
+    Args:
+        published: The publish rows of the published nodes a caller reaches, which it lists too.
+
     Returns:
         (master, summary) — see module docstring for shapes.
     """
-    raw = getServiceDefinitions(node_store.custom()) or {}
+    raw = getServiceDefinitions(node_store.custom(published)) or {}
     services = raw.get('services', {}) or {}
 
     master: Dict[str, Any] = {}
@@ -195,7 +202,7 @@ def _build() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     return master, summary
 
 
-async def _get_catalog() -> Tuple[Dict[str, Any], Dict[str, Any]]:
+async def _get_catalog(published: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Return the cached (master, summary), building it on first use.
 
@@ -204,6 +211,18 @@ async def _get_catalog() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     icon reads are blocking.
     """
     global _catalog
+    if published:
+        key = tuple(sorted((node_id, row['snapshot']['sha256']) for node_id, row in published.items()))
+        if key in _published:
+            return _published[key]
+        # As below: a build that invalidate() overtook answers its caller but is not cached
+        generation = _generation
+        built = await asyncio.to_thread(_build, published)
+        if generation == _generation:
+            if len(_published) >= _PUBLISHED_MAX:
+                _published.clear()
+            _published[key] = built
+        return built
     if _catalog is not None:
         return _catalog
     async with _lock:
@@ -221,28 +240,29 @@ async def _get_catalog() -> Tuple[Dict[str, Any], Dict[str, Any]]:
         return built
 
 
-async def get_summary() -> Dict[str, Any]:
+async def get_summary(published: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     """
     Return the cached bulk response body:
     ``{'services': {...}, 'icons': {...}, 'version'}``.
 
     Every service entry carries only the display fields plus an ``icon``
     id into the deduplicated ``icons`` table — the configuration schema
-    is served by :func:`get_service`.
+    is served by :func:`get_service`. ``published`` adds the caller's published nodes.
     """
-    _, summary = await _get_catalog()
+    _, summary = await _get_catalog(published)
     return summary
 
 
-async def get_service(name: str) -> Optional[Dict[str, Any]]:
+async def get_service(name: str, published: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
     """
     Return one service's full entry (configuration schema included).
 
     Args:
         name: The service's logical type (e.g. ``'ocr'``).
+        published: The publish rows of the published nodes the caller reaches.
 
     Returns:
         The full entry dict, or None when the service is unknown.
     """
-    master, _ = await _get_catalog()
+    master, _ = await _get_catalog(published)
     return master.get(name)

@@ -33,6 +33,7 @@ function makeNode() {
 test('a package holds the node, its marker, and no build inputs', async () => {
 	const { files } = await packageNode('demo', makeNode());
 	assert.deepStrictEqual(Object.keys(files).sort(), ['.rrnode', 'IGlobal.py', 'demo.svg', 'services.json']);
+	assert.deepStrictEqual(JSON.parse(files['.rrnode']), { name: 'demo', contract: 1 });
 });
 
 test('the index entry carries each definition as plain JSON text by file, and the icons inline', async () => {

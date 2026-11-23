@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ai.common.node_packages import NodeNotEntitled
 from ai.modules.task.commands import cmd_misc
 from ai.modules.task.commands.cmd_misc import MiscCommands
 
@@ -157,7 +158,7 @@ async def test_on_rrext_services_returns_specific_service(monkeypatch):
     """When `arguments.service` is set, return that single full entry."""
     schema = {'name': 'ocr', 'fields': []}
 
-    async def fake_get_service(name):
+    async def fake_get_service(name, published=None):
         return schema if name == 'ocr' else None
 
     monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
@@ -172,7 +173,7 @@ async def test_on_rrext_services_returns_specific_service(monkeypatch):
 async def test_on_rrext_services_unknown_service_raises(monkeypatch):
     """An unknown service id raises ValueError (re-raised after debug log)."""
 
-    async def fake_get_service(name):
+    async def fake_get_service(name, published=None):
         return None
 
     monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
@@ -188,7 +189,7 @@ async def test_on_rrext_services_no_service_returns_summary(monkeypatch):
     """Without a `service` arg, the cached summary body is returned."""
     summary = {'services': {'a': {'title': 'A'}}, 'version': 7}
 
-    async def fake_get_summary():
+    async def fake_get_summary(published=None):
         return summary
 
     monkeypatch.setattr(cmd_misc.services_catalog, 'get_summary', fake_get_summary)
@@ -196,6 +197,59 @@ async def test_on_rrext_services_no_service_returns_summary(monkeypatch):
     conn = _make_conn()
     result = await MiscCommands.on_rrext_services(conn, {})
     assert result['body'] == summary
+
+
+@pytest.fixture
+def published(monkeypatch):
+    """The caller reaches acme.echo; acme.other is published to someone else."""
+
+    async def visible_nodes(conn):
+        return {'acme.echo': {}}
+
+    monkeypatch.setattr(cmd_misc.node_deploy, 'visible_nodes', visible_nodes)
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_services_shows_only_the_published_nodes_the_caller_reaches(monkeypatch, published):
+    asked = []
+
+    async def fake_get_summary(published=None):
+        asked.append(published)
+        return {'services': {'webhook': {}, 'acme.echo': {}, 'acme.other': {}}, 'version': 7}
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_summary', fake_get_summary)
+
+    result = await MiscCommands.on_rrext_services(_make_conn(), {})
+
+    # The catalogue is built with the caller's published nodes, and lists no one else's
+    assert asked == [{'acme.echo': {}}]
+    assert sorted(result['body']['services']) == ['acme.echo', 'webhook']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_services_does_not_describe_a_node_published_to_someone_else(monkeypatch, published):
+    async def fake_get_service(name, published=None):
+        return {'name': name}
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
+
+    with pytest.raises(ValueError, match="Service 'acme.other' not found"):
+        await MiscCommands.on_rrext_services(_make_conn(), {'arguments': {'service': 'acme.other'}})
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_refuses_a_node_the_caller_cannot_run(monkeypatch):
+    async def nodes_for(conn, components):
+        raise NodeNotEntitled('acme.other is not published to you or any of your teams')
+
+    validated = []
+    monkeypatch.setattr(cmd_misc.node_deploy, 'nodes_for', nodes_for)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validated.append)
+    request = {'arguments': {'pipeline': {'components': [{'id': 'x', 'provider': 'acme.other'}]}}}
+
+    with pytest.raises(NodeNotEntitled):
+        await MiscCommands.on_rrext_validate(_make_conn(), request)
+    assert validated == []
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +270,7 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
         return {'ok': True}
 
     monkeypatch.setattr(cmd_misc, 'validatePipeline', _fake_validate)
-    monkeypatch.setattr(cmd_misc.node_store, 'custom', lambda: [{'protocol': 'provider_x://'}])
+    monkeypatch.setattr(cmd_misc.node_store, 'custom', lambda published=None: [{'protocol': 'provider_x://'}])
 
     conn = _make_conn()
     request = {
@@ -544,6 +598,22 @@ def _validate_conn(monkeypatch, env=None):
     merged = AsyncMock(return_value=ENV if env is None else env)
     monkeypatch.setattr(account, 'get_merged_env', merged)
     return _make_conn(account_info=SimpleNamespace(userId='user-1', devTeam='', organization=None))
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_keeps_the_node_code_when_it_hides_substituted_values(monkeypatch):
+    async def nodes_for(conn, components):
+        raise NodeNotEntitled('acme.other is not published to you or any of your teams')
+
+    monkeypatch.setattr(cmd_misc.node_deploy, 'nodes_for', nodes_for)
+    conn = _validate_conn(monkeypatch)
+    component = {'id': 'x', 'provider': 'acme.other', 'config': {'apikey': SERVICE_TOKEN_REF}}
+
+    with pytest.raises(RuntimeError) as refused:
+        await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': [component]}}})
+
+    assert refused.value.code == 'NODE_NOT_ENTITLED'
+    assert SERVICE_TOKEN_VALUE not in str(refused.value)
 
 
 def _llm(component_id, provider):
