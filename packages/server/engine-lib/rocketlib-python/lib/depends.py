@@ -956,6 +956,7 @@ def ensure_run_constraints(node_dirs: list[str]) -> str:
         requirements = _node_files(node_dirs, 'requirement*.txt')
         overrides = _node_files(node_dirs, 'overrides.txt')
         if not requirements and not overrides:
+            _run_state = None
             return baseline
         key = _content_hash([baseline] + requirements + _find_override_files() + overrides)
         root = os.path.join(engine_cache_dir(), 'runs', key)
@@ -964,11 +965,16 @@ def ensure_run_constraints(node_dirs: list[str]) -> str:
             os.makedirs(root, exist_ok=True)
             _combine_requirements(_find_override_files() + overrides, overrides_path)
             _run_state = (constraints, overrides_path)
+            # A cold solve can outlast the run's startup wait: the heartbeat keeps the status moving
+            updateProgress("Solving the pipeline's requirements...")
+            _start_heartbeat()
             try:
                 _solve(requirements, constraints, root, baseline)
             except RuntimeError:
                 _run_state = None
                 raise RequirementsConflict(_conflict(requirements, root, baseline)) from None
+            finally:
+                _stop_heartbeat()
         _run_state = (constraints, overrides_path)
         return constraints
 
@@ -977,10 +983,13 @@ def _solve(sources: list[str], constraints: str, root: str, baseline: str) -> No
     """Compile ``sources`` into ``constraints`` holding the server's pins, which the result keeps for later installs."""
     combined = os.path.join(root, 'combined.txt')
     _combine_requirements(sources, combined)
-    _compile_constraints(constraints, combined, pinned=baseline)
+    # Written whole, then moved in place: a later run reuses any constraints file it finds
+    partial = f'{constraints}.part'
+    _compile_constraints(partial, combined, pinned=baseline)
     # Its pins only: the index options are the run's own already
-    with open(baseline, encoding='utf-8') as server, open(constraints, 'a', encoding='utf-8') as run:
+    with open(baseline, encoding='utf-8') as server, open(partial, 'a', encoding='utf-8') as run:
         run.writelines(['\n'] + [line for line in server if not line.startswith('-')])
+    os.replace(partial, constraints)
 
 
 def _conflict(requirements: list[str], root: str, baseline: str) -> str:
