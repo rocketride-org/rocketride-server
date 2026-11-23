@@ -459,7 +459,7 @@ def describe_login_key_expiry(expires_at: Optional[str]) -> str:
     """
     if expires_at is None:
         return ' It does not expire.'
-    return f' It expires on {utc_day(expires_at)} (bounded by your sign-in session); run `rocketride login` again before then.'
+    return f' It expires on {utc_day(expires_at)} (bounded by your sign-in session); to renew it, remove ROCKETRIDE_DEV_APIKEY from .env and run `rocketride login` before then.'
 
 
 def minted_key_expiry_note(minted: dict) -> str:

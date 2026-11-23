@@ -67,9 +67,15 @@ def test_create_key_leaves_expires_at_absent_when_the_server_did_not_report_it()
     assert 'expiresAt' not in result
 
 
+def test_create_key_leaves_expires_at_absent_when_it_is_not_a_timestamp():
+    for odd in (1798761600000, {'when': 'soon'}, True):
+        result, _ = _create({'key': 'rr_x', 'record': {'id': 'k1', 'expiresAt': odd}})
+        assert result == {'key': 'rr_x'}
+
+
 def test_the_login_line_prints_the_granted_day_bounded_by_the_sign_in_session():
     assert describe_login_key_expiry('2027-02-03T23:30:00.123456') == (
-        ' It expires on 2027-02-03 (bounded by your sign-in session); run `rocketride login` again before then.'
+        ' It expires on 2027-02-03 (bounded by your sign-in session); to renew it, remove ROCKETRIDE_DEV_APIKEY from .env and run `rocketride login` before then.'
     )
     assert describe_login_key_expiry(None) == ' It does not expire.'
 
@@ -78,7 +84,7 @@ def test_the_login_line_says_nothing_when_the_server_reported_no_expiry():
     assert minted_key_expiry_note({'key': 'rr_x'}) == ''
     assert minted_key_expiry_note({'key': 'rr_x', 'expiresAt': None}) == ' It does not expire.'
     assert minted_key_expiry_note({'key': 'rr_x', 'expiresAt': '2027-02-03T23:30:00Z'}) == (
-        ' It expires on 2027-02-03 (bounded by your sign-in session); run `rocketride login` again before then.'
+        ' It expires on 2027-02-03 (bounded by your sign-in session); to renew it, remove ROCKETRIDE_DEV_APIKEY from .env and run `rocketride login` before then.'
     )
 
 

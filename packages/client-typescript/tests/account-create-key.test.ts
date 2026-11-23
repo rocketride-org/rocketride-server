@@ -57,6 +57,15 @@ describe('AccountApi.createKey', () => {
 		expect(await api.createKey({ name: 'ci', permissions: [] })).toEqual({ key: 'rr_x', expiresAt: null });
 	});
 
+	it('treats an expiresAt that is not a timestamp as not reported (never as "never expires")', async () => {
+		for (const odd of [1798761600000, { when: 'soon' }, true]) {
+			const { api } = apiReturning({ key: 'rr_x', record: { id: 'k1', expiresAt: odd } });
+			const result = await api.createKey({ name: 'ci', permissions: [] });
+			expect(result).toEqual({ key: 'rr_x' });
+			expect('expiresAt' in result).toBe(false);
+		}
+	});
+
 	it('leaves expiresAt absent when the server did not report it (never read as "never expires")', async () => {
 		const { api } = apiReturning({ key: 'rr_x' });
 		const result = await api.createKey({ name: 'ci', permissions: [] });
@@ -68,7 +77,7 @@ describe('AccountApi.createKey', () => {
 describe('describeLoginKeyExpiry', () => {
 	it('prints the granted day, bounded by the sign-in session', () => {
 		expect(describeLoginKeyExpiry('2027-02-03T23:30:00.123456')).toBe(
-			' It expires on 2027-02-03 (bounded by your sign-in session); run `rocketride login` again before then.'
+			' It expires on 2027-02-03 (bounded by your sign-in session); to renew it, remove ROCKETRIDE_DEV_APIKEY from .env and run `rocketride login` before then.'
 		);
 	});
 
