@@ -2529,7 +2529,7 @@ async def test_publish_serializes_claim_check_and_binding_per_container_name(reg
     assert len(registry.set_calls) == 1
 
 
-async def _race_two_engines(registry, monkeypatch, created, undo_together=False):
+async def _race_two_engines(registry, monkeypatch, created, undo_together=False, undo_error=None):
     """Publish two apps that derive one container name from two 'engines'.
 
     The per-name lock is process-local, so two engines each hold their own:
@@ -2577,6 +2577,8 @@ async def _race_two_engines(registry, monkeypatch, created, undo_together=False)
             if undo_count['n'] == 2:
                 undoing.set()
             await undoing.wait()
+        if undo_error:
+            raise RuntimeError(undo_error)
         return await original_state(*args)
 
     monkeypatch.setattr(account_singleton, 'publish_set_state', racing_publish_set_state, raising=False)
@@ -2619,6 +2621,62 @@ async def test_two_engines_tied_first_publishes_both_back_out(registry, quiet_pu
     assert "'acme.foo_bar' already holds" in results[1]['message']
     assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'removed'
     assert registry.publishes[('acme_foo.bar', 'public~')]['state'] == 'removed'
+
+
+@pytest.mark.asyncio
+async def test_a_failed_back_out_reports_that_the_binding_remains(registry, quiet_push, monkeypatch):
+    """When undoing the losing binding fails, the binding is still live: the
+    response must say so (and name the holder) instead of reading as a clean
+    refusal.
+    """
+    results = await _race_two_engines(
+        registry, monkeypatch, {'acme.foo_bar': 100.0, 'acme_foo.bar': 200.0}, undo_error='store down'
+    )
+
+    assert results[0]['success'] is True
+    assert results[1]['success'] is False
+    assert 'could not be removed' in results[1]['message']
+    assert "'acme.foo_bar'" in results[1]['message']
+    assert registry.publishes[('acme_foo.bar', 'public~')]['state'] == 'enabled'
+
+
+@pytest.mark.asyncio
+async def test_a_first_public_claim_is_re_checked_though_a_team_row_already_serves(registry, quiet_push, monkeypatch):
+    """Serving in a team is not holding the name for the public: publishing to
+    @public for the first time is a new claim in that scope, so a rival that
+    landed meanwhile (bound earlier) backs it out.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    registry.publishes[('acme.foo_bar', 'team~t1')] = {
+        'orgId': 'org1',
+        'appId': 'acme.foo_bar',
+        'audience': {'type': 'team', 'id': 't1'},
+        'version': 1,
+        'state': 'enabled',
+        'snapshot': {},
+        'publishedAt': 10,
+        'createdAt': 500.0,
+    }
+    original = account_singleton.publish_set
+
+    async def publish_set_with_rival(org_id, kind, app_id, audience, *rest):
+        # Another engine's earlier-bound rival lands between check and write.
+        _foreign_public_row(registry, 'acme_foo.bar', 100.0)
+        row = await original(org_id, kind, app_id, audience, *rest)
+        row['createdAt'] = 200.0
+        return row
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_rival, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+    req = _request('publish', version=1, target='@public')
+    req['arguments']['appId'] = 'acme.foo_bar'
+
+    result = await handle_deploy_app(owner, req)
+
+    assert result['success'] is False
+    assert "'acme_foo.bar' already holds" in result['message']
+    assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'removed'
 
 
 @pytest.mark.asyncio
