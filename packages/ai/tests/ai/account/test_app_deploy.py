@@ -40,6 +40,7 @@ target resolution, the scope walk, the entitlement checks) runs for real.
 
 import io
 import json
+import time
 import zipfile
 from types import SimpleNamespace
 
@@ -247,9 +248,9 @@ class _FakeRegistry:
                 'publishedAt': 4000,
             }
             previous = self.publishes.get((app_id, self._key(audience)))
-            if previous and 'createdAt' in previous:
-                # Both real backends keep createdAt across a repoint.
-                row['createdAt'] = previous['createdAt']
+            # Both real backends keep createdAt across a repoint and stamp
+            # now on a brand-new row.
+            row['createdAt'] = previous['createdAt'] if previous and 'createdAt' in previous else time.time()
             self.publishes[(app_id, self._key(audience))] = row
             self.set_calls.append({'audience': dict(audience), 'version': version, 'snapshot': snapshot})
             return row
@@ -2681,6 +2682,77 @@ async def test_a_first_public_claim_is_re_checked_though_a_team_row_already_serv
     assert result['success'] is False
     assert "'acme_foo.bar' already holds" in result['message']
     assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'removed'
+
+
+@pytest.mark.asyncio
+async def test_a_republish_never_unpublishes_the_scope_it_already_serves(registry, quiet_push, monkeypatch):
+    """An incumbent already serving @public holds the name there: repointing
+    it claims nothing new, so no re-check runs and a registry hiccup during
+    one cannot turn the live binding into a 'removed' one.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 10.0
+    original = account_singleton.publish_list
+    calls = {'n': 0}
+
+    async def flaky(*args):
+        calls['n'] += 1
+        if calls['n'] == 2:  # what a post-write re-check would read
+            raise RuntimeError('transient')
+        return await original(*args)
+
+    monkeypatch.setattr(account_singleton, 'publish_list', flaky, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is True
+    row = registry.publishes[('acme.brandy', 'public~')]
+    assert (row['version'], row['state']) == (2, 'enabled')
+
+
+@pytest.mark.asyncio
+async def test_a_back_out_restores_a_disabled_prior_row_at_its_prior_version(registry, quiet_push, monkeypatch):
+    """A prior row that was disabled comes back disabled at its old version
+    when the new binding loses the name; the back-out does not write
+    'removed' over it, and the response says it was restored.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    registry.artifacts[2]['moduleId'] = 'acme_foo_bar'
+    registry.publishes[('acme.foo_bar', 'public~')] = {
+        'orgId': 'org1',
+        'appId': 'acme.foo_bar',
+        'audience': dict(AUD_PUBLIC),
+        'version': 1,
+        'state': 'disabled',
+        'snapshot': {'name': 'old'},
+        'publishedAt': 10,
+        'createdAt': 150.0,
+    }
+    original = account_singleton.publish_set
+
+    async def publish_set_with_rival(org_id, kind, app_id, audience, *rest):
+        if app_id == 'acme.foo_bar' and 'acme_foo.bar' not in {a for a, _ in registry.publishes}:
+            _foreign_public_row(registry, 'acme_foo.bar', 100.0)  # bound earlier, lands in the window
+        return await original(org_id, kind, app_id, audience, *rest)
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_rival, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+    req = _request('publish', version=2, target='@public')
+    req['arguments']['appId'] = 'acme.foo_bar'
+
+    result = await handle_deploy_app(owner, req)
+
+    assert result['success'] is False
+    assert "'acme_foo.bar' already holds" in result['message']
+    assert 'restored' in result['message']
+    row = registry.publishes[('acme.foo_bar', 'public~')]
+    assert (row['version'], row['state']) == (1, 'disabled')
+    assert row['snapshot'] == {'name': 'old'}
 
 
 @pytest.mark.asyncio
