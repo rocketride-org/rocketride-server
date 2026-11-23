@@ -601,3 +601,21 @@ def test_a_token_serves_only_the_deployment_it_was_minted_for(served_app):
     )
     assert served_app.get_bundle(token=bound).status_code == 200
     assert served_app.get_bundle(token=elsewhere).status_code == 404
+
+
+def test_public_assets_are_revalidated_so_a_withdrawn_deployment_stops_loading(served_app):
+    """``/_p`` answers ``private, no-cache`` with an ETag; revalidation re-resolves the version, so withdrawal is a 404."""
+    import ai.modules.shell.shell as shell_mod
+
+    path = '/_p/acme.thirdparty/v1/remoteEntry.js'
+    first = served_app.get(path)
+    assert first.status_code == 200
+    assert first.headers['cache-control'] == 'private, no-cache'
+    validator = first.headers['etag']
+    again = served_app.get(path, headers={'if-none-match': validator})
+    assert again.status_code == 304 and again.headers['etag'] == validator
+    assert served_app.get(path, headers={'if-none-match': '"something-else"'}).status_code == 200
+
+    served_app.registry.rows.clear()  # the deployment is withdrawn
+    shell_mod.invalidate_app_serving(served_app.APP)
+    assert served_app.get(path, headers={'if-none-match': validator}).status_code == 404
