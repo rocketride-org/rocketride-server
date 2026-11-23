@@ -1430,6 +1430,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             'RR_SIGNING_KEY': 'sign',
             'RR_OAUTH_BROKER_URL': 'https://broker.example',
             'RR_PROC_PRIVATE': '1',
+            'RR_NODE_RAIL_ENABLED': '1',
             'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
             'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
             'NOTION_API_KEY': 'notion',
@@ -1457,6 +1458,7 @@ def test_filter_subprocess_env_is_an_allowlist():
         'RR_SIGNING_KEY': 'sign',
         'RR_OAUTH_BROKER_URL': 'https://broker.example',
         'RR_PROC_PRIVATE': '1',  # tasks must see the opt-in to act on it
+        'RR_NODE_RAIL_ENABLED': '1',  # a run solves its nodes the way EaaS expects
         'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
         'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
         'NOTION_API_KEY': 'notion',
