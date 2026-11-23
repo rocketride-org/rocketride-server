@@ -157,7 +157,7 @@ def test_write_questions_error_answer_drops_the_engine_path(monkeypatch):
 
     node.writeQuestions(_FakeQuestion())
 
-    assert node.instance.written[0].getText() == '**LLM error** — Exception: Exception: Invalid API key.'
+    assert node.instance.written[0].getText() == '**LLM error** — Exception: Invalid API key.'
     assert any(location in line for line in logged), 'the log lost the engine location'
 
 

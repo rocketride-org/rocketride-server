@@ -239,7 +239,7 @@ class RocketRideDriver(AgentBase):
                 error(f'rocketride wave plan failed run_id={run_id}: {safe_str(exc)}')
                 trace['stop_reason'] = 'error'
                 # The trace travels in the payload a parent agent gets: no engine source path.
-                trace['error'] = f'{type(exc).__name__}: {error_text(exc)}'
+                trace['error'] = error_text(exc, with_type=True)
                 # A retry that failed after an unusable reply carries that reply's notes.
                 current_scratch = safe_str(getattr(exc, 'wave_scratch', '')) or current_scratch
                 if not waves and not current_scratch:
@@ -627,7 +627,7 @@ class RocketRideDriver(AgentBase):
             # was gathered, as it stands, rather than only the error. The log keeps the
             # full text, with the engine location the report leaves out.
             error(f'rocketride wave synthesis failed run_id={context.run_id}: {type(exc).__name__}: {safe_str(exc)}')
-            return _partial_report(f'the model call failed ({type(exc).__name__}: {error_text(exc)})', lines, scratch)
+            return _partial_report(f'the model call failed ({error_text(exc, with_type=True)})', lines, scratch)
         if not safe_str(answer).strip():
             # An empty reply is no answer either; the gathered facts still are.
             return _partial_report('the model returned no text', lines, scratch)

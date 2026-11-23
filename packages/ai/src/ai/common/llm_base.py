@@ -35,7 +35,7 @@ def _shown_error(e: Exception, *, answer: bool = False) -> str:
     """
     if isinstance(e, HostedModelError):
         return str(e)
-    return f'{type(e).__name__}: {error_text(e) if answer else e}'
+    return error_text(e, with_type=True) if answer else f'{type(e).__name__}: {e}'
 
 
 class LLMBase(IInstanceBase):

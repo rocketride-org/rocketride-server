@@ -249,7 +249,7 @@ def test_an_engine_error_in_planning_keeps_the_path_out_of_answer_and_trace(wave
     answer, trace = _planning_fails_with(wave, driver, monkeypatch, failure)
 
     assert answer == 'LLM error: Exception: Invalid API key.'
-    assert trace['error'] == 'Exception: Exception: Invalid API key.'
+    assert trace['error'] == 'Exception: Invalid API key.'
 
 
 class Unprintable(Exception):
@@ -319,4 +319,4 @@ def test_a_tool_that_fails_inside_the_engine_keeps_the_path_out_of_its_result(wa
         wave_name='wave-1',
     )
 
-    assert results[0]['error'] == 'Exception: Exception: Tool not found.'
+    assert results[0]['error'] == 'Exception: Tool not found.'
