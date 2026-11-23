@@ -153,7 +153,10 @@ class DataCommands(DAPConn):
 
         Args:
             request: The DAP request; ``arguments.subcommand`` selects the frame
-                kind, ``arguments.pipe_id`` names an open binding.
+                kind, ``arguments.pipe_id`` names an open binding. An open may
+                name ``pipelineTraceLevel``: the level the engine binds its pipe
+                at for the whole transaction (``caller_stamp``), else the
+                control's.
 
         Returns:
             The engine's response body in an envelope keyed off this request.

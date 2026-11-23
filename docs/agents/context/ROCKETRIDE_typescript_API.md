@@ -506,9 +506,9 @@ const results = await client.sendFiles(
 );
 ```
 
-### `pipe(token, objinfo?, mimeType?, provider?, onSSE?, team?, params?): Promise<DataPipe>`
+### `pipe(token, objinfo?, mimeType?, provider?, onSSE?, team?, params?, pipelineTraceLevel?): Promise<DataPipe>`
 
-Create a streaming data pipe for sending large datasets. `mimeType` defaults to `application/octet-stream`. `token` takes a control id or an address (bare or rooted), as for `send()`; the positional `team` slot is retired (pass `undefined`).
+Create a streaming data pipe for sending large datasets. `mimeType` defaults to `application/octet-stream`. `token` takes a control id or an address (bare or rooted), as for `send()`; the positional `team` slot is retired (pass `undefined`). `pipelineTraceLevel` (`PipelineTraceLevel`: `'none' | 'metadata' | 'summary' | 'full'`) is the trace level of the pipe's transaction: it rides the open and the engine binds the pipe at it, so its FLOW events follow it even on an engine shared by every caller of a published pipeline; omitted, the control's own level applies (`none` on a published pipeline).
 
 ### DataPipe
 

@@ -509,9 +509,9 @@ for result in results:
 
 **Note:** Upload progress events are sent through the event system as `apaevt_status_upload` events (`open`, `write`, `close`, `complete`, `error` actions).
 
-### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None, params: Dict[str, Any] = None) -> DataPipe`
+### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None, params: Dict[str, Any] = None, pipeline_trace_level: Optional[PipelineTraceLevel] = None) -> DataPipe`
 
-Create a streaming data pipe for sending large datasets in chunks. `token` takes a control id or an address (bare or rooted), as for `send()`. `mime_type` defaults to `application/octet-stream`; `on_sse` scopes an SSE callback to this pipe. Returns a `DataPipe` instance (not yet opened).
+Create a streaming data pipe for sending large datasets in chunks. `token` takes a control id or an address (bare or rooted), as for `send()`. `mime_type` defaults to `application/octet-stream`; `on_sse` scopes an SSE callback to this pipe. `pipeline_trace_level` (`'none'`, `'metadata'`, `'summary'` or `'full'`) is the trace level of the pipe's transaction: it rides the open and the engine binds the pipe at it, so its FLOW events follow it even on an engine shared by every caller of a published pipeline; None uses the control's own level (`none` on a published pipeline). Returns a `DataPipe` instance (not yet opened).
 
 ### DataPipe
 

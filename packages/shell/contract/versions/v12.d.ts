@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-22T19:11:44.171Z
-// Source commit: 67d6b43864d16dcd016d1620233db14e8ed2aeea
+// Generated:     2026-11-23T03:51:35.255Z
+// Source commit: 09759ea928209f1eab72c96e9821db39abe84b30
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1375,6 +1375,12 @@ export interface PipelineConfig {
     editorMode?: string;
 }
 /**
+ * How much of a request's flow the engine records and sends as FLOW events,
+ * from nothing to every node's input and output: `use()` and `submit()` take
+ * it, and so does a DataPipe for its own transaction.
+ */
+export type PipelineTraceLevel = "none" | "metadata" | "summary" | "full";
+/**
  * What `submit()` returns: the pipe `close` body plus the resolution stamps.
  *
  * The close body's own fields (`result_types`, `objects` ...) ride beside these.
@@ -1482,7 +1488,7 @@ export interface DeploymentSchedule {
     ttl?: number | null;
     /** Trace verbosity for this source's deploy runs; null/absent = the
         deploy default (full). */
-    traceLevel?: "none" | "metadata" | "summary" | "full" | null;
+    traceLevel?: PipelineTraceLevel | null;
     /** Full task debug output (--trace=debugOut) for this source. */
     debugOut?: boolean;
     /** Unix timestamp (seconds) of the last scheduler dispatch, or null. */
@@ -5267,7 +5273,7 @@ declare class DeployApi {
      * @returns The updated deployment record.
      */
     setSourceConfig(projectId: string, sourceId: string, teamId: string, options?: {
-        traceLevel?: "none" | "metadata" | "summary" | "full" | null;
+        traceLevel?: PipelineTraceLevel | null;
         debugOut?: boolean;
     }): Promise<Deployment>;
     /**
@@ -5518,9 +5524,14 @@ export declare class DataPipe {
      *               (`@<team>/...`, `=team/<tid>/...`); any value throws
      * @param params - Per-call parameter values by public name; they ride the open,
      *                 the one door every per-call value enters by
+     * @param pipelineTraceLevel - The trace level of this pipe's transaction (open,
+     *                 writes, close): 'none' | 'metadata' | 'summary' | 'full'. It rides
+     *                 the open and the engine binds the pipe at it, so the request's flow
+     *                 events follow it even on an engine shared by every caller of a
+     *                 published pipeline. Omitted, the control's own level applies.
      * @throws Error if `team` is passed (the per-call team option is retired)
      */
-    constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>);
+    constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>, pipelineTraceLevel?: PipelineTraceLevel);
     /**
      * Check if the pipe is currently open for writing.
      *
@@ -6010,7 +6021,7 @@ export declare class RocketRideClient extends DAPClient {
         args?: string[];
         ttl?: number;
         /** Pipeline trace level. When set, captures every lane write and invoke call in the response under '_trace'. */
-        pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
+        pipelineTraceLevel?: PipelineTraceLevel;
         /** Optional display name for the task (e.g. shown in dashboard). */
         name?: string;
         /** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
@@ -6076,7 +6087,7 @@ export declare class RocketRideClient extends DAPClient {
         args?: string[];
         ttl?: number;
         env?: Record<string, string>;
-        pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
+        pipelineTraceLevel?: PipelineTraceLevel;
     }): Promise<SUBMIT_RESULT>;
     /**
      * Terminate a running pipeline.
@@ -6192,9 +6203,12 @@ export declare class RocketRideClient extends DAPClient {
      * `token` is the control id, or an address (bare or rooted, `@<team>/...`) the open
      * resolves the way `submit()` resolves a name, starting a published rung when
      * nothing is live. `team` is retired: pass `undefined` (any value throws); a
-     * rooted address names the rung.
+     * rooted address names the rung. `pipelineTraceLevel` is the trace level of
+     * the pipe's transaction ('none' | 'metadata' | 'summary' | 'full'): it rides
+     * the open and the engine binds the pipe at it; omitted, the control's own
+     * level applies.
      */
-    pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe>;
+    pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>, pipelineTraceLevel?: PipelineTraceLevel): Promise<DataPipe>;
     /**
      * Send data to a running pipeline.
      *

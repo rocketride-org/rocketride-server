@@ -28,7 +28,7 @@ export { TASK_STATE } from 'rocketride';
 
 // Deep import ON PURPOSE — the trace barrel is index.tsx and this file is
 // compiled by the VS Code EXTENSION HOST (no --jsx). types.ts is a pure leaf.
-export type { TraceEvent, TraceRow, TraceLevel } from 'shared/components/trace/types';
+export type { TraceEvent, TraceRow } from 'shared/components/trace/types';
 
 // =============================================================================
 // VIEW TYPES

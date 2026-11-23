@@ -43,6 +43,7 @@
 
 import type { RocketRideClient } from './client.js';
 import type { DeployDeleteResult, DeployHistoryEntry, DeployListEnvelope, DeployListParams, Deployment, DeployArtifact, PipelineConfig, PublishResult, SchedulePreview } from './types/deploy.js';
+import type { PipelineTraceLevel } from './types/pipeline.js';
 import { getRegisteredAppPack } from './app-pack-registry.js';
 import type { AppPackModule } from './app-pack-registry.js';
 import type { AppVerifyReport, CreatedApp, CreatedPipe } from '../app-pack/index.js';
@@ -600,7 +601,7 @@ export class DeployApi {
 	 * @param options.debugOut - Full task debug output (--trace=debugOut).
 	 * @returns The updated deployment record.
 	 */
-	async setSourceConfig(projectId: string, sourceId: string, teamId: string, options: { traceLevel?: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut?: boolean } = {}): Promise<Deployment> {
+	async setSourceConfig(projectId: string, sourceId: string, teamId: string, options: { traceLevel?: PipelineTraceLevel | null; debugOut?: boolean } = {}): Promise<Deployment> {
 		return this.client.call<Deployment>('rrext_deploy_pipe', {
 			subcommand: 'source_config',
 			projectId,

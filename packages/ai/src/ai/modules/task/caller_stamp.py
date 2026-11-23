@@ -30,7 +30,12 @@ OPEN and a standalone ``tool`` call naming no pipe, its resolved ``config``
 by stack index, from which the engine builds that control's IGlobal set), with
 which per-call parameters, environment, trace level and request id. Nodes
 read it through ``self.settings`` and nothing else, so it is the whole trust
-boundary between a client and the engine (plan 0 S2, 5.3):
+boundary between a client and the engine (plan 0 S2, 5.3). Its
+``traceLevel`` is what the engine binds the pipe at (``getPipe(level)``,
+plan 7.4) for the whole transaction, open to close: the level the OPEN
+asked for (``pipelineTraceLevel``), else the control's own. A shared engine
+serves every caller of a publication, so the level is the pipe's, never
+the engine's.
 
 - STRIP first: every reserved key a client sent (``_caller``, ``_ctx``,
   ``config``, ``controlId``) is deleted from the request's ``arguments``, at
@@ -55,6 +60,8 @@ narrowed, 2026-11-12).
 import copy
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
+from .types import TaskError
+
 if TYPE_CHECKING:
     from ai.account.models import AccountInfo
 
@@ -70,6 +77,13 @@ RESERVED_KEYS = ('_caller', '_ctx', 'config', 'controlId')
 #: control's config (the ``tool`` one only when it names no pipe).
 OPEN_SUBCOMMAND = 'open'
 TOOL_SUBCOMMAND = 'tool'
+
+#: The open argument naming the pipe's trace level: the name ``use()`` and
+#: ``submit()`` take it under
+TRACE_LEVEL_ARGUMENT = 'pipelineTraceLevel'
+
+#: The trace levels a binding may ask for (the engine's ``PIPELINE_TRACE_LEVEL``)
+TRACE_LEVELS = ('none', 'metadata', 'summary', 'full')
 
 
 def carries_config(subcommand: Optional[str], pipe_id: Any) -> bool:
@@ -146,6 +160,41 @@ def strip_reserved(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     return stripped
 
 
+def requested_trace_level(arguments: Mapping[str, Any]) -> Optional[str]:
+    """
+    The trace level an open asks its pipe to run at, or None when it names none.
+
+    Read from the OPEN only: the engine binds the pipe at it there, and it
+    holds for the whole transaction (open, writes, close), so no later frame
+    can change it.
+
+    Args:
+        arguments: The request's ``arguments`` as the client sent them.
+
+    Returns:
+        ``none``, ``metadata``, ``summary`` or ``full``; None for any other
+        frame, or an open that names no level (the control's own applies).
+
+    Raises:
+        TaskError: TASK_INVALID_ARGUMENT for an open naming a level the
+            engine has not: refused, never dropped.
+    """
+    # Step 1: only the open sets the pipe's level
+    if arguments.get('subcommand') != OPEN_SUBCOMMAND:
+        return None
+    level = arguments.get(TRACE_LEVEL_ARGUMENT)
+    if level is None:
+        return None
+    # Step 2: one of the engine's levels
+    if level not in TRACE_LEVELS:
+        raise TaskError(
+            TaskError.INVALID_ARGUMENT,
+            f'{TRACE_LEVEL_ARGUMENT} must be one of {"|".join(TRACE_LEVELS)}, got {level!r}',
+            field=TRACE_LEVEL_ARGUMENT,
+        )
+    return level
+
+
 def mint(
     account_info: 'AccountInfo',
     control: 'TaskControl',
@@ -154,6 +203,7 @@ def mint(
     params: Optional[Mapping[str, Mapping[str, Any]]] = None,
     subcommand: Optional[str] = None,
     pipe_id: Any = None,
+    trace_level: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     The ``_caller`` context of one request through ``control`` (plan 5.3 item 1).
@@ -165,6 +215,8 @@ def mint(
         params: The admitted per-call params, per node (``{nodeId: {configKey: value}}``).
         subcommand: The frame kind.
         pipe_id: The slot the frame names, or None for a frame that starts its own binding.
+        trace_level: The level the open asked for (``requested_trace_level``),
+            or None for the control's own.
 
     Returns:
         ``{controlId, userId, teamId, orgId, address, rung, params, env,
@@ -194,7 +246,9 @@ def mint(
         # Only the ROCKETRIDE_* keys the resolved spec references (least
         # privilege, plan 6.2); the control resolves them once (C.10)
         'env': dict(control.env),
-        'traceLevel': control.trace_level,
+        # The level the engine binds the pipe at: the request's, else the
+        # control's (a published agent's shared engine defaults to none)
+        'traceLevel': trace_level or control.trace_level,
         'correlationId': correlation_id,
     }
     # The frame that starts a binding builds the control's IGlobal set: its
@@ -224,16 +278,24 @@ def prepare(
 
     Returns:
         A copy of ``arguments`` with the server's ``_caller`` set and every
-        client-sent reserved key removed. An internal connection's arguments
-        are returned as a plain copy: it stamped its own context.
+        client-sent reserved key removed. An open's requested trace level
+        moves into ``_caller.traceLevel``: the engine reads it there only. An
+        internal connection's arguments are returned as a plain copy: it
+        stamped its own context.
+
+    Raises:
+        TaskError: TASK_INVALID_ARGUMENT for a trace level the engine has not.
     """
     # Step 1: the one pass-through: a server-made connection forwards the
     # context it stamped itself
     if is_internal(conn):
         return copy.deepcopy(dict(arguments))
-    # Step 2: STRIP what the client sent, THEN set the server's context; the
+    # Step 2: the level an open asks for, checked before anything is sent
+    trace_level = requested_trace_level(arguments)
+    # Step 3: STRIP what the client sent, THEN set the server's context; the
     # order is the trust boundary (a merge would let the client win)
     prepared = strip_reserved(arguments)
+    prepared.pop(TRACE_LEVEL_ARGUMENT, None)
     prepared['_caller'] = mint(
         conn._account_info,
         control,
@@ -241,5 +303,6 @@ def prepare(
         params=params,
         subcommand=arguments.get('subcommand'),
         pipe_id=arguments.get('pipeId'),
+        trace_level=trace_level,
     )
     return prepared

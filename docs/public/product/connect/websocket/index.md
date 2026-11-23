@@ -102,7 +102,14 @@ published pipe that is not running is started. The open's response returns the
 control the pipe was opened on, as `controlId` (and its `address`). Every later
 request on the pipe (`write`, `close`, ...) carries that control id as its
 `token` in `arguments`, never an address, so a frame cannot land on another
-control the address resolves to by then. For example:
+control the address resolves to by then.
+
+The open may also carry `pipelineTraceLevel` (`none`, `metadata`, `summary` or
+`full`): the level the engine binds this pipe at for its whole transaction, open
+to close, so its FLOW events follow it even on an engine shared by every caller
+of a published pipe. Without it the control's own level applies (`none` on a
+published pipe); any other value is refused with `TASK_INVALID_ARGUMENT`. A later
+frame cannot change it. For example:
 
 ```json
 {

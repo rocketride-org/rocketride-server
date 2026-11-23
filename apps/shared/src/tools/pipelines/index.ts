@@ -36,7 +36,7 @@ export type { IPipelineDiscovery, IPipelineDiscoveryOptions } from './sidebar/di
 // at the tool root and this index is its only public face.
 export { default as ProjectView } from './ProjectView';
 export type { IProjectViewProps } from './ProjectView';
-export type { IViewProps, ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, TraceLevel } from './types';
+export type { IViewProps, ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './types';
 export { parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from './hostEvents';
 export type { ParsedServerEvent } from './hostEvents';
 export { useTaskEvents } from './panels/development/hooks/useTaskEvents';

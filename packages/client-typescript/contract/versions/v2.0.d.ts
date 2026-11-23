@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 36ea08044c7d600e9010d5adf4fc90c463dbafed
+// Source commit: 09759ea928209f1eab72c96e9821db39abe84b30
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1176,14 +1176,10 @@ export interface PipeStoreBlock {
         plans: BillingPlan[];
     };
 }
-/**
- * The app scaffold's placeholder icon, for a pipeline that wants one. The
- * pipeline scaffold writes no icon file and the default block names none.
- */
+/** The placeholder icon every scaffolded pipeline ships — the app scaffold's. */
 export declare const PIPE_ICON_SVG: string;
 /**
- * The block a new pipeline is stamped with — a fresh object each call. It
- * names no icon: a pipeline without one leaves `icon` unset.
+ * The block a new pipeline is stamped with — a fresh object each call.
  *
  * @returns The scaffold's default store block.
  */
@@ -1317,10 +1313,8 @@ export interface PipelineConfig {
     /** Project identifier for organization and permissions */
     project_id?: string;
     /** The store listing (tagline, categories, tags, icon, readme, links,
-        mode, billing). A pipeline carries one when it is deployed: the
-        packers and the deploy door add the default block to a pipe that has
-        none (a version stored by an earlier release can lack it). The engine
-        never sees it. */
+        mode, billing). Present = the pipeline is listable; absent = it
+        deploys unlisted. The engine never sees it. */
     store?: PipeStoreBlock;
     /** Per-call params: public name -> `nodeId.configKey` */
     parameters?: Record<string, string>;
@@ -1350,6 +1344,12 @@ export interface PipelineConfig {
     /** Active editor mode (e.g. 'design', 'status', 'flow') */
     editorMode?: string;
 }
+/**
+ * How much of a request's flow the engine records and sends as FLOW events,
+ * from nothing to every node's input and output: `use()` and `submit()` take
+ * it, and so does a DataPipe for its own transaction.
+ */
+export type PipelineTraceLevel = "none" | "metadata" | "summary" | "full";
 /**
  * What `submit()` returns: the pipe `close` body plus the resolution stamps.
  *
@@ -1458,7 +1458,7 @@ export interface DeploymentSchedule {
     ttl?: number | null;
     /** Trace verbosity for this source's deploy runs; null/absent = the
         deploy default (full). */
-    traceLevel?: "none" | "metadata" | "summary" | "full" | null;
+    traceLevel?: PipelineTraceLevel | null;
     /** Full task debug output (--trace=debugOut) for this source. */
     debugOut?: boolean;
     /** Unix timestamp (seconds) of the last scheduler dispatch, or null. */
@@ -4933,9 +4933,8 @@ declare class DeployApi {
      * The pipe rides as the artifact; the zip beside it carries the pipe at
      * its root plus the readme and icon its `store` block declares and every
      * file the README references, laid out relative to the pipe file's
-     * directory. A pipe without a `store` block is packed with the default
-     * block added (its `readme` kept only when README.md sits beside the
-     * pipe); the file on disk is left as it is. A declared or referenced file
+     * directory. A pipe without a `store` block deploys as an UNLISTED
+     * artifact (the zip is the pipe alone). A declared or referenced file
      * that is missing, or that resolves outside the pipe's directory, is
      * refused by name before any call; `deploy.add({ kind: 'pipe', pipeline })`
      * stays the raw door for a pipeline dict.
@@ -4984,8 +4983,8 @@ declare class DeployApi {
      * Scaffolds a new pipeline in the workspace — the programmatic twin of
      * `rocketride pipe new` and `createApp`'s pipeline counterpart (Node.js
      * only). Writes `<dir>/<pipeId>/<pipeId>.pipe` carrying the default
-     * `store` block, a `README.md` stub and an empty `assets/` directory; no
-     * icon file is written. Scaffolding only — nothing is deployed; the
+     * `store` block, the placeholder `icon.svg`, a `README.md` stub and an
+     * empty `assets/` directory. Scaffolding only — nothing is deployed; the
      * normal lifecycle (edit → `addPipe` → publish) follows.
      *
      * @param pipeId - The pipeline id: one dot-free segment of letters,
@@ -5213,7 +5212,7 @@ declare class DeployApi {
      * @returns The updated deployment record.
      */
     setSourceConfig(projectId: string, sourceId: string, teamId: string, options?: {
-        traceLevel?: "none" | "metadata" | "summary" | "full" | null;
+        traceLevel?: PipelineTraceLevel | null;
         debugOut?: boolean;
     }): Promise<Deployment>;
     /**
@@ -5464,9 +5463,14 @@ export declare class DataPipe {
      *               (`@<team>/...`, `=team/<tid>/...`); any value throws
      * @param params - Per-call parameter values by public name; they ride the open,
      *                 the one door every per-call value enters by
+     * @param pipelineTraceLevel - The trace level of this pipe's transaction (open,
+     *                 writes, close): 'none' | 'metadata' | 'summary' | 'full'. It rides
+     *                 the open and the engine binds the pipe at it, so the request's flow
+     *                 events follow it even on an engine shared by every caller of a
+     *                 published pipeline. Omitted, the control's own level applies.
      * @throws Error if `team` is passed (the per-call team option is retired)
      */
-    constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>);
+    constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>, pipelineTraceLevel?: PipelineTraceLevel);
     /**
      * Check if the pipe is currently open for writing.
      *
@@ -5956,7 +5960,7 @@ export declare class RocketRideClient extends DAPClient {
         args?: string[];
         ttl?: number;
         /** Pipeline trace level. When set, captures every lane write and invoke call in the response under '_trace'. */
-        pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
+        pipelineTraceLevel?: PipelineTraceLevel;
         /** Optional display name for the task (e.g. shown in dashboard). */
         name?: string;
         /** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
@@ -6022,7 +6026,7 @@ export declare class RocketRideClient extends DAPClient {
         args?: string[];
         ttl?: number;
         env?: Record<string, string>;
-        pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
+        pipelineTraceLevel?: PipelineTraceLevel;
     }): Promise<SUBMIT_RESULT>;
     /**
      * Terminate a running pipeline.
@@ -6138,9 +6142,12 @@ export declare class RocketRideClient extends DAPClient {
      * `token` is the control id, or an address (bare or rooted, `@<team>/...`) the open
      * resolves the way `submit()` resolves a name, starting a published rung when
      * nothing is live. `team` is retired: pass `undefined` (any value throws); a
-     * rooted address names the rung.
+     * rooted address names the rung. `pipelineTraceLevel` is the trace level of
+     * the pipe's transaction ('none' | 'metadata' | 'summary' | 'full'): it rides
+     * the open and the engine binds the pipe at it; omitted, the control's own
+     * level applies.
      */
-    pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe>;
+    pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>, pipelineTraceLevel?: PipelineTraceLevel): Promise<DataPipe>;
     /**
      * Send data to a running pipeline.
      *

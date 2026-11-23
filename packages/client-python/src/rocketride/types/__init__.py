@@ -87,6 +87,7 @@ from .pipeline import (
     PipelineControlConnection,
     PipelineComponent,
     PipelineConfig,
+    PipelineTraceLevel,
     SUBMIT_RESULT,
 )
 
@@ -256,6 +257,7 @@ __all__ = [
     'PipelineControlConnection',
     'PipelineComponent',
     'PipelineConfig',
+    'PipelineTraceLevel',
     'SUBMIT_RESULT',
     # Task types
     'TASK_STATUS_COMPONENT_STAT',
