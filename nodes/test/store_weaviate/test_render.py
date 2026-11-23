@@ -10,6 +10,8 @@ from __future__ import annotations
 import random
 import tracemalloc
 
+import pytest
+
 from .test_record_updates import _make_obj_records, _make_store
 
 
@@ -167,3 +169,59 @@ def test_render_of_an_unknown_document_calls_nothing():
     store, _ = _make_store(_make_obj_records('doc', 3, is_deleted=False))
 
     assert _render(store, 'missing') == []
+
+
+def _limited_store(records: dict[str, dict], maximum: int, monkeypatch) -> tuple[object, list[int]]:
+    """Create a store on a server whose QUERY_MAXIMUM_RESULTS is set to maximum; also return each query's limit."""
+    store, collection = _make_store(records)
+    collection.queryMaximumResults = maximum
+    fetch = collection.query.fetch_objects
+    limits: list[int] = []
+
+    def recorded_fetch(**kwargs):
+        limits.append(kwargs.get('limit'))
+        assert len(limits) <= 20, 'render is not making progress'
+        return fetch(**kwargs)
+
+    monkeypatch.setattr(collection.query, 'fetch_objects', recorded_fetch)
+    return store, limits
+
+
+def test_render_of_a_small_document_on_a_server_with_a_lower_limit(monkeypatch):
+    """A server set to 500 results rejects the default page; even a 2-chunk document must still render."""
+    store, limits = _limited_store(_shuffled(_make_obj_records('doc', 2, is_deleted=False)), 500, monkeypatch)
+
+    assert _render(store, 'doc') == [_expected(2)]
+    assert limits == [10_000, 500]  # rejected once, then fetched at the server's limit
+
+    # The lowered page size is kept, so a later render is not rejected again
+    limits.clear()
+    assert _render(store, 'doc') == [_expected(2)]
+    assert limits == [500]
+
+
+def test_render_pages_under_a_server_with_a_lower_limit(monkeypatch):
+    """A document longer than the server's limit is read in pages of that limit."""
+    store, limits = _limited_store(_shuffled(_make_obj_records('doc', 1_201, is_deleted=False)), 500, monkeypatch)
+
+    assert _render(store, 'doc') == [_expected(1_201)]
+    assert limits == [10_000, 500, 500, 500]  # rejected, two full pages, then a short one
+
+
+def test_render_raises_a_query_error_that_is_not_the_result_limit(monkeypatch):
+    """Only the result-limit rejection is retried; any other query error reaches the caller."""
+    store, collection = _make_store(_make_obj_records('doc', 2, is_deleted=False))
+    from weaviate.exceptions import WeaviateQueryError  # the mock the store was loaded with
+
+    calls = []
+
+    def failing_fetch(**kwargs):
+        calls.append(kwargs)
+        raise WeaviateQueryError('connection reset')
+
+    monkeypatch.setattr(collection.query, 'fetch_objects', failing_fetch)
+
+    with pytest.raises(WeaviateQueryError):
+        _render(store, 'doc')
+    assert len(calls) == 1
+    assert store.renderPageSize == 10_000

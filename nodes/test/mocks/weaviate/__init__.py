@@ -42,6 +42,8 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 import hashlib
 
+from .exceptions import WeaviateQueryError
+
 
 # Weaviate's server defaults: a query without a limit returns QUERY_DEFAULTS_LIMIT
 # objects, and one whose offset + limit exceeds QUERY_MAXIMUM_RESULTS is rejected.
@@ -316,11 +318,12 @@ class MockQuery:
         """
         if limit is None:
             limit = QUERY_DEFAULTS_LIMIT
-        if offset + limit > QUERY_MAXIMUM_RESULTS:
-            raise ValueError(
+        maximum = self.collection.queryMaximumResults
+        if offset + limit > maximum:
+            raise WeaviateQueryError(
                 f'invalid pagination params: query maximum results exceeded: the total limit calculated from '
                 f"the provided offset '{offset}' and limit '{limit}' exceeds the configured value for "
-                f"QUERY_MAXIMUM_RESULTS '{QUERY_MAXIMUM_RESULTS}'"
+                f"QUERY_MAXIMUM_RESULTS '{maximum}'"
             )
 
         results = []
@@ -420,6 +423,9 @@ class MockCollection:
         if name not in MockCollection._all_storage:
             MockCollection._all_storage[name] = {}
         self._storage = MockCollection._all_storage[name]
+
+        # A server can set QUERY_MAXIMUM_RESULTS below the default; a test sets this to model one
+        self.queryMaximumResults = QUERY_MAXIMUM_RESULTS
 
         self.query = MockQuery(self)
         self.data = MockData(self)

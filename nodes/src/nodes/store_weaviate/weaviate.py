@@ -60,6 +60,9 @@ _REPEAT_PAUSE_SECONDS = 1.0
 # How many such pages in a row a trash update tolerates before it fails.
 _MAX_STALLS = 2
 
+# A query rejected for asking for too many objects names the server's limit
+_QUERY_MAXIMUM_RESULTS = re.compile(r"QUERY_MAXIMUM_RESULTS '(\d+)'")
+
 
 class Store(DocumentStoreBase):
     apikey: str | None = None
@@ -71,6 +74,7 @@ class Store(DocumentStoreBase):
     renderChunkSize: int = 32 * 1024 * 1024
     # The most chunks render asks Weaviate for in one page. Weaviate rejects a
     # query whose offset + limit exceeds QUERY_MAXIMUM_RESULTS (10000 by default).
+    # A server configured lower lowers this to its limit on the first rejection.
     renderPageSize: int = 10000
     similarity: str = 'Cosine'
     client: WeaviateClient | None = None
@@ -624,13 +628,12 @@ class Store(DocumentStoreBase):
         # only. The cursor moves forward on every full page, so any number of
         # copies is passed, and re-reading a copy only replaces it in place.
         groupSize = self.renderChunkSize
-        pageSize = self.renderPageSize
         groupStart = 0
         pieces: Dict[int, str] = {}
 
         cursor = 0
         while True:
-            objects = self._fetchRenderPage(objectId, cursor, pageSize)
+            objects = self._fetchRenderPage(objectId, cursor)
 
             lastChunk = cursor
             for point in objects:
@@ -652,24 +655,42 @@ class Store(DocumentStoreBase):
                 # Of several copies of one chunk number, the last one read is kept
                 pieces[chunk] = point.properties.get('content') or ''
 
-            if len(objects) < pageSize:
+            # Compared after the fetch, which may have lowered the page size to the server's limit
+            if len(objects) < self.renderPageSize:
                 break
             cursor = self._nextRenderCursor(cursor, lastChunk)
 
         self._emitRenderGroup(pieces, callback)
 
-    def _fetchRenderPage(self, objectId: str, cursor: int, pageSize: int) -> List[Any]:
+    def _fetchRenderPage(self, objectId: str, cursor: int) -> List[Any]:
         """
-        Return up to pageSize objects of one document from chunkId cursor on, in chunkId order.
+        Return up to renderPageSize objects of one document from chunkId cursor on, in chunkId order.
+
+        A server whose QUERY_MAXIMUM_RESULTS is below renderPageSize rejects the
+        query and names its limit. renderPageSize then drops to that limit, for
+        this page and every later render, and the page is fetched again.
         """
-        points = self.collectionObj.query.fetch_objects(
-            filters=(
-                Filter.by_property('objectId').equal(objectId) & Filter.by_property('chunkId').greater_or_equal(cursor)
-            ),
-            sort=Sort.by_property('chunkId', ascending=True),
-            limit=pageSize,
-        )
-        return points.objects
+        while True:
+            try:
+                points = self.collectionObj.query.fetch_objects(
+                    filters=(
+                        Filter.by_property('objectId').equal(objectId)
+                        & Filter.by_property('chunkId').greater_or_equal(cursor)
+                    ),
+                    sort=Sort.by_property('chunkId', ascending=True),
+                    limit=self.renderPageSize,
+                )
+                return points.objects
+            except WeaviateBaseError as error:
+                match = _QUERY_MAXIMUM_RESULTS.search(str(error))
+                if match is None:
+                    raise
+                limit = int(match.group(1))
+
+                # Only a lower, usable limit is retried, so the retries end
+                if not 0 < limit < self.renderPageSize:
+                    raise
+                self.renderPageSize = limit
 
     @staticmethod
     def _nextRenderCursor(cursor: int, lastChunk: int) -> int:
