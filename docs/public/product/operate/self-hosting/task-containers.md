@@ -114,7 +114,9 @@ its container. Treat access to the Docker daemon as access to those values.
 ## Files and storage
 
 The task file is streamed into the container and goes with it; the engine
-writes no copy to disk.
+writes no copy to disk. The packaged nodes the run loads go in the same way,
+64 MiB at most, from the engine's own `nodes/` directory, before the task
+starts: the task loads the same copies a child process would.
 
 Pipelines that use the file-system tool (`tool_filesystem`), or the skills
 tool (`tool_skills`) with a skills folder, work on a
@@ -173,9 +175,9 @@ left behind.
 - No GPU reaches a task container, so a node that would compute on a local GPU
   runs on the CPU. Use a model server for GPU work.
 - Nodes that work on the engine host's own files see only the container's.
-- Tasks run the nodes in the image. A node that only the engine's own `nodes/`
-  directory holds (a custom node, or one the engine unpacks when a run starts)
-  is not available in a task container.
+- A task runs the nodes in the image and the packaged nodes its run loads. A
+  custom node that only the engine's own `nodes/` directory holds is not
+  available in a task container.
 - A task's crash dump stays in its container. When the engine runs with
   `--dumps`, a task that crashes writes one and its console names the file,
   but the container is removed when the task ends, and the dump with it.
