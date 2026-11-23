@@ -294,6 +294,18 @@ def test_a_skipped_call_does_not_resolve_memory_references(wave):
     assert host.calls == []
 
 
+def test_tools_load_resolves_memory_references(wave):
+    memory = DictMemory()
+    memory.put('wave-0.r0', _name(2))
+    state = _state(wave)
+
+    (result,), host = _execute(wave, [_call(LOAD, names=['{{memory.ref:wave-0.r0}}'])], state=state, memory=memory)
+
+    assert result['summary'] == f'Loaded: {_name(2)}'
+    assert state.loaded_tools == {_name(2)}
+    assert host.calls == []
+
+
 def _blocking_get(release, name='late.tool'):
     def get(tool):
         release.wait(5)

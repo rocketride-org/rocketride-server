@@ -1469,8 +1469,10 @@ def _execute_wave_calls(
         # inputs from previously stored results without extra peek calls.
         # A call this wave answers itself never runs a tool, so its references
         # are not resolved: a custom format would ask the model for nothing.
+        # tools.load is the exception: it searches and loads with its arguments.
         try:
-            args = asked if local else _resolve_refs(asked, agent_base=agent_base, context=context)
+            skip_refs = local and tool != LOAD_TOOL
+            args = asked if skip_refs else _resolve_refs(asked, agent_base=agent_base, context=context)
         except _MissingRef as exc:
             # Reported like any failed call: the model sees why, and the tool never ran.
             with lock:
