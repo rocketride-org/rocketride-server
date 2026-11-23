@@ -35,8 +35,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# The end of an engine error's text: " at (<engine source path>:<line>)".
-_ENGINE_LOCATION = re.compile(r' at \([^()]*:\d+\)$')
+# The end of an engine error's text: " at (<source file>:<line>)" (engLib store/python/bindings.cpp).
+# The file is a full path for Python code, which on Windows can hold "(x86)"; a bare file name for
+# the engine's own C++; or "<Unknown>" with line -1 when there was no traceback. An error whose
+# message quotes another engine error ends in one location per level. Only a file name (an
+# extension, or <...>) counts, so ordinary text such as "retry at (10:30)" stays.
+_ENGINE_LOCATION = re.compile(r'(?: at \((?:<[^<>()]*>|(?:[^()]|\([^()]*\))*\.\w+):-?\d+\))+$')
 
 
 def safe_str(value: Any) -> str:
@@ -61,18 +65,22 @@ def safe_str(value: Any) -> str:
         return ''
 
 
-def error_text(exc: BaseException) -> str:
-    """The text of an exception, for text a user reads: no engine source location.
+def error_text(error: BaseException | str, with_type: bool = False) -> str:
+    """The text of an error, for text a user or a parent agent reads: no engine source location.
 
-    An error raised inside the engine reaches Python as an Exception whose ``str()``
-    is ``<code>: <message> at (<engine source path>:<line>)``; the engine marks it
-    ``__formatted`` (engLib store/python/bindings.cpp). Answers are shown to customers,
-    so they get the same text without the location. The code stays: callers that tell
-    an error answer by its label (Discord) rely on it. Logs keep ``str()``.
-    Any other exception is ``str(exc)``.
+    An error raised inside the engine reaches Python as an Exception whose ``str()`` is
+    ``<code>: <message> at (<source file>:<line>)``, marked ``__formatted`` (engLib
+    store/python/bindings.cpp). Answers are shown to customers, so they get the same text
+    without the location. The code stays: callers that tell an error answer by its label
+    (Discord) rely on it. The location is dropped from any exception or string, so a
+    message that quotes an engine error loses it too. Logs keep ``str()``.
+
+    Args:
+        error: The exception, or an error's text (a framework event's ``error`` field).
+        with_type: Open with the exception's type name, ``<Type>: <text>``. An engine error
+            already opens with its code, so it gets no second label.
     """
-    text = safe_str(exc)
-    if not getattr(exc, '__formatted', False):
-        return text
-    # An error with no message reads "<code>: " once the location is gone.
-    return _ENGINE_LOCATION.sub('', text).removesuffix(': ')
+    text = _ENGINE_LOCATION.sub('', safe_str(error)).rstrip()
+    if with_type and not getattr(error, '__formatted', False):
+        return f'{type(error).__name__}: {text}'
+    return text
