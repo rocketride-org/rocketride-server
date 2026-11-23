@@ -1046,6 +1046,15 @@ async def test_zip_node_modules_check_is_case_insensitive(monkeypatch, build_sto
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['node_modules./x/a.js', 'node_modules /x/a.js'])
+async def test_zip_node_modules_check_strips_win32_trailing_chars(monkeypatch, build_store, toolchain, entry):
+    rail, fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
 async def test_zip_entries_with_a_bang_in_the_path_are_refused(monkeypatch, build_store, toolchain):
     """No app path may contain '!', the bundler's request separator, so a
     resolved request cannot be forged by a file or folder name.
@@ -1512,6 +1521,17 @@ def test_job_install_env_also_pins_corepack_network_and_latest():
         app_build._JOB_INSTALL.reset(token)
     assert env['COREPACK_ENABLE_NETWORK'] == '0' and env['COREPACK_DEFAULT_TO_LATEST'] == '0'
     assert 'COREPACK_ENABLE_NETWORK' not in app_build._build_env()
+
+
+def test_names_are_casefolded_and_win32_trailing_chars_stripped(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / 'po\u017ftcss.config.js', 'MARKER-plugin\n')
+    _write(ws / '.npmrc.', 'x\n')
+    _write(ws / 'node_modules_extra' / 'keep.txt', 'k')
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert 'MARKER' not in (ws / 'po\u017ftcss.config.js').read_text(encoding='utf-8')
+    assert app_build._remove_pnpm_configs(str(ws)) == ['.npmrc.']
+    assert (ws / 'node_modules_extra' / 'keep.txt').is_file()
 
 
 def test_env_filter_only_touches_dotenv_names(tmp_path):
