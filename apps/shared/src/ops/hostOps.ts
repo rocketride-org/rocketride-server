@@ -15,7 +15,7 @@
 // single-connection browser root has no env slots), but every op is
 // declared here so realms address one vocabulary.
 //
-// Imports only the ext-host-safe busOps leaf: this file is compiled into
+// Imports only the ext-host-safe busOps and externalUrl leaves: this file is compiled into
 // webview bundles, the cloud realm, AND the extension host.
 // =============================================================================
 
@@ -73,7 +73,9 @@ export interface DevToolViewPayload {
 /** The host-environment op map. */
 export interface HostOpMap extends ShellOpMap {
 	/** Opens a URL in the user's real browser (never inside the realm).
-	 *  Every implementation MUST gate through {@link assertExternalUrl}. */
+	 *  Every implementation MUST gate through {@link assertExternalUrl}.
+	 *  The shell serves a default (`window.open`, right for the cloud root);
+	 *  hosts without a usable window (VS Code) register their own. */
 	'host.openExternal': ShellOpSpec<{ url: string }, void>;
 	/** The Stripe publishable key for the host's server, or null + reason. */
 	'host.stripeKey': ShellOpSpec<Record<string, never>, StripeKeyInfo>;
@@ -176,25 +178,6 @@ export interface HostOpMap extends ShellOpMap {
 // SHARED GUARDS
 // =============================================================================
 
-/** The only URL schemes a host may open externally. */
-export const EXTERNAL_URL_SCHEMES = ['https', 'http', 'mailto'] as const;
-
-/**
- * Validates a realm-supplied external URL — the GENERIC half of every
- * `host.openExternal` implementation. A realm must never steer the host
- * into opening file:/vscode:/javascript:/custom-app URIs.
- *
- * @param url - The URL as received off the bus.
- * @returns The validated URL (for fluent use).
- * @throws When the URL is unparseable or its scheme is not allowlisted.
- */
-export function assertExternalUrl(url: string): string {
-	let scheme = '';
-	try {
-		scheme = new URL(url).protocol.replace(':', '').toLowerCase();
-	} catch { /* unparseable — rejected below */ }
-	if (!(EXTERNAL_URL_SCHEMES as readonly string[]).includes(scheme)) {
-		throw new Error(`Blocked external URL scheme: ${scheme || '(unparseable)'}`);
-	}
-	return url;
-}
+/** The scheme guard lives in the shell, which serves a default
+ *  `host.openExternal` itself and cannot import from here. */
+export { EXTERNAL_URL_SCHEMES, assertExternalUrl } from 'shell/src/ops/externalUrl';

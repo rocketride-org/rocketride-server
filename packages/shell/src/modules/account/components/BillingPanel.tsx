@@ -41,7 +41,8 @@ import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } fr
 import { CreditsPanel } from '../../billing/components/CreditsPanel';
 import { BillingDashboard } from '../../billing/components/BillingDashboard';
 import { TopUpModal } from '../../billing/components/TopUpModal';
-import { UpgradeModal } from '../../billing/components/UpgradeModal';
+import { isVisibleSubscriptionPlan, UpgradeModal } from '../../billing/components/UpgradeModal';
+import type { PlanChangeOutcome, PlanChangePreview } from '../../billing/components/planChange';
 import type { ActiveTask, TopupPlan } from '../../billing/components/BillingDashboard';
 import type { CheckoutPlan } from '../../checkout/types';
 import { Badge, parseWireDate } from './shared';
@@ -354,7 +355,8 @@ export interface BillingPanelProps {
 	/** Called to purchase a top-up pack (charges card on file). */
 	onPurchaseTopup?: (plan: CheckoutPlan) => Promise<{ status: string; clientSecret?: string }>;
 	/** Called when the user confirms a plan change. */
-	onUpgradeSubscription?: (appId: string, newPriceId: string) => Promise<void>;
+	onUpgradeSubscription?: (appId: string, newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
+	onPreviewSubscriptionChange?: (appId: string, newPriceId: string, expectedPriceId: string) => Promise<PlanChangePreview | null>;
 }
 
 // =============================================================================
@@ -368,11 +370,21 @@ export interface BillingPanelProps {
  * panel (view / change plan / cancel), and the admin dashboard. The cancel
  * confirmation and its error handling live HERE, not in AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, onPreviewSubscriptionChange }) => {
 	// ── Top-up modal state ──────────────────────────────────────────────────
 	const [showTopUpModal, setShowTopUpModal] = useState(false);
 	// ── Upgrade modal state ─────────────────────────────────────────────────
 	const [upgradeTarget, setUpgradeTarget] = useState<BillingDetail | null>(null);
+	const activeUpgradeTarget = upgradeTarget && subscriptions.find((row) =>
+		row.appId === upgradeTarget.appId && row.stripeSubscriptionId === upgradeTarget.stripeSubscriptionId
+	);
+	const upgradePlans = useMemo(() => allPlans?.filter((plan) => plan.appId === upgradeTarget?.appId), [allPlans, upgradeTarget?.appId]);
+	const previewUpgrade = useCallback(
+		(newPriceId: string, expectedPriceId: string) => upgradeTarget && onPreviewSubscriptionChange
+			? onPreviewSubscriptionChange(upgradeTarget.appId, newPriceId, expectedPriceId)
+			: Promise.resolve(null),
+		[upgradeTarget, onPreviewSubscriptionChange],
+	);
 	// ── Record panel state ──────────────────────────────────────────────────
 	// The open record's appId; the record itself resolves LIVE from props so a
 	// host refresh (e.g. a cancel flipping cancelAtPeriodEnd) updates the open
@@ -501,6 +513,9 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 	// ── Render-derived record panel values ──────────────────────────────────
 	// Footer verb gating mirrors the retired per-row buttons.
 	const isCancelable = viewedSub != null && ['active', 'trialing', 'past_due'].includes(viewedSub.status) && !viewedSub.cancelAtPeriodEnd;
+	const canChangePlan = onUpgradeSubscription && viewedSub && allPlans?.some((plan) =>
+		plan.appId === viewedSub.appId && plan.stripePriceId !== viewedSub.stripePriceId && isVisibleSubscriptionPlan(plan)
+	);
 	// Status display pair and credit-grant summary for the open record.
 	const viewedStatus = viewedSub != null ? statusVariant(viewedSub.status) : null;
 	const grants = viewedSub != null ? grantSummary(viewedSub.credits) : null;
@@ -572,7 +587,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 						// Footer shows for an org admin when EITHER verb is available; the
 						// Cancel button is gated on isCancelable independently, so a sub
 						// already set to cancel-at-period-end still offers Change Plan.
-						isOrgAdmin && (isCancelable || onUpgradeSubscription) ? (
+						isOrgAdmin && (isCancelable || canChangePlan) ? (
 							<>
 								{isCancelable && (
 									<div style={styles.footerDanger}>
@@ -581,7 +596,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 										</Button>
 									</div>
 								)}
-								{onUpgradeSubscription && (
+								{canChangePlan && (
 									<Button variant="ghost" small disabled={cancelling} onClick={() => setUpgradeTarget(viewedSub)}>
 										Change Plan
 									</Button>
@@ -689,12 +704,18 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 			)}
 
 			{/* Upgrade / change plan modal */}
-			{upgradeTarget && allPlans && onUpgradeSubscription && (
+			{upgradeTarget && upgradePlans && (
 				<UpgradeModal
-					plans={allPlans.filter((p) => p.appId === upgradeTarget.appId)}
-					currentPriceId={upgradeTarget.stripePriceId}
-					currentPlanName={upgradeTarget.planNickname}
-					onUpgrade={(newPriceId) => onUpgradeSubscription(upgradeTarget.appId, newPriceId)}
+					plans={upgradePlans}
+					currentPriceId={(activeUpgradeTarget || upgradeTarget).stripePriceId}
+					currentPlanName={(activeUpgradeTarget || upgradeTarget).planNickname}
+					available={Boolean(isConnected && isOrgAdmin && activeUpgradeTarget && onUpgradeSubscription)}
+					canFinishPayment={Boolean(isConnected && isOrgAdmin && onUpgradeSubscription)}
+					onPreview={onPreviewSubscriptionChange ? previewUpgrade : undefined}
+					onUpgrade={(newPriceId, attemptId, expectedPriceId) => {
+						if (!onUpgradeSubscription) throw new Error('Plan changes are currently unavailable.');
+						return onUpgradeSubscription(upgradeTarget.appId, newPriceId, attemptId, expectedPriceId);
+					}}
 					onClose={() => setUpgradeTarget(null)}
 				/>
 			)}

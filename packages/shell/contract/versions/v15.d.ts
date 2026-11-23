@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV15 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-23T17:09:30.038Z
-// Source commit: 16f849188f49a237244e74928527546bfbb97983
+// Generated:     2026-11-23T16:40:41.990Z
+// Source commit: 4a950f6746c3526993f2e944aa37122296696df5
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -4009,21 +4009,16 @@ declare class BillingApi {
      * complete the checkout without a browser redirect to Stripe.
      *
      * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
-     * promotion code): no payment step is needed. A null secret does not by
-     * itself show that the subscription is active; read `status` for that.
+     * promotion code) — the subscription is already active and no payment
+     * step is needed.
      *
      * @param orgId         - Organisation UUID to subscribe.
      * @param appId         - App being subscribed (e.g. "brandi").
      * @param priceId       - Stripe price_* identifier for the plan.
      * @param promotionCode - Optional promo code to apply (validated server-side).
-     * @param attemptId     - Optional checkout identifier. Replay an ambiguous request only if
-     * the server advertised billing_checkout_replay before dispatch and still advertises it.
-     * A replay reuses the same attempt ID and the exact same request, on the same authenticated
-     * server, user and organization; the capability on a different server does not authorize it.
-     * Legacy servers may accept the field without deduplicating.
      * @returns Object with client_secret (or null), subscription_id, and status.
      */
-    createCheckoutSession(orgId: string, appId: string, priceId: string, promotionCode?: string, attemptId?: string): Promise<{
+    createCheckoutSession(orgId: string, appId: string, priceId: string, promotionCode?: string): Promise<{
         clientSecret: string | null;
         subscriptionId: string;
         status: string;
@@ -4055,14 +4050,9 @@ declare class BillingApi {
      *
      * @param orgId - Organisation UUID (context only — server uses the caller's org).
      * @param code  - Customer-facing code string (case-insensitive).
-     * @param attemptId - Optional redemption identifier. Replay an ambiguous request only if
-     * the server advertised billing_checkout_replay before dispatch and still advertises it.
-     * A replay reuses the same attempt ID and the exact same request, on the same authenticated
-     * server, user and organization; the capability on a different server does not authorize it.
-     * Legacy servers may accept the field without deduplicating.
      * @returns Redemption result with mode and granted credits.
      */
-    redeemPromoCode(orgId: string, code: string, attemptId?: string): Promise<PromoRedemption>;
+    redeemPromoCode(orgId: string, code: string): Promise<PromoRedemption>;
     /**
      * Creates a Stripe Billing Portal session for managing payment methods.
      *
@@ -7878,9 +7868,9 @@ type CheckoutModalPromoProps = {
     onValidatePromoCode: (code: string, priceId?: string) => Promise<PromoValidation$1>;
     /**
      * Redeems a credit-grant (hackathon) code — $0 subscription plus
-     * immediate credits, no plan selection or payment step. Forward the attempt ID on retries.
+     * immediate credits, no plan selection or payment step.
      */
-    onRedeemPromoCode: (code: string, attemptId?: string) => Promise<PromoRedemption$1>;
+    onRedeemPromoCode: (code: string) => Promise<PromoRedemption$1>;
 } | {
     onValidatePromoCode?: undefined;
     onRedeemPromoCode?: undefined;
@@ -7892,10 +7882,9 @@ interface CheckoutModalBaseProps {
     appDescription?: string;
     /**
      * Id of the app being subscribed to. Optional. It picks the label of the
-     * button shown after a grant or hackathon code subscribes the org to the
-     * app: the pipeline builder (`rocketride.pipeBuilder`) keeps "Start
-     * building", every other app gets "Continue to <appName>". A credits-only
-     * grant shows "Done", which just closes the modal.
+     * button shown after a grant or hackathon code is redeemed: the pipeline
+     * builder (`rocketride.pipeBuilder`) keeps "Start building", every other
+     * app gets "Continue to <appName>".
      */
     appId?: string;
     /** Stripe publishable key (pk_test_* or pk_live_*). */
@@ -7918,15 +7907,13 @@ interface CheckoutModalBaseProps {
     onFetchPlans: () => Promise<CheckoutPlan[]>;
     /**
      * Creates a Stripe subscription on the server and returns the
-     * client secret needed by Stripe Elements to confirm the payment. Forward the
-     * attempt ID so the connected server can recognize a retry.
+     * client secret needed by Stripe Elements to confirm the payment.
      *
      * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
-     * promotion code): the payment step is skipped. A null secret does not by
-     * itself show that the subscription is active: with `requireCheckoutStatus`
-     * the modal also needs an explicit `active` or `trialing` status before it accepts it.
+     * promotion code) — the subscription is already active and the payment
+     * step is skipped entirely.
      */
-    onCreateCheckout: (priceId: string, promotionCode?: string, attemptId?: string) => Promise<{
+    onCreateCheckout: (priceId: string, promotionCode?: string) => Promise<{
         clientSecret: string | null;
         subscriptionId: string;
         status?: string;
@@ -7936,13 +7923,7 @@ interface CheckoutModalBaseProps {
      * The server writes 'incomplete' status; the webhook later flips to 'active'.
      */
     onConfirmPending: (subscriptionId: string, priceId: string) => Promise<void>;
-    /** Whether the checkout still belongs to the host's current session and modal. */
-    isCheckoutCurrent?: () => boolean;
-    /** The server confirmed it can safely resolve an already-used attempt ID. */
-    supportsCheckoutReplay?: boolean;
-    /** Require explicit server status before accepting a no-payment response. */
-    requireCheckoutStatus?: boolean;
-    /** Called after a successful payment or a grant that subscribes the org to the app — host should close the modal. */
+    /** Called after a successful payment — host should close the modal. */
     onSuccess: () => void;
     /** Called when the user dismisses the modal without completing checkout. */
     onClose: () => void;
@@ -7955,12 +7936,6 @@ interface CheckoutModalBaseProps {
     onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }
 type CheckoutModalProps = CheckoutModalBaseProps & CheckoutModalPromoProps;
-interface CheckoutScope {
-    orgId: string;
-    userId: string;
-    server: string;
-    replaySupported: boolean;
-}
 type TelemetryFact = {
     /** Event name from the app's telemetry contract (e.g. 'auth:start'). */
     event: string;
@@ -8196,13 +8171,11 @@ interface ShellConnectionEventMap {
      * to payment (used by the web pricing page); omit it to show the picker.
      * The optional `promo` carries a discount code already validated on the
      * pricing page, so the skipped-picker checkout still applies the discount.
-     * The manager captures checkoutScope before deferring delivery.
      */
     "shell:subscribe": {
         app: ShellAppEntry;
         plan?: CheckoutPlan;
         promo?: PromoValidation$1 | null;
-        checkoutScope?: CheckoutScope | null;
     };
     /**
      * User cancelled a subscription for an app from the account/billing UI.
@@ -9777,7 +9750,7 @@ export declare class ConnectionManager implements IConnectionManager {
     hasCredentials(): boolean;
     /** Returns a copy of the current connection status. */
     getConnectionStatus(): ConnectionStatus;
-    /** Returns the cached ConnectResult from the most recent successful connect. */
+    /** Returns the latest cached ConnectResult for this connection. */
     getAccountInfo(): ConnectResult | undefined;
     /** Returns the resolved server HTTP URL. */
     getHttpUrl(): string;
@@ -11195,7 +11168,6 @@ export interface ClientOpMap extends ShellOpMap {
     "client.request": ShellOpSpec<{
         message: DAPMessage;
         timeout?: number;
-        checkoutScope?: CheckoutScope;
     }, IWireEnvelope>;
     "client.addMonitor": ShellOpSpec<{
         key: ClientMonitorKey;
@@ -12816,8 +12788,6 @@ export declare const SettingsProvider: React$1.FC<ISettingsProviderProps>;
 interface CheckoutFlowProps {
     /** Stripe publishable key from API config. */
     stripeKey: string;
-    /** Source endpoint when the key is fetched by an embedded host. */
-    stripeServer?: string;
     /** Organization ID from the authenticated identity. */
     orgId: string;
 }
@@ -15128,6 +15098,39 @@ export declare function formatDayTime(timestamp: number): string;
 export declare function formatTimeAgo(timestamp: number): string;
 /** Format a number with locale-appropriate thousands separators. */
 export declare function formatNumber(n: number): string;
+type PlanChangeTiming = "immediate" | "next_renewal" | "unchanged";
+type PlanChangePreview = {
+    direction: "upgrade";
+    timing: "immediate";
+    billingIntervalChanges?: boolean;
+} | {
+    direction: "downgrade";
+    timing: "next_renewal";
+    billingIntervalChanges?: boolean;
+} | {
+    direction: "interval_change";
+    timing: "immediate" | "next_renewal";
+    billingIntervalChanges?: true;
+} | {
+    direction: "unchanged";
+    timing: "unchanged";
+    billingIntervalChanges?: false;
+};
+type PlanChangeStatus = "payment_failed" | "failed" | "requires_payment_method" | "payment_pending" | "requires_action" | "downgrade_scheduled" | "scheduled" | "unchanged" | "upgraded" | "applied";
+interface PlanChangeOutcomeFields {
+    timing?: PlanChangeTiming;
+    clientSecret?: string | null;
+    stripePublishableKey?: string;
+    /** Host guard called immediately before Stripe confirmation. */
+    assertPaymentScope?: () => void;
+}
+type PlanChangeOutcome = (PlanChangeOutcomeFields & {
+    status: "requires_action";
+    clientSecret: string;
+    stripePublishableKey: string;
+}) | (PlanChangeOutcomeFields & {
+    status: Exclude<PlanChangeStatus, "requires_action">;
+});
 interface ActiveTask {
     /** Task identifier. */
     taskId: string;
@@ -15208,7 +15211,8 @@ interface IAccountViewProps {
         clientSecret?: string;
     }>;
     /** Called when the user confirms a plan upgrade/downgrade from the billing panel. */
-    onUpgradeSubscription?: (appId: string, newPriceId: string) => Promise<void>;
+    onUpgradeSubscription?: (appId: string, newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
+    onPreviewSubscriptionChange?: (appId: string, newPriceId: string, expectedPriceId: string) => Promise<PlanChangePreview | null>;
     /** The currently active section / tab. */
     section: AccountSection;
     /** Called when the user switches tabs. */
@@ -15505,6 +15509,11 @@ interface EnvironmentViewProps {
  * @param props - Environment view configuration and callbacks.
  */
 export declare const EnvironmentView: React$1.FC<EnvironmentViewProps>;
+/**
+ * Two-step checkout modal: PlanPicker (step 1) then Stripe Elements (step 2).
+ *
+ * All server communication is via callback props — no SDK imports.
+ */
 export declare const CheckoutModal: React$1.FC<CheckoutModalProps>;
 interface PlanPickerProps {
     /** Plans to display. Plans with ``metadata.action`` render as non-selectable CTA cards. */
@@ -15547,6 +15556,10 @@ interface PlanPickerProps {
     currentPriceId?: string;
     /** Content rendered below the plan cards (e.g. a "Continue" button). */
     footer?: React$1.ReactNode;
+    /** Keep the selected plan visible if the catalog introduces an interval toggle. */
+    keepSelectedPlanVisible?: boolean;
+    /** Disable the billing-interval toggle while a host operation is in progress. */
+    intervalDisabled?: boolean;
     /** Called when the user changes the visible billing interval. */
     onIntervalChange?: (interval: "month" | "year") => void;
     /** Default interval on first render. Default: ``'month'``. */
@@ -15612,8 +15625,14 @@ interface UpgradeModalProps {
      * confirm. Ignored if it equals the current plan. Defaults to no selection.
      */
     preselectedPriceId?: string;
-    /** Called when the user confirms the plan change. */
-    onUpgrade: (newPriceId: string) => Promise<void>;
+    /** Preview from the server. Return null if the connected server has no preview. */
+    onPreview?: (newPriceId: string, expectedPriceId: string) => Promise<PlanChangePreview | null>;
+    /** Keep the dialog and its attempt open if the host is temporarily unavailable. */
+    available?: boolean;
+    /** A host may permit replay of an authenticated attempt after its original row disappears. */
+    canFinishPayment?: boolean;
+    /** Confirm a plan change. Retries for the same selection reuse the attempt ID. */
+    onUpgrade: (newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
     /** Called when the modal is dismissed. */
     onClose: () => void;
 }
@@ -15621,8 +15640,7 @@ interface UpgradeModalProps {
  * Modal dialog for upgrading or downgrading a subscription plan.
  *
  * Displays the PlanPicker grid with the current plan disabled. The user
- * selects a new plan and clicks Confirm to trigger the server-side
- * Stripe subscription modification with proration.
+ * selects a new plan and confirms the timing reported by the server.
  */
 export declare const UpgradeModal: React$1.FC<UpgradeModalProps>;
 /**

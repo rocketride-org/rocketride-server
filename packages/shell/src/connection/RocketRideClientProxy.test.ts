@@ -329,6 +329,39 @@ void test('a host that keeps the key elsewhere wins over the shell default', asy
 	assert.deepEqual(await bus.request('host.apiKey', {}), { apiKey: 'from-the-extension-host' });
 });
 
+void test('the shell root opens external links itself, and only safe schemes', async () => {
+	// The cloud shell root is the only host on the home/Account pages; with
+	// no handler here, "Manage Payment Methods" failed with BusNoHandlerError.
+	const opened: unknown[][] = [];
+	const g = globalThis as { window?: unknown };
+	const prev = g.window;
+	const tab = { opener: {} as unknown };
+	let blocked = false;
+	g.window = {
+		open: (...args: unknown[]) => {
+			opened.push(args);
+			return blocked ? null : tab;
+		},
+	};
+	try {
+		const bus = createOpBus();
+		registerShellHostOps(bus, { getClient: () => null });
+
+		await bus.request('host.openExternal', { url: 'https://billing.stripe.com/p/session/x' });
+		assert.deepEqual(opened, [['https://billing.stripe.com/p/session/x', '_blank']]);
+		assert.equal(tab.opener, null);
+
+		await assert.rejects(() => bus.request('host.openExternal', { url: 'javascript:alert(1)' }), /Blocked external URL scheme/);
+		assert.equal(opened.length, 1);
+
+		// A popup blocker must surface as an error, never a silent no-op.
+		blocked = true;
+		await assert.rejects(() => bus.request('host.openExternal', { url: 'https://billing.stripe.com/p/session/y' }), /blocked the new tab/);
+	} finally {
+		g.window = prev;
+	}
+});
+
 void test('an engine event pushed from the root dispatches in the realm', async () => {
 	// The counter-flow: nothing requested this, so no request op could carry
 	// it. Going through the SDK's own onEvent means everything hanging off an
