@@ -213,6 +213,44 @@ def test_validate_config_rejects_an_unpinned_allow_list():
         endpoint.validateConfig(False)
 
 
+def test_validate_config_accepts_engine_ijson_params(monkeypatch):
+    """The engine hands config arrays as IJson; _params() must unwrap them (#3434)."""
+    import scraper_beautifulsoup.IEndpoint as iep
+
+    # Mirror rocketlib.types.IJson: a subclass whose static toDict() unwraps
+    # engine values (base-class instances) recursively into native dict/list.
+    class _EngineIJson:
+        def __init__(self, value):
+            self.value = value
+
+    class _IJson(_EngineIJson):
+        @staticmethod
+        def toDict(obj):
+            if isinstance(obj, _EngineIJson):
+                return _IJson.toDict(obj.value)
+            if isinstance(obj, dict):
+                return {key: _IJson.toDict(value) for key, value in obj.items()}
+            if isinstance(obj, list):
+                return [_IJson.toDict(value) for value in obj]
+            return obj
+
+    monkeypatch.setattr(iep, 'IJson', _IJson)
+
+    endpoint = IEndpoint.__new__(IEndpoint)
+    endpoint.endpoint = MagicMock(name='endpoint')
+    endpoint.endpoint.serviceConfig = {'parameters': _EngineIJson({
+        'sources': [{'name': 'a', 'kind': 'feed', 'url': 'https://news.example/feed'}],
+        'urlAllowList': _EngineIJson(['^https://news\\.example/']),
+    })}
+
+    # Params reach the validators as native dict/list, not IJson.
+    params = endpoint._params()
+    assert isinstance(params, dict)
+    assert params['urlAllowList'] == ['^https://news\\.example/']
+    # The whole validation path (compile + pinned-host check) must accept them.
+    endpoint.validateConfig(False)
+
+
 # -- tools through IInstance ----------------------------------------------
 
 
