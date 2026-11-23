@@ -30,6 +30,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
+import { resolveWebviewUrl } from './webviewUrl';
 
 // =============================================================================
 // STYLES
@@ -72,15 +73,19 @@ const WebviewProvider: React.FC<IWebviewProviderProps> = ({ uri }) => {
 	// Extract URL by stripping the "webview:" prefix
 	const url = uri.slice(WEBVIEW_PREFIX.length);
 
-	if (!url) {
+	// Same-authority pages (anything on the shell origin but the engine's chat
+	// and dropper pages) and non-web schemes are never framed (#1022).
+	// The iframe is given the canonical URL that was checked, never the raw text.
+	const framed = url ? resolveWebviewUrl(url, window.location.origin, window.location.href) : null;
+	if (!framed) {
 		return <div>Invalid webview URI: {uri}</div>;
 	}
 
 	return (
 		<iframe
-			src={url}
+			src={framed}
 			style={styles.iframe}
-			title={url}
+			title={framed}
 			// Least-privilege embedding: no top-navigation hijack, and no
 			// clipboard read for arbitrary origins (write-only clipboard).
 			sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
