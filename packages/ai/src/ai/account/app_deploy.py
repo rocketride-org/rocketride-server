@@ -549,19 +549,37 @@ async def _container_holder_now(
     return _container_holder(app_id, module_id, own_first, claims)
 
 
-async def _back_out(account: Any, org_id: str, conn: Any, app_id: str, audience: Dict[str, str]) -> bool:
-    """Undo a binding written just now: a 'removed' row holds no name.
+async def _back_out(
+    account: Any, org_id: str, conn: Any, app_id: str, audience: Dict[str, str], prior: Optional[Dict[str, Any]]
+) -> str:
+    """Undo a binding written just now and say how: 'restored', 'removed' or '' (failed).
 
-    A 'removed' row is written even when the audience's previous row was
-    disabled. Returns False (after a warning) when the undo failed, so the
-    caller reports that the binding remains instead of a clean refusal.
+    ``prior`` is the audience's row before the write. When one existed it is
+    put back (its version and snapshot, then its state, so a disabled row
+    stays disabled); otherwise the new row is written 'removed', which holds
+    no name. A failure is logged at warning and returns '', so the caller
+    reports that the binding remains instead of a clean refusal.
     """
+    actor = _actor_of(conn)
     try:
-        await account.publish_set_state(org_id, 'app', app_id, audience, 'removed', _actor_of(conn))
+        if prior is not None:
+            await account.publish_set(
+                org_id, 'app', app_id, audience, int(prior.get('version') or 0), prior.get('snapshot') or {}, actor
+            )
+            if prior.get('state') != 'enabled':
+                await account.publish_set_state(org_id, 'app', app_id, audience, str(prior.get('state')), actor)
+            return 'restored'
+        await account.publish_set_state(org_id, 'app', app_id, audience, 'removed', actor)
+        return 'removed'
     except Exception as exc:
         warning(f'[app_deploy] could not back out the binding of {app_id} for {audience}: {exc}')
-        return False
-    return True
+        return ''
+
+
+def _same_audience(row: Dict[str, Any], audience: Dict[str, str]) -> bool:
+    """True when ``row`` is the binding of ``audience`` (type and id)."""
+    other = row.get('audience') or {}
+    return other.get('type') == audience.get('type') and (other.get('id') or '') == (audience.get('id') or '')
 
 
 def _back_out_failed_error(app_id: str, module_id: str, holder: str) -> str:
@@ -1214,6 +1232,13 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                     mine = await account.publish_of_app(home, 'app', app_id)
                     own_rows = [r for r in mine if _scope_sees(audience, r) and _caller_sees(conn, r)]
                     own_first = _first_bound_at(own_rows) if claims else None
+                    # This audience's row before the write. One that already serves
+                    # holds the name in this scope, so repointing it claims nothing
+                    # new and needs no re-check (a failed one must never unpublish a
+                    # live binding). A new scope, or a row that did not serve, is a
+                    # claim: re-check it, and put the prior row back on a back-out.
+                    prior = next((r for r in mine if _same_audience(r, audience)), None)
+                    needs_recheck = prior is None or bool(serving_block_of(prior, account.review_ladder))
                 except Exception as exc:
                     debug(f'[app_deploy] container-name check failed: {exc}')
                     return conn.build_error(request, 'could not check the app id against existing apps; try again')
@@ -1223,28 +1248,41 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
             row = await account.publish_set(
                 home, 'app', app_id, audience, version, manifest_snapshot(entry, artifact), _actor_of(conn)
             )
-            if developer:
+            if developer and needs_recheck:
                 # The lock is process-local, so a publish on ANOTHER engine can have
                 # landed between the check above and this write. Re-read the claims
                 # (the backend reads its own writes, so whichever racer looks last
                 # sees both rows) and back this binding out when resolve would not
-                # hand it the name. Every developer publish re-checks (a repoint or a
-                # first claim in a new audience scope alike): it fails closed, and when
-                # both racers back out a retry settles it.
+                # hand it the name. Only a NEW claim re-checks (see needs_recheck);
+                # it fails closed, and when both racers back out a retry settles it.
                 try:
                     holder = await _container_holder_now(account, home, conn, app_id, module_id, audience)
                 except Exception as exc:
                     debug(f'[app_deploy] container-name re-check failed: {exc}')
-                    if not await _back_out(account, home, conn, app_id, audience):
+                    undone = await _back_out(account, home, conn, app_id, audience, prior)
+                    if not undone:
                         return conn.build_error(
                             request,
-                            'could not check the app id against existing apps, and the new binding could not be removed; remove it',
+                            'could not check the app id against existing apps, and the new binding could '
+                            'not be removed: it is still live; remove it',
                         )
-                    return conn.build_error(request, 'could not check the app id against existing apps; try again')
+                    return conn.build_error(
+                        request,
+                        'could not check the app id against existing apps; '
+                        + (
+                            'the previous binding of this audience was restored; try again'
+                            if undone == 'restored'
+                            else 'the new binding was removed and needs publishing again'
+                        ),
+                    )
                 if holder:
-                    if not await _back_out(account, home, conn, app_id, audience):
+                    undone = await _back_out(account, home, conn, app_id, audience, prior)
+                    if not undone:
                         return conn.build_error(request, _back_out_failed_error(app_id, module_id, holder))
-                    return conn.build_error(request, _holder_error(app_id, module_id, holder))
+                    message = _holder_error(app_id, module_id, holder)
+                    if undone == 'restored':
+                        message += ' The previous binding of this audience was restored.'
+                    return conn.build_error(request, message)
 
         # Refresh the acting user's manifest (data + signal); other audience
         # members pick the row up on their next account rebuild/login.
