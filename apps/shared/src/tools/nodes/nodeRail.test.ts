@@ -31,9 +31,9 @@ test('a node rail lists versions newest first, with the rungs each is live on', 
 	assert.deepEqual(
 		versions.map((v) => [v.registryVersion, v.author, v.message, v.rungs, v.state, v.buildStatus]),
 		[
-			[3, 'Ada', undefined, ['personal'], 'private', ''],
+			[3, 'Ada', undefined, ['personal'], undefined, ''],
 			[2, 'u2', undefined, [], 'failed', 'failed'],
-			[1, 'Ada', 'first', ['team'], 'private', ''],
+			[1, 'Ada', 'first', ['team'], undefined, ''],
 		]
 	);
 });

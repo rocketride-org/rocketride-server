@@ -27,6 +27,8 @@ const NODE_SUBJECT: DeploySubject = {
 	publicAudience: false,
 	intro: 'Upload immutable versions of this node, then publish each to an audience: @me or a team. A run gets the version published to its caller, and the canvas shows the node only where it is published.',
 	deployHint: 'Choose the .rrnode to upload as the next immutable version. Binds nothing. Publish it to an audience afterwards.',
+	deployCardHint: 'upload a .rrnode as the next version',
+	liveFootnote: 'Publishing points an audience at an immutable version: first publish, update and rollback are all this one move. A run takes the version published to its caller, else to a team, when it starts.',
 };
 
 const styles: Record<string, CSSProperties> = {

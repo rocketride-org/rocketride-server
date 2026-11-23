@@ -83,7 +83,8 @@ export function toNodeRail(rail: WireNodeRail, teams: NodeTeam[]): { versions: A
 			sha: v.sha256,
 			message: v.comment || undefined,
 			rungs: [...new Set(pins.filter((p) => p.registryVersion === v.version).map((p) => p.rung))] as RungKind[],
-			state: (v.state === 'failed' ? 'failed' : 'private') as AppVersionInfo['state'],
+			// A node has no review: only a failed upload gets a badge
+			state: v.state === 'failed' ? 'failed' : undefined,
 			// The upload is the build: a version that is not failed serves
 			buildStatus: v.state === 'failed' ? 'failed' : '',
 		}));

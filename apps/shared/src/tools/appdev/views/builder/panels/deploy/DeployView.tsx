@@ -71,6 +71,10 @@ export interface DeploySubject {
 	intro: string;
 	/** What the Deploy dialog's step does. */
 	deployHint: string;
+	/** The Deploy card's one-line hint; the app's when absent. */
+	deployCardHint?: string;
+	/** The Where-live panel's footnote; the app's when absent. */
+	liveFootnote?: string;
 }
 
 /** An app: every audience, the store included. */
@@ -853,7 +857,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly, su
 								{/* While the zip is in flight the tile itself is the card —
 								    the version row (and its 'uploaded' tick) exists only
 								    once the server has accepted the upload. */}
-								<span style={styles.publishHint}>{deployBusy ? 'uploading…' : 'snapshot the current build to the server'}</span>
+								<span style={styles.publishHint}>{deployBusy ? 'uploading…' : (subject.deployCardHint ?? 'snapshot the current build to the server')}</span>
 							</div>
 						)}
 						{(versions ?? []).map((v) => {
@@ -976,9 +980,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly, su
 									</div>
 								))}
 								<div style={styles.liveFoot}>
-									{host.submitForReview
+									{subject.liveFootnote ?? (host.submitForReview
 										? 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.'
-										: 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server; the store publishes directly.'}
+										: 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server; the store publishes directly.')}
 								</div>
 							</>
 						)}
