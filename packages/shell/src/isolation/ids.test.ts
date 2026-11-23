@@ -179,6 +179,32 @@ test('T112b a host.apiKey answer that arrives after logout does not re-add the p
 	}
 });
 
+// The pairwise scans took 4.3 s here; the sweep takes about 0.1 s. A test timeout cannot fire while the scan holds the event
+// loop, so the time of the one call under test is measured and asserted (1.5 s: 15x the sweep, a third of the pairwise scans).
+test('T112c redacting a large engine error with many must-deny values and replaceable ids stays linear', async (tt) => {
+	const t = makeRoot();
+	try {
+		t.cm.apiKey = newKey();
+		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const run = await startRun(A);
+		const key = t.cm.apiKey;
+		const real = lastRun(t.cm).projectId;
+		const unit = `${key} ${real} `;
+		const message = unit.repeat(Math.floor((3.6 * 1024 * 1024) / unit.length));
+		t.cm.engine.failWith('terminate', { message });
+		const start = performance.now();
+		const answer = await call(A, 'terminate', { token: run.token });
+		const took = performance.now() - start;
+		tt.diagnostic(`T112c redacting a 3.6 MB error: ${took.toFixed(1)} ms`);
+		assert.ok(took < 1500, `redacting the error took ${took.toFixed(1)} ms`);
+		const text = engineErrorText(answer, 'a 3.6 MB terminate failure');
+		assert.ok(!text.includes(key) && !text.includes(real), 'neither the key nor the real project id survives');
+		assert.ok(text.includes('[redacted]') && text.includes(run.projectId), 'the key is redacted and the own project is shown as its alias');
+	} finally {
+		t.cleanup();
+	}
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // T113 — inbound free strings (N1-f)
 // ─────────────────────────────────────────────────────────────────────────────
