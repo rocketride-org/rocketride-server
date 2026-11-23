@@ -3666,6 +3666,11 @@ class TaskEngine(DAPBase):
             self._terminated_called = False
             self._teardown_done = asyncio.Event()
             self._exit_event_seen = False
+            # A crash, and a kill by the server, belong to the run they
+            # happened in: a relaunch that exits cleanly must read Completed,
+            # and one that crashes must be classified on its own exit
+            self._crash = None
+            self._process_killed = False
             self._stop_reason = None
             self.dormant_reason = None
             self.db_approved = {}

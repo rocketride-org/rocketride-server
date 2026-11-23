@@ -2595,3 +2595,20 @@ async def test_start_task_retries_a_run_log_open_that_failed_in_the_previous_run
         await TaskEngine.start_task(t)
 
     assert t._run_log_failed == set()
+
+
+async def test_start_task_clears_the_previous_runs_crash_state(monkeypatch):
+    """A crash and a kill by the server belong to the run they happened in: the next launch starts without them.
+
+    A relaunch reuses the engine object. A crash left on it would refuse the next run its `Completed`
+    and record `error`; a kill flag left on it would hide the next run's own crash.
+    """
+    t, _ = _startable_task(monkeypatch)
+    t._crash = 'SIGSEGV (code 11)'
+    t._process_killed = True
+
+    with pytest.raises(_LaunchStop):
+        await TaskEngine.start_task(t)
+
+    assert t._crash is None
+    assert t._process_killed is False
