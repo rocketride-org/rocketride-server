@@ -72,6 +72,8 @@ class LaunchSpec:
     uses_store: bool = False
     # The run's storage anchor (the task file's storage.root)
     storage_root: str = ''
+    # The folders of the packaged nodes the run loads (node_store.place), for a task that cannot see the engine's nodes/
+    nodes: List[str] = field(default_factory=list)
 
 
 def task_argv(

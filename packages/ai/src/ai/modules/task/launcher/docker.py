@@ -27,8 +27,9 @@ The docker runtime: each task runs in its own container from ``rocketride/node``
 The ``docker`` CLI drives it through ``asyncio.create_subprocess_exec``, never a
 library: ``docker start -a -i`` is a real process whose stdout, stderr and stdin
 are the container's, so the stdio reader and ``--autoterm`` work as they do for
-a subprocess. A run is five commands — ``create -i``, ``cp -``, ``start -a -i``,
-``wait``, ``rm -f`` — and the exit code comes from ``docker wait``, not from the
+a subprocess. A run is five commands — ``create -i``, ``cp -`` (twice when the
+run has packaged nodes), ``start -a -i``, ``wait``, ``rm -f`` — and the exit code
+comes from ``docker wait``, not from the
 CLI, which can die before the container does; the CLI's code stands only when
 the daemon cannot say (see ``_wait_for_exit``).
 """
@@ -43,6 +44,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import sys
 import tarfile
 import time
@@ -78,6 +80,13 @@ _ROOTS_IN_USE: Dict[str, str] = {}
 
 # The engine's data directory inside the image (engine-base: mkdir /opt/data)
 CONST_CONTAINER_DATA_PATH = '/opt/data'
+
+# The folder the task's start-up scan loads nodes from (WORKDIR /opt/rocketride)
+CONST_CONTAINER_NODES_PATH = '/opt/rocketride/nodes'
+
+# The most a run's packaged nodes may take, headers included: they are read into memory at every start.
+# Today's largest node is about 6 MiB, all of them together about 16 MiB
+CONST_NODES_SIZE_LIMIT = 64 * 1024 * 1024
 
 # Where a run's store subtree is mounted inside its container
 CONST_CONTAINER_STORE_ROOT = '/opt/store'
@@ -445,15 +454,131 @@ def task_tar(data: bytes, uid: int = CONST_IMAGE_UID, gid: int = CONST_IMAGE_GID
     """
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w') as tar:
-        info = tarfile.TarInfo('task.json')
-        info.size = len(data)
-        info.mode = 0o600
-        info.uid, info.gid = uid, gid
-        # Names only for the image's own user; any other is known by number alone
-        if (uid, gid) == (CONST_IMAGE_UID, CONST_IMAGE_GID):
-            info.uname = info.gname = 'rocketride'
-        info.mtime = int(time.time())
-        tar.addfile(info, io.BytesIO(data))
+        tar.addfile(tar_member('task.json', 0o600, len(data), uid=uid, gid=gid), io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def tar_member(
+    name: str, mode: int, size: int = 0, directory: bool = False, uid: int = CONST_IMAGE_UID, gid: int = CONST_IMAGE_GID
+) -> tarfile.TarInfo:
+    """
+    The header of one member of a tar stream for a task, owned by the user the task runs as.
+
+    Args:
+        name: The member's path.
+        mode: Its permissions.
+        size: Its length, for a file.
+        directory: Whether it is a directory.
+        uid: The task's uid.
+        gid: The task's gid.
+
+    Returns:
+        The header.
+    """
+    info = tarfile.TarInfo(name)
+    info.size = size
+    info.mode = mode
+    info.uid, info.gid = uid, gid
+    # Names only for the image's own user; any other is known by number alone
+    if (uid, gid) == (CONST_IMAGE_UID, CONST_IMAGE_GID):
+        info.uname = info.gname = 'rocketride'
+    info.mtime = int(time.time())
+    if directory:
+        info.type = tarfile.DIRTYPE
+    return info
+
+
+def add_directory(
+    tar: tarfile.TarFile, source: str, target: str, budget: int, uid: int = CONST_IMAGE_UID, gid: int = CONST_IMAGE_GID
+) -> int:
+    """
+    Put a host directory into a tar stream for a task: its directories and its regular files, not links.
+
+    Args:
+        tar: The archive being written.
+        source: The directory on this host.
+        target: Its path in the archive.
+        budget: The bytes of the archive it may still take, headers included.
+        uid: The task's uid.
+        gid: The task's gid.
+
+    Returns:
+        What is left of the budget; below zero when the directory does not fit, which ends the reading.
+
+    Raises:
+        OSError: If the directory, or a directory in it, cannot be read.
+    """
+
+    def unreadable(error: OSError) -> None:
+        # os.walk skips a directory it cannot list: the task would get part of it, or none, without a word
+        if not isinstance(error, FileNotFoundError) or error.filename == source:
+            raise error
+
+    end = tar.offset + budget
+    for root, directories, files in os.walk(source, onerror=unreadable):
+        # os.walk enters a Windows junction, which is a link to a directory
+        directories[:] = sorted(name for name in directories if not os.path.isjunction(os.path.join(root, name)))
+        relative = os.path.relpath(root, source).replace(os.sep, '/')
+        base = target if relative == '.' else f'{target}/{relative}'
+        tar.addfile(tar_member(base, 0o755, directory=True, uid=uid, gid=gid))
+        for name in sorted(files):
+            if tar.offset > end:
+                break
+            path = os.path.join(root, name)
+            try:
+                seen = os.stat(path, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(seen.st_mode):
+                continue
+            try:
+                f = open(path, 'rb')
+            except FileNotFoundError:
+                # Removed after its look: left out, as one removed before it
+                continue
+            with f:
+                # A link swapped in after the look is not followed: only the file looked at is read
+                opened = os.fstat(f.fileno())
+                if (opened.st_dev, opened.st_ino) != (seen.st_dev, seen.st_ino):
+                    continue
+                # One byte more than fits shows a file is too big without reading all of it
+                data = f.read(end - tar.offset + 1)
+            mode = 0o755 if seen.st_mode & 0o100 else 0o644
+            tar.addfile(tar_member(f'{base}/{name}', mode, len(data), uid=uid, gid=gid), io.BytesIO(data))
+        if tar.offset > end:
+            break
+    return end - tar.offset
+
+
+def nodes_tar(folders: Sequence[str], uid: int, gid: int) -> bytes:
+    """
+    The run's node folders as a tar stream for ``docker cp -`` into the image's nodes folder.
+
+    Each folder goes in under its own name with its digest file, so the task's
+    scan loads it and ``depends()`` keeps it out of the lock's hash, as on the
+    engine's disk.
+
+    Args:
+        folders: The node folders on the engine's disk.
+        uid: The task's uid.
+        gid: The task's gid.
+
+    Returns:
+        The tar archive.
+
+    Raises:
+        ValueError: If they take more than ``CONST_NODES_SIZE_LIMIT``.
+        OSError: If one of them cannot be read.
+    """
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as tar:
+        budget = CONST_NODES_SIZE_LIMIT
+        for folder in folders:
+            budget = add_directory(tar, folder, os.path.basename(folder), budget, uid, gid)
+            if budget < 0:
+                raise ValueError(
+                    f"The run's nodes take more than {CONST_NODES_SIZE_LIMIT // 2**20} MiB; they are copied in as it starts"
+                )
     return buffer.getvalue()
 
 
@@ -1405,7 +1530,7 @@ class DockerLauncher(Launcher):
 
     async def start(self, spec: LaunchSpec) -> DockerLaunch:
         """
-        ``create -i``, ``cp -``, ``start -a -i``; on any failure remove what was made and raise.
+        ``create -i``, ``cp -`` (task file, then nodes), ``start -a -i``; on any failure remove what was made and raise.
 
         Args:
             spec: What to launch.
@@ -1416,6 +1541,7 @@ class DockerLauncher(Launcher):
         Raises:
             DockerError: If the daemon or the image cannot be used.
             StoreUnavailableError: If the pipeline needs a store this container cannot have.
+            ValueError: If the run's nodes take more than ``CONST_NODES_SIZE_LIMIT``.
         """
         await self.prepare()
         mounts, overrides = await self.store_mounts(spec)
@@ -1438,10 +1564,17 @@ class DockerLauncher(Launcher):
             # The root the task holds goes by its container from here
             if spec.token_sha256 in _ROOTS_IN_USE:
                 _ROOTS_IN_USE[container_id] = _ROOTS_IN_USE.pop(spec.token_sha256)
+            owner = self.user or (CONST_IMAGE_UID, CONST_IMAGE_GID)
             await self._cli.run(
                 ['cp', '-', f'{container_id}:{CONST_CONTAINER_DATA_PATH}'],
-                stdin=task_tar(spec.task_file, *(self.user or (CONST_IMAGE_UID, CONST_IMAGE_GID))),
+                stdin=task_tar(spec.task_file, *owner),
             )
+            # The image holds only the server's own nodes: the packaged ones the run loads go in before it starts
+            if spec.nodes:
+                await self._cli.run(
+                    ['cp', '-', f'{container_id}:{CONST_CONTAINER_NODES_PATH}'],
+                    stdin=await asyncio.to_thread(nodes_tar, spec.nodes, *owner),
+                )
             process = await self._cli.attach(['start', '-a', '-i', container_id])
             try:
                 # Counted looks that each answer slowly would stretch a start without end

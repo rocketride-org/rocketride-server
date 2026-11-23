@@ -85,6 +85,7 @@ from ai.constants import (
     CONST_CHANNEL_REDIAL_DELAY,
 )
 from ai.account.base import OutOfCreditsError, SubscriptionRequiredError
+from ai.common import node_release
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.node_config import resolve_node_config
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
@@ -3842,7 +3843,7 @@ class TaskEngine(DAPBase):
             # The nodes it names that the server does not carry go on disk first: the run's start-up scan
             # loads them. Every control that attaches later runs this engine's spec, so its nodes are these
             try:
-                await asyncio.to_thread(node_store.place, resolved)
+                nodes = await asyncio.to_thread(node_store.place, resolved, self._launcher.isolated)
             except Exception as e:
                 raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
 
@@ -3928,6 +3929,7 @@ class TaskEngine(DAPBase):
                     debug_attach=debug_attach,
                     uses_store=uses_store,
                     storage_root=self._storage_root() if uses_store else '',
+                    nodes=[os.path.join(node_release.nodes_dir(), name) for name in nodes],
                 )
             )
             del task_file

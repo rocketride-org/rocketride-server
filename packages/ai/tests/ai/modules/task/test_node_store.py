@@ -464,3 +464,27 @@ def test_an_index_it_cannot_use_keeps_no_schema(server, monkeypatch):
 
     assert node_store.custom() == [] and node_store.schema('provider_x') is None
     assert len(server['warnings']) == 1 and 'NODE_REGISTRY_UNAVAILABLE' in server['warnings'][0]
+
+
+def test_an_isolated_run_gets_the_nodes_a_source_tree_engine_loads(server, monkeypatch):
+    # A development engine loads webhook from nodes/src/nodes, so nodes/ has no folder of it; a task in
+    # a container or a pod sees only nodes/
+    def unpack(name, data, sha256, nodes_dir):
+        server['unpacked'].append(name)
+        _unpacked_before(server, name, sha256)
+
+    monkeypatch.setattr(node_store.node_packages, 'unpack', unpack)
+    node_store.start()
+    pipeline = {'components': [{'provider': 'webhook'}, {'provider': 'provider_x'}]}
+
+    assert node_store.place(pipeline) == ['llm_x']
+    assert node_store.place(pipeline, isolated=True) == ['llm_x', 'webhook']
+    assert server['unpacked'] == ['llm_x', 'webhook']
+
+
+def test_an_isolated_run_leaves_the_server_s_own_folder_alone(server):
+    os.makedirs(os.path.join(server['nodes'], 'webhook'))
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'webhook'}]}, isolated=True) == []
+    assert server['unpacked'] == []

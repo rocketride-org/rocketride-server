@@ -258,8 +258,13 @@ def _with_requires(names: Iterable[str], nodes: Optional[Dict[str, Any]] = None)
     return order
 
 
-def place(pipeline: Dict[str, Any]) -> List[str]:
+def place(pipeline: Dict[str, Any], isolated: bool = False) -> List[str]:
     """Unpack into nodes/ each node the pipeline names that the server does not carry.
+
+    Args:
+        pipeline: The resolved pipeline.
+        isolated: The run's task sees only nodes/ (a container or a pod): a node the engine loads
+            from a source tree (nodes/src/nodes), which nodes/ has no folder of, is unpacked too.
 
     Returns:
         The index's nodes the run loads from nodes/: the nodes placed, then the copies an earlier run
@@ -275,6 +280,11 @@ def place(pipeline: Dict[str, Any]) -> List[str]:
             sha256 = _nodes[name]['sha256']
             # Already unpacked: the package is not read, so a launch does not open the node archive
             if node_packages.digest_of(os.path.join(nodes_dir, name)) != sha256:
+                node_packages.unpack(name, account.node_package(name, sha256), sha256, nodes_dir)
+        # The image of an isolated task holds only the server's own nodes
+        for name in loaded if isolated else []:
+            if name not in names and not os.path.isdir(os.path.join(nodes_dir, name)):
+                sha256 = _index[name]['sha256']
                 node_packages.unpack(name, account.node_package(name, sha256), sha256, nodes_dir)
         return names + [
             name
