@@ -590,7 +590,22 @@ test('R-gate2 a request waiting on the API key is not sent once a terminate, an 
 		assertDenied(await waiting, 'capability', 'a read of a handle closed during the key wait');
 		assert.equal(t.cm.engine.received.length, before, 'nothing is sent for the closed handle');
 	});
-	await tt.test('logout (no run, no handle: only the epoch tells the request is stale)', async (st) => {
+	await tt.test('teardown (no run, no handle, realm still attached: only the epoch tells the request is stale)', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const A = t.open(ENTRY_A);
+		const releaseKey = t.cm.holdApiKey();
+		st.after(() => releaseKey());
+		t.cm.emit('shell:login', { user: { userId: t.cm.engine.userId } });
+		const before = t.cm.engine.received.length;
+		const waiting = clientRequest(A, execMsg());
+		await settle();
+		await t.root.teardownAll(500);
+		releaseKey();
+		assertDenied(await waiting, 'capability', 'an execute asked before a teardown');
+		assert.equal(t.cm.engine.received.length, before, 'nothing is started for the earlier epoch');
+	});
+	await tt.test('logout (the realm is detached: the request is refused or never answered, and never sent)', async (st) => {
 		const t = makeRoot();
 		st.after(() => t.cleanup());
 		const A = t.open(ENTRY_A);
