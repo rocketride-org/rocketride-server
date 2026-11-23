@@ -232,7 +232,12 @@ def simulate_run(
 
     def call_llm_json(context, question):
         prompt = question.getPrompt()
-        kind = 'plan-retry' if 'Your previous reply was not usable' in prompt else 'plan'
+        # Read the planner's own retry instruction: a tool description may quote the same words.
+        retry = any(
+            i.subtitle == 'CRITICAL' and i.instructions.startswith('Your previous reply was not usable')
+            for i in question.instructions
+        )
+        kind = 'plan-retry' if retry else 'plan'
         report.requests.append(
             Measured(
                 kind,
