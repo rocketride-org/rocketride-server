@@ -1446,10 +1446,12 @@ def _guard_cases(job, env):
 
 
 def _symlink_or_skip(target, link) -> None:
-    """``os.symlink``, or skip: Windows without Developer Mode or the privilege raises OSError/NotImplementedError."""
+    """``os.symlink``; on Windows only, skip when the privilege is missing (any other failure is a real error)."""
     try:
         os.symlink(target, link)
     except (OSError, NotImplementedError) as exc:
+        if os.name != 'nt':
+            raise
         pytest.skip(f'cannot create a symlink on this host: {exc}')
 
 
