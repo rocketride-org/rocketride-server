@@ -75,7 +75,8 @@ test('T30 the realm op set is exactly the documented one; the root is not import
 		await assertDeniedOp(A.request(op, { sessionId: 's', projectId: 'p', source: 's' }), 'unknown_op', op);
 	}
 
-	// Grep guard: only src/isolation/ imports the root or names the gated router.
+	// Grep guard: only src/isolation/ imports the root or names the gated router, and, since
+	// PR2b wires it (plan 3.3), Shell.tsx creates the root beside registerClientOps.
 	const src = path.join(__dirname, '..');
 	const offenders: string[] = [];
 	const walk = (dir: string): void => {
@@ -84,7 +85,7 @@ test('T30 the realm op set is exactly the documented one; the root is not import
 			if (e.isDirectory()) walk(full);
 			else if (/\.tsx?$/.test(e.name)) {
 				const rel = path.relative(src, full);
-				if (rel.startsWith(`isolation${path.sep}`) || rel === path.join('ops', 'busBridge.ts')) continue;
+				if (rel.startsWith(`isolation${path.sep}`) || rel === path.join('ops', 'busBridge.ts') || rel === path.join('components', 'layout', 'Shell.tsx')) continue;
 				const text = readFileSync(full, 'utf8');
 				if (/isolation\/appRoot/.test(text) || /createGatedBusRouter/.test(text)) offenders.push(rel);
 			}
@@ -320,9 +321,20 @@ test('T46 teardown ends runs, closes handles, removes monitors, clears ledgers',
 		st.after(() => t.cleanup());
 		const A = t.open(ENTRY_A);
 		const run = await startRun(A);
+		const before = t.cm.engine.received.length;
 		t.cm.emit('shell:logout', {});
 		await settle();
-		assertDenied(await clientRequest(A, dap('rrext_get_task_status', { token: run.token })), 'ownership', 'a handle after shell:logout');
+		// PR2b (plan 5.3, G4 checklist N4): the logout also detaches the realm, so the old handle
+		// gets no answer at all (or a denial), and nothing reaches the engine.
+		const answer = await Promise.race([
+			clientRequest(A, dap('rrext_get_task_status', { token: run.token })).then(
+				(v) => ({ v }),
+				() => ({ v: 'rejected' as const })
+			),
+			new Promise<{ v: 'silent' }>((resolve) => setTimeout(() => resolve({ v: 'silent' }), 300)),
+		]);
+		if (answer.v !== 'silent' && answer.v !== 'rejected') assertDenied(answer.v, ['ownership', 'capability'], 'a handle after shell:logout');
+		assert.equal(t.cm.engine.messagesFor('rrext_get_task_status', before).length, 0, 'nothing forwarded after shell:logout');
 	});
 });
 

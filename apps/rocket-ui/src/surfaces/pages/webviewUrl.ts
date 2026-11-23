@@ -90,6 +90,22 @@ function isEngineChatPage(url: URL): boolean {
 }
 
 /**
+ * The isolated apps' host suffix from `RR_APP_ORIGIN_TEMPLATE` (`apps.example`
+ * for `https://{label}.apps.example`), or '' when there is none.
+ *
+ * @param template - The origin template, if isolation is on.
+ */
+function appSuffixOf(template: string | null | undefined): string {
+	if (!template || !template.includes('{label}')) return '';
+	try {
+		const host = new URL(template.replace('{label}', 'x')).hostname.toLowerCase().replace(/\.+$/, '');
+		return host.startsWith('x.') ? host.slice(2) : '';
+	} catch {
+		return '';
+	}
+}
+
+/**
  * Decide whether a `webview:` document may frame a URL.
  *
  * Only absolute http(s) URLs without credentials are considered (relative and
@@ -110,10 +126,11 @@ function isEngineChatPage(url: URL): boolean {
  * @param raw - The URL taken from the `webview:` document URI.
  * @param shellOrigin - The shell's own origin (`window.location.origin`).
  * @param shellHref - The shell document's URL (`window.location.href`), which the iframe resolves `src` against; defaults to the origin.
+ * @param appOriginTemplate - `getIsolation()?.originTemplate`: hosts under its suffix are refused (#1022, E7).
  * @returns True when the URL may be framed.
  */
-export function isAllowedWebviewUrl(raw: string, shellOrigin: string, shellHref: string = shellOrigin): boolean {
-	return resolveWebviewUrl(raw, shellOrigin, shellHref) !== null;
+export function isAllowedWebviewUrl(raw: string, shellOrigin: string, shellHref: string = shellOrigin, appOriginTemplate?: string | null): boolean {
+	return resolveWebviewUrl(raw, shellOrigin, shellHref, appOriginTemplate) !== null;
 }
 
 /**
@@ -128,9 +145,15 @@ export function isAllowedWebviewUrl(raw: string, shellOrigin: string, shellHref:
  * @param raw - The URL taken from the `webview:` document URI.
  * @param shellOrigin - The shell's own origin (`window.location.origin`).
  * @param shellHref - The shell document's URL (`window.location.href`); defaults to the origin.
+ * @param appOriginTemplate - `getIsolation()?.originTemplate`: hosts under its suffix are refused (#1022, E7).
  * @returns The canonical URL to frame, or null when it must not be framed.
  */
-export function resolveWebviewUrl(raw: string, shellOrigin: string, shellHref: string = shellOrigin): string | null {
+export function resolveWebviewUrl(
+	raw: string,
+	shellOrigin: string,
+	shellHref: string = shellOrigin,
+	appOriginTemplate?: string | null
+): string | null {
 	let url: URL;
 	try {
 		url = new URL(raw);
@@ -143,7 +166,7 @@ export function resolveWebviewUrl(raw: string, shellOrigin: string, shellHref: s
 	} catch {
 		// Opaque or unparsable shell URL: nothing to resolve against.
 	}
-	return isAllowedUrl(url, shellOrigin) ? url.href : null;
+	return isAllowedUrl(url, shellOrigin, appOriginTemplate) ? url.href : null;
 }
 
 /**
@@ -151,11 +174,18 @@ export function resolveWebviewUrl(raw: string, shellOrigin: string, shellHref: s
  *
  * @param url - The absolute URL the iframe will load.
  * @param shellOrigin - The shell's own origin.
+ * @param appOriginTemplate - The isolated apps' origin template, if isolation is on.
  * @returns True when it may be framed.
  */
-function isAllowedUrl(url: URL, shellOrigin: string): boolean {
+function isAllowedUrl(url: URL, shellOrigin: string, appOriginTemplate?: string | null): boolean {
 	const target = endpointOf(url);
 	if (!target || url.username || url.password) return false;
+	// E7 (#1022): never a host under the isolated apps' origin suffix.
+	const suffix = appSuffixOf(appOriginTemplate);
+	if (suffix) {
+		const host = url.hostname.toLowerCase().replace(/\.+$/, '');
+		if (host === suffix || host.endsWith(`.${suffix}`)) return false;
+	}
 
 	let shell: Endpoint | null = null;
 	try {

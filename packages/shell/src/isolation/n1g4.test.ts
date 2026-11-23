@@ -124,7 +124,9 @@ test('T116 real user, team and org ids never reach a realm in free text, store e
 		tt.after(() => t.cleanup());
 		t.cm.engine.userId = USER;
 		t.cm.engine.teamId = TEAM;
-		delete t.cm.engine.client.getAccountInfo;
+		// Account info that names none of the ids the engine stamps (PR2b fails closed with no
+		// account info at all, so the realm needs some): nothing may be learnt from the bodies.
+		t.cm.engine.client.getAccountInfo = () => ({ userId: 'local', devTeam: 'local', organization: null });
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
 		const run = await startRun(A);
 		t.cm.engine.setStatus({ notes: [`by ${USER} for ${TEAM}`] });

@@ -30,6 +30,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
+import { getIsolation } from 'shell';
 import { resolveWebviewUrl } from './webviewUrl';
 
 // =============================================================================
@@ -75,8 +76,9 @@ const WebviewProvider: React.FC<IWebviewProviderProps> = ({ uri }) => {
 
 	// Same-authority pages (anything on the shell origin but the engine's chat
 	// and dropper pages) and non-web schemes are never framed (#1022).
+	// Nor any isolated app's origin (E7, #1022): a webview frame is not the app frame.
 	// The iframe is given the canonical URL that was checked, never the raw text.
-	const framed = url ? resolveWebviewUrl(url, window.location.origin, window.location.href) : null;
+	const framed = url ? resolveWebviewUrl(url, window.location.origin, window.location.href, getIsolation()?.originTemplate) : null;
 	if (!framed) {
 		return <div>Invalid webview URI: {uri}</div>;
 	}

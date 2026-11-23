@@ -58,7 +58,11 @@ import { createOpBus } from '../ops/busOps';
 import { CLIENT_EVENT_OP } from '../ops/clientOps';
 import type { IOpBus, IBusRequestOptions, BusOpHandler } from '../ops/busOps';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
-import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
+import type { IRetainedPort, IRetainedRegistry, RetainedSubscriber } from '../ops/retained';
+import { isGuestRealm } from '../isolation/guestFlag';
+import { SHELL_CAPS } from '../isolation/shellCaps';
+import { rehydrateDenied } from '../isolation/denial';
+import type { BridgeInit } from '../isolation/types';
 import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, isLoopbackShell, isRelayBounceTarget, tokenStore, tabSession, updateTabSession } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
 import { shellReporter } from '../telemetry/host';
@@ -231,6 +235,9 @@ function normalizeEnv(env: Record<string, unknown> | undefined): Record<string, 
  * cm.emit('shell:switchApp', { appId: 'rocketride.home' });
  * ```
  */
+/** What a guest realm's service catalog says (#1022, plan 4.8). */
+const GUEST_SERVICES_ERROR = 'Not available in isolated apps';
+
 export class ConnectionManager implements IConnectionManager {
 	// =========================================================================
 	// SINGLETON
@@ -261,7 +268,9 @@ export class ConnectionManager implements IConnectionManager {
 	}
 
 	private constructor() {
-		this.installMirrorSubscriptions();
+		// An isolated app's guest realm subscribes to nothing on the retained
+		// lane: its state comes from rr:bridge:init and shell.event.* (#1022).
+		if (!isGuestRealm()) this.installMirrorSubscriptions();
 	}
 
 	// =========================================================================
@@ -365,6 +374,8 @@ export class ConnectionManager implements IConnectionManager {
 	public initialize(options?: InitOptions): void {
 		// Guard: do not create a second client
 		if (this.client) return;
+		// An isolated app's guest never owns a socket (#1022): enterGuestMode instead.
+		if (isGuestRealm()) return;
 
 		// Resolve server URI
 		this.serverUri = options?.uri || (typeof window !== 'undefined' ? window.location.origin : '');
@@ -379,6 +390,9 @@ export class ConnectionManager implements IConnectionManager {
 		this.client = new RocketRideClient({
 			uri: this.serverUri,
 			clientName: options?.clientName || DEFAULT_CLIENT_NAME,
+			// Every auth (reconnects too) tells the server this shell can host
+			// isolated apps, so its app lists keep their load fields (#1022, M3).
+			shellCaps: [...SHELL_CAPS],
 			persist: true,
 			// The caller-facing option type is the frozen Record<string, unknown>;
 			// normalize to the string map the SDK copies verbatim instead of casting.
@@ -1868,6 +1882,7 @@ export class ConnectionManager implements IConnectionManager {
 	 * (the canvas icon registry) never need a fetch of their own.
 	 */
 	public getCachedServices(): { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } {
+		if (isGuestRealm()) return { services: {}, servicesError: GUEST_SERVICES_ERROR };
 		if (!this.isConnected()) {
 			return { services: {}, icons: {}, servicesError: 'Not connected' };
 		}
@@ -1887,6 +1902,10 @@ export class ConnectionManager implements IConnectionManager {
 	 * Deduplicates concurrent calls.
 	 */
 	public async refreshServices(): Promise<void> {
+		if (isGuestRealm()) {
+			this.emit('shell:servicesUpdated', { services: {}, servicesError: GUEST_SERVICES_ERROR });
+			return;
+		}
 		const owner = this.lifecycleOwner;
 		if (!owner || !this.isCurrentOperation(owner)) return;
 		if (!this.isConnected() || !this.client) {
@@ -2073,6 +2092,8 @@ export class ConnectionManager implements IConnectionManager {
 	 */
 	public request(op: string, params: unknown, opts?: IBusRequestOptions): Promise<unknown> {
 		this.logDebug(op, params);
+		// A guest rebuilds the root's refusals as CapabilityDeniedError (#1022).
+		if (isGuestRealm()) return this.opBus.request(op, params, opts).catch((err: unknown) => Promise.reject(rehydrateDenied(err)));
 		return this.opBus.request(op, params, opts);
 	}
 
@@ -2198,6 +2219,14 @@ export class ConnectionManager implements IConnectionManager {
 	}
 
 	/**
+	 * This realm's own retained registry: the isolated-app root (#1022)
+	 * serves a gated realm's allowlisted retained reads from it.
+	 */
+	public retained(): IRetainedRegistry {
+		return this.retainedRegistry;
+	}
+
+	/**
 	 * Installs the realm's retained transport — called ONCE by the bus-realm
 	 * attachment with the wire port from attachRealmToRoot. Every existing
 	 * subscription re-points to the new port (and replays off the root's
@@ -2301,6 +2330,70 @@ export class ConnectionManager implements IConnectionManager {
 			this.cachedServiceIcons = (services.icons ?? null) as Record<string, string> | null;
 			this.cachedServicesError = services.servicesError ?? null;
 			this.emit('shell:servicesUpdated', { services: this.cachedServices ?? {}, ...(this.cachedServiceIcons ? { icons: this.cachedServiceIcons } : {}), ...(this.cachedServicesError ? { servicesError: this.cachedServicesError } : {}) } as never);
+		});
+	}
+
+	/**
+	 * Enters guest mode: the realm of an isolated app frame (#1022, plan 4.8).
+	 *
+	 * The state comes from the accepted `rr:bridge:init` (connected flag, the
+	 * engine's HTTP base, the identity aliases as account info with no token,
+	 * key or app list) and later from the root's `shell.event.*` emitOps,
+	 * which update it and re-emit the matching local `shell:*` events. The
+	 * brokered client is built at once, with its `client.event` handler.
+	 *
+	 * @param init - The accepted bridge init.
+	 */
+	public enterGuestMode(init: BridgeInit): void {
+		// Frozen in v15: on the root it would replace the real session state (G4, DA LOW 3).
+		if (!isGuestRealm()) throw new Error('enterGuestMode: not an isolated app guest realm');
+		this.mirrorConnected = init.props.isConnected === true;
+		this.serverUri = init.engineHttpUrl;
+		this.connectionStatus = { ...this.connectionStatus, state: this.mirrorConnected ? ConnectionState.CONNECTED : ConnectionState.DISCONNECTED };
+		const identity = init.identity;
+		const org = identity?.organizations[0];
+		this.accountInfo = identity
+			? ({
+				userId: identity.userId,
+				displayName: identity.displayName,
+				organization: org ? { id: org.id, name: org.name } : null,
+				memberships: identity.organizations.map((o) => ({ id: o.id, name: o.name })),
+				apps: [],
+				capabilities: [],
+			} as unknown as ConnectResult)
+			: undefined;
+		this.seedMirrorClient();
+		const setConnected = (connected: boolean): void => {
+			this.mirrorConnected = connected;
+			this.connectionStatus = { ...this.connectionStatus, state: connected ? ConnectionState.CONNECTED : ConnectionState.DISCONNECTED };
+			this.seedMirrorClient();
+		};
+		this.ops().handle('shell.event.connected', () => {
+			setConnected(true);
+			this.emit('shell:connected', undefined as never);
+		});
+		this.ops().handle('shell.event.disconnected', () => {
+			setConnected(false);
+			this.emit('shell:disconnected', { reason: 'root disconnected', hasError: false });
+		});
+		this.ops().handle('shell.event.statusChange', (params) => {
+			const p = (params ?? {}) as Record<string, unknown>;
+			const next: ConnectionStatus = { ...this.connectionStatus };
+			if (Object.values(ConnectionState).includes(p.state as ConnectionState)) next.state = p.state as ConnectionState;
+			if (typeof p.connectionMode === 'string') next.connectionMode = p.connectionMode as ConnectionMode;
+			if (typeof p.authPhase === 'string') next.authPhase = p.authPhase as AuthPhase;
+			this.connectionStatus = next;
+			this.emit('shell:statusChange', this.getConnectionStatus());
+		});
+		this.ops().handle('shell.event.themeChange', (params) => {
+			const raw = ((params ?? {}) as { tokens?: unknown }).tokens;
+			const tokens: Record<string, string> = {};
+			if (raw && typeof raw === 'object') for (const [k, v] of Object.entries(raw)) if (typeof v === 'string') tokens[k] = v;
+			this.emit('shell:themeChange', { tokens });
+		});
+		this.ops().handle('shell.event.viewActivated', (params) => {
+			const viewId = ((params ?? {}) as { viewId?: unknown }).viewId;
+			if (typeof viewId === 'string') this.emit('shell:viewActivated', { viewId });
 		});
 	}
 

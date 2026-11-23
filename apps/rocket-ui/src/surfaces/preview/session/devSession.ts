@@ -57,7 +57,8 @@ import * as LocalJsxRuntime from 'react/jsx-runtime';
 import * as LocalJsxDevRuntime from 'react/jsx-dev-runtime';
 import * as LocalRocketride from 'rocketride';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
-import { ConnectionManager } from 'shell';
+import { ConnectionManager, getIsolation } from 'shell';
+import { previewAllowed } from '../isolationGate';
 import type { IWorkspaceFileSystem } from 'shared/modules/vfs/vfsTypes';
 import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
 import { getWorkspaceVfs, storePathToVirtual } from '../../workspace/vfs/workspace';
@@ -683,6 +684,8 @@ export class WebDevSession {
 			// meta carries the WORKSPACE manifest (refreshed whenever deps
 			// resettle) so the preview shell's chrome and Settings track it
 			const entryUrl = result.entryUrl;
+			// E13 (#1022): never a local registration for an app isolation keeps out of this realm.
+			if (!previewAllowed(this.appId, getIsolation())) throw new Error(`"${this.appId}" runs in its own isolated origin and cannot be previewed here`);
 			api.registerLocalApp(
 				this.appId,
 				() => import(/* webpackIgnore: true */ entryUrl).then((m: { default?: unknown }) => m.default ?? m),

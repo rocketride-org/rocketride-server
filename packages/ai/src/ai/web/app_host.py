@@ -38,7 +38,8 @@ App-host dispatch (#1022, design section 5).
 
 App-host routes:
     GET /_rr/frame.html               — the guest frame, shell origins injected as a meta tag
-    GET /_rr/<guest>                  — the guest bundle named by runtime.json (immutable)
+    GET /_rr/frame.html?c=<ticket>    — the same, its CSP widened to the ticket's network (no-store)
+    GET /_rr/<guest>                  — the guest bundle and every chunk named by runtime.json (immutable)
     GET /_rr/clear                    — Clear-Site-Data: "storage" (a same-origin navigation only, on logout)
     GET /_t/<token>/v<N>/<file>       — one version's dist behind a frame token (private, no-store)
     GET /_p/<appId>/v<N>/<file>       — a public ready version's dist (anonymous; registry
@@ -56,7 +57,8 @@ import hashlib
 import hmac
 import html
 import re
-from typing import Optional
+from typing import List, Optional
+from urllib.parse import parse_qs
 
 from starlette.datastructures import Headers
 from starlette.responses import Response
@@ -67,13 +69,16 @@ from ai.modules.shell.app_origin import (
     client_ip,
     current_config,
     entitlement_ok,
+    guest_assets,
     guest_dir,
     is_canonical_app_id,
     label_of,
+    network_for,
     public_lookup_ok,
     public_version_dirs,
-    read_runtime_marker,
     token_version_dirs,
+    validate_network,
+    verify_frame_ticket,
     verify_frame_token,
 )
 
@@ -90,6 +95,27 @@ _CSP = (
     "frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
 )
 
+
+def _csp_with(network: List[str]) -> str:
+    """The app-host policy with ``network`` (validated https origins) added to ``img-src`` and ``connect-src``."""
+    if not network:
+        return _CSP
+    extra = ' ' + ' '.join(network)
+    return _CSP.replace("img-src 'self' data: blob:", "img-src 'self' data: blob:" + extra).replace(
+        "connect-src 'self'", "connect-src 'self'" + extra
+    )
+
+
+# Guest chunk media types (the flat guest build emits only these, Appendix L).
+_GUEST_MEDIA_TYPES = {
+    'js': 'text/javascript',
+    'css': 'text/css',
+    'woff2': 'font/woff2',
+    'woff': 'font/woff',
+    'svg': 'image/svg+xml',
+    'png': 'image/png',
+}
+
 # Set on EVERY app-host response by the route itself (the engine's
 # security-headers middleware sits inside this one and never sees them).
 _APP_HOST_HEADERS = {
@@ -98,7 +124,6 @@ _APP_HOST_HEADERS = {
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
     'Origin-Agent-Cluster': '?1',
-    'Vary': 'Service-Worker',
 }
 
 _TOKEN_CACHE = 'private, no-store'
@@ -111,6 +136,20 @@ _GUEST_CACHE = 'public, max-age=31536000, immutable'
 def _is_app_host_path(path: str) -> bool:
     """Whether a path belongs to the app-host route families."""
     return any(path == prefix or path.startswith(prefix + '/') for prefix in _APP_HOST_PREFIXES)
+
+
+def _merge_vary(response: Response) -> None:
+    """Add ``Service-Worker`` to the response's ``Vary`` (a union of tokens; ``*`` stays ``*``)."""
+    tokens = [t.strip() for t in (response.headers.get('vary') or '').split(',') if t.strip()]
+    if '*' in tokens:
+        response.headers['Vary'] = '*'
+        return
+    merged, seen = [], set()
+    for token in [*tokens, 'Service-Worker']:
+        if token.lower() not in seen:
+            seen.add(token.lower())
+            merged.append(token)
+    response.headers['Vary'] = ', '.join(merged)
 
 
 def _not_found() -> Response:
@@ -152,6 +191,7 @@ class AppHostMiddleware:
         else:
             response = await self._serve(scope, headers, label, path) if label else _not_found()
             response.headers.update(_APP_HOST_HEADERS)
+            _merge_vary(response)
             if 'content-security-policy' not in response.headers:
                 response.headers['Content-Security-Policy'] = _CSP
         await response(scope, receive, send)
@@ -204,7 +244,8 @@ class AppHostMiddleware:
             return _not_found()
         parts = path.split('/')[1:]
         if parts[:1] == ['_rr'] and len(parts) == 2:
-            return self._serve_rr(parts[1], headers)
+            query = parse_qs(scope.get('query_string', b'').decode('latin-1'), keep_blank_values=True)
+            return self._serve_rr(parts[1], headers, query, label)
         if parts[:1] in (['_t'], ['_p']) and len(parts) >= 4:
             version = _VERSION.fullmatch(parts[2])
             rest = parts[3:]
@@ -217,8 +258,8 @@ class AppHostMiddleware:
                 return await self._serve_public(parts[1], int(version.group(1)), rest, label, headers)
         return _not_found()
 
-    def _serve_rr(self, name: str, headers: Headers) -> Response:
-        """``/_rr/frame.html``, ``/_rr/<guest>`` and ``/_rr/clear``."""
+    def _serve_rr(self, name: str, headers: Headers, query: Optional[dict] = None, label: str = '') -> Response:
+        """``/_rr/frame.html`` (``?c=<ticket>``), ``/_rr/<guest or chunk>`` and ``/_rr/clear``."""
         if name == 'clear':
             # Only a same-ORIGIN navigation wipes the origin's storage (each
             # guest navigates its own frame here on logout). Every app host is
@@ -232,16 +273,27 @@ class AppHostMiddleware:
                 return _not_found()
             return Response(b'', headers={'Clear-Site-Data': '"storage"', 'Cache-Control': 'no-store'})
         try:
-            marker = read_runtime_marker()
+            assets = guest_assets()
             if name == 'frame.html':
                 document = (guest_dir() / 'frame.html').read_text(encoding='utf-8')
-            elif name == marker['guest']:
-                bundle = (guest_dir() / marker['guest']).read_bytes()
-                return Response(bundle, media_type='text/javascript', headers={'Cache-Control': _GUEST_CACHE})
+            elif name in assets:
+                media_type = _GUEST_MEDIA_TYPES.get(name.rsplit('.', 1)[-1])
+                if media_type is None:
+                    return _not_found()
+                body = (guest_dir() / name).read_bytes()
+                extra = (
+                    {'Content-Security-Policy': f"{_CSP}; frame-ancestors 'none'"}
+                    if media_type == 'image/svg+xml'
+                    else {}
+                )
+                return Response(body, media_type=media_type, headers={'Cache-Control': _GUEST_CACHE, **extra})
             else:
                 return _not_found()
         except (OSError, RuntimeError):
             return _not_found()
+        query = query or {}
+        ticketed = 'c' in query
+        network = self._ticket_network(query.get('c'), label) if ticketed else []
         origins = ' '.join(self.config.shell_origins)
         meta = f'<meta name="rr-shell-origins" content="{html.escape(origins)}">'
         head = re.search(r'<head[^>]*>', document, re.IGNORECASE)
@@ -250,10 +302,27 @@ class AppHostMiddleware:
             document,
             media_type='text/html',
             headers={
-                'Cache-Control': 'no-cache',
-                'Content-Security-Policy': f'{_CSP}; frame-ancestors {origins}',
+                # A ticketed frame's policy depends on the query: never cached.
+                'Cache-Control': 'no-store' if ticketed else 'no-cache',
+                'Content-Security-Policy': f'{_csp_with(network)}; frame-ancestors {origins}',
             },
         )
+
+    def _ticket_network(self, values: Optional[list], label: str) -> List[str]:
+        """
+        The network a ``c`` ticket widens ``frame.html`` to, or [] (the base policy).
+
+        Exactly one ``c`` value; it must verify for this host's label, and its
+        list is revalidated now (``validate_network``) and dropped whole when
+        any entry fails. A bad ticket never fails the frame itself.
+        """
+        if not values or len(values) != 1 or not label:
+            return []
+        try:
+            claims = verify_frame_ticket(values[0], label, config=self.config)
+            return validate_network(claims['n'])
+        except (FrameTokenError, ValueError):
+            return []
 
     def _own_origins(self, headers: Headers) -> tuple:
         """The origin this app host answers as (the request's own label under the template)."""
@@ -276,7 +345,8 @@ class AppHostMiddleware:
         # resolves to another dist tree (another rail won, or it was replaced) is not that grant.
         if 'd' in claims and dist_dir != claims['d']:
             return _not_found()
-        return await _read_dist(dist_dir, rest, _TOKEN_CACHE)
+        network = await network_for(claims['a'], version, dist_dir)
+        return await _read_dist(dist_dir, rest, _TOKEN_CACHE, _csp_with(network))
 
     async def _serve_public(
         self, app_id: str, version: int, rest: list, label: str, headers: Optional[Headers] = None
@@ -285,18 +355,32 @@ class AppHostMiddleware:
         if not is_canonical_app_id(app_id) or not hmac.compare_digest(label_of(app_id), label):
             return _not_found()
         dirs = await public_version_dirs(app_id, version)
+        dist_dir = dirs.get(version)
+        network = await network_for(app_id, version, dist_dir)
         return await _read_dist(
-            dirs.get(version), rest, _PUBLIC_CACHE, etag=True, if_none_match=(headers or {}).get('if-none-match', '')
+            dist_dir,
+            rest,
+            _PUBLIC_CACHE,
+            _csp_with(network),
+            etag=True,
+            if_none_match=(headers or {}).get('if-none-match', ''),
         )
 
 
 async def _read_dist(
-    dist_dir: Optional[str], rest: list, cache_control: str, *, etag: bool = False, if_none_match: str = ''
+    dist_dir: Optional[str],
+    rest: list,
+    cache_control: str,
+    csp: str = _CSP,
+    *,
+    etag: bool = False,
+    if_none_match: str = '',
 ) -> Response:
     """Stream one file of a version's dist tree from the store, or the one 404.
 
-    With ``etag`` the response carries a validator and a matching ``If-None-Match`` answers 304: the
-    caller has already re-resolved the version (so a withdrawn one is the 404 above), only the bytes are saved.
+    ``csp`` carries the served version's network (img-src/connect-src). With ``etag`` the response carries a
+    validator and a matching ``If-None-Match`` answers 304: the caller has already re-resolved the version (so a
+    withdrawn one is the 404 above), only the bytes are saved.
     """
     if not dist_dir:
         return _not_found()
@@ -311,14 +395,16 @@ async def _read_dist(
     # The pinned table: on Windows the registry can map .js to text/plain,
     # which a nosniff browser then refuses to run.
     media_type = _media_type(rest[-1]) or 'application/octet-stream'
-    headers = {'Cache-Control': cache_control}
+    # ``csp`` carries the served version's network (img-src/connect-src).
+    headers = {'Cache-Control': cache_control, 'Content-Security-Policy': csp}
+    # Before the validator: a 304 replaces a cache's stored headers, so it carries the 200's policy.
+    if media_type in ('text/html', 'application/xhtml+xml', 'image/svg+xml'):
+        # A document from a dist is never framed by anyone: the guest frame
+        # (frame.html) is the only framable page on an app host.
+        headers['Content-Security-Policy'] = f"{csp}; frame-ancestors 'none'"
     if etag:
         validator = '"' + hashlib.sha256(data).hexdigest()[:32] + '"'
         headers['ETag'] = validator
         if validator in [item.strip() for item in if_none_match.split(',')]:
             return Response(status_code=304, headers=headers)
-    if media_type in ('text/html', 'application/xhtml+xml', 'image/svg+xml'):
-        # A document from a dist is never framed by anyone: the guest frame
-        # (frame.html) is the only framable page on an app host.
-        headers['Content-Security-Policy'] = f"{_CSP}; frame-ancestors 'none'"
     return Response(data, media_type=media_type, headers=headers)

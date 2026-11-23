@@ -31,12 +31,16 @@
  *   shell:test    — run node:test against co-located TypeScript tests
  *   shell:bundle  — run rsbuild build
  *   shell:copy    — sync build/shell → dist/server/static/shell (+ isolation/capabilities.json)
- *   shell:build   — full build: client-typescript → test → bundle → copy
+ *   shell:guest-build — rsbuild build of the isolated-app guest runtime (build/shell-guest)
+ *   shell:guest-copy  — sync build/shell-guest → dist/server/static/shell-guest, then write
+ *                       frame.html and runtime.json (#1022)
+ *   shell:build   — full build: client-typescript → test → bundle → copy → guest-build → guest-copy
  *   shell:dev     — start rsbuild dev server on port 3000
  *   shell:clean   — remove build artifacts
  */
 const path = require('path');
-const { readdir } = require('node:fs/promises');
+const { readdir, readFile, writeFile } = require('node:fs/promises');
+const crypto = require('node:crypto');
 const {
 	execCommand,
 	syncDir,
@@ -66,6 +70,14 @@ const SERVER_CLIENTS_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', '
 // The server reads it from static/shell/isolation/ (startup check, deploy
 // validation, the frame grant) and the guest runtime pins its sha256.
 const CAPABILITIES_JSON = path.join(APP_ROOT, 'isolation', 'capabilities.json');
+// The guest runtime of isolated apps (#1022 PR2b): a flat build served by the
+// engine at /_rr/<name> on app hosts only, by exact name from runtime.json.
+const GUEST_CONFIG = 'rsbuild.guest.config.mts';
+const GUEST_BUILD_DIR = path.join(BUILD_ROOT, 'shell-guest');
+const SERVER_GUEST_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell-guest');
+const GUEST_ENTRY = /^guest-boot\.[A-Za-z0-9_-]+\.js$/;
+// Appendix L: the only names the engine serves (it refuses the marker otherwise).
+const GUEST_ASSET = /^guest-[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.(?:js|css|woff2|woff|svg|png)$/;
 
 // Source directories and files that affect the shell build output.
 const SRC_DIR = path.join(APP_ROOT, 'src');
@@ -223,6 +235,79 @@ function makeCopyAction() {
 }
 
 /**
+ * Build the guest runtime (build/shell-guest) with rsbuild.guest.config.mts.
+ *
+ * @returns {object} Action with run function.
+ */
+function makeGuestBuildAction() {
+	return {
+		run: async (ctx, task) => {
+			await removeDir(GUEST_BUILD_DIR);
+			await execCommand('npx', ['rsbuild', 'build', '--config', GUEST_CONFIG], {
+				task,
+				cwd: APP_ROOT,
+				env: { ...process.env, ROCKETRIDE_BUILD_ROOT: BUILD_ROOT },
+			});
+		},
+	};
+}
+
+/**
+ * Mirror build/shell-guest to dist/server/static/shell-guest and write the
+ * two generated files beside it:
+ *   frame.html   — one external script, the guest entry; no inline script
+ *   runtime.json — {runtime, guest, chunks, publicPath, protoMin, protoMax, capabilitiesSha256}
+ * Fails the build on a subdirectory or on any emitted name outside
+ * _GUEST_ASSET (the engine would refuse the marker at startup).
+ *
+ * @returns {object} Action with run function.
+ */
+function makeGuestCopyAction() {
+	return {
+		run: async (ctx, task) => {
+			const source = GUEST_BUILD_DIR;
+			const target = SERVER_GUEST_DIR;
+			const entries = await readdir(source, { withFileTypes: true });
+			const names = [];
+			for (const entry of entries) {
+				if (!entry.isFile()) throw new Error(`guest build is not flat: ${entry.name}`);
+				if (!GUEST_ASSET.test(entry.name))
+					throw new Error(`guest build emitted an unservable name: ${entry.name}`);
+				names.push(entry.name);
+			}
+			const guests = names.filter((name) => GUEST_ENTRY.test(name));
+			if (guests.length !== 1)
+				throw new Error(`guest build must emit exactly one entry (found ${guests.length})`);
+			const guest = guests[0];
+			const chunks = names.filter((name) => name !== guest).sort();
+			if (chunks.length > 512) throw new Error(`guest build emitted ${chunks.length} chunks (at most 512)`);
+
+			const stats = await syncDir(source, target, { package: true });
+			const capabilitiesSha256 = crypto
+				.createHash('sha256')
+				.update(await readFile(CAPABILITIES_JSON))
+				.digest('hex');
+			const marker = {
+				runtime: 1,
+				guest,
+				chunks,
+				publicPath: '/_rr/',
+				protoMin: 1,
+				protoMax: 1,
+				capabilitiesSha256,
+			};
+			const frameHtml =
+				'<!doctype html>\n<html><head><meta charset="utf-8">' +
+				`<script src="/_rr/${guest}"></script>` +
+				'</head><body></body></html>\n';
+			await writeFile(path.join(target, 'frame.html'), frameHtml);
+			await writeFile(path.join(target, 'runtime.json'), JSON.stringify(marker, null, 2) + '\n');
+			task.output = formatSyncStats(stats);
+		},
+	};
+}
+
+/**
  * Run co-located shell TypeScript tests through node:test.
  *
  * Discovers *.test.ts and *.test.tsx files recursively under src/ and
@@ -269,6 +354,8 @@ const shellModule = {
 		{ name: 'shell:test-run', action: makeTestRunAction },
 		{ name: 'shell:bundle', action: makeBundleAction },
 		{ name: 'shell:copy', action: makeCopyAction },
+		{ name: 'shell:guest-build', action: makeGuestBuildAction },
+		{ name: 'shell:guest-copy', action: makeGuestCopyAction },
 
 		{
 			// Standalone test entry: compile the TS client SDK first so the
@@ -285,7 +372,14 @@ const shellModule = {
 			name: 'shell:build',
 			action: () => ({
 				description: 'Build the shell',
-				steps: ['client-typescript:build', 'shell:test-run', 'shell:bundle', 'shell:copy'],
+				steps: [
+					'client-typescript:build',
+					'shell:test-run',
+					'shell:bundle',
+					'shell:copy',
+					'shell:guest-build',
+					'shell:guest-copy',
+				],
 			}),
 		},
 		{

@@ -45,7 +45,7 @@
  * MF one-document-one-version rule).
  */
 
-import { repointRemote, isRemoteLoaded, invalidateAppDescriptor, isDevRemote } from './appLoader';
+import { repointRemote, isRemoteLoaded, invalidateAppDescriptor, isDevRemote, isIsolatedId } from './appLoader';
 import { sessionScopedStore } from './devGate';
 
 // =============================================================================
@@ -216,6 +216,15 @@ export function applyAppVersionOverride(
 	moduleId: string,
 	override: AppVersionOverride | null,
 ): 'ready' | 'reload-required' {
+	// An isolated app never runs a Module Federation container in this realm
+	// (#1022): the override is stored and the frame is reminted for it.
+	if (isIsolatedId(appId)) {
+		if (override === null) clearAppVersionOverride(appId);
+		else setAppVersionOverride(appId, override);
+		invalidateAppDescriptor(appId);
+		return 'ready';
+	}
+
 	// The live dev build always wins — record/clear the override for later
 	// sessions but never repoint a dev-owned container.
 	if (isDevRemote(moduleId)) {
@@ -237,7 +246,7 @@ export function applyAppVersionOverride(
 	// A loaded container is committed to its version for this document
 	if (isRemoteLoaded(moduleId)) return 'reload-required';
 	// Not loaded yet — repoint the registration and evict the descriptor
-	repointRemote(moduleId, versionedEntryUrl(appId, override.version));
+	repointRemote(appId, moduleId, versionedEntryUrl(appId, override.version));
 	invalidateAppDescriptor(appId);
 	return 'ready';
 }

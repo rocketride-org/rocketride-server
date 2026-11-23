@@ -173,6 +173,9 @@ export function useIframeBridge(iframeRef: RefObject<HTMLIFrameElement>): void {
 		const handler = (e: MessageEvent) => {
 			// Ignore messages that did not originate from our managed iframe
 			if (e.source !== iframeRef.current?.contentWindow) return;
+			// ...at the shell's own origin (E7, #1022): post() only ever targets
+			// that origin, so a frame navigated elsewhere is a stranger.
+			if (e.origin !== window.location.origin) return;
 			const msg = e.data;
 			switch (msg?.type) {
 				case 'view:ready':

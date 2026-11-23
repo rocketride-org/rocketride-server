@@ -1240,7 +1240,7 @@ importers:
         version: 2.3.3(rollup@4.62.4)(vite@6.4.3(@types/node@22.20.1)(jiti@2.6.1)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(tsx@4.23.1))
       vitest:
         specifier: '>=4.1.11 <5'
-        version: 4.1.11(@types/node@22.20.1)(jsdom@20.0.3)(vite@6.4.3(@types/node@22.20.1)(jiti@2.6.1)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(tsx@4.23.1))
+        version: 4.1.11(@types/node@22.20.1)(happy-dom@21.0.4)(jsdom@20.0.3)(vite@6.4.3(@types/node@22.20.1)(jiti@2.6.1)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(tsx@4.23.1))
 
   packages/chat-widget:
     devDependencies:
@@ -1430,6 +1430,9 @@ importers:
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
+      happy-dom:
+        specifier: 21.0.4
+        version: 21.0.4
       tsx:
         specifier: ~4.23.1
         version: 4.23.1
@@ -4817,6 +4820,7 @@ packages:
   '@secretlint/secretlint-rule-preset-recommend@10.2.2':
     resolution: {integrity: sha512-K3jPqjva8bQndDKJqctnGfwuAxU2n9XNCPtbXVI5JvC7FnQiNg/yWlQPbMUlBXtBoBGFYp08A94m6fvtc9v+zA==}
     engines: {node: '>=20.0.0'}
+    deprecated: Built into secretlint v14 and later. Remove this package; the rule id still works. https://github.com/secretlint/secretlint/blob/HEAD/docs/rules/preset-recommend.md
 
   '@secretlint/source-creator@10.2.2':
     resolution: {integrity: sha512-h6I87xJfwfUTgQ7irWq7UTdq/Bm1RuQ/fYhA3dtTIAop5BwSFmZyrchph4WcoEvbN460BWKmk4RYSvPElIIvxw==}
@@ -5380,6 +5384,9 @@ packages:
 
   '@types/vscode@1.99.1':
     resolution: {integrity: sha512-cQlqxHZ040ta6ovZXnXRxs3fJiTmlurkIWOfZVcLSZPcm9J4ikFpXuB7gihofGn5ng+kDVma5EmJIclfk0trPQ==}
+
+  '@types/whatwg-mimetype@3.0.2':
+    resolution: {integrity: sha512-c2AKvDT8ToxLIOUlN51gTiHXflsfIFisS4pO7pDPoKouJCESkhZnEy623gwP9laCy5lnLDAw1vAzu2vM2YLOrA==}
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
@@ -6151,6 +6158,10 @@ packages:
 
   buffer-from@1.1.2:
     resolution: {integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==}
+
+  buffer-image-size@0.6.4:
+    resolution: {integrity: sha512-nEh+kZOPY1w+gcCMobZ6ETUp9WfibndnosbpwB1iJk/8Gt5ZF2bhS6+B6bPYz424KtwsR6Rflc3tCz1/ghX2dQ==}
+    engines: {node: '>=4.0'}
 
   buffer@5.7.1:
     resolution: {integrity: sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==}
@@ -7496,6 +7507,7 @@ packages:
   eslint@9.39.4:
     resolution: {integrity: sha512-XoMjdBOwe/esVgEvLmNsD3IRHkm7fbKIUGvrleloJXUZgDHig2IPWNniv+GwjyJXzuNqVjlr5+4yVUZjycJwfQ==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -8012,6 +8024,10 @@ packages:
     engines: {node: '>=0.4.7'}
     hasBin: true
 
+  happy-dom@21.0.4:
+    resolution: {integrity: sha512-tFm+GaLBgo6o0awHnvHaNoraVo27qJ+2tZEtZ+cIa08hXbeitrxAJajLI05hsUy/2/YTKcUjQYzHe5mCcraLBw==}
+    engines: {node: '>=20.0.0'}
+
   has-bigints@1.1.0:
     resolution: {integrity: sha512-R3pbpkcIqv2Pm3dUwgjclDRVmWpTJW2DcMzcIhEXEx1oh/CEMObMm3KLmRJOdvhM7o4uQBnwr8pzRK2sJWIqfg==}
     engines: {node: '>= 0.4'}
@@ -8292,6 +8308,7 @@ packages:
   image-size@2.0.2:
     resolution: {integrity: sha512-IRqXKlaXwgSMAMtpNzZa1ZAe8m+Sa1770Dhk8VkSsP9LS+iHD62Zd8FQKs8fbPiagBE7BzoFX23cxFnwshpV6w==}
     engines: {node: '>=16.x'}
+    deprecated: Use latest 2.x please
     hasBin: true
 
   immediate@3.0.6:
@@ -18728,6 +18745,8 @@ snapshots:
 
   '@types/vscode@1.99.1': {}
 
+  '@types/whatwg-mimetype@3.0.2': {}
+
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 20.19.30
@@ -19664,6 +19683,10 @@ snapshots:
   buffer-equal-constant-time@1.0.1: {}
 
   buffer-from@1.1.2: {}
+
+  buffer-image-size@0.6.4:
+    dependencies:
+      '@types/node': 22.20.1
 
   buffer@5.7.1:
     dependencies:
@@ -21750,6 +21773,19 @@ snapshots:
       wordwrap: 1.0.0
     optionalDependencies:
       uglify-js: 3.19.3
+
+  happy-dom@21.0.4:
+    dependencies:
+      '@types/node': 22.20.1
+      '@types/whatwg-mimetype': 3.0.2
+      '@types/ws': 8.18.1
+      buffer-image-size: 0.6.4
+      entities: 7.0.1
+      whatwg-mimetype: 3.0.0
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   has-bigints@1.1.0: {}
 
@@ -27438,7 +27474,7 @@ snapshots:
       terser: 5.48.0
       tsx: 4.23.1
 
-  vitest@4.1.11(@types/node@22.20.1)(jsdom@20.0.3)(vite@6.4.3(@types/node@22.20.1)(jiti@2.6.1)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(tsx@4.23.1)):
+  vitest@4.1.11(@types/node@22.20.1)(happy-dom@21.0.4)(jsdom@20.0.3)(vite@6.4.3(@types/node@22.20.1)(jiti@2.6.1)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(tsx@4.23.1)):
     dependencies:
       '@vitest/expect': 4.1.11
       '@vitest/mocker': 4.1.11(vite@6.4.3(@types/node@22.20.1)(jiti@2.6.1)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(tsx@4.23.1))
@@ -27462,6 +27498,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.20.1
+      happy-dom: 21.0.4
       jsdom: 20.0.3
     transitivePeerDependencies:
       - msw

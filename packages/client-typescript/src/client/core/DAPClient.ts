@@ -87,6 +87,9 @@ export class DAPClient extends DAPBase {
 	 */
 	protected _clientDisplayVersion?: string;
 
+	/** Shell capabilities sent with every `auth` (`RocketRideClientConfig.shellCaps`). */
+	protected _shellCaps?: string[];
+
 	/** Auth response body from the last successful _dapConnect. Set before onConnected fires. */
 	protected _connectResult?: ConnectResult;
 
@@ -110,6 +113,9 @@ export class DAPClient extends DAPBase {
 
 		// Resolve the version string the client will advertise to the server during auth
 		this._clientDisplayVersion = config.clientVersion || SDK_VERSION;
+
+		// Shell capabilities ride along in every auth (absent: no key on the wire)
+		if (Array.isArray(config.shellCaps)) this._shellCaps = [...config.shellCaps];
 	}
 
 	/**

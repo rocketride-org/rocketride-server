@@ -27,7 +27,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import WebviewProvider from './WebviewProvider';
+import Module from 'node:module';
+
+// The provider reads the isolation config from `shell`, whose entry point pulls
+// in the whole UI (CSS, browser globals). Stand in a shell with isolation off
+// (and one with it on, below) before the provider loads.
+const shellStub: { getIsolation: () => { originTemplate: string } | null } = { getIsolation: () => null };
+const moduleInternals = Module as unknown as { _load: (request: string, ...rest: unknown[]) => unknown };
+const originalLoad = moduleInternals._load;
+moduleInternals._load = function (request: string, ...rest: unknown[]) {
+	return request === 'shell' ? shellStub : originalLoad.call(this, request, ...rest);
+};
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const WebviewProvider = (require('./WebviewProvider') as { default: React.ComponentType<{ uri: string }> }).default;
 
 /** Render the provider with a stand-in shell location. */
 function render(uri: string): string {
@@ -48,4 +60,17 @@ test('renders no iframe for a refused URL', () => {
 		assert.ok(!html.includes('<iframe'), uri);
 		assert.match(html, /Invalid webview URI/, uri);
 	}
+});
+
+test('refuses a host under the isolated apps origin suffix, and frames it once isolation is off', () => {
+	const uri = 'webview:https://a1234567890123456789012345.apps.example/_rr/frame.html';
+	shellStub.getIsolation = () => ({ originTemplate: 'https://{label}.apps.example' });
+	try {
+		const html = render(uri);
+		assert.ok(!html.includes('<iframe'));
+		assert.match(html, /Invalid webview URI/);
+	} finally {
+		shellStub.getIsolation = () => null;
+	}
+	assert.match(render(uri), /<iframe/);
 });

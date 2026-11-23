@@ -40,7 +40,7 @@ import pytest
 import ai.modules.shell as shell_pkg
 
 from . import isolation_support as sup
-from .isolation_support import b64u, need, new_key
+from .isolation_support import b64u, key_entry, need, new_key
 
 
 def _ao():
@@ -689,3 +689,151 @@ def test_scope_id_values_never_raise(value, isolation_env):
         '10.0.0.1',
         'fe80::/64',
     )
+
+
+# ===========================================================================
+# PR2b: T106 RR_APP_ALIAS_KEY, T104 startup (chunks), the runtime marker's chunk list
+# ===========================================================================
+
+import json  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    'value',
+    [
+        None,
+        '',
+        '   ',
+        b64u(b'x' * 31),  # 31 bytes: too short
+        b64u(b'x' * 16),
+        '***not base64***',
+        'k1:' + b64u(new_key()),  # a kid:key pair is the frame-token format, not this one
+    ],
+    ids=['missing', 'empty', 'blank', '31-bytes', '16-bytes', 'not-base64', 'kid-form'],
+)
+def test_t106_a_missing_empty_or_short_alias_key_refuses_start(value, isolation_env):
+    """T106: ``RR_APP_ALIAS_KEY`` is required when not ``off``: base64url, at least 32 bytes, named in the one-line refusal."""
+    isolation_env.set(RR_APP_ALIAS_KEY=value)
+    _refuses('RR_APP_ALIAS_KEY')
+
+
+def test_t106_a_valid_alias_key_starts_and_is_never_printed(isolation_env):
+    """T106: 32 bytes is enough; it reaches the config (``alias_key``) and not its repr."""
+    key = new_key()
+    isolation_env.set(RR_APP_ALIAS_KEY=b64u(key))
+    _validate()
+    cfg = isolation_env.config()
+    assert cfg.alias_key == key
+    assert b64u(key) not in repr(cfg) + str(cfg)
+    assert repr(key)[2:20] not in repr(cfg)
+
+
+@pytest.mark.parametrize('position', ['first', 'second'])
+def test_g4_an_alias_key_equal_to_a_frame_token_key_refuses_start(position, isolation_env):
+    """G4 (security LOW): the alias key must not be any of the frame-token keys (one secret, two purposes)."""
+    shared, other = new_key(), new_key()
+    keys = (
+        [key_entry('k1', shared), key_entry('k2', other)]
+        if position == 'first'
+        else [key_entry('k1', other), key_entry('k2', shared)]
+    )
+    isolation_env.set(RR_APP_FRAME_TOKEN_KEYS=','.join(keys), RR_APP_ALIAS_KEY=b64u(shared))
+    _refuses('RR_APP_ALIAS_KEY')
+
+
+@pytest.mark.parametrize('value', [None, '', 'short', '***'], ids=['missing', 'empty', 'short', 'garbage'])
+def test_t106_under_off_the_alias_key_is_ignored(value, monkeypatch, tmp_path, clean_caches):
+    """T106: under ``off`` nothing else is read, so a bad or absent alias key never stops startup (the golden stays)."""
+    sup.apply_env(monkeypatch, {})
+    if value is not None:
+        monkeypatch.setenv('RR_APP_ALIAS_KEY', value)
+    cfg = need(_ao(), 'load_isolation_config')(
+        {'RR_APP_ISOLATION': 'off', **({'RR_APP_ALIAS_KEY': value} if value is not None else {})}
+    )
+    assert cfg.mode == 'off'
+    assert not getattr(cfg, 'alias_key', b'')
+    _validate()  # a no-op under off
+
+
+# ---- the marker's chunk list ------------------------------------------------
+
+
+def _marker(isolation_env, **changes):
+    """Rewrite ``runtime.json`` with ``changes`` applied over the valid fixture (a ``None`` value removes the key)."""
+    path = isolation_env.static / 'shell-guest' / 'runtime.json'
+    marker = json.loads(path.read_text())
+    for key, value in changes.items():
+        if value is None:
+            marker.pop(key, None)
+        else:
+            marker[key] = value
+    path.write_text(json.dumps(marker))
+    return marker
+
+
+def test_t104_a_complete_marker_starts(isolation_env):
+    """T104 control: the fixture's marker (6 chunks, publicPath ``/_rr/``) validates and is what ``read_runtime_marker`` returns."""
+    _validate()
+    marker = need(_ao(), 'read_runtime_marker')()
+    assert marker['publicPath'] == '/_rr/'
+    assert marker['chunks'] == sorted(sup.GUEST_CHUNK_BODIES)
+
+
+@pytest.mark.parametrize(
+    'changes',
+    [
+        {'chunks': None},  # the key is required
+        {'chunks': 'guest-a.js'},
+        {'chunks': {'a': 'guest-a.js'}},
+        {'chunks': [5]},
+        {'chunks': ['evil.js']},
+        {'chunks': ['guest-a.exe']},
+        {'chunks': ['Guest-a.js']},
+        {'chunks': ['guest-a/b.js']},
+        {'chunks': ['guest-../x.js']},
+        {'chunks': ['guest-a b.js']},
+        {'chunks': ['guest-.js']},
+        {'chunks': ['guest-a.js', 'guest-a.js']},  # duplicates
+        {'chunks': ['guest-test.js']},  # equal to ``guest``
+        {'chunks': [f'guest-c{i}.js' for i in range(513)]},  # more than 512
+        {'publicPath': None},
+        {'publicPath': '/_rr'},
+        {'publicPath': '/other/'},
+        {'publicPath': 'https://cdn.example/_rr/'},
+        {'publicPath': 7},
+    ],
+    ids=lambda c: (
+        next(iter(c)) + '=' + (str(next(iter(c.values())))[:24] if next(iter(c.values())) is not None else 'absent')
+    ),
+)
+def test_t104_an_invalid_chunk_list_or_public_path_refuses_start(changes, isolation_env):
+    """T104: ``chunks`` is a list of at most 512 unique ``_GUEST_ASSET`` names, none equal to ``guest``; ``publicPath`` is ``/_rr/``."""
+    _marker(isolation_env, **changes)
+    message = _refuses('runtime')
+    assert 'RR_APP_ISOLATION=off' in message
+
+
+def test_t104_exactly_512_chunks_and_an_empty_list_are_valid(isolation_env):
+    """T104: the bounds are inclusive; the chunk files must exist, so write them."""
+    guest = isolation_env.static / 'shell-guest'
+    names = [f'guest-c{i}.js' for i in range(512)]
+    for name in names:
+        (guest / name).write_text('x')
+    _marker(isolation_env, chunks=names)
+    _validate()
+    _marker(isolation_env, chunks=[])
+    _validate()
+
+
+def test_t104_startup_check_b_fails_when_a_listed_chunk_is_missing(isolation_env):
+    """T104: check (b) covers every chunk file, and names the first missing one."""
+    missing = sorted(sup.GUEST_CHUNK_BODIES)[2]
+    (isolation_env.static / 'shell-guest' / missing).unlink()
+    message = _refuses(missing)
+    assert 'RR_APP_ISOLATION=off' in message
+
+
+def test_t104_guest_assets_is_the_guest_plus_the_chunks(isolation_env):
+    """T104: the allowlist the route serves from (cached per marker mtime)."""
+    assets = need(_ao(), 'guest_assets')()
+    assert set(assets) == {'guest-test.js', *sup.GUEST_CHUNK_BODIES}

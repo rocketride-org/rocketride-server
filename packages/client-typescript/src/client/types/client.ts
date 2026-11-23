@@ -234,6 +234,12 @@ export interface RocketRideClientConfig {
 	clientVersion?: string;
 
 	/**
+	 * Shell capabilities sent with every `auth` (e.g. `['appIsolation:1']`).
+	 * The server stores them on the connection; absent sends no key at all.
+	 */
+	shellCaps?: string[];
+
+	/**
 	 * Optional trace callback invoked at the start and end of every `call()`.
 	 * Credential-bearing fields are redacted from the callback copy. Use for
 	 * logging, debugging, or telemetry.
@@ -487,6 +493,12 @@ export interface AppManifestEntry {
 	/** Registry version number the entry resolves to (the scope-walk winner). */
 	registryVersion?: number;
 
+	/** The app runs in its own origin (separate-origin isolation, #1022). */
+	isolated?: boolean;
+
+	/** The app is first party and may run in the shell realm (#1022). */
+	firstParty?: boolean;
+
 	/** App version string (semver). */
 	version?: string;
 
@@ -617,5 +629,17 @@ export interface ServerInfoResult {
 		api: string;
 		/** Absolute URL of the environment's web UI. */
 		ui: string;
+	};
+
+	/**
+	 * Separate-origin app isolation (#1022). Absent when the server runs
+	 * with isolation `off`.
+	 */
+	appIsolation?: {
+		mode: 'optin' | 'enforce';
+		/** e.g. `https://{label}.apps.example.com`. */
+		originTemplate: string;
+		protoMin: number;
+		protoMax: number;
 	};
 }
