@@ -65,6 +65,30 @@ _PROCESS_FETCH_SIGNING_KEY = secrets.token_urlsafe(32)
 MIN_FETCH_SIGNING_KEY_BYTES = 32
 
 
+def _configured_signing_key() -> str:
+    """RR_SIGNING_KEY exactly as the operator wrote it, whatever the locale.
+
+    The engine's embedded Python can start with an ASCII filesystem encoding
+    (C locale). os.environ then hands non-ASCII bytes back as lone surrogates,
+    which cannot be encoded again: signing with such a key raises
+    UnicodeEncodeError. Read the raw bytes where the OS keeps bytes and decode
+    them as UTF-8.
+
+    Raises:
+        ValueError: The configured bytes are not UTF-8 (the value is never
+            included in the message).
+    """
+    if os.supports_bytes_environ:
+        raw = os.environb.get(b'RR_SIGNING_KEY', b'')
+    else:
+        # Windows keeps the environment as text: no bytes view, no locale step.
+        raw = os.environ.get('RR_SIGNING_KEY', '').encode('utf-8', 'surrogatepass')
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        raise ValueError('RR_SIGNING_KEY must be valid UTF-8') from None
+
+
 def fetch_signing_key() -> str:
     """The key the engine signs and verifies /task/fetch claims with.
 
@@ -78,7 +102,7 @@ def fetch_signing_key() -> str:
     configuration instead of silently minting capabilities with a guessable
     key; never include the configured value in an error.
     """
-    configured = os.environ.get('RR_SIGNING_KEY', '')
+    configured = _configured_signing_key()
     if configured and len(configured.encode('utf-8')) < MIN_FETCH_SIGNING_KEY_BYTES:
         raise ValueError(f'RR_SIGNING_KEY must contain at least {MIN_FETCH_SIGNING_KEY_BYTES} UTF-8 bytes')
     return configured or _PROCESS_FETCH_SIGNING_KEY
@@ -1321,11 +1345,16 @@ class FileStore:
             arguments = {'path': path, 'expires_in': expires_in, 'download_name': download_name}
             reply = await asyncio.to_thread(task_channel.request_sync, 'store.url', arguments)
             return reply.body['url']
-        if self._task_process:
+        if self._task_process and not _configured_signing_key():
             # A task with no channel (no --data_port) would sign with its own
             # random key: a URL the engine refuses. Say so instead. The flag was
             # set when the view was built, so worker threads never read the
             # engine's current-task slot (main task thread only, task.cpp).
+            # A direct run whose own environment carries RR_SIGNING_KEY is the
+            # exception: the operator gave this process the key a server
+            # verifies with, and an engine-spawned task never inherits it
+            # (it is never passed to task subprocesses), so those runs keep
+            # their download URLs.
             raise RuntimeError('a fetch URL needs the engine, and this task has no channel to it')
 
         import time

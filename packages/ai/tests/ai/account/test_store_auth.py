@@ -31,8 +31,8 @@ leak), the normalization-bypass fuzz family, and cross-user write-lock
 exclusion on shared team paths.
 """
 
+import os
 import shutil
-import sys
 import tempfile
 from types import SimpleNamespace
 
@@ -737,12 +737,19 @@ class TestSignedFetchUrls:
         assert response.status_code == 401, label
 
 
-def _require_env_can_hold(value: str) -> None:
-    """Skip when the process environment cannot encode value (ASCII locale runners)."""
-    try:
-        value.encode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
-    except UnicodeEncodeError:
-        pytest.skip('the process environment encoding cannot hold this non-ASCII key')
+def _set_signing_key(monkeypatch, key) -> None:
+    """Set RR_SIGNING_KEY as the raw bytes an operator's environment holds.
+
+    monkeypatch.setenv encodes a str with the filesystem encoding, which is
+    ASCII when the engine's Python runs under the C locale, so a non-ASCII key
+    could not even be set. The bytes view takes any key on any locale; Windows
+    has no bytes view and keeps the environment as text.
+    """
+    raw = key if isinstance(key, bytes) else key.encode('utf-8')
+    if os.supports_bytes_environ:
+        monkeypatch.setitem(os.environb, b'RR_SIGNING_KEY', raw)
+    else:
+        monkeypatch.setenv('RR_SIGNING_KEY', raw.decode('utf-8', 'surrogateescape'))
 
 
 class TestFetchSigningKeyStaysInTheEngine:
@@ -762,8 +769,7 @@ class TestFetchSigningKeyStaysInTheEngine:
     def test_configured_weak_key_refuses_task_module_before_workers(self, monkeypatch, key):
         from ai.modules import task
 
-        _require_env_can_hold(key)
-        monkeypatch.setenv('RR_SIGNING_KEY', key)
+        _set_signing_key(monkeypatch, key)
         started = []
         monkeypatch.setattr(task, 'TaskServer', lambda *args, **kwargs: started.append(True))
         with pytest.raises(ValueError, match='RR_SIGNING_KEY must contain at least 32') as error:
@@ -818,8 +824,7 @@ class TestFetchSigningKeyStaysInTheEngine:
 
     @pytest.mark.parametrize('key', ['x' * 32, 'é' * 16])
     def test_minimum_configured_key_is_accepted(self, monkeypatch, key):
-        _require_env_can_hold(key)
-        monkeypatch.setenv('RR_SIGNING_KEY', key)
+        _set_signing_key(monkeypatch, key)
         assert file_store.fetch_signing_key() == key
 
     @pytest.fixture(autouse=True)
@@ -902,6 +907,33 @@ class TestFetchSigningKeyStaysInTheEngine:
 
         with pytest.raises(RuntimeError, match='no channel'):
             await fs.get_url('reports/q1.csv')
+
+    @pytest.mark.asyncio
+    async def test_a_direct_run_with_its_own_signing_key_keeps_its_download_urls(self, monkeypatch, store):
+        """No channel, but the operator put RR_SIGNING_KEY in this process: a server with that key verifies the URL."""
+        from ai.modules.data import channel
+        from ai.modules.task.fetch import handle_fetch
+
+        monkeypatch.setattr(channel.task_channel, 'available', False)
+        monkeypatch.setenv('RR_SIGNING_KEY', _SIGNING_KEY)
+        task_file = {'identity': {'userId': 'user-1'}, 'storage': {'root': 'users/user-1/files'}}
+        monkeypatch.setattr(Store, '_get_current_task', staticmethod(lambda: task_file))
+        fs = Store.engine_file_store()
+        await fs.write('reports/q1.csv', b'data')
+
+        url = await fs.get_url('reports/q1.csv')
+
+        assert '/task/fetch?token=' in url
+        assert (await handle_fetch(self._request(url))).status_code == 200
+
+    def test_a_key_that_is_not_utf8_is_refused_without_echoing_it(self, monkeypatch):
+        """os.environ would hand these bytes back as lone surrogates, which cannot be signed with."""
+        _set_signing_key(monkeypatch, b'\xff\xfe' * 20)
+        if not os.supports_bytes_environ:
+            pytest.skip('Windows keeps the environment as text: there is no raw byte view')
+        with pytest.raises(ValueError, match='must be valid UTF-8') as error:
+            file_store.fetch_signing_key()
+        assert 'xff' not in str(error.value).lower()
 
     @pytest.mark.asyncio
     async def test_the_engine_signs_with_no_channel_and_no_task(self, store):
