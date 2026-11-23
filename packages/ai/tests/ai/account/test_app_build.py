@@ -1587,6 +1587,26 @@ async def test_zip_entry_leading_slash_still_refused(monkeypatch, build_store, t
     assert rail.stamps[-1]['status'] == 'failed'
 
 
+def test_env_filter_drops_lines_with_js_only_line_separators(tmp_path):
+    """Rsbuild's dotenv regex treats U+2028/U+2029 (and Python NEL) as line
+    breaks, so one kept line could smuggle a second, non-PUBLIC_ assignment.
+    """
+    ls, ps, nel = chr(0x2028), chr(0x2029), chr(0x85)
+    app = tmp_path / 'app'
+    text = (
+        f"PUBLIC_A='x'{ls}NODE_OPTIONS=--require ./evil.js\n"
+        f"PUBLIC_B: 'x'{ps}RSPACK_X=1\n"
+        f'PUBLIC_C=y{nel}SECRET=1\n'
+        'PUBLIC_SAFE=ok\n'
+    )
+    _write(app / '.env', text)
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_SAFE=ok']
+    _write(app / '.env', 'PUBLIC_A=1\nPUBLIC_B: 2\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=1', 'PUBLIC_B: 2']
+
+
 def test_env_filter_only_touches_dotenv_names(tmp_path):
     """`.env` and `.env.*` are filtered; `.environment.json` is not an env file."""
     app = tmp_path / 'app'

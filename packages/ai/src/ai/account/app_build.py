@@ -260,6 +260,11 @@ _WORKSPACE_YAML_KEYS = (
 # rsbuild copies the app dir's .env files into its OWN process env; only
 # PUBLIC_ entries are meant for the bundle, so only those survive.
 # Rsbuild's dotenv parser also accepts the colon form (`PUBLIC_X: value`).
+# Characters a JS /gm regex (Rsbuild's dotenv parser) treats as line breaks but
+# text-mode reading does not split on (U+2028, U+2029), plus NEL, which Python
+# splits on and JS does not. A kept line containing one could carry a second,
+# non-PUBLIC_ assignment, so such lines are dropped.
+_JS_LINE_BREAKS = (chr(0x2028), chr(0x2029), chr(0x85))
 _ENV_PUBLIC_LINE = re.compile(r'^\s*(?:export\s+)?PUBLIC_[A-Za-z0-9_]*(?:\s*=|:\s)(.*)$')
 
 
@@ -1021,7 +1026,8 @@ def _filter_env_files(app_dir: str) -> None:
     PUBLIC_ keys such as NODE_OPTIONS or RSPACK_* would steer the build
     process itself); only PUBLIC_ entries are meant for the bundle, and a
     value containing command substitution (``$(`` or a backtick) is dropped.
-    Multi-line values are not supported in server builds.
+    Multi-line values are not supported in server builds. A line holding U+2028,
+    U+2029 or NEL is dropped: the dotenv parser would see it as several lines.
     """
     try:
         names = os.listdir(app_dir)
@@ -1036,6 +1042,8 @@ def _filter_env_files(app_dir: str) -> None:
             kept = []
             for line in handle:
                 match = _ENV_PUBLIC_LINE.match(line.rstrip('\r\n'))
+                if any(sep in line for sep in _JS_LINE_BREAKS):
+                    continue
                 if match and '$(' not in match.group(1) and '`' not in match.group(1):
                     kept.append(line.rstrip('\r\n'))
         with open(path, 'w', encoding='utf-8') as handle:
