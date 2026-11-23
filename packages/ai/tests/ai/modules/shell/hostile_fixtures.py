@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import copy
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ai.account.store import StorageError
 
@@ -198,6 +198,16 @@ class HostileAccount:
         self.plans: Dict[str, List[Dict[str, Any]]] = {}
         self.publish_list_calls = 0
         self.fail = False
+
+    async def authorize_app_use(self, info: Any, app_id: str, version: Optional[int] = None) -> bool:
+        """The commerce hook a SaaS overlay must supply (the base denies by default).
+
+        This fixture models a hosted overlay whose commerce check allows
+        these apps; the deny paths the suites exercise (private audience,
+        unpublished or disabled versions, other orgs) are decided by the
+        publish rows and ``entitled_version_dirs``, not by this hook.
+        """
+        return True
 
     # -- seeding -----------------------------------------------------------------
 
