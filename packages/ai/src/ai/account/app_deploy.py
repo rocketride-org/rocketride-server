@@ -71,7 +71,7 @@ import weakref
 from contextlib import AsyncExitStack
 from typing import Any, Dict, List, Optional
 
-from rocketlib import debug
+from rocketlib import debug, warning
 
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
 from ai.account.app_rows import (
@@ -549,12 +549,28 @@ async def _container_holder_now(
     return _container_holder(app_id, module_id, own_first, claims)
 
 
-async def _back_out(account: Any, org_id: str, conn: Any, app_id: str, audience: Dict[str, str]) -> None:
-    """Undo a first binding written just now: a 'removed' row holds no name."""
+async def _back_out(account: Any, org_id: str, conn: Any, app_id: str, audience: Dict[str, str]) -> bool:
+    """Undo a binding written just now: a 'removed' row holds no name.
+
+    A 'removed' row is written even when the audience's previous row was
+    disabled. Returns False (after a warning) when the undo failed, so the
+    caller reports that the binding remains instead of a clean refusal.
+    """
     try:
         await account.publish_set_state(org_id, 'app', app_id, audience, 'removed', _actor_of(conn))
     except Exception as exc:
-        debug(f'[app_deploy] could not back out the binding of {app_id}: {exc}')
+        warning(f'[app_deploy] could not back out the binding of {app_id} for {audience}: {exc}')
+        return False
+    return True
+
+
+def _back_out_failed_error(app_id: str, module_id: str, holder: str) -> str:
+    """The refusal when the losing binding could not be removed: it is still live."""
+    return (
+        f'{app_id} loads under the container name {module_id!r}, which {holder!r} holds, and the new '
+        'binding could not be removed: it is still live and may be withheld. Remove it '
+        f'(rrext_deploy_app remove) or publish {app_id} again.'
+    )
 
 
 async def assert_pipe_id_outside_app_namespace(conn: Any, account: Any, org_id: str, project_id: str) -> None:
@@ -1198,9 +1214,6 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                     mine = await account.publish_of_app(home, 'app', app_id)
                     own_rows = [r for r in mine if _scope_sees(audience, r) and _caller_sees(conn, r)]
                     own_first = _first_bound_at(own_rows) if claims else None
-                    # Only a FIRST binding (no serving row of the app yet) can newly
-                    # claim the name; a repoint of a held one cannot race for it.
-                    first_binding = not any(not serving_block_of(r, account.review_ladder) for r in mine)
                 except Exception as exc:
                     debug(f'[app_deploy] container-name check failed: {exc}')
                     return conn.build_error(request, 'could not check the app id against existing apps; try again')
@@ -1210,20 +1223,27 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
             row = await account.publish_set(
                 home, 'app', app_id, audience, version, manifest_snapshot(entry, artifact), _actor_of(conn)
             )
-            if developer and first_binding:
+            if developer:
                 # The lock is process-local, so a publish on ANOTHER engine can have
                 # landed between the check above and this write. Re-read the claims
                 # (the backend reads its own writes, so whichever racer looks last
                 # sees both rows) and back this binding out when resolve would not
-                # hand it the name. Fails closed: if both back out, a retry settles it.
+                # hand it the name. Every developer publish re-checks (a repoint or a
+                # first claim in a new audience scope alike): it fails closed, and when
+                # both racers back out a retry settles it.
                 try:
                     holder = await _container_holder_now(account, home, conn, app_id, module_id, audience)
                 except Exception as exc:
                     debug(f'[app_deploy] container-name re-check failed: {exc}')
-                    await _back_out(account, home, conn, app_id, audience)
+                    if not await _back_out(account, home, conn, app_id, audience):
+                        return conn.build_error(
+                            request,
+                            'could not check the app id against existing apps, and the new binding could not be removed; remove it',
+                        )
                     return conn.build_error(request, 'could not check the app id against existing apps; try again')
                 if holder:
-                    await _back_out(account, home, conn, app_id, audience)
+                    if not await _back_out(account, home, conn, app_id, audience):
+                        return conn.build_error(request, _back_out_failed_error(app_id, module_id, holder))
                     return conn.build_error(request, _holder_error(app_id, module_id, holder))
 
         # Refresh the acting user's manifest (data + signal); other audience

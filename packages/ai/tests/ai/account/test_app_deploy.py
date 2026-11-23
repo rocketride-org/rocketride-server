@@ -246,6 +246,10 @@ class _FakeRegistry:
                 'snapshot': dict(snapshot or {}),
                 'publishedAt': 4000,
             }
+            previous = self.publishes.get((app_id, self._key(audience)))
+            if previous and 'createdAt' in previous:
+                # Both real backends keep createdAt across a repoint.
+                row['createdAt'] = previous['createdAt']
             self.publishes[(app_id, self._key(audience))] = row
             self.set_calls.append({'audience': dict(audience), 'version': version, 'snapshot': snapshot})
             return row
