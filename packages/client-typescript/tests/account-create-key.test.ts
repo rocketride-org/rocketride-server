@@ -77,7 +77,7 @@ describe('AccountApi.createKey', () => {
 describe('describeLoginKeyExpiry', () => {
 	it('prints the granted day, bounded by the sign-in session', () => {
 		expect(describeLoginKeyExpiry('2027-02-03T23:30:00.123456')).toBe(
-			' It expires on 2027-02-03 (bounded by your sign-in session); to renew it, remove ROCKETRIDE_DEV_APIKEY from .env and run `rocketride login` before then.'
+			' It expires on 2027-02-03 (bounded by your sign-in session); to renew it, remove ROCKETRIDE_APIKEY from .env or the shell and run `rocketride login` before then.'
 		);
 	});
 

@@ -40,7 +40,7 @@
 export function describeLoginKeyExpiry(expiresAt: string | null | undefined): string {
 	if (expiresAt === undefined) return '';
 	if (expiresAt === null) return ' It does not expire.';
-	return ` It expires on ${utcDay(expiresAt)} (bounded by your sign-in session); to renew it, remove ROCKETRIDE_DEV_APIKEY from .env and run \`rocketride login\` before then.`;
+	return ` It expires on ${utcDay(expiresAt)} (bounded by your sign-in session); to renew it, remove ROCKETRIDE_APIKEY from .env or the shell and run \`rocketride login\` before then.`;
 }
 
 /**
