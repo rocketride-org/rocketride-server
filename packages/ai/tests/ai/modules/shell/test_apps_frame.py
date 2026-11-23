@@ -45,7 +45,7 @@ from fastapi.testclient import TestClient
 import ai.modules.shell.shell as shell_mod
 
 from . import isolation_support as sup
-from .isolation_support import label_for
+from .isolation_support import csp_directives, label_for
 
 THIRD = 'acme.thirdparty'
 FIRST = 'rocketride.home'
@@ -410,6 +410,18 @@ def test_e8_404_isolated_any_client(file, headers, world):
     assert world.reads == [], 'the bytes must not even be read from the store'
 
 
+def test_e8_resolution_probe_does_not_advertise_an_isolated_entry(world):
+    """The ``/apps/<appId>`` probe names a main-origin remoteEntry.js only where that URL would serve."""
+    isolated = world.client.get(f'/apps/{THIRD}', headers=COOKIE)
+    assert isolated.status_code != 200, (
+        'an isolated app has no main-origin entry to advertise (the probe falls through to the static tree)'
+    )
+    assert 'remoteEntry.js' not in isolated.text
+    first_party = world.client.get(f'/apps/{FIRST}', headers=COOKIE)
+    assert first_party.status_code == 200
+    assert first_party.json()['entry'] == f'/apps/{FIRST}/v1/remoteEntry.js'
+
+
 def test_e8_first_party_still_served(world):
     """T35: a first-party app (not isolated) keeps serving from the main origin."""
     resp = world.client.get(f'/apps/{FIRST}/v1/remoteEntry.js', headers=COOKIE)
@@ -509,6 +521,19 @@ def test_e8_refusal_is_not_an_existence_oracle(world):
     assert same.text == other.text
 
 
+def _csp_blocks_scripts(csp: str) -> bool:
+    """A sandbox without allow-scripts, or default-src 'none' with no script source that re-opens it.
+
+    ``default-src 'none'; script-src 'unsafe-inline'`` would still run the script inside an SVG document.
+    """
+    directives = csp_directives(csp)
+    sandboxed = 'sandbox' in directives and 'allow-scripts' not in directives['sandbox']
+    closed = directives.get('default-src') == ["'none'"] and all(
+        directives.get(name, ["'none'"]) == ["'none'"] for name in ('script-src', 'script-src-elem', 'script-src-attr')
+    )
+    return sandboxed or closed
+
+
 def test_e8_isolated_icon_is_not_a_script_vector(world):
     """T35: an isolated app's versioned icon may still feed an ``<img>`` but must not be a navigable script on the shell origin.
 
@@ -518,7 +543,7 @@ def test_e8_isolated_icon_is_not_a_script_vector(world):
     resp = world.client.get(f'/apps/{THIRD}/v1/icon.svg', headers=COOKIE)
     if resp.status_code == 200:
         csp = resp.headers.get('content-security-policy', '')
-        assert 'sandbox' in csp or "default-src 'none'" in csp
+        assert _csp_blocks_scripts(csp), csp
         assert resp.headers.get('x-content-type-options') == 'nosniff'
     else:
         assert resp.status_code == 404
@@ -693,3 +718,29 @@ def test_a_frame_token_is_bound_to_the_deployment_its_grant_describes(world):
     claims = sup.need(_ao(), 'verify_frame_token')(token, label_for(THIRD), config=world.config())
     assert isinstance(claims['d'], str) and claims['d'], 'the token carries the deployment it opens'
     assert claims['d'] in asyncio.run(_ao().token_version_dirs('u1', 'org-1', THIRD)).values()
+
+
+def test_apps_frame_deeply_nested_body_is_a_bad_request_not_a_500(world):
+    """A body under the 4 KiB cap that nests deeper than the JSON parser allows answers 400 ``bad_request``."""
+    raw = b'[' * 1500 + b']' * 1500
+    assert len(raw) < 4096
+    resp = world.post(raw=raw, headers={'content-type': 'application/json'})
+    assert resp.status_code == 400
+    assert resp.json()['error'] == 'bad_request'
+
+
+@pytest.mark.parametrize(
+    'csp,ok',
+    [
+        ("default-src 'none'; sandbox", True),
+        ("default-src 'none'", True),
+        ('sandbox', True),
+        ("default-src 'none'; script-src 'unsafe-inline'", False),
+        ("default-src 'none'; script-src-elem 'self'", False),
+        ('sandbox allow-scripts', False),
+        ("default-src 'self'", False),
+    ],
+)
+def test_the_icon_policy_check_rejects_a_csp_that_permits_scripts(csp, ok):
+    """The icon test's predicate itself: a CSP that re-opens scripts must not pass it."""
+    assert _csp_blocks_scripts(csp) is ok
