@@ -71,7 +71,7 @@ function defaultBlockWithoutReadme(): Record<string, unknown> {
 
 describe('defaultStoreBlock', () => {
 	it('names a README and no icon, a fresh object each call', () => {
-		expect(defaultStoreBlock()).toEqual({ tagline: '', categories: ['pipeline'], tags: [], readme: './README.md', links: {}, mode: 'free', billing: { plans: [] } });
+		expect(defaultStoreBlock()).toEqual({ version: '1.0.0', tagline: '', categories: ['pipeline'], tags: [], readme: './README.md', links: {}, mode: 'free', billing: { plans: [] } });
 		expect('icon' in defaultStoreBlock()).toBe(false);
 		expect(defaultStoreBlock()).not.toBe(defaultStoreBlock());
 		// The placeholder stays exported for a pipeline that wants one
@@ -83,6 +83,9 @@ describe('validateStoreBlock', () => {
 	it('accepts the default block and names an unknown key, a bad mode, a bad path', () => {
 		expect(validateStoreBlock(defaultStoreBlock())).toEqual(defaultStoreBlock());
 		expect(() => validateStoreBlock({ publisher: 'acme' })).toThrow(/unknown key "publisher"/);
+		// The author's own version: major.minor.patch with an optional tag, nothing else
+		for (const version of ['1.0.0', '0.3.12', '2.0.0-beta.1', '1.0.0-rc-1.0', '10.20.30-0a']) expect(validateStoreBlock({ version }).version).toBe(version);
+		for (const version of ['1', '1.0', 'v1.0.0', '1.0.0.0', '', 7, null, '1.0.0\n', '01.0.0', '1.0.0-alpha..1', '1.0.0-01', '1.0.0-']) expect(() => validateStoreBlock({ version })).toThrow(/store\.version must be a version/);
 		expect(() => validateStoreBlock({ mode: 'usage' })).toThrow(/store\.mode must be free, subscription, paywall/);
 		expect(() => validateStoreBlock({ icon: '../x.svg' })).toThrow(/store\.icon must stay inside/);
 		expect(() => validateStoreBlock({ readme: '/etc/README.md' })).toThrow(/store\.readme must be a path relative/);

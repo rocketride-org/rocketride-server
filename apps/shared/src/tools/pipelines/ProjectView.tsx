@@ -167,6 +167,8 @@ export interface IProjectViewProps {
 	clearPendingOAuthTokens?: () => void;
 	/** Called when the user requests a save (Ctrl+S or menu). */
 	onSave?: () => void;
+	/** Puts the document back to its saved state (the PACKAGE page's Cancel); absent = the host cannot. */
+	onRevert?: () => void | Promise<void>;
 	/** SaaS-only: export/download the current pipeline. Forwarded to the canvas. */
 	onExport?: () => void;
 	/** When true, the canvas is fully read-only: editing, saving, and run/stop are disabled. */
@@ -304,7 +306,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, canvasGate = null, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, onOpenTool, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, onUnknownConfigKeys, configMessages, conversion = null, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy, review }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, canvasGate = null, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, onOpenTool, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, onUnknownConfigKeys, configMessages, conversion = null, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onRevert, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy, review }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -485,8 +487,8 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		onSave?.();
 	}, [onSave]);
 
-	// Whether the PACKAGE page holds a draft (its own Save has not run): the
-	// DEPLOY page refuses to deploy a pipeline behind pending changes.
+	// Whether the PACKAGE page holds pending FILES (its Save has not written
+	// them): the DEPLOY page refuses to deploy a pipeline behind them.
 	const [packagePending, setPackagePending] = useState(false);
 
 	// --- Open link -----------------------------------------------------------
@@ -689,7 +691,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 						servicesJson={servicesJson}
 						getNodeSchema={getNodeSchema ? handleGetNodeSchema : undefined}
 						onContentChanged={isReadonly ? undefined : handleContentChanged}
+						isDirty={isReadonly ? false : isDirty}
 						onSave={isReadonly ? undefined : handleSave}
+						onRevert={isReadonly ? undefined : onRevert}
 						onPendingChange={setPackagePending}
 						developerId={developerId ?? ''}
 						serverHost={serverHost}

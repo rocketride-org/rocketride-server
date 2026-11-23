@@ -145,7 +145,7 @@ Workspace operations on pipelines; deploying and publishing them is
 - `rocketride pipe new <id> [--name <text>] [--dir <dir>] [--workspace <dir>]`
   — scaffold a new pipeline under `./pipelines/<id>/` (or `--dir`): the
   `<id>.pipe` carrying `components: []`, `project_id: <id>`, `name`,
-  `description` and the default `store` block (`tagline: ""`,
+  `description` and the default `store` block (`version: "1.0.0"`, `tagline: ""`,
   `categories: ["pipeline"]`, `tags: []`, `readme: "./README.md"`,
   `links: {}`, `mode: "free"`, `billing: { plans: [] }`), a `README.md`
   stub, and an empty `assets/` directory. The block names no icon and no

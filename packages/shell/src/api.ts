@@ -507,22 +507,19 @@ export type { Announcement } from './hooks/useAnnouncements';
 import { formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime } from './util/formatters';
 import AccountView from './modules/account';
 import { DesktopView } from './modules/desktop';
-import { CatalogPicker } from './components/catalog/CatalogPicker';
 import { EnvironmentView } from './modules/environment';
 import { CheckoutModal, PlanPicker } from './modules/checkout';
 import { UpgradeModal } from './modules/billing';
 
 export {
 	formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime,
-	AccountView, DesktopView, CatalogPicker, EnvironmentView,
+	AccountView, DesktopView, EnvironmentView,
 	CheckoutModal, PlanPicker, UpgradeModal,
 };
 
 // The shared desktop page's type surface (the component itself is exported
 // above and on shellApi; its default server adapter stays internal).
 export type { DesktopApp, DesktopViewProps, DesktopAdapter, DesktopQuote, DesktopVersionRow, DesktopVersionOverride } from './modules/desktop';
-// The catalog picker's props (the ONE catalog-to-desktop picker, both editions).
-export type { ICatalogPickerProps } from './components/catalog/CatalogPicker';
 
 export type { CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './modules/checkout/types';
 export type { EnvironmentSlotConfig, EnvironmentScope } from './modules/environment';
@@ -745,7 +742,6 @@ export const shellApi = {
 	get DesktopView() { return DesktopView; },
 	// The catalog picker (Open / Add / Adding tiles over rrext_public_catalog
 	// + rrext_app desktop_add) — the one picker both launcher hosts mount.
-	get CatalogPicker() { return CatalogPicker; },
 	// Desktop version selector — session override read + apply/clear
 	get getAppVersionOverride() { return getAppVersionOverride; },
 	get applyAppVersionOverride() { return applyAppVersionOverride; },

@@ -77,6 +77,9 @@ export interface PipelineHostOpMap extends ShellOpMap {
 	'host.pipeline.stop': ShellOpSpec<{ doc: string; source: string }, void>;
 	/** Saves the document — same flow as the Ctrl+S keybinding. */
 	'host.pipeline.save': ShellOpSpec<{ doc: string }, void>;
+	/** Puts the document back to its saved state and keeps it open (the
+	 *  PACKAGE page's Cancel). An untitled document has no saved state. */
+	'host.pipeline.revert': ShellOpSpec<{ doc: string }, void>;
 	/** Publishes an immutable version of the document to the registry.
 	 *  HOST-side because it snapshots the TextDocument, never webview state:
 	 *  an untitled doc rejects outright and a dirty one is saved first, so

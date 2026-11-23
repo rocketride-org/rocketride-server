@@ -7,7 +7,8 @@ and the account-layer behaviour built on it.
 - ``AccountBase.desktop_app_ids`` / ``decorate_desktop`` — the first read
   seeds the inventory; later reads keep what the user chose.
 - ``handle_app`` desktop writes — change the list, push the account.
-- ``handle_public`` — the public catalog carries the same decoration.
+- ``handle_public`` — the public catalog carries the same decoration and is
+  answered by name (``catalog_order``), sorted before the page is cut.
 - The OSS login assembly and the OSS account push decorate with the real
   membership (no forced ``onDesktop: True`` anywhere).
 - Concurrency: the per-user lock keeps two adds from losing one another.
@@ -747,6 +748,41 @@ async def test_an_anonymous_catalog_lists_no_agents():
     acct = _agent_account()
     result = await acct.handle_public(_conn(authenticated=False), {'command': 'rrext_public_catalog'})
     assert [a['id'] for a in result['body']['apps']] == ['rocketride.chat', 'rocketride.sql']
+
+
+def test_catalog_order_is_by_name_then_id_and_leaves_its_input_alone():
+    entries = [
+        {'id': 'b.same', 'name': 'Same'},
+        {'id': 'zeta.noName'},
+        {'id': 'a.same', 'name': 'same'},
+        {'id': 'acme.alpha', 'name': 'Alpha'},
+    ]
+    before = list(entries)
+    # Case does not order; a nameless entry sorts by its id; one name is ordered by id
+    assert [e['id'] for e in AccountBase.catalog_order(entries)] == ['acme.alpha', 'a.same', 'b.same', 'zeta.noName']
+    assert entries == before
+
+
+@pytest.mark.asyncio
+async def test_the_catalog_is_answered_by_name_and_a_page_is_a_slice_of_the_sorted_list():
+    """Apps and agents sort as one list; the inventory's own order does not show."""
+    acct = _Account(
+        inventory=[
+            {'id': 'rocketride.sql', 'name': 'SQL Explorer', 'shells': None},
+            {'id': 'rocketride.chat', 'name': 'chat', 'shells': None},
+            {'id': 'acme.dropper', 'name': 'Dropper', 'shells': None},
+        ],
+        agents=[{**AGENT, 'name': 'Aparavi Bot'}],
+    )
+    whole = await acct.handle_public(_conn(), {'command': 'rrext_public_catalog'})
+    assert [a['name'] for a in whole['body']['apps']] == ['Aparavi Bot', 'chat', 'Dropper', 'SQL Explorer']
+    page = await acct.handle_public(
+        _conn(), {'command': 'rrext_public_catalog', 'arguments': {'offset': 1, 'limit': 2}}
+    )
+    assert [a['name'] for a in page['body']['apps']] == ['chat', 'Dropper']
+    assert page['body']['total'] == 4
+    # The first desktop is still seeded in the inventory's order, not the catalog's
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.sql', 'rocketride.chat', 'acme.dropper']
 
 
 @pytest.mark.asyncio

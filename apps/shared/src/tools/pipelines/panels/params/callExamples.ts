@@ -27,8 +27,8 @@
  * an example value each) become a `submit()` call in JavaScript, TypeScript
  * and Python, and the HTTP door's request (plan §3.5: the dotted address in
  * one path segment, params on the query string, the account key in the
- * Authorization header). The API Params page renders these in live tabs; the
- * store listing (Step 6) embeds the same block.
+ * Authorization header). `CallExamplesBlock.tsx` renders them, for the API Params
+ * page and for the endpoint dialog of the editors and the Catalog.
  */
 
 import type { ServiceParamDescriptor } from 'rocketride';
@@ -56,6 +56,8 @@ export interface IBuildCallExamplesParams {
 	params: ICallExampleParam[];
 	/** The server origin for the HTTP example (`https://api.example.com`); a placeholder when unknown. */
 	host?: string;
+	/** The account key the HTTP example's Authorization header shows; `rr_...` when absent. */
+	apiKey?: string;
 }
 
 // =============================================================================
@@ -181,7 +183,7 @@ function pyParams(params: ICallExampleParam[]): string {
  * @param input - {@link IBuildCallExamplesParams}.
  * @returns One code block per tab.
  */
-export function buildCallExamples({ address, params, host }: IBuildCallExamplesParams): Record<CallExampleTabId, string> {
+export function buildCallExamples({ address, params, host, apiKey }: IBuildCallExamplesParams): Record<CallExampleTabId, string> {
 	const js = [
 		`const { RocketRideClient } = require('rocketride');`,
 		`const client = new RocketRideClient({ uri, apiKey });`,
@@ -213,7 +215,7 @@ export function buildCallExamples({ address, params, host }: IBuildCallExamplesP
 	const http = [
 		`# The HTTP door: the dotted address in one path segment, params on the query string (plan 3.5)`,
 		`POST ${(host || HOST_PLACEHOLDER).replace(/\/+$/, '')}/webhook/${address}${query ? `?${query}` : ''}`,
-		`Authorization: Bearer rr_...`,
+		`Authorization: Bearer ${apiKey || 'rr_...'}`,
 		`Content-Type: application/octet-stream`,
 		``,
 		`<binary request body>`,

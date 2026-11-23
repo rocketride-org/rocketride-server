@@ -644,6 +644,8 @@ class DeployPipeCommands(_DeployBase):
         """
         from .. import services_catalog
         from ..address import build_address, refuse_team_option
+        from ai.common.parameters import describe_parameters
+
         from ..interfaces import pipe_interfaces
         from ..task_control import RESOLVE_READ
 
@@ -686,6 +688,7 @@ class DeployPipeCommands(_DeployBase):
             'rung': pin.rung,
             'version': pin.version,
             'interfaces': interfaces,
+            'parameters': describe_parameters(resolution.artifact),
         }
         if pin.rung == 'team':
             body['teamId'] = deployment.team
@@ -704,6 +707,8 @@ class DeployPipeCommands(_DeployBase):
         """
         from .. import services_catalog
         from ..address import build_address, parse_address
+        from ai.common.parameters import describe_parameters
+
         from ..interfaces import pipe_interfaces
 
         parsed = parse_address(control.address)
@@ -715,6 +720,7 @@ class DeployPipeCommands(_DeployBase):
             'rung': control.rung,
             'version': None,
             'interfaces': interfaces,
+            'parameters': describe_parameters(control.pipeline or {}),
         }
         if control.rung == 'team':
             body['teamId'] = control.owner_id

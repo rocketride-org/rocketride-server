@@ -242,6 +242,7 @@ const PipelineWebview: React.FC = () => {
 			onViewStateChange: handleViewStateChange,
 			onContentChanged: handleContentChanged,
 			save: () => ConnectionManager.getInstance().emitOp('host.pipeline.save', { doc: docRef.current }),
+			revert: () => ConnectionManager.getInstance().request('host.pipeline.revert', { doc: docRef.current } as never).then(() => undefined),
 			/** The provider owns the TextDocument; publish saves host-side —
 			 *  the panel just needs a resolvable save step for its flow. */
 			saveDocument: async () => {},

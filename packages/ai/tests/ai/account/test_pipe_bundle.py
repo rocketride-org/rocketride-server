@@ -85,6 +85,7 @@ def test_the_default_block_names_no_file_and_lists_the_pipe_as_free():
     """What the door gives a pipe without a block: no icon, no readme, a fresh dict each call."""
     block = default_store_block()
     assert block == {
+        'version': '1.0.0',
         'tagline': '',
         'categories': ['pipeline'],
         'tags': [],
@@ -291,3 +292,34 @@ def test_a_failed_write_rolls_back_what_landed(monkeypatch):
         asyncio.run(write_pipe_content('org-1', 'user-1', ENTRY, bundle, validate_store_block(LISTED_PIPE)))
     home = store_home_of('org-1', ENTRY)
     assert [call.args[0] for call in fs.delete.await_args_list] == [f'{home}/icon.svg', f'{home}/docs/README.md']
+
+
+# ==== store.version: the author's own version ====================================
+
+
+@pytest.mark.parametrize('version', ['1.0.0', '0.3.12', '2.0.0-beta.1', '1.0.0-rc-1.0', '10.20.30-0a'])
+def test_a_store_version_is_major_minor_patch_with_an_optional_tag(version):
+    assert validate_store_block({'store': {'version': version}})['version'] == version
+
+
+@pytest.mark.parametrize(
+    'version',
+    [
+        '1',
+        '1.0',
+        'v1.0.0',
+        '1.0.0.0',
+        '',
+        7,
+        None,
+        '1.0.0\n',
+        '\u0661.\u0662.\u0663',
+        '01.0.0',
+        '1.0.0-alpha..1',
+        '1.0.0-01',
+        '1.0.0-',
+    ],
+)
+def test_any_other_store_version_is_refused(version):
+    with pytest.raises(ValueError, match='store.version must be a version'):
+        validate_store_block({'store': {'version': version}})

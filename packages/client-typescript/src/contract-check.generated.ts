@@ -141,6 +141,8 @@ import type { PipeInterfaceNode as Frozen_PipeInterfaceNode } from '../contract/
 import type { PipeInterfaceNode as Current_PipeInterfaceNode } from './client/index.js';
 import type { PipeInterfaceMap as Frozen_PipeInterfaceMap } from '../contract/versions/v2.0';
 import type { PipeInterfaceMap as Current_PipeInterfaceMap } from './client/index.js';
+import type { PipeParameter as Frozen_PipeParameter } from '../contract/versions/v2.0';
+import type { PipeParameter as Current_PipeParameter } from './client/index.js';
 import type { PipeInterfaces as Frozen_PipeInterfaces } from '../contract/versions/v2.0';
 import type { PipeInterfaces as Current_PipeInterfaces } from './client/index.js';
 import type { DeployActor as Frozen_DeployActor } from '../contract/versions/v2.0';
@@ -745,6 +747,12 @@ const _k_PipeInterfaceMap: { [K in _AllKeys<Frozen_PipeInterfaceMap>]-?: K } = {
 void _k_PipeInterfaceMap;
 const _b_PipeInterfaceMap: [_DroppedKeys<Frozen_PipeInterfaceMap, Current_PipeInterfaceMap>] extends [never] ? true : _DroppedKeys<Frozen_PipeInterfaceMap, Current_PipeInterfaceMap> = true;
 void _b_PipeInterfaceMap;
+const _t_PipeParameter: Frozen_PipeParameter = {} as Current_PipeParameter;
+void _t_PipeParameter;
+const _k_PipeParameter: { [K in _AllKeys<Frozen_PipeParameter>]-?: K } = {} as { [K in _AllKeys<Current_PipeParameter>]-?: K };
+void _k_PipeParameter;
+const _b_PipeParameter: [_DroppedKeys<Frozen_PipeParameter, Current_PipeParameter>] extends [never] ? true : _DroppedKeys<Frozen_PipeParameter, Current_PipeParameter> = true;
+void _b_PipeParameter;
 const _t_PipeInterfaces: Frozen_PipeInterfaces = {} as Current_PipeInterfaces;
 void _t_PipeInterfaces;
 const _k_PipeInterfaces: { [K in _AllKeys<Frozen_PipeInterfaces>]-?: K } = {} as { [K in _AllKeys<Current_PipeInterfaces>]-?: K };

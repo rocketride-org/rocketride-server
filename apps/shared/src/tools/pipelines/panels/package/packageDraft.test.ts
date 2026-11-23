@@ -26,20 +26,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import type { IAssetsHost } from '../../../../components/assets';
-import { applyPatch, isEmptyPatch, mergeChange, overlayAssetsHost, patchOf, pendingDataUri, prunePatch } from './packageDraft';
+import { overlayAssetsHost, pendingDataUri } from './packageDraft';
 import type { PendingFiles } from './packageDraft';
-
-/** A document with one of every key the panes write, plus the canvas's own. */
-const DOCUMENT = {
-	project_id: 'docBrain',
-	name: 'Doc brain',
-	description: '',
-	source: 'webhook_1',
-	parameters: { maxEdge: 'llm_1.max_edge' },
-	store: { tagline: '', mode: 'free', readme: './README.md' },
-	components: [{ id: 'webhook_1' }, { id: 'llm_1' }],
-	docRevision: 4,
-};
 
 /** A host over a fixed set of files that records what reaches it. */
 function fakeHost(files: Record<string, string>): { host: IAssetsHost; written: string[]; opened: string[] } {
@@ -58,95 +46,6 @@ function fakeHost(files: Record<string, string>): { host: IAssetsHost; written: 
 	};
 	return { host, written, opened };
 }
-
-describe('patchOf', () => {
-	it('holds only the PACKAGE keys a pane changed', () => {
-		const next = { ...DOCUMENT, description: 'Answers from your documents', docRevision: 5, components: [] };
-		assert.deepEqual(patchOf(DOCUMENT, next), { description: 'Answers from your documents' });
-	});
-
-	it('is empty when a pane wrote the document back unchanged', () => {
-		const next = { ...DOCUMENT, store: { tagline: '', mode: 'free', readme: './README.md' }, docRevision: 5 };
-		assert.equal(isEmptyPatch(patchOf(DOCUMENT, next)), true);
-	});
-
-	it('records a removed key as a pending removal', () => {
-		const next: Record<string, unknown> = { ...DOCUMENT };
-		delete next.source;
-		const patch = patchOf(DOCUMENT, next);
-		assert.equal('source' in patch, true);
-		assert.equal(patch.source, undefined);
-	});
-
-	it('reads a reordered map as a change: the order is what the reader sees', () => {
-		const document = { ...DOCUMENT, parameters: { a: 'llm_1.a', b: 'llm_1.b' } };
-		const next = { ...document, parameters: { b: 'llm_1.b', a: 'llm_1.a' } };
-		assert.deepEqual(Object.keys(patchOf(document, next)), ['parameters']);
-	});
-});
-
-describe('mergeChange', () => {
-	it('adds the keys a pane changed and keeps the rest of the draft', () => {
-		const shown = { ...DOCUMENT, name: 'Brain' };
-		const next = { ...shown, description: 'New words', docRevision: 5 };
-		assert.deepEqual(mergeChange({ name: 'Brain' }, shown, next), { name: 'Brain', description: 'New words' });
-	});
-
-	it('keeps an edit made since a late pane was shown its document', () => {
-		// The Assets pane was shown the document before a name was typed on Identity; its icon path arrives after
-		const shown = DOCUMENT;
-		const next = { ...shown, store: { ...shown.store, icon: './icon.png' } };
-		const merged = mergeChange({ name: 'Typed since' }, shown, next);
-		assert.deepEqual(merged, { name: 'Typed since', store: { tagline: '', mode: 'free', readme: './README.md', icon: './icon.png' } });
-	});
-
-	it('answers the same draft when the pane wrote back what it was shown', () => {
-		const draft = { name: 'Brain' };
-		assert.equal(mergeChange(draft, DOCUMENT, { ...DOCUMENT, docRevision: 9 }), draft);
-	});
-
-	it('merges a removal as a pending removal', () => {
-		const next: Record<string, unknown> = { ...DOCUMENT };
-		delete next.source;
-		const merged = mergeChange({ name: 'Brain' }, DOCUMENT, next);
-		assert.equal('source' in merged, true);
-		assert.equal(merged.source, undefined);
-		assert.equal(merged.name, 'Brain');
-	});
-});
-
-describe('applyPatch', () => {
-	it('replaces pending keys, deletes pending removals and keeps the rest', () => {
-		const applied = applyPatch(DOCUMENT, { name: 'Brain', source: undefined });
-		assert.equal(applied.name, 'Brain');
-		assert.equal('source' in applied, false);
-		assert.equal(applied.components, DOCUMENT.components);
-		assert.equal(applied.docRevision, 4);
-	});
-
-	it('answers the same object for an empty patch', () => {
-		assert.equal(applyPatch(DOCUMENT, {}), DOCUMENT);
-	});
-});
-
-describe('prunePatch', () => {
-	it('drops the keys the document caught up with', () => {
-		const patch = { name: 'Brain', description: 'New words' };
-		const saved = { ...DOCUMENT, name: 'Brain' };
-		assert.deepEqual(prunePatch(saved, patch), { description: 'New words' });
-	});
-
-	it('answers the same object when nothing caught up', () => {
-		const patch = { name: 'Brain' };
-		assert.equal(prunePatch(DOCUMENT, patch), patch);
-	});
-
-	it('drops a pending removal once the key is gone', () => {
-		const saved: Record<string, unknown> = { ...DOCUMENT };
-		delete saved.source;
-		assert.equal(isEmptyPatch(prunePatch(saved, { source: undefined })), true);
-	});
-});
 
 describe('pendingDataUri', () => {
 	it('encodes image bytes under the media type of the extension', () => {

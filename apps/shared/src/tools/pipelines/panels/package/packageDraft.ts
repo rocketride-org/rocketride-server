@@ -21,17 +21,18 @@
 // SOFTWARE.
 
 // =============================================================================
-// PACKAGE DRAFT — the pending changes of the PACKAGE page (no React, no host)
+// PACKAGE DRAFT — the pending files of the PACKAGE page (no React, no host)
 // =============================================================================
 
 /**
- * The PACKAGE page holds what its panes change as a DRAFT until Save: a patch
- * over the document's root keys, and the files the Assets pane wrote (the
- * README text, the icon, inserted images), kept in memory. Save writes the
- * files, applies the patch to the document and saves it; Cancel drops both.
+ * A pipeline has one draft, the document its host holds; the PACKAGE page
+ * writes straight into it. The FILES the Assets pane writes (the README
+ * text, the icon, inserted images) are not the document: the page keeps
+ * them in memory until Save writes them beside the pipeline, and Cancel
+ * drops them.
  *
- * This module is the pure half: the patch arithmetic and the file overlay a
- * pane reads its own pending writes back through. The page owns the state.
+ * This module is that file half, pure: the overlay a pane reads its own
+ * pending writes back through. The page owns the state.
  */
 
 import type { IAssetsHost } from '../../../../components/assets';
@@ -41,16 +42,7 @@ import { besidePath, posixBasename } from '../../../../components/assets/assetsM
 // TYPES
 // =============================================================================
 
-/** The document's root keys the PACKAGE panes write; no pane writes any other. */
-export const PACKAGE_KEYS = ['project_id', 'name', 'description', 'source', 'parameters', 'store'] as const;
-
-/** One root key the PACKAGE panes write. */
-export type PackageKey = (typeof PACKAGE_KEYS)[number];
-
-/** The draft's document half: the root keys that differ from the document, each with its pending value (undefined = the key is removed). */
-export type PackagePatch = Partial<Record<PackageKey, unknown>>;
-
-/** The draft's file half: pending content by path beside the document (posix, normalised). */
+/** The pending files: content by path beside the document (posix, normalised). */
 export type PendingFiles = Map<string, Uint8Array | string>;
 
 // =============================================================================
@@ -69,106 +61,6 @@ const IMAGE_MEDIA_TYPES: Record<string, string> = {
 
 /** Bytes per `String.fromCharCode` call when encoding base64: under every engine's argument limit. */
 const BASE64_CHUNK = 0x8000;
-
-// =============================================================================
-// THE PATCH
-// =============================================================================
-
-/**
- * Whether two values of a root key hold the same content. Key order counts:
- * the parameters map and the links map are ordered lists to the reader.
- *
- * @param a - One value.
- * @param b - The other.
- * @returns True when both serialise to the same JSON (undefined equals undefined only).
- */
-function sameValue(a: unknown, b: unknown): boolean {
-	if (a === undefined || b === undefined) return a === b;
-	return JSON.stringify(a) === JSON.stringify(b);
-}
-
-/**
- * The patch that turns the document into `next`, over the PACKAGE keys only.
- *
- * @param document - The pipeline document as the host holds it.
- * @param next - The document a pane asked for (the document with the pane's change).
- * @returns The keys whose value differs, each with the value `next` holds.
- */
-export function patchOf(document: object, next: object): PackagePatch {
-	const from = document as Record<string, unknown>;
-	const to = next as Record<string, unknown>;
-	const patch: PackagePatch = {};
-	for (const key of PACKAGE_KEYS) {
-		if (!sameValue(from[key], to[key])) patch[key] = to[key];
-	}
-	return patch;
-}
-
-/**
- * The draft after one pane's write. The pane hands the whole document with
- * its change; what it changed is what differs from the document it was
- * SHOWN, and only those keys are merged over the draft as it is now. A pane
- * that finishes late (its write began before another pane's edit) then adds
- * its own keys without undoing that edit.
- *
- * @param current - The draft as it is now.
- * @param shown - The drafted document the pane was shown when its write began.
- * @param next - The document the pane asked for.
- * @returns The SAME patch object when the pane changed nothing, else the merged patch.
- */
-export function mergeChange(current: PackagePatch, shown: object, next: object): PackagePatch {
-	const changed = patchOf(shown, next);
-	return isEmptyPatch(changed) ? current : { ...current, ...changed };
-}
-
-/**
- * The patch without the keys the document already agrees with: after a Save
- * the host's document catches up and the draft empties by itself.
- *
- * @param document - The pipeline document as the host holds it.
- * @param patch - The pending patch.
- * @returns The SAME patch object when nothing was dropped, else a smaller one.
- */
-export function prunePatch(document: object, patch: PackagePatch): PackagePatch {
-	const held = document as Record<string, unknown>;
-	const kept: PackagePatch = {};
-	let dropped = false;
-	for (const key of PACKAGE_KEYS) {
-		if (!(key in patch)) continue;
-		if (sameValue(held[key], patch[key])) dropped = true;
-		else kept[key] = patch[key];
-	}
-	return dropped ? kept : patch;
-}
-
-/**
- * The document with the patch applied: a pending value replaces the key, a
- * pending removal deletes it. Every other key is the document's.
- *
- * @param document - The pipeline document as the host holds it.
- * @param patch - The pending patch.
- * @returns A new document object; the SAME object when the patch is empty.
- */
-export function applyPatch<T extends object>(document: T, patch: PackagePatch): T {
-	if (isEmptyPatch(patch)) return document;
-	const next: Record<string, unknown> = { ...(document as Record<string, unknown>) };
-	for (const key of PACKAGE_KEYS) {
-		if (!(key in patch)) continue;
-		if (patch[key] === undefined) delete next[key];
-		else next[key] = patch[key];
-	}
-	return next as T;
-}
-
-/**
- * Whether a patch holds no pending change.
- *
- * @param patch - The patch.
- * @returns True when no key is pending.
- */
-export function isEmptyPatch(patch: PackagePatch): boolean {
-	return PACKAGE_KEYS.every((key) => !(key in patch));
-}
 
 // =============================================================================
 // THE FILE OVERLAY

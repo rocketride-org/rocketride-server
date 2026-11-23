@@ -32,13 +32,18 @@
 //   identity === null  → logged-out: the server inventory + Sign In button
 //   identity !== null  → logged-in: the user's DESKTOP (what they added,
 //                         seeded with the inventory on the first sign-in)
-//                         plus the shell's CatalogPicker to add more, and
-//                         the Sign Out button
+//                         and the Sign Out button
+//
+// The Catalog button in the top bar (left of the GitHub stars) swaps the
+// desktop for the CATALOG: the common catalog picker (shared), the one
+// home-ui's store mounts, drawn here in the shell theme. The button, and the
+// logo, lead back to the desktop.
 // =============================================================================
 
-import React, { useMemo, type CSSProperties } from 'react';
+import React, { useMemo, useState, type CSSProperties } from 'react';
 import { getShellApi, AppLayout } from 'shell';
 import type { ShellAppProps, AppManifestEntry, DesktopViewProps } from 'shell';
+import { CatalogPicker } from 'shared/components/catalog/CatalogPicker';
 import GitHubStars from './GitHubStars';
 
 // =============================================================================
@@ -47,7 +52,7 @@ import GitHubStars from './GitHubStars';
 //
 // Runtime shell access (hooks, connection manager, the shared desktop) flows
 // through the single curated contract accessor rather than named value
-// imports from shell. DesktopView and CatalogPicker postdate older shell
+// imports from shell. DesktopView postdates older shell
 // contracts: `shell` is a shared module with `import: null`, so against an
 // older host the member is simply undefined — probe it guarded (an unguarded
 // destructure of a missing member is the exact pattern that once took this
@@ -59,23 +64,14 @@ const DesktopView: React.FC<DesktopViewProps> | null =
 		? (shellApi as unknown as { DesktopView: React.FC<DesktopViewProps> }).DesktopView
 		: null;
 
-/** The picker's props as this page uses them (the shell's ICatalogPickerProps is wider). */
-interface CatalogPickerProps {
-	/** Shell-compatibility filter sent to the catalog. */
-	shell?: string;
-	/** App ids never shown (this launcher itself). */
-	excludeIds?: string[];
-}
-const CatalogPicker: React.FC<CatalogPickerProps> | null =
-	typeof (shellApi as { CatalogPicker?: unknown }).CatalogPicker === 'function'
-		? (shellApi as unknown as { CatalogPicker: React.FC<CatalogPickerProps> }).CatalogPicker
-		: null;
-
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
 const DISCORD_URL = 'https://discord.gg/PMXrtenMsY';
+
+/** This launcher is never an entry of its own catalog. */
+const EXCLUDED = ['rocketride.hello'];
 
 // =============================================================================
 // STYLES
@@ -123,9 +119,45 @@ const styles = {
 		boxSizing: 'border-box' as const,
 	} as CSSProperties,
 
-	/** The catalog picker under the desktop grid (signed in only). */
+	/** The catalog view: its heading over the picker, in the desktop's column. */
 	catalog: {
-		marginTop: 64,
+		width: '100%',
+		maxWidth: 1080,
+		margin: '0 auto',
+	} as CSSProperties,
+
+	catalogTitle: {
+		margin: 0,
+		fontSize: 28,
+		fontWeight: 800,
+		color: 'var(--rr-text-primary)',
+		letterSpacing: -0.5,
+	} as CSSProperties,
+
+	catalogSubtitle: {
+		margin: '6px 0 28px',
+		fontSize: 15,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** The brand as the way back to the desktop. Raw button: the shell Button has no bare logo form. */
+	brandButton: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
+		marginRight: 'auto',
+		padding: 0,
+		border: 'none',
+		background: 'none',
+		color: 'inherit',
+		font: 'inherit',
+		cursor: 'pointer',
+	} as CSSProperties,
+
+	/** The Catalog button while the catalog is the view shown. */
+	linkBtnActive: {
+		borderColor: 'var(--rr-brand)',
+		color: 'var(--rr-brand)',
 	} as CSSProperties,
 
 	/** Fallback row (pre-v7 host without DesktopView). */
@@ -290,6 +322,9 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const cm = ConnectionManager.getInstance();
 	const { appManifest, prefs, setTheme } = useWorkspace();
 	const { desktopApps } = useSubscriptions();
+	// The view under the top bar: the desktop, or the catalog the top bar's
+	// Catalog button opens
+	const [page, setPage] = useState<'desktop' | 'catalog'>('desktop');
 
 	// The unauthenticated home owns its look (mirrors saas home-ui's
 	// applyThemeMode ownership): re-assert the anonymous default — the
@@ -331,13 +366,24 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 			{/* Top bar */}
 			<div style={styles.topBar}>
 				{/* Brand logo */}
-				<div style={styles.brand}>
+				<button type="button" style={styles.brandButton} onClick={() => setPage('desktop')} aria-label="RocketRide: back to the desktop">
 					<svg width="36" height="36" viewBox="0 0 191 192" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block', flexShrink: 0 }}>
 						<path d="M159.5 161.424L153.7 167.224C151.9 169.024 148.9 169.024 147 167.224L126.6 146.824C115.6 135.824 115.6 118.024 126.6 107.024C138.1 95.5245 138.1 76.9245 126.6 65.4245L125.1 63.9245C113.6 52.4245 95 52.4245 83.5 63.9245C72.5 74.9245 54.6 74.9245 43.6 63.9245L23.2 43.5245C21.4 41.7245 21.4 38.7245 23.2 36.8245L29 31.0245C37 23.0245 49.1 20.5245 59.6 24.9245L87.5 36.3245C97.3 40.1245 108.4 38.0245 116.3 31.1245L137 10.4245C138.6 8.92449 140.4 7.42449 142.5 6.22449C146.2 4.12449 150.3 3.02449 154.5 2.62449L185.4 0.0244895C188.3 -0.275511 190.8 2.22449 190.5 5.12449L187.8 36.4245C187.3 42.8245 184.5 48.8245 180.1 53.5245L160.5 73.1245C152.5 81.2245 150.1 93.3245 154.5 103.824L155.5 106.224L161.2 120.024L165.6 130.924C169.9 141.424 167.5 153.524 159.5 161.524V161.424Z" fill="currentColor" fillOpacity={0.85} />
 						<path d="M0.799997 190.325C-0.200003 189.325 -0.300003 187.625 0.599997 186.425L21.1 162.024C31.1 150.024 37.9 137.725 41.3 125.325C43.6 116.625 44.6 108.525 44.1 101.225C44.1 100.325 44.4 99.4245 45.1 98.8245C45.8 98.2245 46.8 97.9245 47.7 98.1245C65 101.625 83.5 98.3245 98.5 88.9245C99.6 88.2245 101.1 88.4245 102 89.3245C102.9 90.2245 103.1 91.7245 102.4 92.8245C93 107.825 89.7 126.325 93.2 143.525C93.4 144.325 93.2 145.225 92.6 145.925C92 146.625 91 147.225 90.1 147.125C82.8 146.625 74.6 147.525 66 149.925C53.6 153.225 41.2 160.025 29.3 170.125L4.9 190.625C3.8 191.525 2.1 191.525 0.999997 190.425H0.799997V190.325Z" fill="#F93822" />
 					</svg>
 					<span style={styles.brandName}>RocketRide</span>
-				</div>
+				</button>
+
+				{/* Catalog — swaps the desktop for the catalog, and back. Styled as
+				    the top bar's own link buttons are (this page's chrome). */}
+				<button
+					type="button"
+					style={page === 'catalog' ? { ...styles.linkBtn, ...styles.linkBtnActive } : styles.linkBtn}
+					aria-pressed={page === 'catalog'}
+					onClick={() => setPage((current) => (current === 'catalog' ? 'desktop' : 'catalog'))}
+				>
+					Catalog
+				</button>
 
 				{/* GitHub stars */}
 				<GitHubStars />
@@ -375,12 +421,21 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 			    Launch, versions, remove and status are internal to the
 			    component (identical calls on OSS and SaaS). */}
 			<div style={styles.centre}>
-				{DesktopView ? (
+				{page === 'catalog' ? (
+					// The catalog — the common picker, in the shell theme (no palette
+					// passed). Signed out it lists what an anonymous viewer may see
+					// and an entry's action asks for a sign-in.
+					<div style={styles.catalog}>
+						<h1 style={styles.catalogTitle}>Catalog</h1>
+						<p style={styles.catalogSubtitle}>Add apps and agents to your desktop.</p>
+						<CatalogPicker identity={identity} shell="oss" excludeIds={EXCLUDED} />
+					</div>
+				) : DesktopView ? (
 					<DesktopView
 						apps={apps}
 						greetingOverride={!identity ? 'Welcome to RocketRide' : undefined}
 						showQuote={!!identity}
-						emptyMessage={identity ? 'No apps or agents on your desktop yet. Add some from the catalog below.' : undefined}
+						emptyMessage={identity ? 'No apps or agents on your desktop yet. Add some from the Catalog.' : undefined}
 					/>
 				) : (
 					// Degraded fallback for a pre-v7 host: a minimal name+launch
@@ -393,14 +448,6 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 								<button style={styles.fallbackBtn} onClick={() => handleLaunch(app)}>Open</button>
 							</div>
 						))}
-					</div>
-				)}
-
-				{/* The catalog — signed in only: add apps to the desktop above
-				    (Open / Add tiles over the same verbs SaaS home-ui uses). */}
-				{identity && CatalogPicker && (
-					<div style={styles.catalog}>
-						<CatalogPicker shell="oss" excludeIds={['rocketride.hello']} />
 					</div>
 				)}
 			</div>

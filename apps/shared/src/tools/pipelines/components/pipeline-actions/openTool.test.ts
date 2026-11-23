@@ -20,7 +20,7 @@ test('a filled open-tool note is a button bound to the address and node', () => 
 });
 
 test('a note without open-tool is not a button: the webhook endpoint info, free text, numbers', () => {
-	const notes = [{ 'url-text': 'Webhook interface URL', 'url-link': 'http://h/webhook/acme.x.w', address: 'acme.x.w', lanes: ['json'] }, 'send to acme.x.w', 42, null];
+	const notes = [{ 'url-text': 'Endpoint URL', 'url-link': 'http://h/webhook/acme.x.w', address: 'acme.x.w', lanes: ['json'] }, 'send to acme.x.w', 42, null];
 	assert.deepEqual(openToolNotes(notes), []);
 	assert.deepEqual(openToolNotes(undefined), []);
 	assert.deepEqual(openToolNotes([]), []);
@@ -76,7 +76,7 @@ test('the same button reported by two sources of one engine is shown once', () =
 
 // ==== The source's endpoint note =============================================
 
-const WEBHOOK = { 'url-text': 'Webhook interface URL', 'url-link': 'http://h/webhook/acme.x.webhook_1', address: 'acme.x.webhook_1', lanes: ['json'] };
+const WEBHOOK = { 'url-text': 'Endpoint URL', 'url-link': 'http://h/webhook/acme.x.webhook_1', address: 'acme.x.webhook_1', lanes: ['json'] };
 const CHAT = { 'button-text': 'Open Chat', 'open-tool': 'rocketride.chat', nodeId: 'chat_1', address: 'acme.x.chat_1' };
 const SQL = { 'button-text': 'Explore', 'open-tool': 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.webhook_1' };
 

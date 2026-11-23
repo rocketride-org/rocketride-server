@@ -77,6 +77,7 @@ def _default_block_without_readme() -> dict:
 
 def test_the_default_block_names_a_readme_and_no_icon_and_is_fresh_each_call():
     assert default_store_block() == {
+        'version': '1.0.0',
         'tagline': '',
         'categories': ['pipeline'],
         'tags': [],
@@ -458,3 +459,31 @@ def test_scaffold_never_replaces_an_existing_asset_and_stays_inside_the_workspac
     with pytest.raises(ValueError, match='must resolve to a folder inside the workspace'):
         scaffold_pipe(str(tmp_path / 'ws'), 'ingest', dir='../outside')
     assert not (tmp_path / 'outside').exists()
+
+
+@pytest.mark.parametrize('version', ['1.0.0', '0.3.12', '2.0.0-beta.1', '1.0.0-rc-1.0', '10.20.30-0a'])
+def test_a_store_version_is_major_minor_patch_with_an_optional_tag(version):
+    assert validate_store_block({'version': version})['version'] == version
+
+
+@pytest.mark.parametrize(
+    'version',
+    [
+        '1',
+        '1.0',
+        'v1.0.0',
+        '1.0.0.0',
+        '',
+        7,
+        None,
+        '1.0.0\n',
+        '\u0661.\u0662.\u0663',
+        '01.0.0',
+        '1.0.0-alpha..1',
+        '1.0.0-01',
+        '1.0.0-',
+    ],
+)
+def test_any_other_store_version_is_refused(version):
+    with pytest.raises(ValueError, match='store.version must be a version'):
+        validate_store_block({'version': version})

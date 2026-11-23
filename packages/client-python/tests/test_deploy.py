@@ -135,6 +135,7 @@ class TestDeploy:
         assert fetched == {
             **pipeline,
             'store': {
+                'version': '1.0.0',
                 'tagline': '',
                 'categories': ['pipeline'],
                 'tags': [],

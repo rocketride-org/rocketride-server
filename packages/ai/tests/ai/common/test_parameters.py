@@ -247,3 +247,39 @@ def test_the_views_cache_resolves_each_component_once(catalog, monkeypatch):
         )
         assert errors == [] and per_node['detect_1']['iqr.sensitivity'] == value
     assert calls == ['detector']
+
+
+# ==== describe_parameters: the map as a caller sees it ============================
+
+
+def test_a_parameter_is_described_by_public_name_with_its_descriptor_and_no_target(catalog):
+    pipeline = _pipeline(parameters={'maxEdge': 'depth_1.max_edge'})
+    # The node's default shows while the component configures nothing
+    assert parameters.describe_parameters(pipeline) == [
+        {'name': 'maxEdge', 'default': 640, 'type': 'integer', 'minimum': 1}
+    ]
+
+
+def test_the_default_is_the_components_configured_value(catalog):
+    pipeline = _pipeline(parameters={'maxEdge': 'depth_1.max_edge'})
+    pipeline['components'][1]['config'] = {'max_edge': 1024}
+    assert parameters.describe_parameters(pipeline)[0]['default'] == 1024
+
+
+def test_an_entry_that_names_no_parameter_leaf_is_left_out(catalog):
+    pipeline = _pipeline(
+        parameters={
+            'maxEdge': 'depth_1.max_edge',
+            'ghost': 'nobody.field',
+            'hidden': 'depth_1.apikey',
+            'model': 'depth_1.service.model',
+            'malformed': 'depth_1',
+        }
+    )
+    # An unknown component, a secret, a leaf without the param flag and a malformed target tell nothing
+    assert [entry['name'] for entry in parameters.describe_parameters(pipeline)] == ['maxEdge']
+
+
+def test_a_pipeline_without_a_map_has_no_parameters(catalog):
+    assert parameters.describe_parameters(_pipeline()) == []
+    assert parameters.describe_parameters(_pipeline(parameters=['maxEdge'])) == []

@@ -70,7 +70,14 @@ export interface BillingPlan {
 }
 
 /** The eight keys a `store` block may carry, in the scaffold's order. */
-export const STORE_KEYS = ['tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode', 'billing'] as const;
+export const STORE_KEYS = ['tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode', 'billing', 'version'] as const;
+
+/**
+ * The pipeline's own version, as an app's is in package.json: major.minor.patch
+ * with an optional pre-release tag. It is what a tile shows; the registry's
+ * version NUMBER stays what a deploy or a pin names.
+ */
+export const STORE_VERSION_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
 
 /** The monetization modes, the app model. */
 export const STORE_MODES = ['free', 'subscription', 'paywall'] as const;
@@ -83,6 +90,8 @@ export type StoreMode = (typeof STORE_MODES)[number];
 
 /** The `store` block of a `.pipe`: the pipeline's store listing. */
 export interface PipeStoreBlock {
+	/** The pipeline's own version (major.minor.patch), set by its author as an app's package version is. */
+	version?: string;
 	/** One-line tagline for the store card. */
 	tagline?: string;
 	/** Store categories. */
@@ -119,6 +128,7 @@ export const PIPE_ICON_SVG = PLACEHOLDER_ICON_SVG;
  */
 export function defaultStoreBlock(): PipeStoreBlock {
 	return {
+		version: '1.0.0',
 		tagline: '',
 		categories: ['pipeline'],
 		tags: [],
@@ -270,6 +280,10 @@ export function validateStoreBlock(store: unknown): PipeStoreBlock {
 	if (store.tagline !== undefined) {
 		if (typeof store.tagline !== 'string') throw new Error('store.tagline must be a string');
 		out.tagline = store.tagline;
+	}
+	if (store.version !== undefined) {
+		if (typeof store.version !== 'string' || !STORE_VERSION_PATTERN.test(store.version)) throw new Error('store.version must be a version such as 1.0.0 (major.minor.patch)');
+		out.version = store.version;
 	}
 	for (const key of ['categories', 'tags'] as const) {
 		const list = store[key];

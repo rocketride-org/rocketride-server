@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: b98d99ddd8940352a5af31735b87f43b73166323
+// Source commit: 6ffa9eb820f56db61d8684c562250ac50ecc9628
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1143,8 +1143,15 @@ export declare const STORE_KEYS: readonly [
     "readme",
     "links",
     "mode",
-    "billing"
+    "billing",
+    "version"
 ];
+/**
+ * The pipeline's own version, as an app's is in package.json: major.minor.patch
+ * with an optional pre-release tag. It is what a tile shows; the registry's
+ * version NUMBER stays what a deploy or a pin names.
+ */
+export declare const STORE_VERSION_PATTERN: RegExp;
 /** The monetization modes, the app model. */
 export declare const STORE_MODES: readonly [
     "free",
@@ -1157,6 +1164,8 @@ export type StoreKey = (typeof STORE_KEYS)[number];
 export type StoreMode = (typeof STORE_MODES)[number];
 /** The `store` block of a `.pipe`: the pipeline's store listing. */
 export interface PipeStoreBlock {
+    /** The pipeline's own version (major.minor.patch), set by its author as an app's package version is. */
+    version?: string;
     /** One-line tagline for the store card. */
     tagline?: string;
     /** Store categories. */
@@ -1401,6 +1410,29 @@ export interface PipeInterfaceNode {
  * carries (`database`, `tool`, `llm`, ...).
  */
 export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]>>;
+/**
+ * One per-call parameter of a pipeline, as a caller sees it: the public name
+ * a call sets in `params`, what the value must be, and what a call gets when
+ * it omits it. The node and field behind the name are not told.
+ */
+export interface PipeParameter {
+    /** The public name (the key of `params`). */
+    name: string;
+    /** The value a call gets when it omits the parameter: the publisher's configured value, else the node's default. */
+    default: unknown;
+    /** The value's type (`string`, `integer`, `number`, `boolean`, ...). */
+    type?: string;
+    /** Display title. */
+    title?: string;
+    /** Description. */
+    description?: string;
+    /** Allowed values, when the parameter is an enum. */
+    enum?: unknown[];
+    /** Lower bound, when one is declared. */
+    minimum?: number;
+    /** Upper bound, when one is declared. */
+    maximum?: number;
+}
 /** The `interfaces()` answer: which publication would answer, and what it offers. */
 export interface PipeInterfaces {
     /** The pipe address (`developerId.pipelineId`). */
@@ -1413,6 +1445,8 @@ export interface PipeInterfaces {
     teamId?: string;
     /** The map. */
     interfaces: PipeInterfaceMap;
+    /** The pipeline's per-call parameters, in the map's order; absent on a server that predates them. */
+    parameters?: PipeParameter[];
 }
 /** Denormalized audit identity — survives account deletion. */
 export interface DeployActor {

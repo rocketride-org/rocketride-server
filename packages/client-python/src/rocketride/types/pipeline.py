@@ -129,6 +129,7 @@ class PipeStoreBlock(TypedDict, total=False):
     sees the block.
     """
 
+    version: str  # The pipeline's own version (major.minor.patch), as an app's package version
     tagline: str  # One-line tagline for the store card
     categories: list[str]  # Store categories
     tags: list[str]  # Free tags

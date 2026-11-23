@@ -77,7 +77,13 @@ MAX_PIPE_README_BYTES = 1024 * 1024
 # ==== Store block =============================================================
 
 #: The eight keys a ``store`` block may carry, in the scaffold's order.
-STORE_KEYS = ('tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode', 'billing')
+STORE_KEYS = ('tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode', 'billing', 'version')
+
+#: The pipeline's own version, as an app's is in package.json: major.minor.patch
+#: with an optional pre-release tag.
+STORE_VERSION = re.compile(
+    r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?'
+)
 
 #: The monetization modes, the app model.
 STORE_MODES = ('free', 'subscription', 'paywall')
@@ -127,6 +133,7 @@ def default_store_block() -> PipeStoreBlock:
         The scaffold's default store block.
     """
     return {
+        'version': '1.0.0',
         'tagline': '',
         'categories': ['pipeline'],
         'tags': [],
@@ -296,6 +303,10 @@ def validate_store_block(store: Any) -> PipeStoreBlock:
         if not isinstance(store['tagline'], str):
             raise ValueError('store.tagline must be a string')
         out['tagline'] = store['tagline']
+    if 'version' in store:
+        if not isinstance(store['version'], str) or not STORE_VERSION.fullmatch(store['version']):
+            raise ValueError('store.version must be a version such as 1.0.0 (major.minor.patch)')
+        out['version'] = store['version']
     for key in ('categories', 'tags'):
         if key not in store:
             continue

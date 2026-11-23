@@ -109,6 +109,7 @@ listing fields and carries exactly these keys (an unknown key is an error naming
 
 | Key | Type | Meaning |
 | --- | --- | --- |
+| `version` | string | The pipeline's own version, `major.minor.patch` (optional pre-release tag), as an app's package version: what its tile shows. The registry's version number is counted by each deploy |
 | `tagline` | string | One line for the store card |
 | `categories` | string[] | Store categories |
 | `tags` | string[] | Free tags |
@@ -121,7 +122,7 @@ listing fields and carries exactly these keys (an unknown key is an error naming
 `rocketride pipe new <id>` stamps the default block:
 
 ```json
-"store": { "tagline": "", "categories": ["pipeline"], "tags": [],
+"store": { "version": "1.0.0", "tagline": "", "categories": ["pipeline"], "tags": [],
            "readme": "./README.md", "links": {}, "mode": "free", "billing": { "plans": [] } }
 ```
 

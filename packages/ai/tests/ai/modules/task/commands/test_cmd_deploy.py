@@ -280,6 +280,7 @@ class TestPublish:
                 'readme': '',
                 'links': {},
                 'mode': 'free',
+                'version': '1.0.0',
                 'billing': {'plans': []},
             },
         }

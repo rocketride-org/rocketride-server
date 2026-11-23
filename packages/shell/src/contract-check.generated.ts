@@ -865,6 +865,8 @@ import type { PipeInterfaceNode as Frozen_PipeInterfaceNode } from '../contract/
 import type { PipeInterfaceNode as Current_PipeInterfaceNode } from './api';
 import type { PipeInterfaceMap as Frozen_PipeInterfaceMap } from '../contract/versions/v12';
 import type { PipeInterfaceMap as Current_PipeInterfaceMap } from './api';
+import type { PipeParameter as Frozen_PipeParameter } from '../contract/versions/v12';
+import type { PipeParameter as Current_PipeParameter } from './api';
 import type { PipeInterfaces as Frozen_PipeInterfaces } from '../contract/versions/v12';
 import type { PipeInterfaces as Current_PipeInterfaces } from './api';
 import type { DeployDeleteResult as Frozen_DeployDeleteResult } from '../contract/versions/v12';
@@ -875,8 +877,6 @@ import type { CreatedPipe as Frozen_CreatedPipe } from '../contract/versions/v12
 import type { CreatedPipe as Current_CreatedPipe } from './api';
 import type { LaunchableEntry as Frozen_LaunchableEntry } from '../contract/versions/v12';
 import type { LaunchableEntry as Current_LaunchableEntry } from './api';
-import type { ICatalogPickerProps as Frozen_ICatalogPickerProps } from '../contract/versions/v12';
-import type { ICatalogPickerProps as Current_ICatalogPickerProps } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1747,6 +1747,8 @@ const _t_PipeInterfaceNode: Frozen_PipeInterfaceNode = {} as Current_PipeInterfa
 void _t_PipeInterfaceNode;
 const _t_PipeInterfaceMap: Frozen_PipeInterfaceMap = {} as Current_PipeInterfaceMap;
 void _t_PipeInterfaceMap;
+const _t_PipeParameter: Frozen_PipeParameter = {} as Current_PipeParameter;
+void _t_PipeParameter;
 const _t_PipeInterfaces: Frozen_PipeInterfaces = {} as Current_PipeInterfaces;
 void _t_PipeInterfaces;
 const _t_DeployDeleteResult: Frozen_DeployDeleteResult = {} as Current_DeployDeleteResult;
@@ -1757,5 +1759,3 @@ const _t_CreatedPipe: Frozen_CreatedPipe = {} as Current_CreatedPipe;
 void _t_CreatedPipe;
 const _t_LaunchableEntry: Frozen_LaunchableEntry = {} as Current_LaunchableEntry;
 void _t_LaunchableEntry;
-const _t_ICatalogPickerProps: Frozen_ICatalogPickerProps = {} as Current_ICatalogPickerProps;
-void _t_ICatalogPickerProps;

@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-23T03:51:35.255Z
-// Source commit: 09759ea928209f1eab72c96e9821db39abe84b30
+// Generated:     2026-11-23T16:51:37.562Z
+// Source commit: 6ffa9eb820f56db61d8684c562250ac50ecc9628
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1173,8 +1173,15 @@ export declare const STORE_KEYS: readonly [
     "readme",
     "links",
     "mode",
-    "billing"
+    "billing",
+    "version"
 ];
+/**
+ * The pipeline's own version, as an app's is in package.json: major.minor.patch
+ * with an optional pre-release tag. It is what a tile shows; the registry's
+ * version NUMBER stays what a deploy or a pin names.
+ */
+export declare const STORE_VERSION_PATTERN: RegExp;
 /** The monetization modes, the app model. */
 export declare const STORE_MODES: readonly [
     "free",
@@ -1187,6 +1194,8 @@ export type StoreKey = (typeof STORE_KEYS)[number];
 export type StoreMode = (typeof STORE_MODES)[number];
 /** The `store` block of a `.pipe`: the pipeline's store listing. */
 export interface PipeStoreBlock {
+    /** The pipeline's own version (major.minor.patch), set by its author as an app's package version is. */
+    version?: string;
     /** One-line tagline for the store card. */
     tagline?: string;
     /** Store categories. */
@@ -1206,10 +1215,14 @@ export interface PipeStoreBlock {
         plans: BillingPlan[];
     };
 }
-/** The placeholder icon every scaffolded pipeline ships — the app scaffold's. */
+/**
+ * The app scaffold's placeholder icon, for a pipeline that wants one. The
+ * pipeline scaffold writes no icon file and the default block names none.
+ */
 export declare const PIPE_ICON_SVG: string;
 /**
- * The block a new pipeline is stamped with — a fresh object each call.
+ * The block a new pipeline is stamped with — a fresh object each call. It
+ * names no icon: a pipeline without one leaves `icon` unset.
  *
  * @returns The scaffold's default store block.
  */
@@ -1343,8 +1356,10 @@ export interface PipelineConfig {
     /** Project identifier for organization and permissions */
     project_id?: string;
     /** The store listing (tagline, categories, tags, icon, readme, links,
-        mode, billing). Present = the pipeline is listable; absent = it
-        deploys unlisted. The engine never sees it. */
+        mode, billing). A pipeline carries one when it is deployed: the
+        packers and the deploy door add the default block to a pipe that has
+        none (a version stored by an earlier release can lack it). The engine
+        never sees it. */
     store?: PipeStoreBlock;
     /** Per-call params: public name -> `nodeId.configKey` */
     parameters?: Record<string, string>;
@@ -1425,6 +1440,29 @@ export interface PipeInterfaceNode {
  * carries (`database`, `tool`, `llm`, ...).
  */
 export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]>>;
+/**
+ * One per-call parameter of a pipeline, as a caller sees it: the public name
+ * a call sets in `params`, what the value must be, and what a call gets when
+ * it omits it. The node and field behind the name are not told.
+ */
+export interface PipeParameter {
+    /** The public name (the key of `params`). */
+    name: string;
+    /** The value a call gets when it omits the parameter: the publisher's configured value, else the node's default. */
+    default: unknown;
+    /** The value's type (`string`, `integer`, `number`, `boolean`, ...). */
+    type?: string;
+    /** Display title. */
+    title?: string;
+    /** Description. */
+    description?: string;
+    /** Allowed values, when the parameter is an enum. */
+    enum?: unknown[];
+    /** Lower bound, when one is declared. */
+    minimum?: number;
+    /** Upper bound, when one is declared. */
+    maximum?: number;
+}
 /** The `interfaces()` answer: which publication would answer, and what it offers. */
 export interface PipeInterfaces {
     /** The pipe address (`developerId.pipelineId`). */
@@ -1437,6 +1475,8 @@ export interface PipeInterfaces {
     teamId?: string;
     /** The map. */
     interfaces: PipeInterfaceMap;
+    /** The pipeline's per-call parameters, in the map's order; absent on a server that predates them. */
+    parameters?: PipeParameter[];
 }
 /** Denormalized audit identity — survives account deletion. */
 export interface DeployActor {
@@ -4994,8 +5034,9 @@ declare class DeployApi {
      * The pipe rides as the artifact; the zip beside it carries the pipe at
      * its root plus the readme and icon its `store` block declares and every
      * file the README references, laid out relative to the pipe file's
-     * directory. A pipe without a `store` block deploys as an UNLISTED
-     * artifact (the zip is the pipe alone). A declared or referenced file
+     * directory. A pipe without a `store` block is packed with the default
+     * block added (its `readme` kept only when README.md sits beside the
+     * pipe); the file on disk is left as it is. A declared or referenced file
      * that is missing, or that resolves outside the pipe's directory, is
      * refused by name before any call; `deploy.add({ kind: 'pipe', pipeline })`
      * stays the raw door for a pipeline dict.
@@ -5044,8 +5085,8 @@ declare class DeployApi {
      * Scaffolds a new pipeline in the workspace — the programmatic twin of
      * `rocketride pipe new` and `createApp`'s pipeline counterpart (Node.js
      * only). Writes `<dir>/<pipeId>/<pipeId>.pipe` carrying the default
-     * `store` block, the placeholder `icon.svg`, a `README.md` stub and an
-     * empty `assets/` directory. Scaffolding only — nothing is deployed; the
+     * `store` block, a `README.md` stub and an empty `assets/` directory; no
+     * icon file is written. Scaffolding only — nothing is deployed; the
      * normal lifecycle (edit → `addPipe` → publish) follows.
      *
      * @param pipeId - The pipeline id: one dot-free segment of letters,
@@ -16227,39 +16268,6 @@ export interface DesktopViewProps {
  * @param props - {@link DesktopViewProps}.
  */
 export declare const DesktopView: React$1.FC<DesktopViewProps>;
-/** Props for the {@link CatalogPicker} component. */
-export interface ICatalogPickerProps {
-    /**
-     * Shell-compatibility filter sent to the catalog ('saas', 'oss',
-     * 'vscode'); omitted, every app the caller can reach is listed.
-     */
-    shell?: string;
-    /** App ids never shown (the host launcher itself, e.g. 'rocketride.hello'). */
-    excludeIds?: string[];
-    /**
-     * Launch handler for an APP tile that is already on the desktop. Default:
-     * emit `shell:switchApp` on the connection manager. An agent tile always
-     * opens its host app bound to its address (`shell:switchApp` with
-     * `params`): an app id alone cannot carry the binding.
-     */
-    onLaunch?: (appId: string) => void;
-    /** Called once the server accepted an add (the identity push follows). */
-    onAdded?: (appId: string) => void;
-    /** Heading above the grid (default 'Catalog'); an empty string hides it. */
-    title?: string;
-    /** Line under the heading (default 'Add apps and agents to your desktop.'). */
-    subtitle?: string;
-    /** Show the search field (default true). */
-    showSearch?: boolean;
-    /** Extra styles merged onto the root (padding/width belong to the host). */
-    style?: React$1.CSSProperties;
-}
-/**
- * The catalog picker: every reachable app as a tile with Open / Add / Adding.
- *
- * @param props - {@link ICatalogPickerProps}.
- */
-export declare const CatalogPicker: React$1.FC<ICatalogPickerProps>;
 /** Possible environment scope levels. */
 export type EnvironmentScope = "org" | "team" | "user";
 /** Connection state and permissions for a single connection slot. */
@@ -16681,7 +16689,6 @@ export declare const shellApi: {
     readonly BxFolderOpen: IconComponent;
     readonly AppLayout: import("react").FC<AppLayoutProps>;
     readonly DesktopView: import("react").FC<DesktopViewProps>;
-    readonly CatalogPicker: import("react").FC<ICatalogPickerProps>;
     readonly getAppVersionOverride: typeof getAppVersionOverride;
     readonly applyAppVersionOverride: typeof applyAppVersionOverride;
     readonly versionedEntryUrl: typeof versionedEntryUrl;

@@ -475,6 +475,19 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				editorState.webviewPanel.reveal(undefined, false);
 				await savePipelineDocument(editorState.document);
 			},
+			'host.pipeline.revert': async (p) => {
+				// The PACKAGE page's Cancel: VS Code's own Revert File on this
+				// editor, after any content change the realm sent just before.
+				// The TextDocument change it makes reaches the realm as every
+				// other document change does. An untitled document has no
+				// saved state to go back to.
+				const editorState = stateFor(p.doc);
+				await editorState.pendingEdits;
+				editorState.editFailed = false;
+				if (editorState.document.isUntitled) return;
+				editorState.webviewPanel.reveal(undefined, false);
+				await vscode.commands.executeCommand('workbench.action.files.revert');
+			},
 			'host.pipeline.missingEnv': async (p) => {
 				if (p.keys?.length) await handleMissingEnvVars(p.keys);
 			},
