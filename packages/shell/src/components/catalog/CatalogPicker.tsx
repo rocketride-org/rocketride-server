@@ -462,8 +462,8 @@ const CatalogTile: React.FC<CatalogTileProps> = ({ app, state, error, onOpen, on
 				</div>
 			</div>
 
-			{/* Description — full width below */}
-			<div style={S.description}>{app.description || 'No description'}</div>
+			{/* Description — full width below; a blank one shows nothing */}
+			{app.description?.trim() && <div style={S.description}>{app.description}</div>}
 
 			{/* Bottom row — the state's action */}
 			<div style={S.cardBottom}>

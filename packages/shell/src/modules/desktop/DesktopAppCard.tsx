@@ -417,10 +417,12 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 				)}
 			</div>
 
-			{/* Description — full width below */}
-			<div style={{ fontSize: 14, lineHeight: 1.45, color: 'var(--rr-text-secondary)', ...clamp2 }}>
-				{app.description || 'No description'}
-			</div>
+			{/* Description — full width below; a blank one shows nothing */}
+			{app.description?.trim() && (
+				<div style={{ fontSize: 14, lineHeight: 1.45, color: 'var(--rr-text-secondary)', ...clamp2 }}>
+					{app.description}
+				</div>
+			)}
 
 			{/* Version chip — bottom-left, faint; opens the drop list. Raised
 			    above the launch overlay so the chip takes its own clicks. */}
