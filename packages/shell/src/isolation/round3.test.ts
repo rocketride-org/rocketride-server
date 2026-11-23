@@ -412,6 +412,60 @@ test('R-monitor when the reference cannot be put back, the ledger follows the lo
 	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }))).ok, true, 'the slot is free: that removal counts as done');
 });
 
+test('R-monitor a failed removal re-adds only the types the realm held, so the SDK never exceeds the quota', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const run = await startRun(A);
+	const types = Array.from({ length: 16 }, (_, i) => `t${i}`);
+	await A.request('client.addMonitor', { key: { token: run.token }, types });
+	const client = t.cm.engine.client as { removeMonitor: (k: unknown, ty: string[]) => Promise<void> };
+	const original = client.removeMonitor;
+	// As the SDK: it lowers its counts, then the sync to the engine fails.
+	client.removeMonitor = async (k, ty) => {
+		await original.call(client, k, ty);
+		throw new Error('sync failed');
+	};
+	const extra = Array.from({ length: 20 }, (_, i) => `x${i}`);
+	assert.equal((await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0', ...extra] }))).ok, false, 'the realm sees the removal fail');
+	client.removeMonitor = original;
+	const sdkTypes = [...t.cm.engine.monitors.values()].reduce((n, m) => n + m.size, 0);
+	assert.ok(sdkTypes <= 16, `the SDK holds ${sdkTypes} types, more than the 16-key quota`);
+});
+
+test('R-monitor a removal that fails after teardown does not put its reference back', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const run = await startRun(A);
+	await A.request('client.addMonitor', { key: { token: run.token }, types: ['t0'] });
+	const client = t.cm.engine.client as { removeMonitor: (k: unknown, ty: string[]) => Promise<void> };
+	const original = client.removeMonitor;
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let calls = 0;
+	client.removeMonitor = async (k, ty) => {
+		if (++calls > 1) return original.call(client, k, ty);
+		await gate;
+		throw new Error('sync failed');
+	};
+	tt.after(() => {
+		client.removeMonitor = original;
+		release();
+	});
+	const pending = outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }));
+	await settle();
+	await t.root.teardownAll(500);
+	const adds = (): number => t.cm.engine.monitorCalls.filter((c) => c.kind === 'add').length;
+	const before = adds();
+	release();
+	assert.equal((await pending).ok, false, 'the removal fails');
+	await settle();
+	assert.equal(adds(), before, 'nothing is subscribed again for a run the teardown ended');
+});
+
 test('R-ledger an expired run no longer counts its monitor keys against the quota', async (tt) => {
 	const t = makeRoot();
 	tt.after(() => t.cleanup());

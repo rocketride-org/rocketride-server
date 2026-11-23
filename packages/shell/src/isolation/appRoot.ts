@@ -608,24 +608,31 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		});
 
 		requestOp('client.removeMonitor', async (params, run) => {
-			const types = [...new Set(params.types as string[])];
+			// Only what the realm holds is removed: the SDK lowers counts for any type it is given, so
+			// naming types the ledger never held would otherwise be restored below as new subscriptions.
+			const counts = st.ledger.monitors.get(run!.handle);
+			const held = [...new Set(params.types as string[])].filter((t) => counts?.has(t));
+			if (held.length === 0) return;
+			const startedIn = epoch;
 			try {
-				await client().removeMonitor({ token: run!.token }, types);
+				await client().removeMonitor({ token: run!.token }, held);
 			} catch (err) {
 				// The SDK lowers its own counts before it tells the engine, so a failed call leaves them one
 				// lower. Put the reference back (addMonitor raises the count again) so the failure changes
 				// nothing and a retry removes one reference, not two. If that cannot be done either, the SDK's
 				// count stays lowered and the ledger follows it, so the two agree: the reference then counts as removed.
+				// A run that ended during the call (terminate, teardown, logout, detach) is not subscribed again.
+				if (st.detached || epoch !== startedIn || st.ledger.run(run!.handle) !== run) throw err;
 				const restored = await client()
-					.addMonitor({ token: run!.token }, types)
+					.addMonitor({ token: run!.token }, held)
 					.then(
 						() => true,
 						() => false
 					);
-				if (!restored) lowerLedger(run!, types);
+				if (!restored) lowerLedger(run!, held);
 				throw err;
 			}
-			lowerLedger(run!, types);
+			lowerLedger(run!, held);
 		});
 
 		requestOp('shell.frameToken.refresh', () => fetchFrame(st.info.appId, st.info.version));
