@@ -99,7 +99,11 @@ export function registerShellHostOps(bus: Parameters<typeof registerOpHandlers>[
 		'host.apiKey': () => ({ apiKey: source.getClient()?.getApiKey?.() ?? null }),
 		'host.stripeReturnUrl': () => ({ url: `${window.location.origin}${window.location.pathname}` }),
 		'host.openExternal': (p) => {
-			window.open(assertExternalUrl(p.url), '_blank', 'noopener');
+			// No 'noopener' feature: with it window.open always returns null,
+			// so a blocked popup would look like a successful open.
+			const tab = window.open(assertExternalUrl(p.url), '_blank');
+			if (!tab) throw new Error('The browser blocked the new tab. Allow pop-ups for this site and try again.');
+			tab.opener = null;
 		},
 	};
 	return registerOpHandlers<ShellHostOpMap>(bus, impls);
