@@ -701,7 +701,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					const early = req.mintedProject ? st.pending.get(req.mintedProject) : undefined;
 					if (early) {
 						st.pending.delete(req.mintedProject!);
-						for (const event of early) deliverEvent(st, event);
+						// A refused answer (hit): the realm never learns of this run, so its early events are dropped too.
+						if (hit) eventsDropped += early.length;
+						else for (const event of early) deliverEvent(st, event);
 					}
 					return envelope;
 				} catch (err) {

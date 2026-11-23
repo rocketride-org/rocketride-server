@@ -504,6 +504,26 @@ test("T123 an event for a run whose execute answer is still in flight is buffere
 	assertNoReal(A, t.cm);
 });
 
+test('T123b an event buffered for a run whose execute answer is refused for the API key is dropped, not delivered', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A, { grant: GRANT_A });
+	t.cm.engine.extendBody('execute', { leak: t.cm.apiKey });
+	const release = t.cm.engine.hold('execute');
+	const before = t.cm.engine.received.length;
+	const pending = execute(A);
+	await until(() => t.cm.engine.messagesFor('execute', before).length === 1);
+	const minted = (t.cm.engine.messagesFor('execute', before)[0].message.arguments as { pipeline: { project_id: string } }).pipeline.project_id;
+	const stats = t.root.__stats!();
+	t.cm.emitEngineEvent(t.cm.engine.event('flow', { project_id: minted, source: SRC, detail: 'output of a run the realm was refused' }));
+	await settle();
+	release();
+	expectDenied(await pending, 'credential', 'the answer holding the key is refused');
+	await settle();
+	assert.equal(clientEvents(A).length, 0, 'the realm gets no event for a run it was refused');
+	assert.equal(t.root.__stats!().eventsDropped, stats.eventsDropped + 1, 'the buffered event is counted as dropped');
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // T124 — F9: the API key is known before the first client.request is answered
 // ─────────────────────────────────────────────────────────────────────────────
