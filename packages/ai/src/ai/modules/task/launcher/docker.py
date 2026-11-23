@@ -557,13 +557,37 @@ def add_directory(
     return end - tar.offset
 
 
-def nodes_tar(folders: Sequence[str], uid: int, gid: int) -> bytes:
+def add_nodes(tar: tarfile.TarFile, folders: Sequence[str], uid: int, gid: int, under: str = '') -> None:
     """
-    The run's node folders as a tar stream for ``docker cp -`` into the image's nodes folder.
+    Put the run's node folders into a tar stream for a task.
 
     Each folder goes in under its own name with its digest file, so the task's
     scan loads it and ``depends()`` keeps it out of the lock's hash, as on the
     engine's disk.
+
+    Args:
+        tar: The archive being written.
+        folders: The node folders on the engine's disk.
+        uid: The task's uid.
+        gid: The task's gid.
+        under: The archive path the folders go under, with its trailing slash.
+
+    Raises:
+        ValueError: If they take more than ``CONST_NODES_SIZE_LIMIT``.
+        OSError: If one of them cannot be read.
+    """
+    budget = CONST_NODES_SIZE_LIMIT
+    for folder in folders:
+        budget = add_directory(tar, folder, under + os.path.basename(folder), budget, uid, gid)
+        if budget < 0:
+            raise ValueError(
+                f"The run's nodes take more than {CONST_NODES_SIZE_LIMIT // 2**20} MiB; they are copied in as it starts"
+            )
+
+
+def nodes_tar(folders: Sequence[str], uid: int, gid: int) -> bytes:
+    """
+    The run's node folders as a tar stream for ``docker cp -`` into the image's nodes folder (see ``add_nodes``).
 
     Args:
         folders: The node folders on the engine's disk.
@@ -572,20 +596,10 @@ def nodes_tar(folders: Sequence[str], uid: int, gid: int) -> bytes:
 
     Returns:
         The tar archive.
-
-    Raises:
-        ValueError: If they take more than ``CONST_NODES_SIZE_LIMIT``.
-        OSError: If one of them cannot be read.
     """
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w') as tar:
-        budget = CONST_NODES_SIZE_LIMIT
-        for folder in folders:
-            budget = add_directory(tar, folder, os.path.basename(folder), budget, uid, gid)
-            if budget < 0:
-                raise ValueError(
-                    f"The run's nodes take more than {CONST_NODES_SIZE_LIMIT // 2**20} MiB; they are copied in as it starts"
-                )
+        add_nodes(tar, folders, uid, gid)
     return buffer.getvalue()
 
 

@@ -290,9 +290,10 @@ pods an IPv4 address.
 ### How it differs from docker
 
 - **Files and storage.** A pod shares no filesystem with the engine, and
-  nothing is mounted into it: only the directories named in `RR_K8S_MOUNTS`
-  are copied in, when the task starts; as under docker, a variable a child
-  process would not get is skipped unless `RR_SUBPROCESS_ENV` lists it. A
+  nothing is mounted into it: only the packaged nodes the run loads, 64 MiB at
+  most, and the directories named in `RR_K8S_MOUNTS` are copied in, when the
+  task starts; as under docker, a variable a child process would not get is
+  skipped unless `RR_SUBPROCESS_ENV` lists it. A
   pipeline that uses the file-system tool (`tool_filesystem`), or the skills
   tool (`tool_skills`) with a skills folder, on a filesystem
   store, or on S3 authenticated through a web-identity or EKS Pod Identity
@@ -331,7 +332,7 @@ pods an IPv4 address.
   by the cluster after `RR_K8S_TTL`.
 
 The other [known limits](#known-limits) above hold here too: no GPU, no files
-of the engine host, only the nodes in the image, a crash dump that stays in
+of the engine host, no custom node the image lacks, a crash dump that stays in
 the container, a task whose container is killed from outside the engine
 without a report ends as `Stopped` with the container's exit code, while one
 whose pod is gone before it showed an exit code ends as `Stopped unexpectedly`

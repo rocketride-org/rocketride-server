@@ -87,6 +87,8 @@ PINNED_BOOTSTRAP = (
     'timeout "$t" head -c "$n" | tar -xf - -C /opt/data\n'
     '[ -f /opt/data/.rr-env ] || { echo "rr-task: the start stream ended early" >&2; exit 1; }\n'
     'set -a; . /opt/data/.rr-env; set +a; rm -f /opt/data/.rr-env\n'
+    'if [ -d /opt/data/.rr-nodes ]; then for d in /opt/data/.rr-nodes/*; do rm -rf /opt/rocketride/nodes/"${d##*/}";'
+    ' mv "$d" /opt/rocketride/nodes/; done; rmdir /opt/data/.rr-nodes; fi\n'
     'umask 022\n'
     'exec "$@"'
 )
@@ -1023,6 +1025,65 @@ def test_payload_charges_each_member_header(tmp_path, monkeypatch):
 
 def test_the_limit_on_mounted_directories_is_16_mib():
     assert k8.CONST_MOUNT_SIZE_LIMIT == 16 * 1024 * 1024
+
+
+def _node(root, name, files):
+    """A node folder unpacked on the engine's disk: its files and the digest of its package."""
+    folder = root / name
+    folder.mkdir(parents=True)
+    for file, text in {**files, '.rrnode.sha256': name}.items():
+        (folder / file).write_text(text)
+    return str(folder)
+
+
+def test_the_runs_nodes_travel_before_the_environment_and_belong_to_the_image_user(tmp_path):
+    """Each node folder under .rr-nodes with its digest file; the environment file stays last."""
+    node = _node(tmp_path, 'llm_x', {'IGlobal.py': 'x = 1'})
+    archive = tarfile.open(fileobj=io.BytesIO(payload_tar(b'{}', {}, {}, [node])))
+    assert archive.getnames() == [
+        'task.json',
+        '.rr-nodes/llm_x',
+        '.rr-nodes/llm_x/.rrnode.sha256',
+        '.rr-nodes/llm_x/IGlobal.py',
+        '.rr-env',
+    ]
+    assert archive.extractfile('.rr-nodes/llm_x/IGlobal.py').read() == b'x = 1'
+    assert {(m.uid, m.gid) for m in archive.getmembers()} == {(1000, 1000)}
+
+
+@pytest.mark.skipif(sys.platform != 'linux', reason='the bootstrap runs in a Linux pod; macOS has no timeout(1)')
+@pytest.mark.parametrize('sent', [True, False])
+def test_bootstrap_moves_the_runs_nodes_into_the_images_nodes_folder(tmp_path, sent):
+    """The nodes arrive under .rr-nodes and end in the image's nodes folder, each in place of a
+    folder of its name; a run with none leaves that folder as it is.
+    """
+    import subprocess
+
+    data, nodes = tmp_path / 'data', tmp_path / 'image-nodes'
+    data.mkdir()
+    _node(nodes, 'llm_x', {'stale.py': 'old'})
+    (nodes / 'core').mkdir()
+    source = [_node(tmp_path / 'engine', 'llm_x', {'IGlobal.py': 'x = 1'})] if sent else []
+    payload = payload_tar(b'{}', {}, {}, source)
+    script = BOOTSTRAP.replace(k8.CONST_CONTAINER_DATA_PATH, str(data)).replace(
+        k8.CONST_CONTAINER_NODES_PATH, str(nodes)
+    )
+
+    done = subprocess.run(
+        ['sh', '-c', script, 'rr-task', str(len(payload)), '30', 'true'], input=payload, capture_output=True
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert sorted(os.listdir(nodes)) == ['core', 'llm_x']
+    expected = ['.rrnode.sha256', 'IGlobal.py'] if sent else ['.rrnode.sha256', 'stale.py']
+    assert sorted(os.listdir(nodes / 'llm_x')) == expected
+    assert sorted(os.listdir(data)) == ['task.json']
+
+
+async def test_the_runs_nodes_go_in_on_the_attach_stdin(tmp_path):
+    cli = FakeKubectl()
+    await _launcher(cli).start(_spec(nodes=[_node(tmp_path, 'llm_x', {'IGlobal.py': 'x = 1'})]))
+    assert cli.payload().extractfile('.rr-nodes/llm_x/IGlobal.py').read() == b'x = 1'
 
 
 async def test_task_file_and_environment_go_in_on_the_attach_stdin():
