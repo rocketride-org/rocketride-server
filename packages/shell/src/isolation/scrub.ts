@@ -326,22 +326,21 @@ function redactWithin(s: string, deny: Array<[number, number]>, pass: IPass, rep
 		false,
 		windows
 	);
-	let ranges = mergeRanges(deny);
-	for (let grown = true; grown; ) {
-		grown = false;
-		for (const r of reps) {
-			const a = r.index;
-			const b = a + r.needle.length;
-			for (const g of ranges)
-				if (a < g[1] && b > g[0] && (a < g[0] || b > g[1])) {
-					g[0] = Math.min(g[0], a);
-					g[1] = Math.max(g[1], b);
-					grown = true;
-				}
+	// One sweep over everything sorted by start, no pairwise scans: a group of overlapping spans that
+	// holds a must-deny value is redacted whole (the deny wins over any replacement it overlaps);
+	// the replacements of every other group apply as they are.
+	const spans: Array<{ a: number; b: number; rep?: IMatch<Repl> }> = [...mergeRanges(deny).map((g) => ({ a: g[0], b: g[1] })), ...reps.map((r) => ({ a: r.index, b: r.index + r.needle.length, rep: r }))].sort((x, y) => x.a - y.a || y.b - x.b);
+	const items: Array<{ a: number; b: number; text: string }> = [];
+	for (let i = 0; i < spans.length; ) {
+		let end = spans[i].b;
+		const group: Array<(typeof spans)[number]> = [spans[i]];
+		for (i++; i < spans.length && spans[i].a < end; i++) {
+			end = Math.max(end, spans[i].b);
+			group.push(spans[i]);
 		}
-		if (grown) ranges = mergeRanges(ranges);
+		if (group.some((g) => g.rep === undefined)) items.push({ a: group[0].a, b: end, text: REDACTED });
+		else for (const g of group) items.push({ a: g.a, b: g.b, text: replacement(g.rep!) });
 	}
-	const items = [...ranges.map((g) => ({ a: g[0], b: g[1], text: REDACTED })), ...reps.filter((r) => !ranges.some((g) => r.index < g[1] && r.index + r.needle.length > g[0])).map((r) => ({ a: r.index, b: r.index + r.needle.length, text: replacement(r) }))].sort((x, y) => x.a - y.a);
 	let out = '';
 	let pos = 0;
 	for (const it of items) {

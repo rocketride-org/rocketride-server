@@ -154,6 +154,80 @@ test('T112 the shell API key is in the backstop: denied, redacted in notes and e
 	}
 });
 
+test('T112b a host.apiKey answer that arrives after logout does not re-add the previous session key', async () => {
+	const t = makeRoot();
+	try {
+		Object.assign(t.cm.apiKeySources, { client: false, host: true });
+		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		await startRun(A);
+		const oldKey = newKey();
+		t.cm.apiKey = oldKey;
+		const release = t.cm.holdApiKey();
+		t.cm.emit('shell:login', { user: {} });
+		t.cm.emit('shell:logout', {});
+		release();
+		await settle();
+		t.cm.apiKey = newKey();
+		t.cm.emit('shell:login', { user: {} });
+		await settle();
+		const run = await startRun(A);
+		t.cm.engine.setStatus({ name: `old ${oldKey}` });
+		assert.equal(expectOk(await status(A, run.token), 'status naming the old key').name, `old ${oldKey}`, 'the previous session key is no longer in the backstop');
+		t.cm.engine.setStatus({ name: `new ${t.cm.apiKey}` });
+		expectDenied(await status(A, run.token), 'credential', 'the new session key is');
+	} finally {
+		t.cleanup();
+	}
+});
+
+// The pairwise scans took 4.3 s here; the sweep takes about 0.1 s. A test timeout cannot fire while the scan holds the event
+// loop, so the time of the one call under test is measured and asserted (1.5 s: 15x the sweep, a third of the pairwise scans).
+test('T112c redacting a large engine error with many must-deny values and replaceable ids stays linear', async (tt) => {
+	const t = makeRoot();
+	try {
+		t.cm.apiKey = newKey();
+		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const run = await startRun(A);
+		const key = t.cm.apiKey;
+		const real = lastRun(t.cm).projectId;
+		const unit = `${key} ${real} `;
+		const message = unit.repeat(Math.floor((3.6 * 1024 * 1024) / unit.length));
+		t.cm.engine.failWith('terminate', { message });
+		const start = performance.now();
+		const answer = await call(A, 'terminate', { token: run.token });
+		const took = performance.now() - start;
+		tt.diagnostic(`T112c redacting a 3.6 MB error: ${took.toFixed(1)} ms`);
+		assert.ok(took < 1500, `redacting the error took ${took.toFixed(1)} ms`);
+		const text = engineErrorText(answer, 'a 3.6 MB terminate failure');
+		assert.ok(!text.includes(key) && !text.includes(real), 'neither the key nor the real project id survives');
+		assert.ok(text.includes('[redacted]') && text.includes(run.projectId), 'the key is redacted and the own project is shown as its alias');
+	} finally {
+		t.cleanup();
+	}
+});
+
+test("T112d an engine error where the API key overlaps the realm's own project or task id is redacted whole, the deny winning over the replacement", async (tt) => {
+	for (const field of ['projectId', 'id'] as const) {
+		await tt.test(`the key's tail is the head of the run's real ${field}`, async () => {
+			const t = makeRoot();
+			try {
+				const A = t.open(ENTRY_A, { grant: GRANT_A });
+				const run = await startRun(A);
+				const real = lastRun(t.cm)[field];
+				// The key ends with the first 8 characters of the real id, so the two spans overlap in the error text.
+				const base = newKey();
+				const key = `${base}${real.slice(0, 8)}`;
+				t.cm.apiKey = key;
+				t.cm.engine.failWith('terminate', { message: `rejected ${base}${real} here` });
+				const text = engineErrorText(await call(A, 'terminate', { token: run.token }), 'an error whose key overlaps the own id');
+				assert.equal(text, 'rejected [redacted] here', `the whole overlapping group is redacted: no key, no id tail, no alias, got ${JSON.stringify(text)}`);
+			} finally {
+				t.cleanup();
+			}
+		});
+	}
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // T113 — inbound free strings (N1-f)
 // ─────────────────────────────────────────────────────────────────────────────

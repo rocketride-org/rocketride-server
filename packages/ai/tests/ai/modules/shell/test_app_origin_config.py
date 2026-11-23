@@ -26,7 +26,7 @@ When it is not ``off``, ``validate_isolation_config()`` runs from ``initModule``
 and refuses to start (``RuntimeError``, ONE line naming the check and the
 remedy) unless: (a) the flags are valid, (b) the guest runtime marker exists,
 (c) ``capabilities.json`` matches the marker's sha256, (d) on SaaS the account
-class overrides the three account methods.
+class overrides the account methods required by isolation and live app eligibility.
 
 Tests T1 to T8 of ``.rr-sec/PR1_PLAN.md``.
 """
@@ -232,7 +232,13 @@ def test_capabilities_file_missing_refuses_start(isolation_env):
 # T6 SaaS needs the account methods
 # ---------------------------------------------------------------------------
 
-_OVERRIDES = ('account_info_for', 'is_first_party', 'set_approved_capabilities', 'approved_capabilities')
+_OVERRIDES = (
+    'account_info_for',
+    'is_first_party',
+    'set_approved_capabilities',
+    'approved_capabilities',
+    'authorize_app_use',
+)
 
 
 def _stub_account(*, saas: bool, overrides=()):
@@ -249,8 +255,8 @@ def _stub_account(*, saas: bool, overrides=()):
     return cls()
 
 
-def test_the_base_account_has_the_four_methods():
-    """T6 premise: the base class defines the OSS behaviour of all four (design section 2, check d; G4 NIT adds the reader)."""
+def test_the_base_account_has_the_required_isolation_methods():
+    """T6 premise: the base class defines the OSS behavior of every isolation/eligibility method."""
     from ai.account.base import AccountBase
 
     for name in _OVERRIDES:
@@ -354,12 +360,22 @@ def test_valid_templates_start(template, isolation_env):
         "https://app.example 'unsafe-inline'",
         'javascript:',
         'https://',
+        'https://app.example:65536',
+        'https://app.example:99999',
+        'https://app.example:0',
+        'https://app.example:00000',
     ],
 )
 def test_invalid_shell_origins_refuse_start(origins, isolation_env):
     """T8: RR_SHELL_ORIGINS become ``frame-ancestors``; only plain origins are accepted."""
     isolation_env.set(RR_SHELL_ORIGINS=origins)
     _refuses('RR_SHELL_ORIGINS')
+
+
+@pytest.mark.parametrize('origin', ['https://app.example:1', 'https://app.example:65535', 'http://localhost:5173'])
+def test_shell_origin_ports_in_range_start(origin, isolation_env):
+    isolation_env.set(RR_SHELL_ORIGINS=origin)
+    _validate()
 
 
 def test_no_shell_origin_at_all_refuses_start(isolation_env):

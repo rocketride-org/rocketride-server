@@ -36,6 +36,7 @@ Tests T28, T29, T30 and T35 of ``.rr-sec/PR1_PLAN.md``.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -44,7 +45,7 @@ from fastapi.testclient import TestClient
 import ai.modules.shell.shell as shell_mod
 
 from . import isolation_support as sup
-from .isolation_support import label_for
+from .isolation_support import csp_directives, label_for
 
 THIRD = 'acme.thirdparty'
 FIRST = 'rocketride.home'
@@ -99,7 +100,17 @@ def test_apps_frame_200_contract(world):
     resp = world.frame(THIRD)
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert set(body) == {'v', 'origin', 'entryPrefix', 'expiresAt', 'capabilities', 'network', 'state', 'frame', 'identity'}  # PR2b T78
+    assert set(body) == {
+        'v',
+        'origin',
+        'entryPrefix',
+        'expiresAt',
+        'capabilities',
+        'network',
+        'state',
+        'frame',
+        'identity',
+    }  # PR2b T78
     assert body['v'] == 1
     assert body['origin'] == f'https://{label_for(THIRD)}.apps.example'
     assert body['state'] == 'ready'
@@ -409,6 +420,18 @@ def test_e8_404_isolated_any_client(file, headers, world):
     assert world.reads == [], 'the bytes must not even be read from the store'
 
 
+def test_e8_resolution_probe_does_not_advertise_an_isolated_entry(world):
+    """The ``/apps/<appId>`` probe names a main-origin remoteEntry.js only where that URL would serve."""
+    isolated = world.client.get(f'/apps/{THIRD}', headers=COOKIE)
+    assert isolated.status_code != 200, (
+        'an isolated app has no main-origin entry to advertise (the probe falls through to the static tree)'
+    )
+    assert 'remoteEntry.js' not in isolated.text
+    first_party = world.client.get(f'/apps/{FIRST}', headers=COOKIE)
+    assert first_party.status_code == 200
+    assert first_party.json()['entry'] == f'/apps/{FIRST}/v1/remoteEntry.js'
+
+
 def test_e8_first_party_still_served(world):
     """T35: a first-party app (not isolated) keeps serving from the main origin."""
     resp = world.client.get(f'/apps/{FIRST}/v1/remoteEntry.js', headers=COOKIE)
@@ -508,6 +531,19 @@ def test_e8_refusal_is_not_an_existence_oracle(world):
     assert same.text == other.text
 
 
+def _csp_blocks_scripts(csp: str) -> bool:
+    """A sandbox without allow-scripts, or default-src 'none' with no script source that re-opens it.
+
+    ``default-src 'none'; script-src 'unsafe-inline'`` would still run the script inside an SVG document.
+    """
+    directives = csp_directives(csp)
+    sandboxed = 'sandbox' in directives and 'allow-scripts' not in directives['sandbox']
+    closed = directives.get('default-src') == ["'none'"] and all(
+        directives.get(name, ["'none'"]) == ["'none'"] for name in ('script-src', 'script-src-elem', 'script-src-attr')
+    )
+    return sandboxed or closed
+
+
 def test_e8_isolated_icon_is_not_a_script_vector(world):
     """T35: an isolated app's versioned icon may still feed an ``<img>`` but must not be a navigable script on the shell origin.
 
@@ -517,7 +553,7 @@ def test_e8_isolated_icon_is_not_a_script_vector(world):
     resp = world.client.get(f'/apps/{THIRD}/v1/icon.svg', headers=COOKIE)
     if resp.status_code == 200:
         csp = resp.headers.get('content-security-policy', '')
-        assert 'sandbox' in csp or "default-src 'none'" in csp
+        assert _csp_blocks_scripts(csp), csp
         assert resp.headers.get('x-content-type-options') == 'nosniff'
     else:
         assert resp.status_code == 404
@@ -554,7 +590,9 @@ def test_apps_frame_200_adds_frame_and_identity(world):
 
 def test_apps_frame_ticket_carries_the_manifest_network(world):
     """T78: the ticket's ``n`` is the version's validated network (what widens the frame's CSP)."""
-    world.registry.add('acme.net', 1, org='acme-org', network=['https://api.example.com', 'https://cdn.example.org:8443'])
+    world.registry.add(
+        'acme.net', 1, org='acme-org', network=['https://api.example.com', 'https://cdn.example.org:8443']
+    )
     body = world.frame('acme.net').json()
     claims = sup.need(_ao(), 'verify_frame_ticket')(_frame_ticket(body), label_for('acme.net'), config=world.config())
     assert claims['n'] == ['https://api.example.com', 'https://cdn.example.org:8443']
@@ -597,3 +635,200 @@ def test_apps_frame_identity_differs_per_app_and_survives_frame_key_rotation(wor
     world.env.set(RR_APP_FRAME_TOKEN_KEYS=f'{key_entry("k2", new_key())},{old}')
     shell_mod.invalidate_app_serving(THIRD)
     assert json.dumps(world.frame(THIRD).json()['identity']) == json.dumps(first)
+
+
+def test_frame_grant_rechecks_eligibility_before_its_warm_verdict(world):
+    assert world.frame(THIRD).status_code == 200
+    world.registry.denied_use.add(('u1', THIRD, 1))
+    assert world.frame(THIRD).status_code == 404
+    assert world.registry.app_use_calls[-1] == ('u1', THIRD, 1)
+
+
+def test_frame_grant_checks_the_selected_registry_version(world):
+    world.registry.add(THIRD, 2)
+    world.registry.denied_use.add(('u1', THIRD, 1))
+    assert world.frame(THIRD, version=1).status_code == 404
+    assert world.frame(THIRD, version=2).status_code == 200
+    assert ('u1', THIRD, 2) in world.registry.app_use_calls
+
+
+def test_frame_grant_fails_closed_when_the_eligibility_hook_is_unavailable(world, monkeypatch):
+    from ai.account import account
+
+    assert world.frame(THIRD).status_code == 200
+    monkeypatch.setattr(account, 'authorize_app_use', None)
+    assert world.frame(THIRD).status_code == 404
+
+
+def test_frame_grant_fails_closed_when_the_eligibility_check_fails(world, monkeypatch):
+    from ai.account import account
+
+    async def unavailable(*args):
+        raise RuntimeError('eligibility service unavailable')
+
+    monkeypatch.setattr(account, 'authorize_app_use', unavailable)
+    assert world.frame(THIRD).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Review round: invalidation races, rate counters, the authenticated caller, deployment binding
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_verdict_resolved_across_an_invalidation_is_not_cached(isolation_env, monkeypatch):
+    """A pin lookup in flight while ``drop_app`` runs answers its caller but never re-installs a stale verdict."""
+    import ai.account.app_deploy as deploy
+
+    ao = _ao()
+    gate = asyncio.Event()
+
+    async def slow_pins(org_id, user_id, team_ids):
+        await gate.wait()
+        return [{'id': THIRD, 'isolated': True, 'firstParty': False}]
+
+    monkeypatch.setattr(deploy, 'resolve_app_pins', slow_pins)
+    pending = asyncio.create_task(ao.version_verdict('', THIRD, None))
+    await asyncio.sleep(0)
+    ao.drop_app(THIRD)
+    gate.set()
+    verdict = await pending
+    assert verdict is not None and verdict.isolated is True
+    assert ao._verdict_cache == {}, 'the answer resolved across the invalidation was cached'
+    assert (await ao.version_verdict('', THIRD, None)) is not None
+    assert len(ao._verdict_cache) == 1, 'a lookup that started after the invalidation is cached as usual'
+
+
+def test_rate_counters_survive_a_flood_of_other_keys(clock, monkeypatch):
+    """A live bucket is never evicted to make room: other keys cannot reset a caller's budget."""
+    ao = _ao()
+    monkeypatch.setattr(ao, '_RATE_KEYS_MAX', 3)
+    cache: dict = {}
+    assert [ao._rate_ok(cache, 'a', 2) for _ in range(3)] == [True, True, False]
+    assert ao._rate_ok(cache, 'b', 2) and ao._rate_ok(cache, 'c', 2)
+    assert ao._rate_ok(cache, 'a', 2) is False, "the first caller's counter was not evicted and reset"
+    clock.advance(ao.FRAME_RATE_WINDOW + 1)
+    assert ao._rate_ok(cache, 'd', 2) is True, 'once the windows end the cache has room again'
+
+
+def test_a_full_rate_table_admits_new_callers_up_to_a_shared_overflow_limit(clock, monkeypatch):
+    """Past the cap a new caller is not refused outright: new keys share one bounded overflow bucket."""
+    ao = _ao()
+    monkeypatch.setattr(ao, '_RATE_KEYS_MAX', 3)
+    monkeypatch.setattr(ao, '_RATE_OVERFLOW_FACTOR', 2)
+    cache: dict = {}
+    assert [ao._rate_ok(cache, 'a', 2) for _ in range(3)] == [True, True, False]  # 'a' is exhausted
+    assert ao._rate_ok(cache, 'b', 2) and ao._rate_ok(cache, 'c', 2)  # the table is full
+    # New callers past the cap share an overflow bucket of 2 x 2 = 4.
+    assert [ao._rate_ok(cache, f'new{i}', 2) for i in range(5)] == [True, True, True, True, False]
+    assert ao._rate_ok(cache, 'a', 2) is False, "an existing caller's exhausted count is not reset by the overflow"
+    assert ao._rate_ok(cache, 'b', 2) is True, 'an existing caller keeps its own budget, not the shared one'
+    clock.advance(ao.FRAME_RATE_WINDOW + 1)
+    assert ao._rate_ok(cache, 'newer', 2) is True, (
+        'once the windows end the overflow bucket is fresh and callers get their own'
+    )
+
+
+def test_a_full_rate_table_is_not_rescanned_for_every_new_key(clock, monkeypatch):
+    """Pruning ended windows runs at most once per interval, however many new keys arrive."""
+    ao = _ao()
+    monkeypatch.setattr(ao, '_RATE_KEYS_MAX', 3)
+    passes = []
+    real = ao._prune_rate_cache
+    monkeypatch.setattr(ao, '_prune_rate_cache', lambda cache, now: (passes.append(now), real(cache, now))[1])
+    cache: dict = {}
+    for key in 'abc':
+        assert ao._rate_ok(cache, key, 2)
+    for i in range(50):
+        ao._rate_ok(cache, f'new{i}', 2)
+    assert len(passes) == 1, 'a flood of new keys pruned the full table once, not once per request'
+    clock.advance(ao._RATE_PRUNE_INTERVAL + 0.5)
+    ao._rate_ok(cache, 'later', 2)
+    assert len(passes) == 2, 'the prune runs again once its interval has passed'
+
+
+@pytest.mark.asyncio
+async def test_the_already_authenticated_caller_is_used_not_authenticated_again(isolation_env, monkeypatch):
+    """``frame_grant`` passes its caller on: a second ``authenticate`` that raises cannot turn it anonymous."""
+    from types import SimpleNamespace
+
+    from ai.account import account
+    import ai.account.app_deploy as deploy
+
+    ao = _ao()
+    seen = []
+
+    async def pins(org_id, user_id, team_ids):
+        seen.append((org_id, user_id))
+        return [{'id': THIRD, 'isolated': True, 'firstParty': False}]
+
+    async def broken(token):
+        raise RuntimeError('auth backend down')
+
+    monkeypatch.setattr(deploy, 'resolve_app_pins', pins)
+    monkeypatch.setattr(account, 'authenticate', broken)
+    caller = SimpleNamespace(userId='u1', organization={'id': 'acme-org', 'teams': []})
+
+    verdict = await ao.version_verdict('good-token', THIRD, caller)
+
+    assert verdict is not None and verdict.isolated is True
+    assert seen == [('acme-org', 'u1')], 'the pins were resolved for the caller, not for an anonymous one'
+
+
+@pytest.mark.asyncio
+async def test_an_auth_backend_failure_is_an_unknown_caller_never_an_anonymous_one(isolation_env, monkeypatch):
+    """No pins are resolved and nothing is cached; ``isolated_for`` fails closed."""
+    from ai.account import account
+    import ai.account.app_deploy as deploy
+
+    ao = _ao()
+    asked = []
+
+    async def pins(org_id, user_id, team_ids):
+        asked.append(user_id)
+        return []
+
+    async def broken(token):
+        raise RuntimeError('auth backend down')
+
+    monkeypatch.setattr(deploy, 'resolve_app_pins', pins)
+    monkeypatch.setattr(account, 'authenticate', broken)
+
+    assert await ao.isolated_for('good-token', THIRD) is True
+    assert await ao.version_verdict('good-token', THIRD) is None
+    assert asked == [] and ao._verdict_cache == {}
+
+
+def test_a_frame_token_is_bound_to_the_deployment_its_grant_describes(world):
+    """The grant mints ``d`` = the dist tree it described; the claim is sealed with the rest."""
+    body = world.frame(THIRD).json()
+    token = re.fullmatch(r'/_t/([^/]+)/v1/', body['entryPrefix']).group(1)
+    claims = sup.need(_ao(), 'verify_frame_token')(token, label_for(THIRD), config=world.config())
+    assert isinstance(claims['d'], str) and claims['d'], 'the token carries the deployment it opens'
+    assert claims['d'] in asyncio.run(_ao().token_version_dirs('u1', 'org-1', THIRD)).values()
+
+
+def test_apps_frame_deeply_nested_body_is_a_bad_request_not_a_500(world):
+    """A body under the 4 KiB cap that nests deeper than the JSON parser allows answers 400 ``bad_request``."""
+    raw = b'[' * 1500 + b']' * 1500
+    assert len(raw) < 4096
+    resp = world.post(raw=raw, headers={'content-type': 'application/json'})
+    assert resp.status_code == 400
+    assert resp.json()['error'] == 'bad_request'
+
+
+@pytest.mark.parametrize(
+    'csp,ok',
+    [
+        ("default-src 'none'; sandbox", True),
+        ("default-src 'none'", True),
+        ('sandbox', True),
+        ("default-src 'none'; script-src 'unsafe-inline'", False),
+        ("default-src 'none'; script-src-elem 'self'", False),
+        ('sandbox allow-scripts', False),
+        ("default-src 'self'", False),
+    ],
+)
+def test_the_icon_policy_check_rejects_a_csp_that_permits_scripts(csp, ok):
+    """The icon test's predicate itself: a CSP that re-opens scripts must not pass it."""
+    assert _csp_blocks_scripts(csp) is ok

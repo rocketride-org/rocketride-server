@@ -48,6 +48,8 @@ export interface IRunEntry {
 	taskIdAlias: string;
 	pipeIds: Set<number>;
 	completedAt?: number;
+	/** Bumped by every restart: a status answer to a request sent before it describes the earlier run. */
+	generation: number;
 }
 
 /** One store handle the realm opened. */
@@ -104,7 +106,7 @@ export interface ILedger {
 	/** Reserves `n` slots until the returned release runs (idempotent). */
 	reserve(kind: QuotaKind, n?: number): () => void;
 	/** Records a started run under a fresh handle. */
-	addRun(fields: Omit<IRunEntry, 'handle' | 'projectAlias' | 'taskIdAlias' | 'pipeIds' | 'completedAt'> & { projectAlias?: string }): IRunEntry;
+	addRun(fields: Omit<IRunEntry, 'handle' | 'projectAlias' | 'taskIdAlias' | 'pipeIds' | 'completedAt' | 'generation'> & { projectAlias?: string }): IRunEntry;
 	/** The live run for a handle (expired runs are dropped here). */
 	run(handle: string): IRunEntry | undefined;
 	/** The live run holding a real token. */
@@ -175,6 +177,8 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 			case 'fsHandles':
 				return fsByHandle.size;
 			case 'monitorKeys':
+				// Expired runs are pruned first: their subscriptions would otherwise keep counting until something else looked them up.
+				liveRuns();
 				return [...monitors.values()].reduce((n, types) => n + types.size, 0) + [...directMonitors.values()].reduce((n, d) => n + d.types.length, 0);
 		}
 	};
@@ -199,6 +203,7 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 				projectAlias: fields.projectAlias ?? mintProjectAlias(deps.random),
 				taskIdAlias: `${handle.slice(3, 11)}.${fields.source}`,
 				pipeIds: new Set(),
+				generation: 0,
 			};
 			runsByHandle.set(handle, entry);
 			return entry;

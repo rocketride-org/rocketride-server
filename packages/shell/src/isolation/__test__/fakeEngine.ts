@@ -90,6 +90,10 @@ export interface IFakeEngine {
 	fail(command: string, message: string): void;
 	/** Makes the NEXT `request` for `command` THROW (a transport or SDK exception). */
 	throwNext(command: string, err: Error): void;
+	/** Makes the NEXT response to `command` `success: false` with this `message` (and `code`). */
+	failWith(command: string, failure: { message: string; code?: string }): void;
+	/** Merges `fields` into every `success: true` body of `command` from now on. */
+	extendBody(command: string, fields: Record<string, unknown>): void;
 	/** Holds responses to `command` until the returned release function runs. */
 	hold(command: string): () => void;
 	/** Sets the `rrext_get_task_status` body fields (they replace the previous ones; the defaults stay). */

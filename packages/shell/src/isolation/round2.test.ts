@@ -34,7 +34,7 @@ import type { DAPMessage } from 'rocketride';
 import { ENTRY_A, ENTRY_B, makeRoot, refAppKey } from './__test__/fixtures';
 import { clientRequest, dap, settle } from './__test__/realm';
 import { assertDenied, brief, outcome, startRun } from './__test__/util';
-import { walk } from './walk';
+import { walk, WalkError, WALK_MAX_NODES, WALK_MAX_STRING_CHARS } from './walk';
 
 const key = refAppKey(ENTRY_A.id);
 const keyB = refAppKey(ENTRY_B.id);
@@ -78,6 +78,29 @@ test('G4R2-M1 a refused response, unregister or publish is charged too', async (
 	assert.equal(codeOf({ __rrbus: 'response', ...reply }), 'rate', `after 120 refused messages the bucket is empty, got ${brief(reply)}`);
 });
 
+test('G4R2-M1b an unregister the rate bucket refused still releases the op at the root', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const R = t.open(ENTRY_A, { raw: true });
+	const C = t.open(ENTRY_A);
+	const op = `app.${key}.late`;
+	R.post({ __rrbus: 'register', ops: [op] });
+	await settle();
+	const hops = (): number => R.received.filter((m) => (m as { __rrbus?: string; op?: string }).__rrbus === 'request' && (m as { op?: string }).op === op).length;
+	void C.request(op, {}, 50).catch(() => undefined);
+	await settle();
+	assert.equal(hops(), 1, 'while registered, the owner is routed to');
+	for (let i = 0; i < 130; i++) R.post({ __rrbus: 'response', id: `nope-${i}`, ok: true, result: 1 });
+	await settle();
+	const refused = await R.rawRequest(`app.${keyB}.x`, {});
+	assert.equal(codeOf({ __rrbus: 'response', ...refused }), 'rate', "the realm's bucket is empty");
+	R.post({ __rrbus: 'unregister', ops: [op] });
+	await settle();
+	void C.request(op, {}, 50).catch(() => undefined);
+	await settle();
+	assert.equal(hops(), 1, 'after the unregister, even a refused one, the owner is no longer routed to');
+});
+
 test('G4R2-M1 a denial never echoes more than 128 characters of an op or command', async (tt) => {
 	const t = makeRoot();
 	tt.after(() => t.cleanup());
@@ -110,6 +133,19 @@ test('G4R2-L1 the rate bucket is charged before the walk; the walker bounds tota
 
 	const six = 'x'.repeat(6 * 1024 * 1024);
 	assert.throws(() => walk({ a: six, b: six }), 'two 6 MiB strings exceed the walker total');
+});
+
+test('R2 undefined-valued properties count against the walker node and string budgets', () => {
+	const many: Record<string, unknown> = {};
+	for (let i = 0; i < WALK_MAX_NODES + 1; i++) many[`k${i}`] = undefined;
+	assert.throws(() => walk(many), WalkError, 'enumerating more undefined properties than the node budget is refused');
+	const few: Record<string, unknown> = { a: undefined, b: 1 };
+	assert.deepEqual({ ...(walk(few) as object) }, { b: 1 }, 'a few undefined properties are still dropped from the copy');
+	// long names on dropped properties are charged to the string budget too
+	const longName = 'x'.repeat(1_000_000);
+	const named: Record<string, unknown> = {};
+	for (let i = 0; i <= Math.ceil(WALK_MAX_STRING_CHARS / longName.length); i++) named[`${i}${longName}`] = undefined;
+	assert.throws(() => walk(named), WalkError, 'long names of undefined-valued properties exceed the string budget');
 });
 
 // =============================================================================

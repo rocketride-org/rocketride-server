@@ -29,6 +29,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import type { DenyCode } from '../capabilityDenied';
 import { isWireError } from '../../connection/errorWire';
@@ -41,7 +42,7 @@ import type { IOpenedRealm } from './realm';
 export const SHELL_ROOT = path.join(__dirname, '..', '..', '..');
 
 /** The shared capability table, read as data (never through the stubs). */
-export function readCapabilityJson(): { v: number; rows: Array<{ cap: string; op: string; command?: string; subcommand?: string; args: Record<string, string>; top?: string[] }> } {
+export function readCapabilityJson(): { v: number; rows: Array<{ cap: string; op: string; command?: string; subcommands?: string[]; args: Record<string, string>; top?: string[] }> } {
 	return JSON.parse(readFileSync(path.join(SHELL_ROOT, 'isolation', 'capabilities.json'), 'utf8'));
 }
 
@@ -166,4 +167,39 @@ export function bodyOfResponse(envelope: unknown): Record<string, unknown> {
 	const env = envelope as { ok?: boolean; value?: { body?: Record<string, unknown> } };
 	assert.equal(env.ok, true, `expected an ok envelope, got ${brief(envelope)}`);
 	return env.value?.body ?? {};
+}
+
+/**
+ * Best-of-`n` wall-clock times of a measured run and its control, taken in
+ * alternating rounds so both see the same host load. A run that returns a
+ * number reports the time of just the operation under test (its setup and
+ * clean-up stay outside); one that returns nothing is timed whole.
+ */
+export async function bestPair(n: number, control: () => Promise<void | number>, measured: () => Promise<void | number>): Promise<{ control: number; measured: number }> {
+	const out = { control: Infinity, measured: Infinity };
+	for (let i = 0; i < n; i++) {
+		for (const [key, run] of [
+			['control', control],
+			['measured', measured],
+		] as const) {
+			const start = performance.now();
+			const own = await run();
+			out[key] = Math.min(out[key], typeof own === 'number' ? own : performance.now() - start);
+		}
+	}
+	return out;
+}
+
+/**
+ * A cost bound that holds on a quiet host and on a loaded one.
+ *
+ * CI runs this suite beside others on the same runner, so an absolute budget
+ * alone measures the neighbours (8 MiB outbound: 128 ms on a laptop, 1.7 s on
+ * a loaded runner). The control is the same operation with the root's sets
+ * empty, timed in the same rounds: the run passes under `budgetMs`, or under
+ * `ratio` times its control. A cost that grows with the needle sets is
+ * orders of magnitude over its control and fails either way.
+ */
+export function assertCost(what: string, t: { control: number; measured: number }, budgetMs: number, ratio: number): void {
+	assert.ok(t.measured < budgetMs || t.measured < ratio * t.control, `${what} took ${t.measured.toFixed(1)} ms against a ${t.control.toFixed(1)} ms control (budget ${budgetMs} ms or ${ratio}x)`);
 }

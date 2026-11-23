@@ -38,6 +38,7 @@ build the app without the middleware when its module does not exist yet.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -588,7 +589,9 @@ def test_app_host_scripts_keep_their_type_when_the_os_maps_js_differently(served
         assert resp.headers['content-type'].startswith('text/javascript')
 
 
-# ===========================================================================
+# ====================================================================
+
+
 # PR2b: T80 ticketed frame.html, T81 network on /_t and /_p, T82 Vary, T104 chunks
 # ===========================================================================
 
@@ -653,9 +656,24 @@ def _bad_tickets(served_app, clock):
     good = _ticket(served_app, NET)
     other_app = sup.need(ao, 'mint_frame_ticket')('acme.other', 1, NET, config=cfg)
     frame_token = served_app.token()
-    forged_http = sup.seal_raw(key, kid, {'a': 'acme.thirdparty', 'v': 1, 'n': ['http://evil.example'], 'iat': now, 'exp': now + 900}, '.csp')
-    forged_wild = sup.seal_raw(key, kid, {'a': 'acme.thirdparty', 'v': 1, 'n': ['https://*.example.com', "'unsafe-eval'", 'https:'], 'iat': now, 'exp': now + 900}, '.csp')
-    forged_shell = sup.seal_raw(key, kid, {'a': 'acme.thirdparty', 'v': 1, 'n': [sup.SHELL_ORIGIN], 'iat': now, 'exp': now + 900}, '.csp')
+    forged_http = sup.seal_raw(
+        key, kid, {'a': 'acme.thirdparty', 'v': 1, 'n': ['http://evil.example'], 'iat': now, 'exp': now + 900}, '.csp'
+    )
+    forged_wild = sup.seal_raw(
+        key,
+        kid,
+        {
+            'a': 'acme.thirdparty',
+            'v': 1,
+            'n': ['https://*.example.com', "'unsafe-eval'", 'https:'],
+            'iat': now,
+            'exp': now + 900,
+        },
+        '.csp',
+    )
+    forged_shell = sup.seal_raw(
+        key, kid, {'a': 'acme.thirdparty', 'v': 1, 'n': [sup.SHELL_ORIGIN], 'iat': now, 'exp': now + 900}, '.csp'
+    )
     flipped = good[:-3] + ('AAA' if not good.endswith('AAA') else 'BBB')
     return {
         'garbage': 'not-a-ticket',
@@ -747,17 +765,25 @@ def test_t81_each_version_has_its_own_network(served_app):
     served_app.registry.add('acme.multi', 2, org='acme-org', network=['https://two.example.com'])
     token = served_app.token(app='acme.multi', version=1)
     one = served_app.get_bundle(token=token, version=1, host=host)
-    assert csp_directives(one.headers['content-security-policy'])['connect-src'] == ["'self'", 'https://one.example.com']
+    assert csp_directives(one.headers['content-security-policy'])['connect-src'] == [
+        "'self'",
+        'https://one.example.com',
+    ]
     token2 = served_app.token(app='acme.multi', version=2)
     two = served_app.get_bundle(token=token2, version=2, host=host)
-    assert csp_directives(two.headers['content-security-policy'])['connect-src'] == ["'self'", 'https://two.example.com']
+    assert csp_directives(two.headers['content-security-policy'])['connect-src'] == [
+        "'self'",
+        'https://two.example.com',
+    ]
 
 
 def test_t81_a_version_without_network_and_a_404_stay_on_the_base_policy(served_app):
     """T81 control: the default app has no network; a refused request carries no one's network."""
     base = _base_frame_csp(served_app)
     ok = served_app.get_bundle()
-    assert {k: v for k, v in csp_directives(ok.headers['content-security-policy']).items()} == {k: v for k, v in base.items() if k != 'frame-ancestors'}
+    assert {k: v for k, v in csp_directives(ok.headers['content-security-policy']).items()} == {
+        k: v for k, v in base.items() if k != 'frame-ancestors'
+    }
     host = _add_net_app(served_app)
     miss = served_app.get(f'/_t/{served_app.token(app="acme.net")}/v9/remoteEntry.js', host=host)
     assert miss.status_code == 404
@@ -870,3 +896,35 @@ def test_t104_chunks_are_app_host_only(isolation_env):
     """T104: on the shell host the guest chunks are as absent as the guest bundle is (H4)."""
     resp = _client(isolation_env).get(f'/_rr/{_chunk_names()[0]}', headers={'host': 'app.example'})
     assert resp.status_code == 404
+
+
+def test_a_token_serves_only_the_deployment_it_was_minted_for(served_app):
+    """A bound token whose version now resolves to another dist tree is the one 404."""
+    ao = sup.load_module('ai.modules.shell.app_origin')
+    dirs = asyncio.run(ao.token_version_dirs('u1', 'org-1', served_app.APP))
+    real = dirs[1]
+    mint = sup.need(ao, 'mint_frame_token')
+    bound = mint(served_app.APP, 1, 'u1', 'org-1', config=served_app.config, dist_dir=real)
+    elsewhere = mint(
+        served_app.APP, 1, 'u1', 'org-1', config=served_app.config, dist_dir='orgs/other-org/files/apps/x/v1/dist'
+    )
+    assert served_app.get_bundle(token=bound).status_code == 200
+    assert served_app.get_bundle(token=elsewhere).status_code == 404
+
+
+def test_public_assets_are_revalidated_so_a_withdrawn_deployment_stops_loading(served_app):
+    """``/_p`` answers ``private, no-cache`` with an ETag; revalidation re-resolves the version, so withdrawal is a 404."""
+    import ai.modules.shell.shell as shell_mod
+
+    path = '/_p/acme.thirdparty/v1/remoteEntry.js'
+    first = served_app.get(path)
+    assert first.status_code == 200
+    assert first.headers['cache-control'] == 'private, no-cache'
+    validator = first.headers['etag']
+    again = served_app.get(path, headers={'if-none-match': validator})
+    assert again.status_code == 304 and again.headers['etag'] == validator
+    assert served_app.get(path, headers={'if-none-match': '"something-else"'}).status_code == 200
+
+    served_app.registry.rows.clear()  # the deployment is withdrawn
+    shell_mod.invalidate_app_serving(served_app.APP)
+    assert served_app.get(path, headers={'if-none-match': validator}).status_code == 404

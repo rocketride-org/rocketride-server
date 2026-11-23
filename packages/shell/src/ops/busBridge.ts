@@ -805,8 +805,11 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					return;
 				}
 				case 'unregister':
-					// Charged like a registration; the array is bounded above.
-					if (charge('unregister') || !Array.isArray(m.ops)) return;
+					// Charged like a registration; the array is bounded above. A refused charge still
+					// applies the unregister: it only releases names this realm owns, and dropping it
+					// would leave the old owner routable at the root with nobody to resend it.
+					charge('unregister');
+					if (!Array.isArray(m.ops)) return;
 					for (const op of m.ops) {
 						if (typeof op !== 'string' || op.length > MAX_NAME) continue;
 						if (appOwners.get(op) === realm) appOwners.delete(op);

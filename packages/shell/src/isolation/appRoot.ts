@@ -219,11 +219,15 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	/** Fetches the API key from both sources: `getClient().getApiKey()` and `host.apiKey` (`hostOps.ts:122`). */
 	const refreshApiKeys = (): void => {
 		addApiKey(clientApiKey());
+		// A logout or teardown bumps the epoch: an answer from the session before it must not re-add that session's key.
+		const askedIn = epoch;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const answered = Promise.resolve()
 			.then(() => cm.ops().request('host.apiKey', {}))
 			.then(
-				(answer) => addApiKey(isPlainObject(answer) ? answer.apiKey : undefined),
+				(answer) => {
+					if (epoch === askedIn) addApiKey(isPlainObject(answer) ? answer.apiKey : undefined);
+				},
 				() => undefined
 			);
 		const waited = new Promise<void>((resolve) => {
@@ -352,16 +356,55 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	/** One DAP request on the root's own behalf (teardown, recovery). */
 	const sendEngine = (command: string, args: Record<string, unknown>, timeout = DAP_TIMEOUT_MAX_MS): Promise<DAPMessage> => Promise.resolve().then(() => client().request({ type: 'request', seq: 0, command, arguments: args } as DAPMessage, timeout) as Promise<DAPMessage>);
 
+	/** Whether a terminate answer means the run is gone: it succeeded, or the engine says the run is no longer registered. */
+	const terminated = (r: DAPMessage | undefined): boolean => isPlainObject(r) && (r.success !== false || (r as { code?: unknown }).code === TASK_NOT_REGISTERED);
+
+	/**
+	 * Ends what no ledger can hold: a run (terminate) or an open handle (fs_close,
+	 * pipe close). A transport failure and a negative DAP answer are both failures
+	 * (the SDK resolves the latter): the call is retried on the lost-run schedule,
+	 * then logged. For a handle (fs_close, pipe close) a retry helps only when
+	 * the call never reached the engine (transport failure): the engine releases
+	 * a handle even when its close fails, so a retry after a negative answer is
+	 * answered as an unknown handle, which this treats as a failure, not as closed.
+	 */
+	const endOrphanCall = (what: string, command: string, args: Record<string, unknown>, retriesLeft: number[] = [...LOST_RUN_RETRY_MS]): void => {
+		track(sendEngine(command, args).then(terminated, () => false)).then((done) => {
+			if (done) return;
+			if (retriesLeft.length === 0) {
+				opts.log('warn', `[isolation] could not end an unrecorded ${what}`);
+				return;
+			}
+			const [delay, ...rest] = retriesLeft;
+			schedule(() => endOrphanCall(what, command, args, rest), delay);
+		});
+	};
+	const endOrphanRun = (token: string): void => endOrphanCall('run', 'terminate', { token });
+
 	/** Best-effort end of what an answer started when it cannot be recorded (late, detached, or a record failure). */
 	const endOrphan = (req: IGatedRequest, response: DAPMessage): void => {
 		const body = isPlainObject(response) && response.success !== false && isPlainObject(response.body) ? response.body : undefined;
 		if (!body) return;
-		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') {
-			track(sendEngine('terminate', { token: body.token }).catch(() => opts.log('warn', '[isolation] could not end an unrecorded run')));
-		}
+		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') endOrphanRun(body.token);
 		if (req.command === 'rrext_store' && req.subcommand === 'fs_open' && typeof body.handle === 'string') {
-			track(sendEngine('rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode }).catch(() => undefined));
+			endOrphanCall('file handle', 'rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode });
 		}
+		if (req.command === 'rrext_process' && req.subcommand === 'open' && Number.isSafeInteger(body.pipe_id) && req.run) {
+			endOrphanCall('pipe', 'rrext_process', { subcommand: 'close', token: req.run.token, pipe_id: body.pipe_id });
+		}
+	};
+
+	/** Takes back what `record` allocated for an answer the realm will never receive (it was refused after recording). */
+	const unrecord = (st: IRealmState, req: IGatedRequest, response: DAPMessage): void => {
+		const body = isPlainObject(response) && response.success !== false && isPlainObject(response.body) ? response.body : undefined;
+		if (!body) return;
+		// A restart's token is the one endOrphan terminates: the run it renewed is gone with it.
+		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') {
+			const run = st.ledger.runByToken(body.token);
+			if (run) st.ledger.dropRun(run.handle);
+		}
+		if (req.command === 'rrext_store' && req.subcommand === 'fs_open' && typeof body.handle === 'string') st.ledger.dropFs(body.handle);
+		if (req.command === 'rrext_process' && req.subcommand === 'open' && Number.isSafeInteger(body.pipe_id)) req.run?.pipeIds.delete(body.pipe_id as number);
 	};
 
 	/** An execute answer the choke point refuses: its run leaves the ledger and is terminated. */
@@ -391,7 +434,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				if (r.success === false) return (r as { code?: unknown }).code === TASK_NOT_REGISTERED ? 'absent' : 'error';
 				const token = isPlainObject(r.body) ? r.body.token : undefined;
 				if (typeof token !== 'string') return 'error';
-				await sendEngine('terminate', { token });
+				// A failed termination keeps the run in recovery (counted, looked up again); only a
+				// success, or the engine saying the run is no longer registered, ends it.
+				if (!terminated(await sendEngine('terminate', { token }))) return 'error';
 				ledger.lostRuns.delete(project);
 				return 'found';
 			})
@@ -485,7 +530,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	};
 
 	/** Records what the engine answered and rewrites what the realm may see. */
-	const record = (st: IRealmState, req: IGatedRequest, response: DAPMessage): DAPMessage => {
+	const record = (st: IRealmState, req: IGatedRequest, response: DAPMessage, runGeneration?: number): DAPMessage => {
 		if (opts.__throwIn === 'ledger') throw new Error('test hook: ledger');
 		if (!isPlainObject(response) || response.success === false) return response;
 		const body = isPlainObject(response.body) ? response.body : undefined;
@@ -507,6 +552,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			case 'restart': {
 				const run = req.run!;
 				run.completedAt = undefined;
+				run.generation++;
 				if (!body) return response;
 				remember(body.token, body.publicToken, body.id);
 				if (typeof body.token === 'string') run.token = body.token;
@@ -525,7 +571,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				st.ledger.dropRun(req.run!.handle);
 				return response;
 			case 'rrext_get_task_status':
-				if (body && (body.completed === true || body.final === true)) st.ledger.complete(req.run!.handle);
+				// A status asked before a restart describes the run it replaced: it must not expire the restarted one.
+				if (body && (body.completed === true || body.final === true) && req.run!.generation === runGeneration) st.ledger.complete(req.run!.handle);
 				return response;
 			case 'rrext_monitor': {
 				// A run that ended during the call keeps no subscription record (DA N1).
@@ -670,9 +717,16 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					return deniedEnvelope(asDenial(err, 'client.request'));
 				}
 				const startedIn = epoch;
+				const runGeneration = req.run?.generation;
 				try {
 					// DA F9: the API key fetched at attach (or login) is known before any answer is scrubbed.
-					if (apiKeyReady) await apiKeyReady;
+					if (apiKeyReady) {
+						await apiKeyReady;
+						// Admitted before a detach, teardown, logout or terminate that happened during the wait: ownership is checked again.
+						const runGone = req.run !== undefined && st.ledger.run(req.run.handle) !== req.run;
+						const fsGone = typeof req.fs?.handle === 'string' && st.ledger.fs(req.fs.handle) === undefined;
+						if (st.detached || closing > 0 || epoch !== startedIn || runGone || fsGone) throw deny('capability', 'client.request', { command: req.command });
+					}
 					// DA F8: events for this run that arrive before the answer are buffered, not dropped.
 					if (req.mintedProject) st.pending.set(req.mintedProject, []);
 					let response: DAPMessage;
@@ -697,22 +751,35 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					}
 					let recorded: DAPMessage;
 					try {
-						recorded = record(st, req, response);
+						recorded = record(st, req, response, runGeneration);
 					} catch (err) {
 						endOrphan(req, response);
 						throw err;
 					}
+					// The answer is recorded already: if the realm cannot receive it, what it allocated is taken back and ended, not left held.
 					// N1-a: scrubbed for this realm (over budget: too_large). A backstop hit outside notes and
 					// error text is refused at the choke point, on the same request id (N1-e).
 					let hit: boolean;
+					let encoded: ReturnType<typeof encodeMessageData>;
 					try {
-						({ message: recorded, hit } = scrubResponse(st.scrub, req, recorded));
+						try {
+							({ message: recorded, hit } = scrubResponse(st.scrub, req, recorded));
+						} catch (err) {
+							throw err instanceof CapabilityDeniedError ? err : deny('credential', 'client.request', { command: req.command });
+						}
+						encoded = encodeMessageData(recorded);
+						const size = measure(encoded);
+						if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
 					} catch (err) {
-						throw err instanceof CapabilityDeniedError ? err : deny('credential', 'client.request', { command: req.command });
+						unrecord(st, req, response);
+						endOrphan(req, response);
+						throw err;
 					}
-					const encoded = encodeMessageData(recorded);
-					const size = measure(encoded);
-					if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
+					if (hit) {
+						// The choke point refuses this answer (a credential outside notes): the realm never learns of what it allocated.
+						unrecord(st, req, response);
+						endOrphan(req, response);
+					}
 					const envelope = { ok: true, value: encoded } satisfies IWireEnvelope;
 					verdicts.set(envelope, hit ? 'deny' : 'ok');
 					if (hit) {
@@ -725,7 +792,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					const early = req.mintedProject ? st.pending.get(req.mintedProject) : undefined;
 					if (early) {
 						st.pending.delete(req.mintedProject!);
-						for (const event of early) deliverEvent(st, event);
+						// A refused answer (hit): the realm never learns of this run, so its early events are dropped too.
+						if (hit) eventsDropped += early.length;
+						else for (const event of early) deliverEvent(st, event);
 					}
 					return envelope;
 				} catch (err) {
@@ -752,6 +821,17 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			},
 			(err) => deniedEnvelope(asDenial(err, 'client.request'))
 		);
+
+		const lowerLedger = (run: IRunEntry, types: string[]): void => {
+			const counts = st.ledger.monitors.get(run.handle);
+			if (!counts) return;
+			for (const t of types) {
+				const n = (counts.get(t) ?? 0) - 1;
+				if (n > 0) counts.set(t, n);
+				else counts.delete(t);
+			}
+			if (counts.size === 0) st.ledger.monitors.delete(run.handle);
+		};
 
 		requestOp('client.addMonitor', async (params, run) => {
 			const types = [...new Set(params.types as string[])];
@@ -781,16 +861,31 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		});
 
 		requestOp('client.removeMonitor', async (params, run) => {
-			const types = [...new Set(params.types as string[])];
-			await client().removeMonitor({ token: run!.token }, types);
+			// Only what the realm holds is removed: the SDK lowers counts for any type it is given, so
+			// naming types the ledger never held would otherwise be restored below as new subscriptions.
 			const counts = st.ledger.monitors.get(run!.handle);
-			if (!counts) return;
-			for (const t of types) {
-				const n = (counts.get(t) ?? 0) - 1;
-				if (n > 0) counts.set(t, n);
-				else counts.delete(t);
+			const held = [...new Set(params.types as string[])].filter((t) => counts?.has(t));
+			if (held.length === 0) return;
+			const startedIn = epoch;
+			try {
+				await client().removeMonitor({ token: run!.token }, held);
+			} catch (err) {
+				// The SDK lowers its own counts before it tells the engine, so a failed call leaves them one
+				// lower. Put the reference back (addMonitor raises the count again) so the failure changes
+				// nothing and a retry removes one reference, not two. If that cannot be done either, the SDK's
+				// count stays lowered and the ledger follows it, so the two agree: the reference then counts as removed.
+				// A run that ended during the call (terminate, teardown, logout, detach) is not subscribed again.
+				if (st.detached || epoch !== startedIn || st.ledger.run(run!.handle) !== run) throw err;
+				const restored = await client()
+					.addMonitor({ token: run!.token }, held)
+					.then(
+						() => true,
+						() => false
+					);
+				if (!restored) lowerLedger(run!, held);
+				throw err;
 			}
-			if (counts.size === 0) st.ledger.monitors.delete(run!.handle);
+			lowerLedger(run!, held);
 		});
 
 		requestOp('shell.frameToken.refresh', () => fetchFrame(st.info.appId, st.info.version));

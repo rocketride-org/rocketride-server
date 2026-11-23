@@ -53,6 +53,7 @@ compared with the template), or with ``RR_APP_HOST_SOURCE=edge-header`` from
 ``X-RR-App-Host`` when ``X-RR-Edge-Secret`` matches ``RR_EDGE_SECRET``.
 """
 
+import hashlib
 import hmac
 import html
 import re
@@ -67,6 +68,7 @@ from ai.modules.shell.app_origin import (
     IsolationConfig,
     client_ip,
     current_config,
+    entitlement_ok,
     guest_assets,
     guest_dir,
     is_canonical_app_id,
@@ -125,7 +127,9 @@ _APP_HOST_HEADERS = {
 }
 
 _TOKEN_CACHE = 'private, no-store'
-_PUBLIC_CACHE = 'private, max-age=3600'
+# Revalidated on every use (an ETag keeps it cheap): a withdrawn deployment must stop loading at once,
+# not after an hour in the browser's cache.
+_PUBLIC_CACHE = 'private, no-cache'
 _GUEST_CACHE = 'public, max-age=31536000, immutable'
 
 
@@ -251,7 +255,7 @@ class AppHostMiddleware:
                 peer = (scope.get('client') or ('',))[0] or ''
                 if not public_lookup_ok(parts[1], client_ip(headers, peer, self.config)):
                     return Response('Too many requests', status_code=429, media_type='text/plain')
-                return await self._serve_public(parts[1], int(version.group(1)), rest, label)
+                return await self._serve_public(parts[1], int(version.group(1)), rest, label, headers)
         return _not_found()
 
     def _serve_rr(self, name: str, headers: Headers, query: Optional[dict] = None, label: str = '') -> Response:
@@ -333,23 +337,51 @@ class AppHostMiddleware:
             return _not_found()
         if claims['v'] != version:
             return _not_found()
+        if not await entitlement_ok(claims['u'], claims['o'], claims['a'], version):
+            return _not_found()
         dirs = await token_version_dirs(claims['u'], claims['o'], claims['a'])
         dist_dir = dirs.get(version)
+        # The grant the token was minted with described one deployment: a version that now
+        # resolves to another dist tree (another rail won, or it was replaced) is not that grant.
+        if 'd' in claims and dist_dir != claims['d']:
+            return _not_found()
         network = await network_for(claims['a'], version, dist_dir)
         return await _read_dist(dist_dir, rest, _TOKEN_CACHE, _csp_with(network))
 
-    async def _serve_public(self, app_id: str, version: int, rest: list, label: str) -> Response:
+    async def _serve_public(
+        self, app_id: str, version: int, rest: list, label: str, headers: Optional[Headers] = None
+    ) -> Response:
         """``/_p/<appId>/v<N>/<file>``: a version an anonymous caller may load, on the app's own host."""
         if not is_canonical_app_id(app_id) or not hmac.compare_digest(label_of(app_id), label):
             return _not_found()
-        dirs = await public_version_dirs(app_id)
+        dirs = await public_version_dirs(app_id, version)
         dist_dir = dirs.get(version)
         network = await network_for(app_id, version, dist_dir)
-        return await _read_dist(dist_dir, rest, _PUBLIC_CACHE, _csp_with(network))
+        return await _read_dist(
+            dist_dir,
+            rest,
+            _PUBLIC_CACHE,
+            _csp_with(network),
+            etag=True,
+            if_none_match=(headers or {}).get('if-none-match', ''),
+        )
 
 
-async def _read_dist(dist_dir: Optional[str], rest: list, cache_control: str, csp: str = _CSP) -> Response:
-    """Stream one file of a version's dist tree from the store, or the one 404."""
+async def _read_dist(
+    dist_dir: Optional[str],
+    rest: list,
+    cache_control: str,
+    csp: str = _CSP,
+    *,
+    etag: bool = False,
+    if_none_match: str = '',
+) -> Response:
+    """Stream one file of a version's dist tree from the store, or the one 404.
+
+    ``csp`` carries the served version's network (img-src/connect-src). With ``etag`` the response carries a
+    validator and a matching ``If-None-Match`` answers 304: the caller has already re-resolved the version (so a
+    withdrawn one is the 404 above), only the bytes are saved.
+    """
     if not dist_dir:
         return _not_found()
     from ai.account.store import Store
@@ -365,6 +397,11 @@ async def _read_dist(dist_dir: Optional[str], rest: list, cache_control: str, cs
     media_type = _media_type(rest[-1]) or 'application/octet-stream'
     # ``csp`` carries the served version's network (img-src/connect-src).
     headers = {'Cache-Control': cache_control, 'Content-Security-Policy': csp}
+    if etag:
+        validator = '"' + hashlib.sha256(data).hexdigest()[:32] + '"'
+        headers['ETag'] = validator
+        if validator in [item.strip() for item in if_none_match.split(',')]:
+            return Response(status_code=304, headers=headers)
     if media_type in ('text/html', 'application/xhtml+xml', 'image/svg+xml'):
         # A document from a dist is never framed by anyone: the guest frame
         # (frame.html) is the only framable page on an app host.

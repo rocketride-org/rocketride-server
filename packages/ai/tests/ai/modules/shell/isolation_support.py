@@ -290,6 +290,8 @@ class FakeRegistry:
         self.first_party: set = set()  # (app_id, binding_org_id)
         self.approved: Dict[tuple, list] = {}  # (app_id, version) -> caps
         self.account_info_calls: List[tuple] = []
+        self.app_use_calls: List[tuple] = []
+        self.denied_use: set = set()  # (user id, app id, registry version)
 
     # -- seeding ------------------------------------------------------------
 
@@ -401,6 +403,17 @@ class FakeRegistry:
             reg.account_info_calls.append((user_id, org_id))
             return reg.info_of(user_id, org_id)
 
+        async def authorize_app_use(info, app_id, version=None):
+            user_id = str(getattr(info, 'userId', '') or '')
+            reg.app_use_calls.append((user_id, app_id, version))
+            if (user_id, app_id, version) in reg.denied_use:
+                return False
+            if info is None:
+                return True
+            org = getattr(info, 'organization', None) or {}
+            org_id = org.get('id') if isinstance(org, dict) else getattr(org, 'id', '')
+            return reg.info_of(user_id, org_id) is not None
+
         async def is_first_party(app_id, binding_org_id):
             return (app_id, binding_org_id) in reg.first_party
 
@@ -415,6 +428,7 @@ class FakeRegistry:
             ('deployments_artifact', deployments_artifact),
             ('authenticate', authenticate),
             ('account_info_for', account_info_for),
+            ('authorize_app_use', authorize_app_use),
             ('is_first_party', is_first_party),
             ('approved_capabilities', approved_capabilities),
         ):
