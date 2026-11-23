@@ -151,8 +151,10 @@ outside the node or one that carries anything but a drawing, or a requirement
 line with an index, a URL or a local path. Those rules check what a package
 declares; its code runs inside the runs of everyone it is published to, with
 their keys, so publish a node only to people who trust it. A run that uses a
-published node does not get the server's object store, its signing key or its AWS
-identity, so `tool_filesystem` and fetch URLs do not work in that run.
+published node gets only the process runtime from the server's environment: not its
+object store, signing key, AWS identity, `ROCKETRIDE_*` variables or host API keys,
+so `tool_filesystem` and fetch URLs do not work in that run. Keys the pipeline names
+with `${ROCKETRIDE_*}` still resolve.
 
 A run gets, when it is launched, the version bound to the caller's own rung,
 else a team's, and keeps it until it ends. The catalogue and validation show the
