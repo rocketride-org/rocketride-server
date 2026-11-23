@@ -49,8 +49,9 @@ inherit the engine's full environment, only an allowlist:
   the API-key fallbacks individual node pages document (such as
   `OPENAI_API_KEY`)
 
-`RR_SIGNING_KEY`, `RR_MODEL_SERVER_ADMIN_TOKEN`, `RR_DATACORE_GRANT_KEY`, and
-`ROCKETRIDE_DB_BROKER_TOKEN` are never in a task's environment, even through
+`RR_SIGNING_KEY`, `RR_MODEL_SERVER_ADMIN_TOKEN`, `RR_DATACORE_GRANT_KEY`,
+`RR_DB_BROKER_TOKEN`, and `ROCKETRIDE_DB_BROKER_TOKEN` are never in a task's
+environment, even through
 `RR_SUBPROCESS_ENV`: the engine signs the download URLs a task asks for. A
 configured `RR_SIGNING_KEY` needs at least 32 UTF-8 bytes on the filesystem
 store backend, or task-module startup refuses it; S3 and Azure presign and do
@@ -58,15 +59,18 @@ not use it. Tasks
 run as the engine's OS user, so on a shared or multi-user engine set the key in
 the engine's process environment rather than in the `.env` next to the binary,
 and set `RR_PROC_PRIVATE=1` (Linux only) so tasks cannot read the engine's
-environment from `/proc`.
+environment from `/proc`. A hosted engine (`--saas` or `--hosted`) cannot start
+with a populated install `.env` at all, so there the signing key (and
+`RR_TASK_TOKEN_KEY`) must come from the process environment, for example a
+secret mounted as an environment variable on the pod, not from a file.
 
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.
 
-| Variable            | Effect                                                                                                                                                                                                                                                                                                                                           |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment except `RR_TASK_TOKEN_KEY`, which tasks never get, and the five `ROCKETRIDE_DB_` variables the engine removes (listed above); use a bare `*` only on a single-user install. |
-| `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                                                                                                                                                              |
+| Variable            | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment except the secrets tasks never get (`RR_TASK_TOKEN_KEY`, `RR_SIGNING_KEY`, `RR_MODEL_SERVER_ADMIN_TOKEN`, `RR_DATACORE_GRANT_KEY`, `RR_DB_BROKER_TOKEN` and `ROCKETRIDE_DB_BROKER_TOKEN`) and the five `ROCKETRIDE_DB_` variables the engine removes (listed above); use a bare `*` only on a single-user install. |
+| `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                                                                                                                                                                                                                                                                                                     |
 
 Set these in the engine's own environment. Local OSS engines also support an
 install `.env` file. Hosted engines (`--saas` or `--hosted`) refuse a populated
