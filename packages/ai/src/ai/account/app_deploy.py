@@ -552,28 +552,53 @@ async def _container_holder_now(
 async def _back_out(
     account: Any, org_id: str, conn: Any, app_id: str, audience: Dict[str, str], prior: Optional[Dict[str, Any]]
 ) -> str:
-    """Undo a binding written just now and say how: 'restored', 'removed' or '' (failed).
+    """Undo a binding written just now and say how.
 
-    ``prior`` is the audience's row before the write. When one existed it is
-    put back (its version and snapshot, then its state, so a disabled row
-    stays disabled); otherwise the new row is written 'removed', which holds
-    no name. A failure is logged at warning and returns '', so the caller
-    reports that the binding remains instead of a clean refusal.
+    Returns 'restored' (the prior row is back as it was), 'removed' (a
+    brand-new row written 'removed', which holds no name), 'restored-enabled'
+    (the prior version is back but its disabled state could not be rewritten,
+    so the owner's disabled version is serving) or '' (nothing was undone).
+    ``prior`` is the audience's row before the write: its version and snapshot
+    are put back, then its state, so a disabled row stays disabled. Failures
+    are logged at warning so the caller never reports a clean refusal.
     """
     actor = _actor_of(conn)
-    try:
-        if prior is not None:
-            await account.publish_set(
-                org_id, 'app', app_id, audience, int(prior.get('version') or 0), prior.get('snapshot') or {}, actor
-            )
-            if prior.get('state') != 'enabled':
-                await account.publish_set_state(org_id, 'app', app_id, audience, str(prior.get('state')), actor)
-            return 'restored'
-        await account.publish_set_state(org_id, 'app', app_id, audience, 'removed', actor)
+    if prior is None:
+        try:
+            await account.publish_set_state(org_id, 'app', app_id, audience, 'removed', actor)
+        except Exception as exc:
+            warning(f'[app_deploy] could not back out the binding of {app_id} for {audience}: {exc}')
+            return ''
         return 'removed'
+    try:
+        await account.publish_set(
+            org_id, 'app', app_id, audience, int(prior.get('version') or 0), prior.get('snapshot') or {}, actor
+        )
     except Exception as exc:
-        warning(f'[app_deploy] could not back out the binding of {app_id} for {audience}: {exc}')
+        warning(f'[app_deploy] could not restore the prior binding of {app_id} for {audience}: {exc}')
         return ''
+    if prior.get('state') != 'enabled':
+        try:
+            await account.publish_set_state(org_id, 'app', app_id, audience, str(prior.get('state')), actor)
+        except Exception as exc:
+            warning(
+                f'[app_deploy] restored the prior version of {app_id} for {audience} but could not '
+                f'rewrite its {prior.get("state")!r} state: {exc}'
+            )
+            return 'restored-enabled'
+    return 'restored'
+
+
+def _back_out_note(app_id: str, undone: str, prior: Optional[Dict[str, Any]]) -> str:
+    """What the response adds about a back-out, beyond why it happened."""
+    if undone == 'restored-enabled':
+        return (
+            f'The previous binding v{(prior or {}).get("version")} of this audience was restored but is now '
+            f'enabled: disable it (rrext_deploy_app disable) if it should stay off.'
+        )
+    if undone == 'restored':
+        return 'The previous binding of this audience was restored.'
+    return ''
 
 
 def _same_audience(row: Dict[str, Any], audience: Dict[str, str]) -> bool:
@@ -1239,6 +1264,14 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                     # claim: re-check it, and put the prior row back on a back-out.
                     prior = next((r for r in mine if _same_audience(r, audience)), None)
                     needs_recheck = prior is None or bool(serving_block_of(prior, account.review_ladder))
+                    if not needs_recheck:
+                        # A serving row holds only the name it served under: a
+                        # version that changes the container name is a new claim.
+                        served = await account.deployments_artifact(
+                            str(prior.get('orgId') or home), app_id, int(prior.get('version') or 0)
+                        )
+                        served_name = str(served.get('moduleId') or '') if isinstance(served, dict) else ''
+                        needs_recheck = (served_name or module_id_of(app_id)) != module_id
                 except Exception as exc:
                     debug(f'[app_deploy] container-name check failed: {exc}')
                     return conn.build_error(request, 'could not check the app id against existing apps; try again')
@@ -1266,23 +1299,20 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                             'could not check the app id against existing apps, and the new binding could '
                             'not be removed: it is still live; remove it',
                         )
+                    note = _back_out_note(app_id, undone, prior)
                     return conn.build_error(
                         request,
                         'could not check the app id against existing apps; '
-                        + (
-                            'the previous binding of this audience was restored; try again'
-                            if undone == 'restored'
-                            else 'the new binding was removed and needs publishing again'
-                        ),
+                        + (note + ' Try again.' if note else 'the new binding was removed and needs publishing again'),
                     )
                 if holder:
                     undone = await _back_out(account, home, conn, app_id, audience, prior)
                     if not undone:
                         return conn.build_error(request, _back_out_failed_error(app_id, module_id, holder))
-                    message = _holder_error(app_id, module_id, holder)
-                    if undone == 'restored':
-                        message += ' The previous binding of this audience was restored.'
-                    return conn.build_error(request, message)
+                    note = _back_out_note(app_id, undone, prior)
+                    return conn.build_error(
+                        request, _holder_error(app_id, module_id, holder) + (' ' + note if note else '')
+                    )
 
         # Refresh the acting user's manifest (data + signal); other audience
         # members pick the row up on their next account rebuild/login.
