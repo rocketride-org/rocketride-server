@@ -35,12 +35,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# The end of an engine error's text: " at (<source file>:<line>)" (engLib store/python/bindings.cpp).
+# What the engine appends to an error's text: " at (<source file>:<line>)" (engLib store/python/bindings.cpp).
 # The file is a full path for Python code, which on Windows can hold "(x86)"; a bare file name for
-# the engine's own C++; or "<Unknown>" with line -1 when there was no traceback. An error whose
-# message quotes another engine error ends in one location per level. Only a file name (an
-# extension, or <...>) counts, so ordinary text such as "retry at (10:30)" stays.
-_ENGINE_LOCATION = re.compile(r'(?: at \((?:<[^<>()]*>|(?:[^()]|\([^()]*\))*\.\w+):-?\d+\))+$')
+# the engine's own C++; or "<Unknown>" with line -1 when there was no traceback. Only a file name
+# (an extension, or <...>) counts, so ordinary text such as "retry at (10:30)" stays.
+_ENGINE_LOCATION = re.compile(r' at \((?:<[^<>()]*>|(?:[^()]|\([^()]*\))*\.\w+):-?\d+\)')
 
 
 def safe_str(value: Any) -> str:
@@ -80,7 +79,13 @@ def error_text(error: BaseException | str, with_type: bool = False) -> str:
         with_type: Open with the exception's type name, ``<Type>: <text>``. An engine error
             already opens with its code, so it gets no second label.
     """
-    text = _ENGINE_LOCATION.sub('', safe_str(error)).rstrip()
+    text = safe_str(error).rstrip()
+    # An error whose message quotes another engine error ends in one location per level. Taken off
+    # from the end, one at a time, so the work stays linear in the text however it was made.
+    end = len(text)
+    while (start := text.rfind(' at (', 0, end)) >= 0 and _ENGINE_LOCATION.fullmatch(text, start, end):
+        end = start
+    text = text[:end].rstrip()
     if with_type and not getattr(error, '__formatted', False):
         return f'{type(error).__name__}: {text}'
     return text
