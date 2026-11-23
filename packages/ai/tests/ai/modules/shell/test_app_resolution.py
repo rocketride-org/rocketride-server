@@ -221,3 +221,30 @@ def test_oss_unversioned_route_still_serves_bundles(monkeypatch, tmp_path):
     assert client.get('/apps/app/remoteEntry.js').status_code == 200
     assert client.get('/apps/app/static/js/x.js').status_code == 200
     assert client.get('/apps/app/icon.svg').status_code == 200
+
+
+def test_saas_unversioned_route_serves_readme_assets(monkeypatch, tmp_path):
+    """README images the build copies to ``<id>/assets/`` stay servable on SaaS.
+
+    The build copies that folder flat, so exactly one level deep, and only
+    image suffixes are served; scripts there and bundle trees stay refused.
+    """
+    _seed_unversioned_tree(tmp_path)
+    assets = tmp_path / 'app' / 'assets'
+    assets.mkdir()
+    (assets / 'shot.png').write_bytes(b'png')
+    (assets / 'demo.gif').write_bytes(b'gif')
+    (assets / 'x.js').write_text('script', encoding='utf-8')
+    client = _client(monkeypatch, tmp_path, [HOME])
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+
+    async def allow(token: str, app_id: str) -> bool:
+        """Catalog visibility only, as the real check."""
+        return True
+
+    monkeypatch.setattr(shell_mod, '_authorize_app', allow)
+
+    assert client.get('/apps/app/assets/shot.png').status_code == 200
+    assert client.get('/apps/app/assets/demo.gif').status_code == 200
+    assert client.get('/apps/app/assets/x.js').status_code == 404
+    assert client.get('/apps/app/static/js/x.js').status_code == 404
