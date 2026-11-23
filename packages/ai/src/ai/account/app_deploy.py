@@ -472,9 +472,11 @@ async def _container_claims(
 # One lock per container name: the claim check and the binding write must be
 # one step, or two first publishes for different apps both pass the check
 # before either row lands. Process-local: it serializes publishes within one
-# engine process only; a deployment running several engines against one
-# registry needs a backend-level uniqueness constraint on the name. Weak so
-# idle names do not accumulate.
+# engine process only. Across engines on one registry the same step is
+# closed by re-checking the claim AFTER the first write and backing the
+# binding out on a new rival (see the publish handler); that relies on the
+# backend contract on Account.publish_set/publish_list (read-your-writes).
+# Weak so idle names do not accumulate.
 _container_locks: 'weakref.WeakValueDictionary[str, asyncio.Lock]' = weakref.WeakValueDictionary()
 
 
@@ -517,6 +519,42 @@ def _container_holder(
         if own_first is None or theirs is None or theirs <= own_first:
             return other
     return None
+
+
+def _holder_error(app_id: str, module_id: str, holder: str) -> str:
+    """The refusal naming the app that keeps ``module_id`` over ``app_id``."""
+    return (
+        f'{app_id} loads under the container name {module_id!r}, which {holder!r} already '
+        'holds (its app id derives that name, or it was published first). '
+        'Deploy it under a different app id.'
+    )
+
+
+async def _container_holder_now(
+    account: Any, org_id: str, conn: Any, app_id: str, module_id: str, audience: Dict[str, str]
+) -> Optional[str]:
+    """The app that keeps ``module_id`` over ``app_id``, judged from the registry as it is now.
+
+    The same rule as the pre-write check, run after the binding exists, so the
+    app is dated from its own freshly written row. A rival that outranks it,
+    seen only now, is named; one it outranks cannot make resolve withhold it.
+    """
+    claims = await _container_claims(account, org_id, conn, app_id, module_id)
+    own_rows = [
+        r
+        for r in await account.publish_of_app(org_id, 'app', app_id)
+        if _scope_sees(audience, r) and _caller_sees(conn, r)
+    ]
+    own_first = _first_bound_at(own_rows) if claims else None
+    return _container_holder(app_id, module_id, own_first, claims)
+
+
+async def _back_out(account: Any, org_id: str, conn: Any, app_id: str, audience: Dict[str, str]) -> None:
+    """Undo a first binding written just now: a 'removed' row holds no name."""
+    try:
+        await account.publish_set_state(org_id, 'app', app_id, audience, 'removed', _actor_of(conn))
+    except Exception as exc:
+        debug(f'[app_deploy] could not back out the binding of {app_id}: {exc}')
 
 
 async def assert_pipe_id_outside_app_namespace(conn: Any, account: Any, org_id: str, project_id: str) -> None:
@@ -1157,26 +1195,36 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                     claims = await _container_claims(account, home, conn, app_id, module_id)
                     # Only the publisher's own rows every viewer of the proposed
                     # binding sees, and that the caller can see, date it.
-                    own_rows = [
-                        r
-                        for r in await account.publish_of_app(home, 'app', app_id)
-                        if _scope_sees(audience, r) and _caller_sees(conn, r)
-                    ]
+                    mine = await account.publish_of_app(home, 'app', app_id)
+                    own_rows = [r for r in mine if _scope_sees(audience, r) and _caller_sees(conn, r)]
                     own_first = _first_bound_at(own_rows) if claims else None
+                    # Only a FIRST binding (no serving row of the app yet) can newly
+                    # claim the name; a repoint of a held one cannot race for it.
+                    first_binding = not any(not serving_block_of(r, account.review_ladder) for r in mine)
                 except Exception as exc:
                     debug(f'[app_deploy] container-name check failed: {exc}')
                     return conn.build_error(request, 'could not check the app id against existing apps; try again')
                 holder = _container_holder(app_id, module_id, own_first, claims)
                 if holder:
-                    return conn.build_error(
-                        request,
-                        f'{app_id} loads under the container name {module_id!r}, which {holder!r} already '
-                        'holds (its app id derives that name, or it was published first). '
-                        'Deploy it under a different app id.',
-                    )
+                    return conn.build_error(request, _holder_error(app_id, module_id, holder))
             row = await account.publish_set(
                 home, 'app', app_id, audience, version, manifest_snapshot(entry, artifact), _actor_of(conn)
             )
+            if developer and first_binding:
+                # The lock is process-local, so a publish on ANOTHER engine can have
+                # landed between the check above and this write. Re-read the claims
+                # (the backend reads its own writes, so whichever racer looks last
+                # sees both rows) and back this binding out when resolve would not
+                # hand it the name. Fails closed: if both back out, a retry settles it.
+                try:
+                    holder = await _container_holder_now(account, home, conn, app_id, module_id, audience)
+                except Exception as exc:
+                    debug(f'[app_deploy] container-name re-check failed: {exc}')
+                    await _back_out(account, home, conn, app_id, audience)
+                    return conn.build_error(request, 'could not check the app id against existing apps; try again')
+                if holder:
+                    await _back_out(account, home, conn, app_id, audience)
+                    return conn.build_error(request, _holder_error(app_id, module_id, holder))
 
         # Refresh the acting user's manifest (data + signal); other audience
         # members pick the row up on their next account rebuild/login.
