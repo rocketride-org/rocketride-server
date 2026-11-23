@@ -352,6 +352,13 @@ async def write_pipe_content(
     failure every path written so far is deleted, best effort, and the
     error is raised for the door to flip the version 'failed'.
 
+    What is stored is what the block declares. The files it names (``icon``,
+    ``readme``) always; every other entry only beside a declared ``readme``,
+    whose references they are (the packers pack nothing else). Without a
+    ``readme`` the zip's other entries are nobody's declaration and are not
+    stored: the serving dir is public for a published version, and a pipe
+    deployed without a block gets one that declares no file.
+
     Args:
         org_id: The publisher org.
         user_id: The deploying user (the store's client id).
@@ -371,19 +378,26 @@ async def write_pipe_content(
     from ai.account.store import Store
 
     # Step 1: every declared file is in the zip
+    declared = declared_files(block)
     present = set(bundle.entries) if bundle else set()
-    for key, path in declared_files(block).items():
+    for key, path in declared.items():
         if path not in present:
             raise ValueError(f'the store block names {key} "{path}" but the bundle has no such file')
-    if bundle is None or not bundle.entries:
+    if bundle is None:
         return []
 
-    # Step 2: the writes, recorded before each so a partial write is still rolled back
+    # Step 2: the entries the block accounts for (see the docstring)
+    named = set(declared.values())
+    names = bundle.entries if declared.get('readme') else [name for name in bundle.entries if name in named]
+    if not names:
+        return []
+
+    # Step 3: the writes, recorded before each so a partial write is still rolled back
     home = store_home_of(org_id, entry)
     fs = Store.file_store(RequestContext.internal('pipe-deploy'), client_id=user_id)
     written: List[str] = []
     try:
-        for name in bundle.entries:
+        for name in names:
             path = f'{home}/{name}'
             written.append(path)
             await fs.write(path, bundle.archive.read(name))

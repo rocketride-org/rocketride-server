@@ -107,7 +107,8 @@ future). Learn it once:
   pipe's root). `icon` and `readme` are paths relative to the pipe file, and
   the pack carries them with every file the README references, laid out as
   they sit beside the pipe; two pipes in one folder are two pipes and may
-  share files. Every deployed pipeline carries the block: `rocketride pipe
+  share files. Every pipeline carries the block when it is deployed (a version
+  stored by an earlier release can lack it): `rocketride pipe
   new` writes it, and a pipe deployed without one (`rocketride deploy add
   <pipe>`, the DEPLOY card, a pipeline dict sent to `deploy.add`) gets the
   default block. `icon` is optional: a pipeline without one leaves it

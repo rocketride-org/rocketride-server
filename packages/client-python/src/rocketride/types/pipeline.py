@@ -120,9 +120,10 @@ class PipeStoreBilling(TypedDict):
 
 class PipeStoreBlock(TypedDict, total=False):
     """
-    The ``store`` block of a ``.pipe``: the pipeline's store listing. Every
-    deployed pipeline carries one: the packer and the deploy door add the
-    default block to a pipe that has none. Mirrors an app's ``appManifest``
+    The ``store`` block of a ``.pipe``: the pipeline's store listing. A
+    pipeline carries one when it is deployed: the packer and the deploy door
+    add the default block to a pipe that has none (a version stored by an
+    earlier release can lack it). Mirrors an app's ``appManifest``
     listing fields; ``project_id``, ``name``, ``description`` and ``source``
     stay at the pipe's root and are never duplicated here. The engine never
     sees the block.

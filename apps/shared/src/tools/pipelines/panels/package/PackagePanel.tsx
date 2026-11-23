@@ -817,8 +817,10 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 	// Cancel threw away.
 	const [files, setFiles] = useState<PendingFiles>(() => new Map());
 	const [pendingFiles, setPendingFiles] = useState(0);
-	// Bumped by Cancel: the panes that keep local state remount on it.
+	// Bumped by Cancel: the panes that keep local state remount on it. The
+	// ref is the same number, readable at once by work Cancel must outrun.
 	const [epoch, setEpoch] = useState(0);
+	const generation = useRef(0);
 	// 'saving' = the files are being written; 'applied' = the document was
 	// handed the draft and the host's save runs once it holds it.
 	const [phase, setPhase] = useState<'idle' | 'saving' | 'applied'>('idle');
@@ -838,11 +840,19 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 	const latest = useRef({ project, pending, files, section, onSave });
 	latest.current = { project, pending, files, section, onSave };
 
-	/** The draft's intake: a pane hands the whole document with its change; the keys that differ from the document are kept. */
-	const draftChanged = useCallback((next: IPackageProject): void => {
-		setSaveError('');
-		setPatch(patchOf(latest.current.project, next));
-	}, []);
+	// The draft's intake: a pane hands the whole document with its change; the
+	// keys that differ from the document are kept. Each generation of panes
+	// gets its own intake, and one that Cancel ended takes nothing: an icon
+	// drop still reading its file when Cancel ran would otherwise declare the
+	// icon path into the new draft, with the document it was drawn from.
+	const draftChanged = useMemo(() => {
+		const own = epoch;
+		return (next: IPackageProject): void => {
+			if (generation.current !== own) return;
+			setSaveError('');
+			setPatch(patchOf(latest.current.project, next));
+		};
+	}, [epoch]);
 
 	// The Assets pane's host: its writes are held in `files` until Save. A
 	// write into a map Cancel replaced changes nothing the page counts.
@@ -863,17 +873,19 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 
 	/** Cancel: the draft is dropped; the panes show the document and the files as they are. */
 	const cancel = useCallback((): void => {
+		generation.current += 1;
 		setFiles(new Map());
 		setPendingFiles(0);
 		setPatch({});
 		setSaveError('');
-		setEpoch((n) => n + 1);
+		setEpoch(generation.current);
 	}, []);
 
 	/**
 	 * Save: the pending files reach the host, then the document takes the
-	 * draft. The host's own save runs from the effect below, once the
-	 * document it would save holds the draft.
+	 * draft, then the host's own save runs: at once when only files were
+	 * pending, else from the effect below, once the document it would save
+	 * holds the draft.
 	 */
 	const save = useCallback(async (): Promise<void> => {
 		if (!onContentChanged) return;
@@ -882,29 +894,39 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 		try {
 			// Step 1: the README's last keystrokes are still in the pane's debounce; let them reach the draft
 			if (latest.current.section === 'assets') await new Promise((resolve) => setTimeout(resolve, README_WRITE_DEBOUNCE_MS + 50));
-			// Step 2: the files, each leaving the draft as it lands, so a retry writes only what is left
+			// Step 2: the files, each leaving the draft as it lands, so a retry
+			// writes only what is left. An entry rewritten while its write was in
+			// flight stays: the host holds the older content, and it is still pending.
 			const held = latest.current.files;
 			for (const [relPath, data] of assetsHost ? [...held] : []) {
 				await assetsHost?.writeFile(relPath, data);
-				held.delete(relPath);
+				if (held.get(relPath) === data) held.delete(relPath);
 				setPendingFiles(held.size);
 			}
-			// Step 3: the document. A pipeline without a store block gets one here;
-			// the block being added names a README only when that file exists.
+			// Step 3: a pipeline without a store block gets one at Save; whether the
+			// block being added may name its README is asked of the files first.
+			let readmePresent = false;
+			if (!latest.current.project.store) {
+				const readme = ((latest.current.pending.store as PipeStoreBlock | undefined) ?? defaultStoreBlock()).readme;
+				readmePresent = readme && assetsHost ? await assetsHost.readFile(readme).then((text) => text !== null, () => true) : false;
+			}
+			// Step 4: the write, onto the document as the host holds it NOW. Nothing
+			// below awaits, so an edit made elsewhere during the waits above (a
+			// component added on the canvas) is in the document this patch lands on.
 			const document = latest.current.project;
 			let next = prunePatch(document, latest.current.pending);
 			if (!document.store) {
 				const block: PipeStoreBlock = { ...((next.store as PipeStoreBlock | undefined) ?? defaultStoreBlock()) };
-				const readme = block.readme;
-				const present = readme && assetsHost ? await assetsHost.readFile(readme).then((text) => text !== null, () => true) : false;
-				if (!present) delete block.readme;
+				if (!readmePresent) delete block.readme;
 				next = { ...next, store: block };
-				setPatch(next);
 			}
 			if (isEmptyPatch(next)) {
+				// Only files were pending: the document is unchanged, and the host's save still runs
 				setPhase('idle');
+				latest.current.onSave?.();
 				return;
 			}
+			setPatch(next);
 			onContentChanged({ ...applyPatch(document, next), docRevision: (document.docRevision ?? 0) + 1 });
 			setPhase('applied');
 		} catch (err) {

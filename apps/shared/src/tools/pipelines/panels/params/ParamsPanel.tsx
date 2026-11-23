@@ -57,16 +57,19 @@ import { buildCallExamples, CALL_EXAMPLE_TABS, exampleValue, type CallExampleTab
 
 const styles = {
 	// The pane: the map editor scrolls, the call examples stay at the bottom.
+	// In a window too short for both, the editor keeps a usable height and
+	// the pane itself scrolls, so the table and Add parameter stay reachable.
 	page: {
 		display: 'flex',
 		flexDirection: 'column',
 		flex: 1,
 		minHeight: 0,
+		overflowY: 'auto',
 	} as CSSProperties,
 
 	editor: {
-		flex: 1,
-		minHeight: 0,
+		flex: '1 1 auto',
+		minHeight: 160,
 		overflowY: 'auto',
 		paddingBottom: 12,
 	} as CSSProperties,

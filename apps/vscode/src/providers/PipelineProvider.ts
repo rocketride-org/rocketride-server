@@ -133,6 +133,12 @@ interface EditorState {
 	 * content change waits on this before it saves.
 	 */
 	pendingEdits: Promise<void>;
+	/**
+	 * The realm's last content edit did not reach the document (VS Code
+	 * refused it). The save the realm sent behind that edit is skipped: it
+	 * would write the document from before the change as if it were saved.
+	 */
+	editFailed: boolean;
 }
 
 // =============================================================================
@@ -401,10 +407,22 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				// one waits for it (host.pipeline.save reads pendingEdits)
 				const edit = editorState.pendingEdits.then(() => this.applyDocumentEdit(document, content));
 				editorState.pendingEdits = edit.then(
-					() => undefined,
-					() => undefined
+					(result) => {
+						editorState.editFailed = result.changed && !result.applied;
+					},
+					() => {
+						editorState.editFailed = true;
+					}
 				);
-				const { applied } = await edit;
+				const { changed, applied } = await edit;
+				// An edit VS Code refused leaves the realm ahead of the document.
+				// The realm is shown the document as it is, and the author is told:
+				// the change is not in the file and the save behind it will not run.
+				if (changed && !applied) {
+					this.sendCanvasUpdate(document);
+					void vscode.window.showErrorMessage(`RocketRide could not apply your change to ${vscode.workspace.asRelativePath(document.uri)}, so it was not saved. The editor shows the file as it is; make the change again.`);
+					return;
+				}
 				// Auto-backup untitled pipelines so in-progress work survives a
 				// VS Code restart (hot exit does not preserve custom-editor
 				// untitled documents). Cleared when the editor closes.
@@ -445,9 +463,15 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				// files, the native OS Save dialog for untitled ones. Reveal
 				// first so the revert-and-close inside the untitled branch
 				// targets this editor. A content change the realm sent just
-				// before the save (the PACKAGE page's Save) lands first.
+				// before the save (the PACKAGE page's Save) lands first; when
+				// that change did not reach the document, this save is the one
+				// that belonged to it and does not run (the failure was reported
+				// where it happened, and the realm shows the document again).
 				const editorState = stateFor(p.doc);
 				await editorState.pendingEdits;
+				const editFailed = editorState.editFailed;
+				editorState.editFailed = false;
+				if (editFailed) return;
 				editorState.webviewPanel.reveal(undefined, false);
 				await savePipelineDocument(editorState.document);
 			},
@@ -857,6 +881,7 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 			isReady: true,
 			cachedStatuses: {},
 			pendingEdits: Promise.resolve(),
+			editFailed: false,
 		};
 
 		this.editorStates.set(webviewPanel, editorState);

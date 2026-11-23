@@ -128,7 +128,7 @@ listing fields and carries exactly these keys (an unknown key is an error naming
 The default block names no icon, and the scaffold writes no icon file. Declare `icon` only
 when the file is beside the pipe: a declared icon must be in the pack.
 
-**Every deployed pipeline carries the block.** A pipe without one still validates and runs.
+**Every pipeline carries the block when it is deployed.** A version stored by an earlier release can lack it. A pipe without one still validates and runs.
 When it is deployed, the packer (`rocketride deploy add`, `addPipe` / `add_pipe`, the DEPLOY
 card) adds the default block, keeping `readme` only when `README.md` sits beside the pipe;
 the file on disk is not rewritten. A pipeline dict sent to `deploy.add` without a block gets

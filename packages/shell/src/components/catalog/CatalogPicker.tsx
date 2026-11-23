@@ -123,7 +123,7 @@ type CatalogEntryState = 'desktop' | 'adding' | 'available';
 
 /** An entry's README as the detail shows it. */
 type ReadmeState =
-	/** The fetch has not answered yet: the detail shows nothing for it. */
+	/** The fetch has not answered yet: the detail says the README is loading. */
 	| { kind: 'loading' }
 	/** The entry names no README, or its fetch found none. */
 	| { kind: 'none' }
@@ -349,6 +349,13 @@ const S = {
 		marginTop: 14,
 	} as CSSProperties,
 
+	/** The line shown while the README request is out. */
+	detailLoading: {
+		marginTop: 14,
+		fontSize: 13,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
 	/** The add failure in the detail footer — takes the room left of the action. */
 	detailError: {
 		flex: 1,
@@ -549,6 +556,13 @@ const CatalogDetail: React.FC<CatalogDetailProps> = ({ app, state, error, onOpen
 				<Section label="Details">
 					<LabelValue label="Publisher">{app.publisher}</LabelValue>
 				</Section>
+			)}
+
+			{/* The README request is out: say so, apart from the ready and the absent states. */}
+			{readme.kind === 'loading' && (
+				<div role="status" style={S.detailLoading}>
+					Loading the README…
+				</div>
 			)}
 
 			{/* The README stands on its own: shown whenever the entry has one. */}
