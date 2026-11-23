@@ -87,3 +87,9 @@ def test_utc_day_reads_naive_server_time_as_utc_and_keeps_an_unreadable_value():
     assert utc_day('2027-02-04T01:00:00+05:30') == '2027-02-03'
     assert utc_day('2027-02-03T10:00:00Z') == '2027-02-03'
     assert utc_day('not a date') == 'not a date'
+
+
+def test_the_login_line_says_nothing_for_an_expiry_that_is_not_a_timestamp():
+    # The key is already minted when this runs, so an odd value must not fail the login.
+    assert minted_key_expiry_note({'key': 'rr_x', 'expiresAt': 1767225600}) == ''
+    assert minted_key_expiry_note({'key': 'rr_x', 'expiresAt': {'at': 'x'}}) == ''

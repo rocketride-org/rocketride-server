@@ -473,11 +473,13 @@ def minted_key_expiry_note(minted: dict) -> str:
 
     Returns:
         A sentence to append to the "minted API key" line, or '' when the
-        server did not report an expiry.
+        server did not report an expiry (or reported one that is not a
+        timestamp: the key is already minted, so the login must not fail here).
     """
-    if 'expiresAt' not in minted:
+    expires_at = minted.get('expiresAt', '')
+    if expires_at is not None and (not isinstance(expires_at, str) or not expires_at):
         return ''
-    return describe_login_key_expiry(minted['expiresAt'])
+    return describe_login_key_expiry(expires_at)
 
 
 async def _sign_in_saas(uri: str, out: Output) -> str:
