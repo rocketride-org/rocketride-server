@@ -397,13 +397,14 @@ async def _read_dist(
     media_type = _media_type(rest[-1]) or 'application/octet-stream'
     # ``csp`` carries the served version's network (img-src/connect-src).
     headers = {'Cache-Control': cache_control, 'Content-Security-Policy': csp}
+    # Before the validator: a 304 replaces a cache's stored headers, so it carries the 200's policy.
+    if media_type in ('text/html', 'application/xhtml+xml', 'image/svg+xml'):
+        # A document from a dist is never framed by anyone: the guest frame
+        # (frame.html) is the only framable page on an app host.
+        headers['Content-Security-Policy'] = f"{csp}; frame-ancestors 'none'"
     if etag:
         validator = '"' + hashlib.sha256(data).hexdigest()[:32] + '"'
         headers['ETag'] = validator
         if validator in [item.strip() for item in if_none_match.split(',')]:
             return Response(status_code=304, headers=headers)
-    if media_type in ('text/html', 'application/xhtml+xml', 'image/svg+xml'):
-        # A document from a dist is never framed by anyone: the guest frame
-        # (frame.html) is the only framable page on an app host.
-        headers['Content-Security-Policy'] = f"{csp}; frame-ancestors 'none'"
     return Response(data, media_type=media_type, headers=headers)

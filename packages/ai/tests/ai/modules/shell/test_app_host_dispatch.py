@@ -429,6 +429,12 @@ def test_html_from_a_dist_cannot_be_framed(served_app):
         assert resp.status_code == 200
         assert csp_directives(resp.headers['content-security-policy'])['frame-ancestors'] == ["'none'"]
     assert 'frame-ancestors' not in csp_directives(served_app.get_bundle().headers['content-security-policy'])
+    # A 304 replaces a cache's stored headers, so it carries the same policy as the 200 it validates.
+    public = served_app.get('/_p/acme.thirdparty/v1/index.html')
+    again = served_app.get('/_p/acme.thirdparty/v1/index.html', headers={'if-none-match': public.headers['etag']})
+    assert again.status_code == 304
+    assert again.headers['content-security-policy'] == public.headers['content-security-policy']
+    assert csp_directives(again.headers['content-security-policy'])['frame-ancestors'] == ["'none'"]
 
 
 # ---------------------------------------------------------------------------
