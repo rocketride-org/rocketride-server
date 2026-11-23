@@ -295,12 +295,16 @@ written as one text when the limit is crossed, and each later chunk as its own
 text. Invalid UTF-8, including a body that ends inside a character, fails the
 request.
 
-A text request therefore does its work while its `close` is in flight. A
-`cancel` reaches the request until that close returns, and the close then fails
-with `TASK_CANCELLED`. A request cancelled before its close takes no more data
-(a later `write` fails with `TASK_CANCELLED`) and the text still held for it is
-never run. A cancel does not undo work already dispatched: the text a body over
-8 MiB sent on when it crossed the limit has reached the pipeline.
+A text request therefore does its work while its `close` is in flight, and a
+`cancel` reaches the request until that close returns. Cancellation is
+cooperative: a cancel that arrives while the pipeline is still working on the
+text stops it at the next node, and the close fails with `TASK_CANCELLED`;
+once the pipeline has taken the whole text, a cancel no longer changes how the
+close answers, and it returns its result as usual. A request cancelled before
+its close takes no more data (a later `write` fails with `TASK_CANCELLED`) and
+the text still held for it is never run. A cancel does not undo work already
+dispatched: the text a body over 8 MiB sent on when it crossed the limit has
+reached the pipeline.
 
 ### When nothing reads the chosen lane
 
@@ -321,11 +325,11 @@ Read the warnings from `get_task_status(token)['warnings']`, or subscribe to
 
 The fallback in the table covers one direction only. `application/json` into a
 pipeline that reads `text` and neither `json` nor raw is delivered on `text`.
-`text/plain` into a pipeline whose first component reads `json` still reaches
-nobody: a plain text body is never parsed into the `json` lane. There is no
-single header that is correct for every pipeline, which is why the endpoint
-panel offers one example per lane and preselects the one the running pipeline
-reads.
+`text/plain` is never parsed into the `json` lane: with no `text` reader it
+falls through to raw, so it reaches a component only if one reads `tags`, and
+a pipeline that reads `json` alone receives nothing. There is no single header
+that is correct for every pipeline, which is why the endpoint panel offers one
+example per lane and preselects the one the running pipeline reads.
 
 ## Keepalive & timeouts
 

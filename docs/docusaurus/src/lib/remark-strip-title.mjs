@@ -82,11 +82,17 @@ function isSilent(node) {
 }
 
 /**
- * True for an MDX expression that renders nothing: empty, or block comments only, as in `{/* note *\/}`.
+ * True for an MDX expression that renders nothing: empty, or comments only, as in `{/* note *\/}`.
  * Any other expression can render elements (`{<p>Intro</p>}`), so it counts as content before the heading.
+ *
+ * A block comment's body is matched as "anything that is not its terminator", so one comment can
+ * never stretch over content to the end of a later comment: `/* a *\/ <p>x</p> /* b *\/` is content.
+ * A line comment runs to the end of its line.
  */
 function isCommentOnlyExpression(node) {
-	return /^\s*(?:\/\*[\s\S]*?\*\/\s*)*$/.test(node.value ?? '');
+	const blockComment = /\/\*(?:[^*]|\*(?!\/))*\*\//.source;
+	const lineComment = /\/\/[^\r\n]*/.source;
+	return new RegExp(`^\\s*(?:(?:${blockComment}|${lineComment})\\s*)*$`).test(node.value ?? '');
 }
 
 /** True when nothing but silent nodes come before the heading, at every level of the wrappers that hold it. */

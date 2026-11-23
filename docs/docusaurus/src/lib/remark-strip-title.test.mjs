@@ -114,6 +114,22 @@ describe('remarkStripTitle', () => {
 		assert.deepEqual(out, [expr, h(2, 'Troubleshooting'), p('x')]);
 	});
 
+	it('counts an expression as content when it renders something between two comments', () => {
+		// One comment must not be read as running on to the end of the next one
+		for (const value of ['/* one */ <p>Introduction</p> /* two */', '/* a * b */ x /* c */', '/* open', '// note\n<p>x</p>']) {
+			const expr = { type: 'mdxFlowExpression', value };
+			const out = run([expr, h(1, 'Troubleshooting'), p('x')], { frontMatter: { title: 'Guide' } });
+			assert.deepEqual(out, [expr, h(2, 'Troubleshooting'), p('x')], value);
+		}
+	});
+
+	it('skips empty expressions and comments that hold stars and slashes', () => {
+		for (const value of ['', '  ', '/**/', '/* a * b / c ** */', '/* one */\n/* two */', '// note', '// a <p>x</p>\n/* b */']) {
+			const expr = { type: 'mdxFlowExpression', value };
+			assert.deepEqual(run([expr, h(1, 'Title'), p('Body')], { frontMatter: { title: 'T' } }), [expr, p('Body')], value);
+		}
+	});
+
 	it('does not need a value string to leave a page alone', () => {
 		const tree = [h(1, 'Title')];
 		const before = clone(tree);
