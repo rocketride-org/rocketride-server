@@ -11,6 +11,7 @@ an OSS server uses; only the connection is a stand-in (the same shape as
 test_app_deploy's _FakeConn).
 """
 
+import asyncio
 import contextlib
 import io
 import json
@@ -174,6 +175,20 @@ async def test_a_package_is_added_as_a_private_node_version_with_its_bytes_store
             lambda: _package(files={'echo.svg': None, 'C:evil.svg': '<svg/>'}, services={'icon': 'C:evil.svg'}),
             'path with',
         ),
+        (lambda: _package(module='acme__Echo'), 'in lowercase'),
+        (lambda: _package(files={'acme__echo/./services.json': '{"node": "cpp"}'}), r'empty, "\." or "\.\." segment'),
+        (lambda: _package(files={'acme__echo//IGlobal.py': ''}), r'empty, "\." or "\.\." segment'),
+        (lambda: _package(files={'ECHO.SVG': '<svg/>'}), 'two entries with the same path'),
+        (
+            lambda: _package(files={'echo.svg': '<svg><rect style="position:fixed;inset:0;z-index:9"/></svg>'}),
+            'sets style',
+        ),
+        (lambda: _package(files={'echo.svg': '<svg><rect class="fixed inset-0"/></svg>'}), 'sets class'),
+        (lambda: _package(files={'echo.svg': '<svg><rect fill="URL(https://evil.example/x)"/></svg>'}), 'sets fill'),
+        (
+            lambda: _package(files={'echo.svg': '<svg><rect style="fill:u\\72l(https://evil.example/x)"/></svg>'}),
+            'sets style',
+        ),
     ],
     ids=[
         'cpp',
@@ -206,6 +221,14 @@ async def test_a_package_is_added_as_a_private_node_version_with_its_bytes_store
         'services-not-json',
         'marker-not-object',
         'windows-drive-entry',
+        'uppercase-module',
+        'dot-segment',
+        'empty-segment',
+        'same-path-other-case',
+        'icon-fixed-style',
+        'icon-class',
+        'icon-uppercase-url',
+        'icon-css-escape',
     ],
 )
 @pytest.mark.asyncio
@@ -233,7 +256,7 @@ def test_an_icon_that_is_only_a_drawing_is_kept():
     svg = (
         '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
         '<defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs>'
-        '<rect fill="url(#g)" style="opacity:.5"/><use xlink:href="#g"/>'
+        '<rect fill="url(#g)" style="opacity:.5; fill:#123; stroke-width:2"/><use xlink:href="#g"/>'
         '<image href="data:image/png;base64,iVBORw0KGgo="/></svg>'
     )
 
@@ -346,6 +369,31 @@ async def test_only_the_first_uploader_changes_a_node(rail):
     assert len(await account.deployments_versions('org1', 'acme.echo')) == 1
     assert (await node_deploy.visible_nodes(teammate))['acme.echo']['version'] == 1
     assert (await _add(_Conn(), _package(files={'IGlobal.py': '# v2'})))['success']
+
+
+@pytest.mark.asyncio
+async def test_two_first_uploads_at_once_leave_the_node_to_one_of_them(rail, monkeypatch):
+    read = account.deployments_versions
+    arrived, both = [], asyncio.Event()
+
+    async def versions(*args):
+        # Both uploads see the node unowned before either one writes
+        rows = await read(*args)
+        arrived.append(True)
+        if len(arrived) == 2:
+            both.set()
+        await both.wait()
+        return rows
+
+    monkeypatch.setattr(account, 'deployments_versions', versions)
+
+    replies = await asyncio.gather(_add(_Conn(), _package()), _add(_Conn(user_id='u2'), _package()))
+
+    assert sorted(reply['success'] for reply in replies) == [False, True]
+    assert 'belongs to' in next(reply['message'] for reply in replies if not reply['success'])
+    (entry,) = await read('org1', 'acme.echo')
+    winner = 'u1' if replies[0]['success'] else 'u2'
+    assert entry['publishedBy']['userId'] == winner
 
 
 @pytest.mark.asyncio

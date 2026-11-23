@@ -877,6 +877,7 @@ class AccountBase(ABC):
         comment: str = '',
         metadata: dict = None,
         state: str = None,
+        owner: str = None,
     ) -> dict:
         """Snapshot the artifact dict as the next immutable registry version.
 
@@ -886,10 +887,15 @@ class AccountBase(ABC):
         overrides the by-kind born state — the seeder registers
         pre-approved platform artifacts directly as 'ready'.
 
+        ``owner``, when set, is the user id that must own the project (its
+        first version's publisher); another user's raises ``NotOwner``.
+
         Returns the new registry entry (version, sha256, publishedBy, ...).
         """
+        # Passed only when set: a backend without owner checks keeps its signature
+        extra = {'owner': owner} if owner else {}
         return await self._deployment_backend().publish(
-            org_id, project_id, pipeline, actor, comment, metadata=metadata, state=state
+            org_id, project_id, pipeline, actor, comment, metadata=metadata, state=state, **extra
         )
 
     async def deployments_deploy(

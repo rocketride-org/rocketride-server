@@ -48,6 +48,7 @@ Uses IStore directly (the trusted, in-server layer): paths are constructed
 here from validated ids, never from caller-supplied path strings.
 """
 
+import asyncio
 import hashlib
 import json
 import time
@@ -235,6 +236,19 @@ def _check_publish_kind(method: str, kind: str) -> None:
         raise ValueError(f'{method}: unsupported kind {kind!r}')
 
 
+class NotOwner(Exception):
+    """A publish refused: the project's first version belongs to someone else."""
+
+
+def owner_refusal(project_id: str, versions: List[Dict[str, Any]], user_id: str) -> Optional[str]:
+    """Why user_id may not change a project: it belongs to whoever published its first version."""
+    first = min(versions, key=lambda v: v.get('version', 0), default=None)
+    owner = (first or {}).get('publishedBy') or {}
+    if first is None or owner.get('userId') == user_id:
+        return None
+    return f'{project_id} belongs to {owner.get("display") or owner.get("userId")}; only they can change it'
+
+
 def _kind_of(version: Dict[str, Any]) -> str:
     """A registry version's kind; one without it is a pipe."""
     return str(version.get('kind') or 'pipe')
@@ -291,6 +305,8 @@ class FileDeploymentBackend:
     def __init__(self, store: IStore) -> None:
         """Bind the backend to a raw IStore (the account-module trust level)."""
         self._store = store
+        # One meta.json cycle at a time per project: the create path below has no CAS
+        self._locks: Dict[tuple, asyncio.Lock] = {}
 
     # =========================================================================
     # PUBLISH — immutable artifact into the org registry
@@ -305,6 +321,7 @@ class FileDeploymentBackend:
         comment: str = '',
         metadata: Optional[Dict[str, Any]] = None,
         state: Optional[str] = None,
+        owner: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Snapshot ``pipeline`` as the next immutable registry version.
 
@@ -327,9 +344,14 @@ class FileDeploymentBackend:
             state:      Optional born-state override (an artifact review state:
                         private|submit|ready|rejected|failed) — the seeder
                         registers pre-approved platform artifacts as 'ready'.
+            owner:      Optional user id that must own the project: its first
+                        version's publisher, or anyone when it has none yet.
 
         Returns:
             The new registry entry (version, sha256, publishedBy, ...).
+
+        Raises:
+            NotOwner: ``owner`` is set and the project belongs to someone else.
         """
         _safe_id(org_id, 'org_id')
         _safe_id(project_id, 'project_id')
@@ -354,6 +376,10 @@ class FileDeploymentBackend:
             kinds = {_kind_of(v) for v in meta['versions']}
             if kinds and kinds != {kind}:
                 raise StorageError(f'{project_id} holds {kinds.pop()} versions, not {kind}')
+            # Checked here, against the versions this write extends, so a racing first upload cannot slip past it
+            refusal = owner and owner_refusal(project_id, meta['versions'], owner)
+            if refusal:
+                raise NotOwner(refusal)
             version = 1 + max((v['version'] for v in meta['versions']), default=0)
             entry = {
                 'version': version,
@@ -873,7 +899,7 @@ class FileDeploymentBackend:
     async def publish_get(
         self, org_id: str, kind: str, app_id: str, audience: Dict[str, str]
     ) -> Optional[Dict[str, Any]]:
-        """One audience's publish row of one app, or None (removed = None)."""
+        """One audience's publish row of one app of this kind, or None (removed = None)."""
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
         _check_publish_kind('publish_get', kind)
@@ -885,6 +911,8 @@ class FileDeploymentBackend:
         if not row or row.get('state') == 'removed':
             return None
         ver = self._artifact_entry_of(meta, row.get('version', 0))
+        if _kind_of(ver) != kind:
+            return None
         return self._publish_row(
             key,
             row,
@@ -896,7 +924,7 @@ class FileDeploymentBackend:
         )
 
     async def publish_of_app(self, org_id: str, kind: str, app_id: str) -> List[Dict[str, Any]]:
-        """Every live publish row of one app (the where/reverse index feed)."""
+        """Every live publish row of one app of this kind (the where/reverse index feed)."""
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
         _check_publish_kind('publish_of_app', kind)
@@ -905,9 +933,9 @@ class FileDeploymentBackend:
             return []
         out: List[Dict[str, Any]] = []
         for key, row in self._publishes_of(meta).items():
-            if row.get('state') == 'removed':
-                continue
             ver = self._artifact_entry_of(meta, row.get('version', 0))
+            if row.get('state') == 'removed' or _kind_of(ver) != kind:
+                continue
             out.append(
                 self._publish_row(
                     key,
@@ -1281,6 +1309,11 @@ class FileDeploymentBackend:
         state, so concurrent publish/deploy/schedule calls serialize
         correctly on any backend that honors expected_version.
         """
+        async with self._locks.setdefault((org_id, project_id), asyncio.Lock()):
+            return await self._mutate_meta_once(org_id, project_id, mutate)
+
+    async def _mutate_meta_once(self, org_id: str, project_id: str, mutate) -> Any:
+        """The CAS cycles of _mutate_meta; the caller holds the project's lock."""
         last: Exception | None = None
         for _ in range(_CAS_ATTEMPTS):
             path = self._meta_path(org_id, project_id)
@@ -1301,10 +1334,9 @@ class FileDeploymentBackend:
             try:
                 if cas_version is None:
                     # CREATE path: the store contract has no create-if-absent
-                    # precondition, so this write is unguarded — two racing
-                    # first creators would last-write-win. Acceptable for the
-                    # single-process OSS backend (SaaS overrides with DB CAS);
-                    # serializing creates here is a parked follow-up.
+                    # precondition, so this write is unguarded; the project's
+                    # lock in _mutate_meta serializes creators in this process
+                    # (SaaS overrides with DB CAS).
                     await self._store.write_file(path, json.dumps(meta, indent=1))
                 else:
                     await self._store.write_file_atomic(path, json.dumps(meta, indent=1), expected_version=cas_version)
