@@ -27,3 +27,10 @@ bbe1c7130b0ffc708767d4b7a7dc676f27f44a01:packages/ai/tests/ai/modules/task/test_
 # test, added in b68d718d6. The current line carries gitleaks:allow; this covers
 # the original commit still in the PR range.
 b68d718d65ed6c155b0032bd900508d4034e44d3:packages/ai/tests/ai/modules/shell/test_app_host_dispatch.py:generic-api-key:52
+
+# Deterministic public token vectors in the shell isolation n1 test, added in
+# 15b58a9a4. The current lines carry gitleaks:allow; these cover the original
+# commit still in the PR range, without excluding the surrounding source file.
+15b58a9a422c56dffc4b62b4f2a24554cf905382:packages/shell/src/isolation/__test__/n1.ts:generic-api-key:76
+15b58a9a422c56dffc4b62b4f2a24554cf905382:packages/shell/src/isolation/__test__/n1.ts:generic-api-key:77
+15b58a9a422c56dffc4b62b4f2a24554cf905382:packages/shell/src/isolation/__test__/n1.ts:generic-api-key:78
