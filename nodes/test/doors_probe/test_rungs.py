@@ -1067,8 +1067,16 @@ async def test_a_sub_pipe_serves_the_same_call(rig, rung):
 
 @pytest.mark.parametrize('rung', RUNGS)
 async def test_a_forged_sub_pipe_caller_only_mislabels(rig, rung):
-    # The server-set identity rewritten on the sub-pipe; its binding left as it was
-    forged = {'userId': 'mallory', 'orgId': 'org-evil', 'teamId': 'team-evil', 'rung': 'public', 'address': 'evil.pipe'}
+    # The server-set identity rewritten on the sub-pipe; its binding left as it was. The
+    # forged ids are this run's own, so a tree an earlier run or another test left in the
+    # store can never stand in for one this call created
+    forged = {
+        'userId': f'mallory-{rig.nonce}',
+        'orgId': f'org-evil-{rig.nonce}',
+        'teamId': f'team-evil-{rig.nonce}',
+        'rung': 'public',
+        'address': 'evil.pipe',
+    }
     path, key = f'{rig.folder}/{rung}/forged.txt', f'forged-{rung}'
     report = await rig.call(
         rung,
@@ -1090,12 +1098,12 @@ async def test_a_forged_sub_pipe_caller_only_mislabels(rig, rung):
     assert all(result['ok'] for result in nested), nested
 
     # The nested node believes the forgery: a node can lie to itself
-    assert nested[0]['value']['caller']['userId'] == 'mallory'
+    assert nested[0]['value']['caller']['userId'] == forged['userId']
 
     # The server does not: both writes landed with the REAL owner, nothing with the forged one
     assert report.value(1) == 'forged'
     assert (rig.tree(rung) / path).read_text(encoding='utf-8') == 'forged'
-    for kind, ident in (('users', 'mallory'), ('teams', 'team-evil'), ('orgs', 'org-evil')):
+    for kind, ident in (('users', forged['userId']), ('teams', forged['teamId']), ('orgs', forged['orgId'])):
         assert not (rig.store / kind / ident).exists()
     assert rig.strays() == []
 
@@ -1287,7 +1295,13 @@ async def test_a_referenced_variable_reaches_the_config_and_an_unreferenced_one_
     # A variable the pipe does not reference is nowhere in what the node can read
     assert rig.env_other not in report['caller']['env']
     body = json.dumps(report)
-    assert rig.env_other not in body and json.dumps(rig.env_other_value)[1:-1] not in body
+    assert rig.env_other not in body
+    # The referenced value may itself contain the other one (/work/build/dist holds
+    # /work/build): its own occurrences are permitted, so the search runs on what is left
+    # once they are removed. When it does not contain the other, the whole report is searched
+    other, referenced = json.dumps(rig.env_other_value)[1:-1], json.dumps(rig.env_value)[1:-1]
+    rest = body.replace(referenced, '') if other in referenced else body
+    assert other not in rest
 
 
 @pytest.mark.xfail(
