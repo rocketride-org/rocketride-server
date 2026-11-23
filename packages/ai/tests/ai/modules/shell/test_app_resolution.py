@@ -177,3 +177,47 @@ def test_asset_paths_are_untouched(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     assert resp.text == '<svg/>'
+
+
+def _seed_unversioned_tree(tmp_path):
+    """Lay out an app dir holding a bundle, a nested bundle asset and an icon."""
+    app = tmp_path / 'app'
+    (app / 'static' / 'js').mkdir(parents=True)
+    (app / 'remoteEntry.js').write_text('entry', encoding='utf-8')
+    (app / 'static' / 'js' / 'x.js').write_text('chunk', encoding='utf-8')
+    (app / 'icon.svg').write_text('<svg/>', encoding='utf-8')
+
+
+def test_saas_unversioned_route_serves_only_listing_assets(monkeypatch, tmp_path):
+    """On SaaS the unversioned route must not hand out bundles.
+
+    ``_authorize_app`` checks catalog visibility, not the version
+    entitlement the versioned route enforces, so any file served here would
+    skip the paid-app gate. Only the top-level listing assets stay served.
+    """
+    _seed_unversioned_tree(tmp_path)
+    client = _client(monkeypatch, tmp_path, [HOME])
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+
+    async def allow(token: str, app_id: str) -> bool:
+        """Catalog visibility only, as the real check."""
+        return True
+
+    monkeypatch.setattr(shell_mod, '_authorize_app', allow)
+
+    assert client.get('/apps/app/remoteEntry.js').status_code == 404
+    assert client.get('/apps/app/static/js/x.js').status_code == 404
+    icon = client.get('/apps/app/icon.svg')
+    assert icon.status_code == 200
+    assert icon.text == '<svg/>'
+
+
+def test_oss_unversioned_route_still_serves_bundles(monkeypatch, tmp_path):
+    """OSS is single-tenant and open: the unversioned tree is unchanged there."""
+    _seed_unversioned_tree(tmp_path)
+    client = _client(monkeypatch, tmp_path, [HOME])
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: False)
+
+    assert client.get('/apps/app/remoteEntry.js').status_code == 200
+    assert client.get('/apps/app/static/js/x.js').status_code == 200
+    assert client.get('/apps/app/icon.svg').status_code == 200
