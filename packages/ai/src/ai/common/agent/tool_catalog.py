@@ -73,11 +73,11 @@ def catalog_lines(descriptors: Iterable[Any], limit: int = SUMMARY_CHARS) -> Lis
 
 
 def words(text: Any) -> List[str]:
-    """Lowercase words of *text*, split at camelCase, ``_``, ``.`` and other non-alphanumerics."""
+    """Lowercase words of *text* (any script), split at camelCase, ``_``, ``.`` and other non-alphanumerics."""
     if not isinstance(text, str):
         return []
     text = re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', text)
-    return re.findall(r'[a-z0-9]+', text.lower())
+    return re.findall(r'[^\W_]+', text.lower())
 
 
 def _argument_names(td: Dict[str, Any]) -> List[str]:

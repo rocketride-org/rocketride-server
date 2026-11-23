@@ -69,6 +69,12 @@ def test_search_splits_snake_and_camel_case_and_dots():
     assert [td['name'] for td in tc.search(tools, 'invoice id', 5)] == ['srv.getInvoiceById']
 
 
+def test_search_keeps_accented_words_whole():
+    tools = [_td('wx.today', 'Météo du jour.'), _td('t.o', 'M.')]
+
+    assert [td['name'] for td in tc.search(tools, 'météo', 5)] == ['wx.today']
+
+
 def test_search_matches_argument_names():
     tools = [_td('crm.lookup', 'Find a record.', customer_id='string'), _td('crm.other', 'Other.')]
 
