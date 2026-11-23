@@ -38,6 +38,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from engLib import IJson
 import pytest
 
 NODES_SRC = Path(__file__).resolve().parents[2] / 'src' / 'nodes'
@@ -204,12 +205,27 @@ def test_pacing_holds_between_sources_of_one_host():
     assert sent[1][1] - sent[0][1] >= 0.29, 'the second source waited out the per-host interval'
 
 
+@pytest.mark.parametrize('allow_list', [[], [{'pattern': r'^https://news\.example/'}]])
+def test_validate_and_scan_accept_engine_allow_list(allow_list):
+    endpoint = make_endpoint(
+        json.dumps([{'name': 'a', 'kind': 'feed', 'url': 'https://news.example/feed'}]),
+        urlAllowList=allow_list,
+    )
+    endpoint.endpoint.serviceConfig = IJson(endpoint.endpoint.serviceConfig)
+
+    endpoint.validateConfig(False)
+    assert scan(endpoint) == ['a']
+    assert [pattern.pattern for pattern in endpoint._fetcher.allow_patterns] == [row['pattern'] for row in allow_list]
+
+
 def test_validate_config_rejects_an_unpinned_allow_list():
     endpoint = make_endpoint(
-        [{'name': 'a', 'kind': 'feed', 'url': 'https://news.example/feed'}],
-        urlAllowList=['news\\.example'],
+        json.dumps([{'name': 'a', 'kind': 'feed', 'url': 'https://news.example/feed'}]),
+        urlAllowList=[{'pattern': r'news\.example'}],
     )
-    with pytest.raises(ValueError):
+    endpoint.endpoint.serviceConfig = IJson(endpoint.endpoint.serviceConfig)
+
+    with pytest.raises(ValueError, match='must start with a literal http:// or https:// scheme'):
         endpoint.validateConfig(False)
 
 
