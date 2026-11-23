@@ -161,7 +161,6 @@ def test_a_reply_that_reaches_the_output_limit_is_metered(monkeypatch, server, m
     usage = _streamed_usage(_chat(monkeypatch, model))
 
     assert server.requests[0]['action'] == 'invoke-with-response-stream'
-    # Counted twice would read 60 and 100.
     assert (usage.get('input'), usage.get('output')) == (_INPUT, _OUTPUT)
 
 
@@ -170,7 +169,6 @@ def test_a_reply_that_stops_normally_is_metered_once(monkeypatch, server, model)
     server.stop_reason = 'stop'
     usage = _streamed_usage(_chat(monkeypatch, model))
 
-    # Counted twice would read 60 and 100.
     assert (usage.get('input'), usage.get('output')) == (_INPUT, _OUTPUT)
 
 
