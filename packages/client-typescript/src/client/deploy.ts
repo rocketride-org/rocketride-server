@@ -245,10 +245,29 @@ export class DeployApi {
 	 * @param options - Template, display name,
 	 *   frame options, install toggle, `onProgress`, and
 	 *   `workspaceRoot` (default `process.cwd()`). The server base URL for
-	 *   vendoring defaults to this client's own connection.
+	 *   vendoring defaults to this client's own connection. `developerId`
+	 *   is deprecated and ignored: it was the namespace an SDK 1.x caller
+	 *   typed, and the namespace now comes from the organization that
+	 *   deploys the app. The option stays so that code written for 1.x
+	 *   compiles and runs.
 	 * @returns The created app's identity and a report of what ran.
 	 */
-	async createApp(slug: string, options: { workspaceRoot?: string; template?: 'Blank' | 'Dashboard'; displayName?: string; sidebar?: boolean; statusFooter?: boolean; docTabs?: boolean; install?: boolean; serverBaseUrl?: string; onProgress?: (line: string) => void } = {}): Promise<CreatedApp> {
+	async createApp(
+		slug: string,
+		options: {
+			workspaceRoot?: string;
+			template?: 'Blank' | 'Dashboard';
+			displayName?: string;
+			/** @deprecated Ignored. The organization that deploys the app attaches its developer id. */
+			developerId?: string;
+			sidebar?: boolean;
+			statusFooter?: boolean;
+			docTabs?: boolean;
+			install?: boolean;
+			serverBaseUrl?: string;
+			onProgress?: (line: string) => void;
+		} = {}
+	): Promise<CreatedApp> {
 		const pack = await this.loadAppPack();
 		// Vendor from the server THIS client talks to unless overridden —
 		// ws(s) URIs map onto the http(s) origin serving /client/*. This is
@@ -262,7 +281,9 @@ export class DeployApi {
 				serverBaseUrl = uri.replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:').replace(/\/task\/service\/?$/i, '').replace(/\/+$/, '');
 			}
 		}
-		const { workspaceRoot, onProgress, ...rest } = options;
+		// `developerId` is taken out of what the scaffold receives: accepted
+		// for SDK 1.x callers, never written into the app's files
+		const { workspaceRoot, onProgress, developerId: _developerId, ...rest } = options;
 		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, serverBaseUrl, onProgress });
 	}
 

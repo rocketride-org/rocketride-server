@@ -232,8 +232,20 @@ export interface IAccountViewProps {
 	// -- Callbacks (async, host handles actual server calls) --------------------
 	/** Persists updated profile fields. */
 	onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
-	/** Persists the user's team order in the active org (B39): home team first. */
-	onSetTeamOrder: (order: string[]) => Promise<void>;
+	/**
+	 * Persists the user's team order in the active org (B39): home team first.
+	 * Optional so a host written for contract v14, which passes `onSetDevTeam`
+	 * instead, still compiles: without it the Teams card shows the order and
+	 * offers no way to change it.
+	 */
+	onSetTeamOrder?: (order: string[]) => Promise<void>;
+	/**
+	 * @deprecated Ignored. The development team became the team order (B39):
+	 * the home team is the first team in the order, set through
+	 * `onSetTeamOrder`. Kept optional so a host written for contract v14 still
+	 * compiles; the view never calls it.
+	 */
+	onSetDevTeam?: (teamId: string) => Promise<void>;
 	/** Switches the user's active organization. */
 	onSetDefaultOrg: (orgId: string) => Promise<void>;
 	/**

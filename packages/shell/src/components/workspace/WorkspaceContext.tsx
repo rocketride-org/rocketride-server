@@ -129,10 +129,14 @@ export interface IWorkspaceContext {
 	/** Update the opaque app-owned state via a functional updater. */
 	updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
 	/**
-	 * Writes the workspace's pending debounced state to disk NOW.
+	 * Starts a best-effort save of the workspace's pending debounced state
+	 * NOW: the timers are cleared and the writes are sent, not awaited, and
+	 * a write the socket drops is not sent again.
 	 *
-	 * Hand this to Documents as `WorkspaceBinding.flushNow` so a page
-	 * teardown cannot strand the last change in a timer that never fires.
+	 * Hand this to Documents as `WorkspaceBinding.flushNow` so a view that
+	 * unmounts while its app stays active cannot strand the last change in
+	 * a timer that never fires. For a live page only: never call it from
+	 * `pagehide`/`beforeunload` (see that binding's doc).
 	 */
 	flushWorkspaceNow: () => void;
 	/** ID of the currently active app. */
@@ -161,9 +165,10 @@ export interface IWorkspaceContext {
 	/**
 	 * Set when a switch-to-app failed to load while another app stayed on
 	 * screen — surfaced by the shell as a modal over the current app.
-	 * Null when no failure is pending.
+	 * Null when no failure is pending. `params` are the launch parameters of
+	 * the switch that failed, so a retry opens what was asked for.
 	 */
-	loadFailure: { appId: string; name: string } | null;
+	loadFailure: { appId: string; name: string; params?: Record<string, string> } | null;
 	/** Dismisses the pending load-failure modal. */
 	dismissLoadFailure: () => void;
 	/**
@@ -419,7 +424,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 
 	// A failed switch-to-app while another app stayed on screen — rendered by
 	// ShellLayout as a modal over the current app rather than a page takeover.
-	const [loadFailure, setLoadFailure] = useState<{ appId: string; name: string } | null>(null);
+	const [loadFailure, setLoadFailure] = useState<{ appId: string; name: string; params?: Record<string, string> } | null>(null);
 
 	/** Dismisses the pending load-failure modal. */
 	const dismissLoadFailure = useCallback(() => setLoadFailure(null), []);
@@ -669,7 +674,8 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 				persistActiveApp(resolved);
 			} else {
 				// Stay on the current app; surface the failure as a modal over it.
-				setLoadFailure({ appId: resolved, name: entry?.name ?? resolved });
+				// The launch parameters are kept for the retry.
+				setLoadFailure({ appId: resolved, name: entry?.name ?? resolved, ...(launchParams ? { params: launchParams } : {}) });
 			}
 		});
 	}, [switchApp, loadDescriptor, apps, defaultAppId]);

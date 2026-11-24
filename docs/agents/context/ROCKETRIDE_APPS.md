@@ -1117,7 +1117,7 @@ const existing = await client.getTaskToken({ projectId, source: 'input' });
 
 // Pre-flight check, restart with a new config (a NEW control id), stop:
 await client.validate({ pipeline });
-await client.restart({ projectId, source: 'input', pipeline });
+await client.restart({ token, projectId, source: 'input', pipeline });
 const fresh = await client.getTaskToken({ projectId, source: 'input' });
 await client.terminate(fresh!);
 ```
@@ -1280,7 +1280,7 @@ useShellEvent('shell:event', ({ event }) => {
 
 **The error UI.** Use the stock components rather than inventing one, and
 keep the project identity around so recovery is one click —
-`client.restart({ projectId, source, pipeline })` terminates the dead task
+`client.restart({ token, projectId, source, pipeline })` terminates the dead task
 and starts a fresh one in a single round trip:
 
 ```tsx

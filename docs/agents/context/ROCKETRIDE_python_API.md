@@ -401,9 +401,9 @@ result = await client.submit(filepath='docBrain.pipe', data=b'...')
 
 Terminate a running pipeline. `token` is the control id; the control is removed at once and its id is dead afterwards. Termination is graceful (in-flight items finish) and final — start a new pipeline for further processing.
 
-### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: str, team_id: str = '') -> None`
+### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: Optional[str] = None, team_id: str = '') -> None`
 
-Restart a running pipeline with a new configuration: terminates the control `token` names and creates its successor in one server round-trip. **A restart mints a new control id**: the id you held is dead afterwards; read the replacement with `get_task_token()` (or the next `use()`) before sending again, and resubscribe monitors keyed on the old id. Read it right after the restart: the lookup answers the most recently touched of your controls under that project/source, which the successor is at that moment (several live controls can share one `project_id`, one per configuration). The IDEs' Restart action is this call (Play is `use()`). All arguments are keyword-only; `token` (the existing control id) is required: resolve it with `get_task_token()` first when you hold only project/source; pass `team_id` to address the team's DEPLOYED run (omit for your own dev run). Raises `RuntimeError` on failure (a missing or foreign `token` is `permission_denied`).
+Restart a running pipeline with a new configuration: terminates the control `token` names and creates its successor in one server round-trip. **A restart mints a new control id**: the id you held is dead afterwards; read the replacement with `get_task_token()` (or the next `use()`) before sending again, and resubscribe monitors keyed on the old id. Read it right after the restart: the lookup answers the most recently touched of your controls under that project/source, which the successor is at that moment (several live controls can share one `project_id`, one per configuration). The IDEs' Restart action is this call (Play is `use()`). All arguments are keyword-only. `token` (the existing control id) is optional in the signature, as it was in SDK 1.x, and required to run: a call without one raises `ValueError` before anything is sent, so resolve it with `get_task_token()` first when you hold only project/source. Pass `team_id` to address the team's DEPLOYED run (omit for your own dev run). Raises `RuntimeError` on failure (a foreign `token` is `permission_denied`).
 
 ```python
 token = await client.get_task_token(project_id='my-project', source='webhook_1')
@@ -959,8 +959,9 @@ The app methods are the **automation layer under the App Builder UI** — everyt
 **Scaffolding:** `await client.deploy.create_app(slug, template='Blank', display_name=..., ...)`
 scaffolds a new app under `./apps/<slug>-ui`, the same templates as
 `rocketride app create <slug>` and the App Builder wizard (mirrors the TypeScript
-`deploy.createApp`). `developer_id` defaults to the connected org's developer
-id, else `'local'`. Everything below (pack, deploy, publish, review) has full
+`deploy.createApp`). The files carry the slug alone: the organization that
+deploys the app attaches its developer id. `developer_id` is deprecated and
+ignored. Everything below (pack, deploy, publish, review) has full
 Python parity.
 
 **Packing and uploading:** `deploy.add_app` packs an app folder exactly as

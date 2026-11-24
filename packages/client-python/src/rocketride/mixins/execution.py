@@ -540,7 +540,7 @@ class ExecutionMixin(DAPClient):
         project_id: str,
         source: str,
         pipeline: PipelineConfig,
-        token: str,
+        token: Optional[str] = None,
         team_id: str = '',
     ) -> None:
         """
@@ -562,15 +562,26 @@ class ExecutionMixin(DAPClient):
             project_id: The project identifier.
             source: The source component identifier.
             pipeline: The pipeline configuration to restart with.
-            token: The existing control id (required; resolve it with
-                :meth:`get_task_token` first when you hold only
-                project/source).
+            token: The existing control id. Optional in the signature, as it
+                was in SDK 1.x, where the server looked the run up; a
+                restart now needs it, so a call without one raises before
+                anything is sent. Resolve it with :meth:`get_task_token`
+                first when you hold only project/source.
             team_id: Address the team's deploy run; empty for your own dev run.
 
         Raises:
-            RuntimeError: If the restart fails (a missing or foreign
-                ``token`` is ``permission_denied``).
+            ValueError: If ``token`` is missing or empty.
+            RuntimeError: If the restart fails (a foreign ``token`` is
+                ``permission_denied``).
         """
+        # The signature keeps ``token`` optional so code written for SDK 1.x
+        # still calls; the server no longer resolves the run from
+        # project/source, so a missing id is refused here with the way to
+        # get one
+        if not token:
+            raise ValueError(
+                'restart() needs the control id in token: read it with get_task_token(project_id, source) first'
+            )
         arguments: Dict[str, Any] = {
             'token': token,
             'projectId': project_id,

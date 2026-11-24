@@ -435,7 +435,9 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		const ok = await retryApp(loadFailure.appId);
 		if (ok) {
 			dismissLoadFailure();
-			ConnectionManager.getInstance().emit('shell:switchApp', { appId: loadFailure.appId });
+			// With the parameters of the switch that failed: a retried agent
+			// launch opens its host app bound to the agent, not the bare host
+			ConnectionManager.getInstance().emit('shell:switchApp', { appId: loadFailure.appId, ...(loadFailure.params ? { params: loadFailure.params } : {}) });
 		}
 	};
 

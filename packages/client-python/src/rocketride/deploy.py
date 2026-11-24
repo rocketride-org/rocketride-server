@@ -292,6 +292,7 @@ class DeployApi:
         workspace_root: str | None = None,
         template: str = 'Blank',
         display_name: str | None = None,
+        developer_id: str | None = None,
         sidebar: bool = False,
         status_footer: bool = True,
         doc_tabs: bool = False,
@@ -316,6 +317,10 @@ class DeployApi:
                 (default: the current working directory).
             template: 'Blank' (default) or 'Dashboard'.
             display_name: Display name (default: the slug, title-cased).
+            developer_id: Deprecated and ignored. It was the namespace an
+                SDK 1.x caller typed; the namespace now comes from the
+                organization that deploys the app. The argument stays so
+                that code written for 1.x still calls.
             sidebar: Two-column frame with a navigation sidebar.
             status_footer: Status bar across the bottom of the app.
             doc_tabs: Document tab strip across the content area.

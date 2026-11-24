@@ -43,6 +43,7 @@ import {
 	saveAppListing,
 	scanAppMarkers,
 } from '../src/app-pack/index';
+import { RocketRideClient } from '../src/client/client';
 
 let ws: string;
 
@@ -140,6 +141,22 @@ describe('createAppWorkspace', () => {
 		await expect(createAppWorkspace(ws, 'clock', { install: false })).rejects.toThrow(/"apps\/clock-ui" already exists/);
 	});
 
+});
+
+describe('client.deploy.createApp', () => {
+	it('accepts the SDK 1.x developerId option and ignores it', async () => {
+		const client = new RocketRideClient({ env: {} });
+		// No server in this test: there is nothing to vendor from
+		(client as unknown as Record<string, unknown>).getConnectionInfo = () => ({ uri: '' });
+
+		const created = await client.deploy.createApp('clock', { workspaceRoot: ws, developerId: 'acme', install: false });
+
+		expect(created.appId).toBe('clock');
+		expect(JSON.parse(read('apps/clock-ui/package.json')).appManifest.id).toBe('clock');
+		for (const file of ['apps/clock-ui/package.json', 'apps/clock-ui/src/AppDescriptor.ts', 'apps/clock-ui/clock.rrapp']) {
+			expect(read(file)).not.toContain('acme');
+		}
+	});
 });
 
 describe('ensureWorkspaceFile', () => {

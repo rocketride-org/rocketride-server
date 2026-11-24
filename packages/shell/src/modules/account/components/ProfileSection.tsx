@@ -82,8 +82,8 @@ export interface IProfileSectionProps {
 	onActiveTeamIdChange: (id: string | null) => void;
 	onLoadTeamDetail: (teamId: string) => void;
 	onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
-	/** Persists the user's team order in the active workspace (home team first). */
-	onSetTeamOrder: (order: string[]) => Promise<void>;
+	/** Persists the user's team order in the active workspace (home team first); without it the order is shown and cannot be changed. */
+	onSetTeamOrder?: (order: string[]) => Promise<void>;
 	onSetDefaultOrg: (orgId: string) => Promise<void>;
 	/** Renames ANY workspace the user administers (drawer per-row rename). */
 	onRenameWorkspace: (orgId: string, name: string) => Promise<void>;
