@@ -345,6 +345,34 @@ def test_a_run_with_no_answer_ends_as_an_error(run, case):
     assert result.invocations == []
 
 
+@pytest.mark.parametrize(
+    ('raw', 'calls', 'answer'),
+    [
+        (
+            'Call it like this:\n\nclient.run("crm", {"name": "x", "args": [1]})',
+            3,
+            'Call it like this:\n\nclient.run("crm", {"name": "x", "args": [1]})',
+        ),
+        (
+            'const f = () => {"name": "x", "args": [1]}',
+            3,
+            'const f = () => {"name": "x", "args": [1]}',
+        ),
+        ('{"type":"final","content":"bad \\ud800"}', 1, r'bad \ud800'),
+        ('FINAL>>> {"type":"final","content":"bad \\udfff"}', 1, r'bad \udfff'),
+        ('{"type":"final","content":{"text":"\\ud800"}}', 1, '{"text": "\\ud800"}'),
+    ],
+)
+def test_code_examples_and_valid_json_surrogates_reach_the_answer_lane(run, raw, calls, answer):
+    result = run(raw, tools=(GET_DEAL,))
+    assert result.stop_reason is None
+    assert result.content == answer
+    assert result.written == [answer]
+    assert result.content.encode('utf-8').decode('utf-8') == answer
+    assert len(result.prompts) == calls
+    assert result.invocations == []
+
+
 def test_a_bare_json_answer_is_delivered_once_the_model_follows_the_hint(run):
     """Case D with a model that reads the retry hint: one extra call, then the JSON as the answer."""
     result = run(ANSWER_JSON, 'FINAL>>>' + ANSWER_JSON)
