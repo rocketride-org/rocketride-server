@@ -174,7 +174,8 @@ nested in their values: its `type`, or a tool call's `name` and `args` when it
 has no type. Such an object with no type counts as a tool call only as the
 reply's first object or with no word before it on its line. The first-object
 rule excludes explicit code expressions: a leading `return`/`yield`, an
-assignment, or a function argument. Prose such as `Calling: {...}` still counts
+assignment, an arrow function, or a same-line function argument (including later
+comma-separated arguments inside an open parenthesis). Prose such as `Calling: {...}` still counts
 as a call. Elsewhere it is data or code, as in an answer that shows a function called with one. A tool
 call's `type` right after the brace is still read when its colon is missing or
 miswritten, or its key is in curly quotes or lost its closing quote. A brace that opens no object, as in a block of code, is prose and
@@ -205,6 +206,9 @@ The parser does not guess path semantics or disable valid JSON escape decoding.
 Recovery joins valid Unicode surrogate pairs and keeps an unpaired surrogate
 as its original `\uXXXX` escape text, so recovery does not create a character
 that cannot be encoded as UTF-8.
+Parsed final content also preserves lone surrogates as literal `\uXXXX` escapes,
+including after `FINAL>>>` and in object or array content. Valid Unicode characters
+and surrogate pairs keep their decoded values.
 
 ## Upstream docs
 

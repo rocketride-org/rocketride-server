@@ -200,8 +200,9 @@ JSON object that is neither shape, a tool call or an answer that never parsed,
 and an object that has a tool call's `name` and `args` and no `type`, is not
 quoted, and is the reply's first object or has no word before it on its line
 are not answers: the run fails with `stop_reason: error`. Explicit code
-expressions (`return`/`yield`, assignments and function arguments) are exempt
-from the first-object rule; prose such as `Calling: {...}` is not. That holds
+expressions (`return`/`yield`, assignments, arrow functions and same-line function
+arguments, including later comma-separated arguments inside an open parenthesis)
+are exempt from the first-object rule; prose such as `Calling: {...}` is not. That holds
 for a sub-agent's turn too, and a sub-agent turn that fails this way fails the
 orchestrator's run. The returned error contains the reason and position,
 while excerpts of the model's reply go only into the repair hint. Whitespace
@@ -211,7 +212,9 @@ literal. A malformed envelope cannot distinguish a literal Windows-path
 backslash from a recognized escape. Use escaped backslashes in JSON or
 `FINAL>>>` for literal paths. Recovery joins valid surrogate pairs and keeps
 unpaired surrogates as their original `\uXXXX` escape text, preserving UTF-8
-encodability.
+encodability. Parsed final content also preserves lone surrogates as literal
+`\uXXXX` escapes, including after `FINAL>>>` and in object or array content.
+Valid Unicode characters and surrogate pairs keep their decoded values.
 
 A damaged first key or an early closing brace does not hide a tool-call
 type in the remaining members. The reply is retried as a call, and a claim

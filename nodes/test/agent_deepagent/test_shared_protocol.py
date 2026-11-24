@@ -218,3 +218,31 @@ def test_a_parallel_call_after_a_preamble_object_runs_once(run):
     assert result.content == 'Both checked.'
     assert result.stop_reason is None
     assert len(result.prompts) == 2
+
+
+@pytest.mark.parametrize(
+    ('raw', 'calls', 'answer'),
+    [
+        (
+            'Call it like this:\n\nclient.run("crm", {"name": "x", "args": [1]})',
+            3,
+            'Call it like this:\n\nclient.run("crm", {"name": "x", "args": [1]})',
+        ),
+        (
+            'const f = () => {"name": "x", "args": [1]}',
+            3,
+            'const f = () => {"name": "x", "args": [1]}',
+        ),
+        ('{"type":"final","content":"bad \\ud800"}', 1, r'bad \ud800'),
+        ('FINAL>>> {"type":"final","content":"bad \\udfff"}', 1, r'bad \udfff'),
+        ('{"type":"final","content":{"text":"\\ud800"}}', 1, '{"text": "\\ud800"}'),
+    ],
+)
+def test_code_examples_and_valid_json_surrogates_reach_the_answer_lane(run, raw, calls, answer):
+    result = run(raw, tools=(GET_DEAL,))
+    assert result.stop_reason is None
+    assert result.content == answer
+    assert result.written == [answer]
+    assert result.content.encode('utf-8').decode('utf-8') == answer
+    assert len(result.prompts) == calls
+    assert result.invocations == []

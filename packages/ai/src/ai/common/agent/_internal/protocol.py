@@ -62,7 +62,7 @@ _LOOSE_FINAL_OPEN = re.compile(r"""\{\s*(?:type|'type')\s*:\s*["']final["']""")
 _WORD = re.compile(r'[^\W_]')
 
 #: A first object in an explicit code expression is data, even with name/args keys.
-_CODE_OBJECT_PREFIX = re.compile(r'(?:^[ \t]*(?:return|yield)\b|[=(]\s*$)')
+_CODE_OBJECT_PREFIX = re.compile(r'(?:^[ \t]*(?:return|yield)\b|(?:[=(]|=>)\s*$)')
 
 #: A word after an object on its line. Punctuation and closings are not words, and the line is read no
 #: further than a markup tag, a comment or another object that opens there.
@@ -272,6 +272,31 @@ def _closed_fences(text: str) -> Iterator[Tuple[int, int]]:
             opening = None
 
 
+def _code_object_prefix(prefix: str) -> bool:
+    """An explicit code expression before the first object on its line."""
+    if _CODE_OBJECT_PREFIX.search(prefix):
+        return True
+    if not prefix.rstrip().endswith(','):
+        return False
+    # A later argument needs an open parenthesis, ignoring parentheses inside strings.
+    depth, quote, escaped = 0, '', False
+    for char in prefix:
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == quote:
+                quote = ''
+        elif char in '"\'`':
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth = max(0, depth - 1)
+    return depth > 0 and not quote
+
+
 def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
     """
     Yield (type, parsed object, start) for envelopes; an unfinished envelope has no parsed object.
@@ -286,8 +311,8 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
     An object with a tool call's ``name`` and ``args`` and no type will not run. It counts as a
     tool call as the first object (unless introduced by a code expression), or with no word
     before it on its line. Anywhere else it is data or code, as in an answer that shows a
-    function being called with such an object. A leading return/yield, assignment or function
-    argument marks a code expression; prose such as ``Calling: {...}`` still counts as a call.
+    function being called with such an object. A leading return/yield, assignment, arrow function
+    or same-line function argument marks code; prose such as ``Calling: {...}`` still counts as a call.
 
     After a parsed final, a new closed markdown block quotes an example. Its objects are not
     pending work. A call outside that block, or inside an unclosed block, still counts.
@@ -363,7 +388,7 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
         read = end is not None and not stray and not (parsed is None and _MEMBER_CONTINUATION.match(text, end))
         own = members.get('type')
         # Where a name and arguments with no type make a tool call. Elsewhere they are data or code.
-        may_lack_type = no_word_before or (at == first and not _CODE_OBJECT_PREFIX.search(text[line:at]))
+        may_lack_type = no_word_before or (at == first and not _code_object_prefix(text[line:at]))
         if isinstance(parsed, dict):
             names_a_tool = may_lack_type and isinstance(parsed.get('name'), str) and 'args' in parsed
             kind = parsed.get('type', 'tool_call' if names_a_tool else None) if stands else None
@@ -659,9 +684,9 @@ def _final_text(content: Any) -> str:
     """The text of a `final` envelope's content. Anything but a string is written back as JSON, not as a Python repr."""
     if content is None:
         return ''
-    if isinstance(content, str):
-        return content
-    return json.dumps(content, ensure_ascii=False)
+    text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+    # json.loads accepts lone surrogates; keep them as escape text, including in nested JSON content.
+    return text.encode('utf-8', errors='backslashreplace').decode('utf-8')
 
 
 def _tool_call(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:

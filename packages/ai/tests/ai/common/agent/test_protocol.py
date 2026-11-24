@@ -1826,3 +1826,66 @@ class TestNihalFollowup:
         assert answer.encode('utf-8').decode('utf-8') == answer
         assert '\\u' in answer
         assert len(feedback) == 1
+
+
+class TestCodeDictionariesAndUnicodeFinals:
+    @pytest.mark.parametrize(
+        'prefix',
+        [
+            'client.run("crm", ',
+            'client.run("crm", 1, ',
+            'client.run(get_name("crm"), ',
+            'client.run(")", ',
+            "client.run(')', ",
+            'client.run(`)`, ',
+            r'client.run("quoted \" )", ',
+            'const f = () => ',
+            'const f = async () => ',
+        ],
+    )
+    def test_later_arguments_and_arrow_function_dictionaries_are_answer_text(self, prefix):
+        raw = 'Call it like this:\n\n' + prefix + '{"name": "x", "args": [1]})'
+        ask, feedback = scripted(raw)
+        assert answer_of(reply.run_model_turn(ask)) == raw
+        assert len(feedback) == 3
+
+    @pytest.mark.parametrize(
+        'prefix',
+        [
+            'Calling: ',
+            'Calling, ',
+            'Calling (crm), ',
+            'Calling "(", ',
+            "Calling '(', ",
+            'Calling `(`, ',
+            'Calling ("open, ',
+        ],
+    )
+    def test_prose_and_quoted_parentheses_do_not_hide_typeless_pending_work(self, prefix):
+        raw = prefix + '{"name":"crm.create","args":{"name":"Acme"}}' + STACKED_FINAL
+        ask, feedback = scripted(raw)
+        with pytest.raises(ValueError):
+            reply.run_model_turn(ask)
+        assert len(feedback) == 3
+
+    @pytest.mark.parametrize('wrapper', ['{}', 'FINAL>>> {}', '```json\n{}\n```', '[{}]'])
+    @pytest.mark.parametrize(
+        ('content', 'expected'),
+        [
+            ('bad \ud800', r'bad \ud800'),
+            ('bad \udfff', r'bad \udfff'),
+            ('\ud800\ud800', r'\ud800\ud800'),
+            ('\udc00\ud800', r'\udc00\ud800'),
+            ('\ud800A', r'\ud800A'),
+            ('\U0001f600 caf\u00e9', '\U0001f600 caf\u00e9'),
+            (r'literal \ud800', r'literal \ud800'),
+            ({'\ud800': ['\udfff', '\U0001f600']}, '{"\\ud800": ["\\udfff", "\U0001f600"]}'),
+        ],
+    )
+    def test_valid_final_content_always_encodes_as_utf8(self, wrapper, content, expected):
+        raw = wrapper.format(json.dumps({'type': 'final', 'content': content}))
+        ask, feedback = scripted(raw)
+        answer = answer_of(reply.run_model_turn(ask))
+        assert answer == expected
+        assert answer.encode('utf-8').decode('utf-8') == answer
+        assert len(feedback) == 1
