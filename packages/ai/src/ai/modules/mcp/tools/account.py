@@ -15,14 +15,9 @@ signed-in caller only. Key values, credentials and ids never reach this tool.
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import credentials as credentials_mod
+from ..credentials import HOSTED_MODELS_CAPABILITY
 from ..tooling import ToolHints, ToolRegistry
 from ._common import engine_call
-
-# The capability tag the hosted backend's ``Account.capabilities`` returns when
-# OpenAI nodes can run on RocketRide-hosted models without a key of the user's
-# own. The backend writes the same literal, so a test pins this value: renaming
-# the tag means changing both sides together.
-HOSTED_OPENAI_CAPABILITY = 'hosted-models:openai'
 
 # Every sentence the tool can say. Plain words for a person who has never used
 # RocketRide: no prices, no "upgrade", no links, never a tool name, and never a
@@ -69,17 +64,19 @@ MODEL_HOSTED = (
     "Some OpenAI models can run on RocketRide without a key of your own. They use this workspace's compute credits."
 )
 MODEL_HOSTED_OTHERS = (
-    'Other OpenAI models and other AI providers need your own key, saved in RocketRide under Settings > Variables.'
+    'Other OpenAI models and other AI providers need your own key, saved in RocketRide under '
+    'Settings > Environment Variables.'
 )
 MODEL_HOSTED_OTHERS_SAVED = (
-    'Other OpenAI models and any other AI provider need your own key, saved in RocketRide under Settings > Variables.'
+    'Other OpenAI models and any other AI provider need your own key, saved in RocketRide under '
+    'Settings > Environment Variables.'
 )
 MODEL_SAVED_ONE = 'RocketRide has a saved AI model key for {providers}.'
 MODEL_SAVED_MANY = 'RocketRide has saved AI model keys for {providers}.'
 MODEL_NONE = 'No AI model key is saved.'
 MODEL_NONE_NEXT = (
     'If a pipeline uses a model from a provider such as OpenAI or Anthropic, get an API key from that provider. '
-    "In RocketRide, open Settings > Variables and add it there. Don't paste the key into this chat."
+    "In RocketRide, open Settings > Environment Variables and add it there. Don't paste the key into this chat."
 )
 MODEL_UNKNOWN = "RocketRide couldn't check saved AI model keys just now."
 MODEL_MAYBE = "RocketRide can't tell whether a saved variable is an AI model key for {providers}."
@@ -228,7 +225,7 @@ def _model_key_check(status: dict, waitlisted: bool) -> Tuple[dict, Optional[str
     saved_text = (
         (MODEL_SAVED_ONE if len(saved) == 1 else MODEL_SAVED_MANY).format(providers=_join(saved)) if saved else ''
     )
-    if HOSTED_OPENAI_CAPABILITY in (status.get('capabilities') or []):
+    if HOSTED_MODELS_CAPABILITY in (status.get('capabilities') or []):
         others = MODEL_HOSTED_OTHERS_SAVED if saved else MODEL_HOSTED_OTHERS
         return _check(
             'model_key', True, ' '.join(filter(None, [MODEL_HOSTED, saved_text, others])), blocking=False

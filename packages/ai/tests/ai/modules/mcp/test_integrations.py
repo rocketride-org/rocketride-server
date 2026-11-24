@@ -535,8 +535,9 @@ async def test_account_status_model_keys_use_catalog_names_and_never_overclaim()
 
 
 async def test_account_status_hosted_models_tag():
-    """The tag must equal what the hosted backend sends; renaming it means changing both sides."""
-    assert account_tool.HOSTED_OPENAI_CAPABILITY == 'hosted-models:openai'
+    """The tool reads the engine's one constant for the tag the hosted backend sends."""
+    assert account_tool.HOSTED_MODELS_CAPABILITY is credentials_mod.HOSTED_MODELS_CAPABILITY
+    assert credentials_mod.HOSTED_MODELS_CAPABILITY == 'hosted-models:openai'
 
     result = await _status(_body(capabilities=['saas', 'hosted-models:openai'], envKeys=['ROCKETRIDE_ANTHROPIC_KEY']))
 
@@ -545,7 +546,7 @@ async def test_account_status_hosted_models_tag():
         'ok': True,
         'detail': "Some OpenAI models can run on RocketRide without a key of your own. They use this workspace's "
         'compute credits. RocketRide has a saved AI model key for Anthropic. Other OpenAI models and any other AI '
-        'provider need your own key, saved in RocketRide under Settings > Variables.',
+        'provider need your own key, saved in RocketRide under Settings > Environment Variables.',
         'blocking': False,
     }
     assert 'hint' not in result
