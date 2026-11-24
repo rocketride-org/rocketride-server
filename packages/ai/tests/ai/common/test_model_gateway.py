@@ -59,7 +59,7 @@ TOKEN = 'rrmg_' + 'a' * 43
 NEBIUS_URL = 'https://api.tokenfactory.nebius.com/v1/'
 
 _KEY_HOW = (
-    'To keep the key out of the pipeline, save it in RocketRide under Settings > Variables as '
+    'To keep the key out of the pipeline, save it in RocketRide under Settings > Environment Variables as '
     "ROCKETRIDE_OPENAI_KEY and enter ${ROCKETRIDE_OPENAI_KEY} as the node's API key."
 )
 NO_KEY_HOSTED = (
@@ -1209,13 +1209,13 @@ TAG = 'hosted-models:openai'
 NOTE = (
     "Runs on RocketRide-hosted models without a key of your own, using this workspace's compute credits. "
     'Not for team deployments: a pipeline deployed to a team needs its own key. Otherwise leave apikey empty. '
-    'To use your own OpenAI key, first save it in RocketRide under Settings > Variables as '
+    'To use your own OpenAI key, first save it in RocketRide under Settings > Environment Variables as '
     'ROCKETRIDE_OPENAI_KEY, then set apikey to ${ROCKETRIDE_OPENAI_KEY}.'
 )
 TEAM_DEPLOY_WARNING = (
     "This pipeline has an OpenAI node with no API key. Hosted models aren't available for team deployments "
     'yet, so the node will fail when the pipeline runs on this team. Add your own OpenAI key to the node: save '
-    'it in RocketRide under Settings > Variables as ROCKETRIDE_OPENAI_KEY, then set apikey to '
+    'it in RocketRide under Settings > Environment Variables as ROCKETRIDE_OPENAI_KEY, then set apikey to '
     '${ROCKETRIDE_OPENAI_KEY}.'
 )
 _KEY_FIELD = {'path': 'llm.apikey', 'title': 'API key', 'kind': 'secret', 'required': True}
