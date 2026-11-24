@@ -29,11 +29,12 @@ failure (connection/auth/timeout) still raises `HardError` and surfaces as
 an MCP tool error, exactly as every other tool handler in this package
 behaves.
 
-Each individual `get_task_status` call is wrapped in its own
-`asyncio.wait_for(..., timeout=_per_poll_timeout(...))` so one hung status
-call cannot itself exceed the overall poll deadline. A single poll timing
-out is not treated as a hard error: it breaks the loop and returns the
-current (last-known) snapshot, same as the overall `timeout` elapsing.
+Every wait in the loop draws on one `CallBudget` of `timeout` seconds: a
+sleep is never longer than the time left, and each `get_task_status` call
+gets at most the time left, with a floor of one second. So a call returns
+within `timeout` plus one second, whatever `interval` is. A single poll
+timing out is not treated as a hard error: it breaks the loop and returns
+the current (last-known) snapshot, same as the overall `timeout` elapsing.
 
 On a terminal state, `monitor` also removes the token from the server-owned
 `TaskRegistry` (`tasks.remove(token)`) -- once a task is terminal there is
@@ -47,7 +48,6 @@ whether the connected engine is local or cloud.
 """
 
 import asyncio
-import time
 from typing import Any, Dict
 
 from ..apps import PIPELINES_TABLE_URI
@@ -55,6 +55,7 @@ from ..errors import _bad
 from ..errors import _timeout
 from ..errors import normalize_error
 from ..tooling import ToolHints, ToolRegistry
+from ._common import CALL_BUDGET_SECONDS, CallBudget
 
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_INTERVAL_SECONDS = 1
@@ -62,14 +63,15 @@ DEFAULT_INTERVAL_SECONDS = 1
 # Hard bounds on the caller-supplied poll parameters, enforced in the handler
 # (not just the schema — the server must not depend on client-side schema
 # validation): one `monitor` call must not busy-loop the engine (`interval: 0`)
-# or hold the tool call open indefinitely (unbounded `timeout`).
-MAX_TIMEOUT_SECONDS = 300
+# or hold the tool call open past the call budget (unbounded `timeout`).
+MAX_TIMEOUT_SECONDS = CALL_BUDGET_SECONDS
 MIN_INTERVAL_SECONDS = 0.25
 
-# Per-poll wall-clock budget for a single `get_task_status` call, so one hung
-# call can't itself exceed the overall poll `timeout`. Floors at the
-# caller's `interval` so a slow but valid poll cadence is never starved.
+# Per-poll bound for a single `get_task_status` call. Floors at the caller's
+# `interval` so a slow but valid poll cadence is never starved, and is cut to
+# the time left in the call (never under MIN_POLL_SECONDS).
 DEFAULT_PER_POLL_TIMEOUT_SECONDS = 5
+MIN_POLL_SECONDS = 1
 
 _TERMINAL_STATES = {5, 6}
 
@@ -143,13 +145,14 @@ async def _monitor(client, tasks, args: Dict[str, Any]) -> dict:
     interval = max(MIN_INTERVAL_SECONDS, interval)
     per_poll_timeout = max(interval, DEFAULT_PER_POLL_TIMEOUT_SECONDS)
 
-    deadline = time.monotonic() + timeout
+    budget = CallBudget(timeout)
     polls = 0
     status: Dict[str, Any] = {}
 
     while True:
+        poll_timeout = budget.left(per_poll_timeout, floor=MIN_POLL_SECONDS)
         try:
-            status = await asyncio.wait_for(client.get_task_status(token), timeout=per_poll_timeout) or {}
+            status = await asyncio.wait_for(client.get_task_status(token), timeout=poll_timeout) or {}
         except asyncio.TimeoutError:
             # A single hung poll isn't a hard failure -- return the current
             # (last-known, necessarily non-terminal) snapshot rather than
@@ -168,10 +171,11 @@ async def _monitor(client, tasks, args: Dict[str, Any]) -> dict:
                 tasks.remove(token)
             return _snapshot(token, status, polls)
 
-        if time.monotonic() >= deadline:
+        wait = budget.left(interval)
+        if wait <= 0:
             return _snapshot(token, status, polls)
 
-        await asyncio.sleep(interval)
+        await asyncio.sleep(wait)
 
 
 async def _list_running_pipelines(client, tasks, args: Dict[str, Any]) -> dict:
@@ -194,7 +198,9 @@ def register(registry: ToolRegistry) -> None:
         'monitor',
         'Poll a running pipeline task (by task_token) until it reaches a terminal state or the '
         'timeout elapses, returning a status snapshot. Long-lived tasks (e.g. webhooks) may never '
-        'reach a terminal state -- the snapshot returned at timeout has terminal=false.',
+        'reach a terminal state -- the snapshot returned at timeout has terminal=false. '
+        'Some hosts stop a tool call after about a minute. Use a timeout of 45 seconds or less '
+        'and call again while terminal is false.',
         _MONITOR_SCHEMA,
         hints=ToolHints.reads(
             "Polls task status; only the server's in-memory token bookkeeping changes when the task completes."

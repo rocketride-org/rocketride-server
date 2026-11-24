@@ -24,6 +24,10 @@ running engine-side), so we report it as a structured, self-correctable
 `{ok: False, error_type: 'Timeout', ...}` result instead, using a distinct
 error_type ('Timeout', not 'TimeoutError') so it never collides with the
 normalizer's hard-failure set.
+
+`run_pipeline` and `run_dropper_pipe` make two engine calls in one tool call.
+Both draw on one `CallBudget`, so the whole call stays inside
+`CALL_BUDGET_SECONDS` however the time splits between them.
 """
 
 import asyncio
@@ -33,11 +37,17 @@ from urllib.parse import urlencode
 from ..apps import DROPPER_URI
 from ..errors import _bad, _timeout
 from ..tooling import ToolHints, ToolRegistry
+from ._common import CallBudget
 
-# Default wall-clock budget for a single blocking `use`/`send`/`terminate`/
+# Default wall-clock bound for a single blocking `use`/`send`/`terminate`/
 # `send_files` seam call. Chosen as a generous-but-bounded default for
-# document-processing pipelines; not user-configurable in v1.
+# document-processing pipelines; not user-configurable in v1. A tool call that
+# makes two of them also stays inside its `CallBudget`.
 DEFAULT_TIMEOUT_SECONDS = 120
+
+# What the dropper cleanup `terminate` gets even when the start used the
+# whole budget, so a task with no upload link is still stopped.
+CLEANUP_FLOOR_SECONDS = 5
 
 _OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads', 'pipelineTraceLevel')
 
@@ -108,7 +118,7 @@ _SEND_FILES_SCHEMA = {
 }
 
 
-async def _start_task(client, args: Dict[str, Any], tool_name: str):
+async def _start_task(client, args: Dict[str, Any], tool_name: str, budget: CallBudget):
     """Shared start path for `run_pipeline` / `run_dropper_pipe`: input check,
     use() kwargs (incl. the `pipelineTraceLevel: 'summary'` default), and the
     wait_for-wrapped engine call. Returns ``(started, None)`` on success or
@@ -130,7 +140,7 @@ async def _start_task(client, args: Dict[str, Any], tool_name: str):
     kwargs.setdefault('pipelineTraceLevel', 'summary')
 
     try:
-        started = await asyncio.wait_for(client.use(**kwargs), timeout=DEFAULT_TIMEOUT_SECONDS)
+        started = await asyncio.wait_for(client.use(**kwargs), timeout=budget.left(DEFAULT_TIMEOUT_SECONDS))
     except asyncio.TimeoutError:
         return None, _timeout(
             f'{tool_name} timed out waiting for the engine to start the task',
@@ -140,7 +150,8 @@ async def _start_task(client, args: Dict[str, Any], tool_name: str):
 
 
 async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
-    started, err = await _start_task(client, args, 'run_pipeline')
+    budget = CallBudget()
+    started, err = await _start_task(client, args, 'run_pipeline', budget)
     if err:
         return err
 
@@ -161,7 +172,7 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
         try:
             result = await asyncio.wait_for(
                 client.send(token, inputs),
-                timeout=DEFAULT_TIMEOUT_SECONDS,
+                timeout=budget.left(DEFAULT_TIMEOUT_SECONDS),
             )
         except asyncio.TimeoutError:
             return _timeout(
@@ -188,7 +199,8 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
     URL: query strings land in access logs, browser history, and ``Referer``
     headers. Unlike ``run_pipeline`` there is no inline-send path.
     """
-    started, err = await _start_task(client, args, 'run_dropper_pipe')
+    budget = CallBudget()
+    started, err = await _start_task(client, args, 'run_dropper_pipe', budget)
     if err:
         return err
 
@@ -204,7 +216,8 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
         # token back to terminate with -- tear it down rather than orphan it
         # until its ttl expires (or forever, when ttl is 0).
         try:
-            await asyncio.wait_for(client.terminate(token), timeout=DEFAULT_TIMEOUT_SECONDS)
+            cleanup_timeout = budget.left(DEFAULT_TIMEOUT_SECONDS, floor=CLEANUP_FLOOR_SECONDS)
+            await asyncio.wait_for(client.terminate(token), timeout=cleanup_timeout)
         except Exception:  # noqa: BLE001 - best-effort cleanup on an already-failed call
             pass
         return _bad(
