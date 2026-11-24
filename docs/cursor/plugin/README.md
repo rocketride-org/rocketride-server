@@ -53,7 +53,9 @@ The link adds the same server without the plugin. Use one or the other.
 ## Sign in
 
 You need no RocketRide API key. The first time Cursor connects to RocketRide,
-it asks you to sign in through your browser.
+it asks you to sign in through your browser. The
+[Cursor setup page](https://docs.rocketride.ai/connect/mcp/http/connect#cursor)
+has the same steps and more help.
 
 ## Cursor CLI
 
@@ -110,7 +112,7 @@ Cursor > Add to Team**.
 
 ## Help
 
-- Setup docs: [Connect a client](https://docs.rocketride.ai/connect/mcp/http/connect)
+- Setup docs: [Connect Cursor](https://docs.rocketride.ai/connect/mcp/http/connect#cursor)
 - Questions and bug reports: [GitHub issues](https://github.com/rocketride-org/rocketride-server/issues)
 - Privacy policy: [rocketride.ai/privacy-policy](https://rocketride.ai/privacy-policy)
 
