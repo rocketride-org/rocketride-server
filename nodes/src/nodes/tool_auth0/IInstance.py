@@ -188,6 +188,8 @@ class IInstance(IInstanceBase):
             data = sanitize.object_response(
                 self._client().request('get_user', identifier=user_id, params=_select_fields(fields))
             )
+            if data.get('user_id') != user_id:
+                raise Auth0Error('API_ERROR', 'Auth0 returned an invalid user response.')
             if 'blocked' in data and not isinstance(data['blocked'], bool):
                 raise Auth0Error('API_ERROR', 'Auth0 returned an invalid user response.')
             identities = data.get('identities', [])

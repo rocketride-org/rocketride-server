@@ -42,16 +42,16 @@ def test_example_pipeline_wires_auth0_to_agent_without_writes():
     agent = components['agent_rocketride_1']
     assert agent['config']['require_tool_call'] is False
     instructions = ' '.join(agent['config']['instructions'])
-    assert "Ask for the affected user's email and sign-in issue if they are missing" in instructions
+    assert 'Use only synthetic test accounts' in instructions
     assert all(name in instructions for name in ('search_users', 'get_user', 'get_user_blocks', 'get_user_logs'))
     assert agent['input'] == [{'lane': 'questions', 'from': 'chat_1'}]
     assert components['response_answers_1']['input'] == [{'lane': 'answers', 'from': 'agent_rocketride_1'}]
     for name, kind in (('llm_ollama_1', 'llm'), ('memory_internal_1', 'memory'), ('tool_auth0_1', 'tool')):
         assert components[name]['control'] == [{'classType': kind, 'from': 'agent_rocketride_1'}]
     config = components['tool_auth0_1']['config']
-    assert config['domain'] == '${ROCKETRIDE_AUTH0_DOMAIN}'
-    assert config['clientId'] == '${ROCKETRIDE_AUTH0_CLIENT_ID}'
-    assert config['clientSecret'] == '${ROCKETRIDE_AUTH0_CLIENT_SECRET}'
+    assert config['domain'] == '${ROCKETRIDE_AUTH0_DEMO_DOMAIN}'
+    assert config['clientId'] == '${ROCKETRIDE_AUTH0_DEMO_CLIENT_ID}'
+    assert config['clientSecret'] == '${ROCKETRIDE_AUTH0_DEMO_CLIENT_SECRET}'
     llm_config = components['llm_ollama_1']['config']
     assert llm_config['profile'] == 'custom'
     llm = llm_config['custom']

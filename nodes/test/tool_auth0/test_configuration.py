@@ -172,18 +172,18 @@ def test_credentials_are_not_taken_from_process_environment(node, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    'secret_name', ['ROCKETRIDE_AUTH0_CLIENT_SECRET', 'ROCKETRIDE_NEW_SECRET'], ids=['example', 'replacement']
+    'secret_name', ['ROCKETRIDE_AUTH0_DEMO_CLIENT_SECRET', 'ROCKETRIDE_NEW_SECRET'], ids=['example', 'replacement']
 )
 def test_example_plain_environment_references_configure_auth0(node, pipeline, secret_name):
     """Expand both the example and replacement references before client validation."""
     package, get_config, depends, _ = node
     example = json.loads((NODE / 'example.pipe').read_text(encoding='utf-8'))
-    if secret_name != 'ROCKETRIDE_AUTH0_CLIENT_SECRET':
+    if secret_name != 'ROCKETRIDE_AUTH0_DEMO_CLIENT_SECRET':
         auth0 = next(item['config'] for item in example['components'] if item['provider'] == 'tool_auth0')
         auth0['clientSecret'] = '${' + secret_name + '}'
     env = {
-        'ROCKETRIDE_AUTH0_DOMAIN': 'tenant.auth0.com',
-        'ROCKETRIDE_AUTH0_CLIENT_ID': 'read-id',
+        'ROCKETRIDE_AUTH0_DEMO_DOMAIN': 'tenant.auth0.com',
+        'ROCKETRIDE_AUTH0_DEMO_CLIENT_ID': 'read-id',
         secret_name: 'read-private',
     }
     resolved = pipeline.resolve_pipeline_env(example, env)

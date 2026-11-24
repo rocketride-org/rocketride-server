@@ -157,7 +157,7 @@ def test_registered_schemas(tool):
 def test_unsafe_identity_connections_rejected(tool, identities):
     """Reject malformed or oversized user identity connection data."""
     instance, client, _ = tool
-    client.request.return_value = {'identities': identities}
+    client.request.return_value = {'user_id': 'id', 'identities': identities}
     assert instance.get_user({'user_id': 'id'})['error_code'] == 'API_ERROR'
 
 
@@ -165,7 +165,7 @@ def test_legitimate_identity_connection_names_preserved(tool):
     """Preserve valid connection names without shortening them."""
     instance, client, _ = tool
     name = 'Username-Password-Authentication'
-    client.request.return_value = {'identities': [{'connection': name}]}
+    client.request.return_value = {'user_id': 'id', 'identities': [{'connection': name}]}
     assert instance.get_user({'user_id': 'id'})['connections'] == [name]
 
 
@@ -244,6 +244,16 @@ def test_user_fields_and_admin_block_default(tool):
             'include_fields': 'true',
         },
     )
+
+
+@pytest.mark.parametrize('profile', [{}, {'blocked': False}, {'user_id': ''}, {'user_id': 'other'}])
+def test_user_profile_must_identify_requested_user(tool, profile):
+    """Do not report block state for an empty, unidentified, or mismatched profile."""
+    instance, client, _ = tool
+    client.request.return_value = profile
+    result = instance.get_user({'user_id': 'u'})
+    assert result['success'] is False and result['error_code'] == 'API_ERROR'
+    assert 'blocked' not in result
 
 
 def test_logs_are_bounded_and_derived_from_allowlist(tool):
@@ -423,7 +433,7 @@ def test_credential_and_control_log_values_are_removed(tool, value):
 def test_profile_fields_are_bounded_and_control_characters_removed(tool):
     """Limit profile text and remove control characters before returning it."""
     instance, client, _ = tool
-    client.request.return_value = {'name': 'A\n\u202e' + 'x' * 301, 'email': 'a\x00' + 'b' * 300}
+    client.request.return_value = {'user_id': 'u', 'name': 'A\n\u202e' + 'x' * 301, 'email': 'a\x00' + 'b' * 300}
     result = instance.get_user({'user_id': 'u'})
     assert result['name'] == 'A' + 'x' * 299
     assert result['email'] == 'a' + 'b' * 253

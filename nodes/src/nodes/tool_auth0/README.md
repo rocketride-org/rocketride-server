@@ -20,7 +20,7 @@ Attach this node to an agent to expose five read-only tools. Each tool returns a
 
 `user_id` and `log_id` must be nonempty strings of at most 300 characters. Identifiers consisting only of whitespace, `.` or `..` are rejected. `email` is required, must be at most 254 characters, and accepts unquoted ASCII addresses. Limits must be integers within the stated range. A successful search with no matches returns an empty list and count zero.
 
-Search entries contain `user_id`, `email`, `name`, and `email_verified`. Profile names and email addresses are bounded and control characters are removed. `get_user` additionally returns `blocked`, `last_login`, `logins_count`, and `connections`; missing optional profile values are null, and an absent `blocked` is false. Each user log contains `log_id`, `date`, `type`, sanitized `description`, `connection`, and `client_name`. `get_log_event` adds `user_id` and `diagnostics`. Each block contains a redacted `identifier` and a `connection`.
+Search entries contain `user_id`, `email`, `name`, and `email_verified`. Profile names and email addresses are bounded and control characters are removed. `get_user` requires a profile identifying the requested user and additionally returns `blocked`, `last_login`, `logins_count`, and `connections`; missing optional profile values are null, and an absent `blocked` is false. Each user log contains `log_id`, `date`, `type`, sanitized `description`, `connection`, and `client_name`. `get_log_event` adds `user_id` and `diagnostics`. Each block contains a redacted `identifier` and a `connection`.
 
 Connection names come from at most 100 identities and are limited to 300 printable characters. Tool arguments must be objects with only the properties listed in the tool schema. Malformed arguments return `INVALID_INPUT`.
 
@@ -52,11 +52,13 @@ Authorize a read-only machine-to-machine application for the Auth0 Management AP
 
 An agent investigating a sign-in failure can search for an exact email, get the matching profile, inspect recent logs and an individual event, then check brute-force blocks. It should distinguish an administrative block from a brute-force record and avoid claiming that a block was removed without an approved recovery action.
 
-The co-located `example.pipe` uses a chat source, RocketRide Wave agent, Ollama model, internal memory, Auth0 tool, and answer response. The model receives the conversation, including the user's email, and summaries of selected Auth0 profile, log, and block data in later prompts. Use a self-hosted Ollama server and a model your organization has approved to process this tenant data.
+The co-located `example.pipe` is a synthetic-data demo. Its chat source is shareable: anyone with access to its endpoint and public run key can submit lookups using the configured Auth0 credentials. The pipeline does not authenticate individual callers. Connect it only to a dedicated test tenant containing synthetic accounts, and never enter real user data. Agent instructions are not an access control. For live tenant data, replace the shareable entry point with an independently authenticated and authorized helpdesk interface, restrict access to authorized staff, and protect the pipeline endpoint and run key before configuring live credentials.
+
+The demo uses a chat source, RocketRide Wave agent, Ollama model, internal memory, Auth0 tool, and answer response. The model receives the conversation, including the email, and summaries of selected Auth0 profile, log, and block data in later prompts. Use a self-hosted Ollama server and a model your organization has approved for the data sent to it.
 
 1. Open the pipeline with a RocketRide engine that includes this node. In the Ollama node's **Custom** profile, set **LLM URL** to the approved Ollama server and **Model** to a model installed on that server. The example ships with both fields empty. If Ollama runs on the same host as the RocketRide engine, use its loopback address.
-2. Configure `ROCKETRIDE_AUTH0_DOMAIN`, `ROCKETRIDE_AUTH0_CLIENT_ID`, and `ROCKETRIDE_AUTH0_CLIENT_SECRET` in RocketRide's environment settings for the tenant's read-only Auth0 application.
-3. Verify the endpoint and model settings with sample data before entering a real user's email.
+2. Configure `ROCKETRIDE_AUTH0_DEMO_DOMAIN`, `ROCKETRIDE_AUTH0_DEMO_CLIENT_ID`, and `ROCKETRIDE_AUTH0_DEMO_CLIENT_SECRET` in RocketRide's environment settings for a read-only application in the synthetic test tenant.
+3. Verify the endpoint and model settings using only synthetic accounts and events.
 
 ### Errors and retries
 

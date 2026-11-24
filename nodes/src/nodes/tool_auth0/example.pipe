@@ -3,7 +3,7 @@
     {
       "id": "chat_1",
       "provider": "chat",
-      "name": "Helpdesk chat",
+      "name": "Synthetic helpdesk demo",
       "config": {
         "hideForm": true,
         "mode": "Source",
@@ -30,7 +30,7 @@
       "config": {
         "agent_description": "Investigates Auth0 sign-in problems using read-only evidence.",
         "instructions": [
-          "Ask for the affected user's email and sign-in issue if they are missing.",
+          "Use only synthetic test accounts and synthetic sign-in issues. Ask for the test account email and issue if they are missing.",
           "Use search_users with the email's original capitalization. If none or several match, explain and ask for clarification as needed.",
           "For the selected account use get_user, get_user_blocks, and get_user_logs. Use get_log_event when more detail is needed.",
           "Base the diagnosis on returned evidence and distinguish administrative blocks from brute-force protection. Explain missing data and errors rather than guessing.",
@@ -119,9 +119,9 @@
       "provider": "tool_auth0",
       "name": "Auth0",
       "config": {
-        "clientId": "${ROCKETRIDE_AUTH0_CLIENT_ID}",
-        "clientSecret": "${ROCKETRIDE_AUTH0_CLIENT_SECRET}",
-        "domain": "${ROCKETRIDE_AUTH0_DOMAIN}",
+        "clientId": "${ROCKETRIDE_AUTH0_DEMO_CLIENT_ID}",
+        "clientSecret": "${ROCKETRIDE_AUTH0_DEMO_CLIENT_SECRET}",
+        "domain": "${ROCKETRIDE_AUTH0_DEMO_DOMAIN}",
         "type": "tool_auth0",
         "name": "Auth0"
       },
