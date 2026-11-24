@@ -84,6 +84,7 @@ def _server() -> TaskServer:
     ts._reserved_ports = set()
     ts._store_instance = None
     ts._config = {}
+    ts._launcher = None
     ts._server = MagicMock()
     ts.debug_message = MagicMock()
     ts.broadcast_server_event = AsyncMock()

@@ -38,7 +38,7 @@ this task neither installs nor imports torch and the other tensor runtimes
 is the only flag that keeps torch off a task; a hosted engine without a model
 server loads it itself.
 
-The engine passes them as it starts the task (task_engine). A pipeline's own
+The engine passes them as it starts the task (ai.modules.task.launcher). A pipeline's own
 args can add one, which only makes the task stricter. Standard library only: nodes and ``_depends_hooks.py`` files import this,
 and importing ``ai`` or ``ai.common`` would run ``depends()``.
 """

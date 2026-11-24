@@ -6,7 +6,8 @@ resources during task execution. Metrics are sampled at configurable intervals
 and accumulated for billing and monitoring purposes.
 
 Features:
-- Per-task CPU and memory tracking using psutil
+- Per-task CPU and memory tracking using psutil, or a runtime's own sampler
+  (a container's ``docker stats``) when the task is not a local process
 - Monitors entire process tree (parent + all children recursively)
 - Per-process GPU memory tracking using nvidia-ml-py (NVIDIA GPUs only)
 - Thread-safe metrics accumulation via asyncio
@@ -14,6 +15,7 @@ Features:
 
 Classes:
     TaskMetrics: Main metrics collector and accumulator
+    MetricsSampler: What a runtime supplies when there is no local PID
 """
 
 import asyncio
@@ -22,7 +24,7 @@ import time
 import uuid
 import psutil
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, TYPE_CHECKING, Tuple
 from rocketlib import debug, error
 from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
@@ -245,6 +247,23 @@ class UsageSink:
         return self._unconfirmed
 
 
+class MetricsSampler(Protocol):
+    """CPU and memory of a task that is not a local process (a container)."""
+
+    # The shortest interval the sampler can serve; a docker stats call takes about a second
+    min_interval: float
+
+    async def sample(self) -> Optional[Tuple[float, int]]:
+        """
+        One reading.
+
+        Returns:
+            ``(cpu_percent, memory_bytes)`` — CPU percent summed over cores, the
+            way psutil reports it — or None when nothing could be read.
+        """
+        ...
+
+
 class TaskMetrics:
     """
     Real-time metrics collector for task resource utilization.
@@ -255,9 +274,10 @@ class TaskMetrics:
     background asyncio task and updated atomically.
 
     Attributes:
-        pid (int): Process ID to monitor (includes all children)
+        pid (Optional[int]): Process ID to monitor (includes all children), or None with a sampler
         sample_interval (float): Seconds between samples (default: 1.0)
-        _process (psutil.Process): Process handle
+        _process (Optional[psutil.Process]): Process handle, or None with a sampler
+        _sampler (Optional[MetricsSampler]): The runtime's sampler when there is no local PID
         _monitoring_task (Optional[asyncio.Task]): Background monitoring task
         _stop_monitoring (asyncio.Event): Signal to stop monitoring
         _metrics_lock (asyncio.Lock): Thread-safe metrics access
@@ -267,8 +287,8 @@ class TaskMetrics:
 
     def __init__(
         self,
-        pid: int,
-        task_status: 'TASK_STATUS',
+        pid: Optional[int] = None,
+        task_status: 'TASK_STATUS' = None,
         task_id: Optional[str] = None,
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -281,16 +301,17 @@ class TaskMetrics:
         attribute: Optional[Callable[[int], Optional['TraceUsage']]] = None,
         usage_sink: Optional['UsageSink'] = None,
         debit_remainder: bool = True,
+        sampler: Optional[MetricsSampler] = None,
     ):
         """
-        Initialize metrics collector for a process tree.
+        Initialize metrics collector for a process tree, or for a runtime's sampler.
 
         Monitors the specified process and all its child processes (recursive).
         Metrics are aggregated across the entire process tree and written
         directly into the provided task status (updates metrics and tokens in-place).
 
         Args:
-            pid: Root process ID to monitor (includes all children)
+            pid: Root process ID to monitor (includes all children); give this or ``sampler``
             task_status: Reference to TASK_STATUS to update in-place (metrics and tokens fields)
             task_id: Task identifier for billing reports
             client_id: Account/client identifier for billing reports
@@ -303,10 +324,15 @@ class TaskMetrics:
                 used beyond what its callers were attributed) is debited to
                 the identity above. False on a shared engine, which has no
                 single owner to charge (see ``_report_to_billing_system``).
+            sampler: CPU and memory from the runtime when the task has no local PID
+                     (a container); the GPU half then reads zero
 
         Raises:
             psutil.NoSuchProcess: If process does not exist
+            ValueError: If neither or both of ``pid`` and ``sampler`` are given
         """
+        if (pid is None) == (sampler is None):
+            raise ValueError('TaskMetrics needs exactly one of pid and sampler')
         self.pid = pid
         self.task_id = task_id
         self.debit_remainder = debit_remainder
@@ -322,6 +348,9 @@ class TaskMetrics:
         self.pipeline_name = pipeline_name or ''
         self.source_name = source_name or ''
         self.sample_interval = sample_interval if sample_interval is not None else CONST_METRICS_SAMPLE_INTERVAL
+        # A sampler that cannot serve the interval sets its own minimum
+        if sampler is not None:
+            self.sample_interval = max(self.sample_interval, sampler.min_interval)
         self._on_update_callback = on_update_callback
 
         # Per-trace accumulators: traceId -> the owning control and its
@@ -344,8 +373,9 @@ class TaskMetrics:
         # later report brings one to zero by writing a zero replacement
         self._debited: set = set()
 
-        # Process handle
-        self._process = psutil.Process(pid)
+        # Process handle, or the runtime's sampler
+        self._sampler = sampler
+        self._process = psutil.Process(pid) if pid is not None else None
 
         # CPU core count for normalization
         self._cpu_count = psutil.cpu_count(logical=True) or 1
@@ -506,6 +536,20 @@ class TaskMetrics:
             # Process died or no access
             pass
 
+    def _apply_sampler_reading(self, reading: Optional[Tuple[float, int]]) -> None:
+        """
+        Record one reading from the runtime's sampler, as _sample_cpu_memory does for psutil.
+
+        Args:
+            reading: ``(cpu_percent, memory_bytes)``, or None to keep the last values.
+        """
+        if reading is None:
+            return
+        cpu_percent, memory_bytes = reading
+        self._status.metrics.cpu_percent = cpu_percent / self._cpu_count if self._cpu_count > 0 else cpu_percent
+        self._status.metrics.cpu_memory_mb = memory_bytes / (1024 * 1024)
+        self._cpu_percent_raw = cpu_percent
+
     def _sample_gpu(self) -> None:
         """
         Sample current GPU memory usage (per-process tree, across all GPUs).
@@ -517,8 +561,9 @@ class TaskMetrics:
 
         If pynvml is not available or fails, GPU memory is set to 0 (no GPU billing).
         """
-        if not self._pynvml_available:
-            # No pynvml - GPU billing disabled (warning already logged at init)
+        if not self._pynvml_available or self._process is None:
+            # No pynvml - GPU billing disabled (warning already logged at init).
+            # No local PID (a container) - nothing to match against NVML's processes.
             self._status.metrics.gpu_memory_mb = 0.0
             return
 
@@ -861,26 +906,37 @@ class TaskMetrics:
         last_sample_time = time.time()
 
         # Initial CPU sample (requires two samples for percentage)
-        try:
-            self._process.cpu_percent(interval=None)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return
+        if self._process is not None:
+            try:
+                self._process.cpu_percent(interval=None)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                return
 
         # Wait one interval before first real sample
         await asyncio.sleep(self.sample_interval)
 
         while not self._stop_monitoring.is_set():
             current_time = time.time()
-            interval = current_time - last_sample_time
 
             try:
+                # A runtime's sampler can take a second; read it before taking the lock
+                reading = await self._sampler.sample() if self._sampler is not None else None
+                # The interval ends when the reading arrives, so the read itself is counted
+                current_time = time.time()
+                interval = current_time - last_sample_time
+
                 async with self._metrics_lock:
                     # Sample current metrics
-                    self._sample_cpu_memory()
+                    if self._sampler is not None:
+                        self._apply_sampler_reading(reading)
+                    else:
+                        self._sample_cpu_memory()
                     self._sample_gpu()
 
-                    # Accumulate into totals
-                    self._accumulate_sample(interval)
+                    # Accumulate into totals; a sampler with no reading left the last
+                    # values in place, which are not billed again
+                    if self._sampler is None or reading is not None:
+                        self._accumulate_sample(interval)
 
                     # Check if 5 minutes have elapsed since last billing report
                     time_since_last_report = current_time - self._last_report_time
