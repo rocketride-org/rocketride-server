@@ -179,6 +179,30 @@ test('the index names the archive and lists only the packaged nodes, with the di
 	);
 });
 
+test('packaged nodes that import each other are refused, and no index is written', async () => {
+	// A run unpacks a node after the nodes it imports; a cycle has no such order
+	const { root, sync } = makeTree();
+	fs.writeFileSync(path.join(root, 'src', 'embed_y', 'IGlobal.py'), 'from nodes.llm_x import helper\n');
+
+	await assert.rejects(syncNodes({}, sync), /Nodes import each other: embed_y -> llm_x -> embed_y\./);
+
+	assert.ok(!fs.existsSync(path.join(root, 'dist', 'nodes', 'index.json')));
+});
+
+test('a node may import a node that imports a third', async () => {
+	const { root, sync } = makeTree();
+	const names = [...sync.srcNodeDirs.keys(), 'tool_z'];
+	sync.srcNodeDirs = new Map(names.map((name) => [name, path.join(root, 'src')]));
+	fs.mkdirSync(path.join(root, 'src', 'tool_z'));
+	fs.writeFileSync(path.join(root, 'src', 'tool_z', 'services.json'), '{"protocol": "tool_z://"}');
+	const imports = 'from nodes.llm_x import a\nfrom nodes.embed_y import b\n';
+	fs.writeFileSync(path.join(root, 'src', 'tool_z', 'IGlobal.py'), imports);
+
+	const packages = await syncNodes({}, sync);
+
+	assert.deepStrictEqual(packages.tool_z.requires, ['embed_y', 'llm_x']);
+});
+
 test('the index contract is the one the engine reads', () => {
 	const constants = fs.readFileSync(path.join(__dirname, '../../packages/ai/src/ai/constants.py'), 'utf8');
 	assert.strictEqual(Number(/^CONST_NODES_CONTRACT = (\d+)$/m.exec(constants)[1]), NODES_CONTRACT);

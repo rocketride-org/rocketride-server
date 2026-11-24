@@ -189,7 +189,38 @@ async function packageNodes(stats, { srcNodeDirs, distDir, libraryOf, copyFile, 
 	for (const entry of Object.values(packages)) {
 		entry.requires = entry.requires.filter((other) => other in packages);
 	}
+	// A run unpacks a node only after the nodes it imports (node_store._with_requires), so a
+	// failed unpack never leaves one on disk without them. Nodes that import each other have no
+	// such order: refused here, where the author of the import sees it
+	const cycle = requiresCycle(packages);
+	if (cycle) {
+		throw new Error(
+			`Nodes import each other: ${cycle.join(' -> ')}. ` +
+				'Move what they share into one of them, or into a node both import.'
+		);
+	}
 	return { zip, packages, sources };
+}
+
+// The first cycle among the packaged nodes' `requires`, as the names along it (the first
+// repeated at the end), or null when every node can be placed after the nodes it imports
+function requiresCycle(packages) {
+	const done = new Set();
+	const visit = (name, trail) => {
+		if (trail.includes(name)) return [...trail.slice(trail.indexOf(name)), name];
+		if (done.has(name)) return null;
+		for (const other of packages[name].requires) {
+			const cycle = visit(other, [...trail, name]);
+			if (cycle) return cycle;
+		}
+		done.add(name);
+		return null;
+	};
+	for (const name of Object.keys(packages).sort()) {
+		const cycle = visit(name, []);
+		if (cycle) return cycle;
+	}
+	return null;
 }
 
 // Removes what this build no longer ships: a file an older build left in the server, another
