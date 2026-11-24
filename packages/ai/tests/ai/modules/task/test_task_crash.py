@@ -1,15 +1,14 @@
 """A real eaas.py runs a pipeline whose Python node ends its task process, or that eaas.py stops on request.
 
-Each server writes the node, under a name of its own, where the builder puts a
-real node, and removes it when it stops. The name starts with `_`, which the
-node contract tests skip.
+The node is `test_crash` (`nodes/src/nodes/test_crash`): a real node that ends
+its task process the way the text it receives asks, hidden from the catalog
+and refused on a hosted server. The builder places it with the other nodes,
+so the test writes nothing into the source tree.
 """
 
 import asyncio
 import contextlib
-import json
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -23,59 +22,12 @@ from ai.constants import CONST_TASK_DATA_PATH
 from rocketride import TASK_STATE, RocketRideClient
 
 _SERVER_DIR = Path(sys.executable).resolve().parent
-_SOURCE_NODES = Path(__file__).resolve().parents[6] / 'nodes' / 'src' / 'nodes'
+_PROVIDER = 'test_crash'
 _APIKEY = 'MYAPIKEY'
 
 pytestmark = pytest.mark.skipif(
     not (_SERVER_DIR / 'ai' / 'eaas.py').is_file(), reason='needs the built server next to the engine'
 )
-
-_SERVICES = {
-    'title': 'Crash Probe',
-    'classType': ['text'],
-    'capabilities': [],
-    'register': 'filter',
-    'node': 'python',
-    'description': ['Ends its task process the way the text asks.'],
-    'documentation': 'https://docs.rocketride.ai',
-    'lanes': {'text': ['text']},
-    'propertyDefinitions': {},
-    'properties': [],
-}
-
-_IGLOBAL = """from rocketlib import IGlobalBase
-
-
-class IGlobal(IGlobalBase):
-    pass
-"""
-
-# A plain read of address 0: ctypes.string_at(0) would only raise OSError on
-# Windows, where ctypes guards its foreign calls. A fast fail and SIGKILL skip
-# every handler in the process; exit(-1) is no crash; a SIGTERM is a cancel
-# the server did not ask for.
-_IINSTANCE = """import ctypes
-import os
-import signal
-
-from rocketlib import IInstanceBase
-
-
-class IInstance(IInstanceBase):
-    def writeText(self, text: str):
-        if text == 'segv':
-            ctypes.c_int.from_address(0).value
-        elif text == 'abort':
-            os.abort()
-        elif text == 'failfast':
-            ctypes.windll.kernel32.RaiseFailFastException(None, None, 0)
-        elif text == 'sigkill':
-            os.kill(os.getpid(), signal.SIGKILL)
-        elif text == 'exit':
-            os._exit(-1)
-        elif text == 'sigterm':
-            os.kill(os.getpid(), signal.SIGTERM)
-"""
 
 
 def _pipeline(provider: str) -> dict:
@@ -99,15 +51,6 @@ def _pipeline(provider: str) -> dict:
     }
 
 
-def _write_node(node: Path, provider: str) -> None:
-    node.mkdir(exist_ok=True)  # only a killed run with the same PID leaves one
-    services = dict(_SERVICES, protocol=f'{provider}://', prefix=provider, path=f'nodes._{provider}')
-    (node / '__init__.py').write_text('# Empty by contract: the engine loads IGlobal and IInstance as submodules.\n')
-    (node / 'services.json').write_text(json.dumps(services))
-    (node / 'IGlobal.py').write_text(_IGLOBAL)
-    (node / 'IInstance.py').write_text(_IINSTANCE)
-
-
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
@@ -123,51 +66,41 @@ def _no_core_file() -> None:
 
 @pytest.fixture(scope='module', params=[False, True], ids=['no-dumps', 'dumps'])
 def server(request, tmp_path_factory):
-    """A real server with the crash node, without and with --dumps."""
+    """A real server, without and with --dumps; its pipelines name the test_crash node."""
     dumps = request.param
     workspace = tmp_path_factory.mktemp('crash-node')
-    # Its own name: xdist may run both servers at once, in two processes
-    provider = f'crash_probe_{os.getpid()}_{int(dumps)}'
-    # Where the builder keeps a real node: its source, and the copy nodes:sync makes in dist/server/nodes
-    nodes = [d / f'_{provider}' for d in (_SOURCE_NODES, _SERVER_DIR / 'nodes')]
-    try:
-        for node in nodes:
-            _write_node(node, provider)
 
-        port = _free_port()
-        # Task ports too, apart from those of the builder's test servers, which start at 20000
-        args = [sys.executable, 'ai/eaas.py', f'--port={port}', f'--base_port={_free_port()}']
-        if dumps:
-            args.append('--dumps')
+    port = _free_port()
+    # Task ports too, apart from those of the builder's test servers, which start at 20000
+    args = [sys.executable, 'ai/eaas.py', f'--port={port}', f'--base_port={_free_port()}']
+    if dumps:
+        args.append('--dumps')
 
-        # Its own crash database, so no other engine's dump reaches the test task
-        env = dict(os.environ, RR_APIKEY=_APIKEY, ROCKETRIDE_CRASHDB_DIR=str(workspace / 'crashdb'))
-        with open(workspace / 'server.log', 'wb') as log:
-            proc = subprocess.Popen(
-                args,
-                cwd=_SERVER_DIR,
-                env=env,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                preexec_fn=None if os.name == 'nt' else _no_core_file,
-            )
+    # Its own crash database, so no other engine's dump reaches the test task
+    env = dict(os.environ, RR_APIKEY=_APIKEY, ROCKETRIDE_CRASHDB_DIR=str(workspace / 'crashdb'))
+    with open(workspace / 'server.log', 'wb') as log:
+        proc = subprocess.Popen(
+            args,
+            cwd=_SERVER_DIR,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            preexec_fn=None if os.name == 'nt' else _no_core_file,
+        )
+        try:
+            yield {
+                'uri': f'http://127.0.0.1:{port}',
+                'provider': _PROVIDER,
+                'dumps': dumps,
+                'log': workspace / 'server.log',
+            }
+        finally:
+            proc.terminate()
             try:
-                yield {
-                    'uri': f'http://127.0.0.1:{port}',
-                    'provider': provider,
-                    'dumps': dumps,
-                    'log': workspace / 'server.log',
-                }
-            finally:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-    finally:
-        for node in nodes:
-            shutil.rmtree(node, ignore_errors=True)
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
 
 
 async def _connect(uri: str, on_event) -> RocketRideClient:

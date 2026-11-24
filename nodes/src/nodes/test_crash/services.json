@@ -1,0 +1,81 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Test Crash",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "test_crash://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "internal" keeps the node out of the catalog (the pipeline
+	//		builder never offers it) while a pipeline that names it still loads
+	//		and resolves it: it exists for the crash tests. "experimental" marks
+	//		it as not production-ready. "nosaas" refuses it on a hosted server:
+	//		it ends its task process on request, which on a shared engine would
+	//		end it for every caller.
+	//
+	"capabilities": ["internal", "experimental", "nosaas"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.test_crash",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "test_crash",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A test node that ends its own task process the way the incoming text asks: segv, abort, ", "failfast, sigkill, exit or sigterm. Used by the tests of how the server reports a task that ", "dies; never shown in the catalog and refused on a hosted server."],
+	//
+	// Optional:
+	//		Where the node's documentation lives
+	//
+	"documentation": "https://docs.rocketride.ai",
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["text"]
+	},
+	//
+	// Optional:
+	//		Local property definitions. The node has no configuration.
+	//
+	"propertyDefinitions": {},
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": []
+}

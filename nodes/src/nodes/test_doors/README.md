@@ -1,8 +1,8 @@
-# doors_probe
+# test_doors
 
 A RocketRide test node that exercises every door a node reads through and
 reports what each one answered. It exists for the rung and boundary tests
-(`nodes/test/doors_probe`) and is never offered in the pipeline builder.
+(`nodes/test/test_doors`) and is never offered in the pipeline builder.
 
 ## What it does
 

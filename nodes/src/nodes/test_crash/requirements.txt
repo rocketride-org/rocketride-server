@@ -1,0 +1,4 @@
+# Test Crash node Requirements
+#
+# This node uses only rocketlib and the Python standard library (ctypes, os, signal).
+# No external dependencies are required.
