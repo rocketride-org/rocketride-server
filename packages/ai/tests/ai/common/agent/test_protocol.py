@@ -1638,25 +1638,35 @@ def test_a_long_reply_is_read_in_linear_time(make_reply, count):
 
     Alternate sizes on the same worker and compare medians. Thread CPU time excludes
     scheduling delays from other CI workers; a generous 8x ratio allows normal noise.
-    The floor keeps sub-millisecond samples from determining the ratio. Pytest's suite
-    timeout remains the watchdog for a parser that never returns.
+    Batch enough calls to span several Windows CPU-clock ticks (which can be 15.6 ms),
+    using the same repetition count for both sizes. Pytest's suite timeout remains
+    the watchdog for a parser that never returns.
     """
     from statistics import median
     from time import thread_time
 
-    replies = [make_reply(count // 4), make_reply(count)]
-    samples = [[], []]
-    for _ in range(3):
-        for index, raw in enumerate(replies):
+    def measure(raw, repetitions):
+        started = thread_time()
+        for _ in range(repetitions):
             ask, _feedback = scripted(raw)
-            started = thread_time()
             try:
                 reply.run_model_turn(ask)
             except ValueError:
                 pass
-            samples[index].append(thread_time() - started)
+        return thread_time() - started
+
+    replies = [make_reply(count // 4), make_reply(count)]
+    for raw in replies:
+        measure(raw, 1)
+    repetitions = 1
+    while measure(replies[0], repetitions) < 0.125:
+        repetitions *= 2
+    samples = [[], []]
+    for _ in range(3):
+        for index, raw in enumerate(replies):
+            samples[index].append(measure(raw, repetitions))
     small, large = (median(sample) for sample in samples)
-    assert large < 8 * max(small, 0.001), (small, large)
+    assert large < 8 * small, (small, large)
 
 
 @pytest.mark.parametrize('prefix', ['Sets look like {1, 2}.\n', 'Example: {"x": 1}\n', '{curly} braces.\n'])
