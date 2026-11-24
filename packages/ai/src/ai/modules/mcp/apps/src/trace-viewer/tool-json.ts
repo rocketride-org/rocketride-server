@@ -20,18 +20,37 @@ export class ToolError extends Error {
 
 export function friendlyToolError(payload: Record<string, unknown>): string {
 	if (payload.error_type === 'TraceExpired') {
-		return 'This trace has aged out of the DVR retention window (7 days dev / 30 days deploy).';
+		return 'This trace has expired. Run the pipeline again to record a new one.';
 	}
 	if (payload.error_type === 'NotFound') {
 		return 'No recorded trace was found at this position.';
 	}
-	return (typeof payload.message === 'string' && payload.message) || 'tool call failed';
+	return (typeof payload.message === 'string' && payload.message) || 'The trace could not be read. Try again.';
+}
+
+function tryParseJson(text: string | undefined): Record<string, unknown> | null {
+	if (!text) return null;
+	try {
+		const value: unknown = JSON.parse(text);
+		return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+	} catch {
+		return null;
+	}
 }
 
 export function parseToolJson(result: unknown): Record<string, unknown> {
 	const res = result as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
 	const text = (res.content ?? []).find((c) => c.type === 'text')?.text;
-	if (res.isError) throw new ToolError(text || 'tool call failed');
+	if (res.isError) {
+		// The server also sets isError on every in-band failure ({ok: false, ...}),
+		// so read that envelope for its plain message instead of showing raw JSON.
+		const envelope = tryParseJson(text);
+		if (envelope && envelope.ok === false) {
+			throw new ToolError(friendlyToolError(envelope), typeof envelope.error_type === 'string' ? envelope.error_type : undefined);
+		}
+		// Raw failure text (a bridge error, JSON) is not for the card.
+		throw new ToolError('The trace could not be read. Try again.');
+	}
 	if (!text) throw new ToolError('malformed tool result (missing text content)');
 	let payload: Record<string, unknown>;
 	try {

@@ -24,7 +24,7 @@ _UNSET = object()
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH', 'ROCKETRIDE_AUTH'):
+    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_UI_DOMAIN', 'MCP_DEV_NO_AUTH', 'ROCKETRIDE_AUTH'):
         monkeypatch.delenv(name, raising=False)
     # The shared client still needs a credential; the URI is what is under test.
     monkeypatch.setenv('ROCKETRIDE_APIKEY', 'svc-key')
@@ -47,6 +47,7 @@ def _init(monkeypatch, fake_web_server, *, host=_UNSET, port=_UNSET, config=None
     def _capture(engine_factory, task_registry=None, **kwargs):
         captured['factory'] = engine_factory
         captured['engine_origin'] = kwargs.get('engine_origin')
+        captured['ui_domain'] = kwargs.get('ui_domain')
         return real_build(engine_factory, task_registry, **kwargs)
 
     monkeypatch.setattr(mcp_module, 'build_mcp_server', _capture)
@@ -312,7 +313,7 @@ async def test_widget_csp_uses_resolved_public_origin(monkeypatch, fake_web_serv
     async with Client(server) as client:
         listed = await client.list_resources()
     dropper = next(r for r in listed.resources if str(r.uri) == apps.DROPPER_URI)
-    assert dropper.meta == {'ui': {'csp': {'connectDomains': ['https://api.rocketride.ai']}}}
+    assert dropper.meta == {'ui': {'csp': {'connectDomains': ['https://api.rocketride.ai'], 'resourceDomains': []}}}
 
 
 @pytest.mark.asyncio
@@ -345,6 +346,58 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
     assert result['ok'] is True, result
     assert result['upload_url'].startswith(f'{origin}/task/data?auth=')
     assert result['dropper_url'].startswith(f'{origin}/dropper?auth=')
+
+
+# ---------------------------------------------------------------------------
+# Widget domain: only from MCP_UI_DOMAIN
+# ---------------------------------------------------------------------------
+
+
+def _domain_warnings(caplog):
+    return [
+        r.getMessage() for r in caplog.records if 'widget domain' in r.getMessage() and r.levelno == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize(
+    ('env', 'domain'),
+    [
+        ({'MCP_UI_DOMAIN': ' https://Widgets.Example.Test/ '}, 'https://widgets.example.test'),
+        ({'MCP_UI_DOMAIN': 'http://127.0.0.1:8080'}, 'http://127.0.0.1:8080'),  # http on loopback
+        ({'MCP_UI_DOMAIN': 'https://[::1]'}, 'https://[::1]'),
+        ({'MCP_RESOURCE_IDENTIFIER': 'https://api.example.test/mcp'}, None),  # no fallback
+        ({}, None),
+    ],
+)
+def test_ui_domain_comes_only_from_mcp_ui_domain(monkeypatch, fake_web_server, caplog, env, domain):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    assert captured['ui_domain'] == domain
+    assert not _domain_warnings(caplog)
+
+
+@pytest.mark.parametrize(
+    'value',
+    [
+        'http://widgets.example.test',  # cleartext off loopback
+        'https://widgets.example.test/app',  # a path, not an origin
+        'https:/user:secret@widgets.example.test',  # parses as a path, so nothing strips the credential
+        'https://[::1',  # unparsable: must not raise
+        'https://widgets example.test',  # urlsplit accepts a space in the host
+        'https://[::1%eth0]',  # a scoped IPv6 address: browsers reject it
+        'https://256.256.256.256',  # ends in a number, so a browser reads it as a bad IPv4 address
+    ],
+)
+def test_invalid_mcp_ui_domain_is_ignored_with_one_warning(monkeypatch, fake_web_server, caplog, value):
+    monkeypatch.setenv('MCP_UI_DOMAIN', value)
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    assert captured['ui_domain'] is None
+    warnings = _domain_warnings(caplog)
+    assert len(warnings) == 1 and 'MCP_UI_DOMAIN' in warnings[0], warnings
+    assert value.strip() not in warnings[0] and 'secret' not in warnings[0]  # the variable is named, never the value
 
 
 # ---------------------------------------------------------------------------

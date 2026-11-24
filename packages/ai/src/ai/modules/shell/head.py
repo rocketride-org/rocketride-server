@@ -72,6 +72,7 @@ _REPLACED = (
 )
 _HEAD_OPEN = re.compile(r'<head\b[^>]*>', re.IGNORECASE)
 _CHARSET = re.compile(r'<meta\b[^>]*?(?:\bcharset\s*=|\bhttp-equiv\s*=\s*["\']?content-type\b)[^>]*>', re.IGNORECASE)
+_VIEWPORT = _tag_with('meta', 'name', 'viewport')
 _HEAD_SPAN = re.compile(r'<head\b[^>]*>.*?</head\s*>', _FLAGS)
 _BODY_OPEN = re.compile(r'<body\b', re.IGNORECASE)
 _HTML_OPEN = re.compile(r'<html\b[^>]*>', re.IGNORECASE)
@@ -164,13 +165,15 @@ def inject_head(
     noindex: bool = False,
     jsonld: Iterable[Mapping[str, Any]] = (),
     extra: Iterable[str] = (),
+    responsive_preloads: Iterable[str] = (),
 ) -> str:
     """Return ``document`` with the page's head metadata in place.
 
     Existing tags of the same kinds are removed first; the new block goes
     right after the head's charset declaration, which must stay within the
     document's first 1024 bytes, else right after <head> (or after <html>,
-    or at the very start). Every value is HTML-escaped, except ``extra``.
+    or at the very start). Responsive preloads go after the viewport. Tag
+    strings supplied in ``extra`` and ``responsive_preloads`` are already escaped.
 
     Args:
         document: The HTML document (the shell's, or a page snapshot).
@@ -181,6 +184,7 @@ def inject_head(
         jsonld: JSON-LD nodes, one ``<script type="application/ld+json">``
             each (``jsonld_script``).
         extra: Complete, already-escaped tags, appended to the block verbatim.
+        responsive_preloads: Complete tags that depend on the document viewport.
 
     Returns:
         The document with the new block in its head.
@@ -216,7 +220,13 @@ def inject_head(
     parts.extend(extra)
     block = ''.join(parts)
     at = _insertion_point(document, start, start + len(region))
-    return document[:at] + block + document[at:]
+    document = document[:at] + block + document[at:]
+    preload_block = ''.join(responsive_preloads)
+    if preload_block:
+        viewport = _VIEWPORT.search(document, start, start + len(region) + len(block))
+        preload_at = viewport.end() if viewport else at + len(block)
+        document = document[:preload_at] + preload_block + document[preload_at:]
+    return document
 
 
 def _insertion_point(document: str, head_start: int, head_end: int) -> int:
