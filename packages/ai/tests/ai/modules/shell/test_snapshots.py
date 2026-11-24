@@ -197,6 +197,58 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
     assert human.headers['cache-control'] == 'private, no-cache'
 
 
+def test_home_shell_preloads_only_the_matching_versioned_hero(shell_root):
+    (shell_root / 'index.html').write_text(
+        '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>'
+        f'<body>{SHELL_BODY}</body></html>'
+    )
+    hint = {
+        'mobile': 'static/image/hero-mobile.abc123.webp',
+        'desktop': 'static/image/hero.abc456.webp',
+        'maxMobileWidth': 1024,
+    }
+    home = _page('/', data=(), extra={'heroImagePreload': hint})
+    _seed()
+    _serve(home, _page(extra=home.extra))
+    client = _client()
+
+    human = client.get('/', headers={'User-Agent': BROWSER})
+    assert human.text.index('name="viewport"') < human.text.index('rel="preload"')
+    assert (
+        '<link rel="preload" as="image" type="image/webp" fetchpriority="high" '
+        'href="/apps/rocketride.home/v3/static/image/hero-mobile.abc123.webp" media="(max-width: 1024px)">'
+    ) in human.text
+    assert (
+        '<link rel="preload" as="image" type="image/webp" fetchpriority="high" '
+        'href="/apps/rocketride.home/v3/static/image/hero.abc456.webp" media="not all and (max-width: 1024px)">'
+    ) in human.text
+    assert 'fetchpriority="high"' not in _crawl(client, '/').text
+    assert 'fetchpriority="high"' not in client.get('/pricing', headers={'User-Agent': BROWSER}).text
+
+
+@pytest.mark.parametrize(
+    'bad_hint',
+    [
+        {'mobile': 'https://example.com/mobile.webp'},
+        {'mobile': 'static/image/../escaped.webp'},
+        {'desktop': 'static/image/a.webp" onload="bad'},
+        {'maxMobileWidth': True},
+        {'maxMobileWidth': '1024px'},
+    ],
+)
+def test_home_shell_skips_invalid_hero_hints(shell_root, bad_hint):
+    hint = {
+        'mobile': 'static/image/hero-mobile.webp',
+        'desktop': 'static/image/hero.webp',
+        'maxMobileWidth': 1024,
+        **bad_hint,
+    }
+    _serve(_page('/', data=(), extra={'heroImagePreload': hint}))
+    response = _client().get('/', headers={'User-Agent': BROWSER})
+    assert response.status_code == 200 and SHELL_BODY in response.text
+    assert 'fetchpriority="high"' not in response.text
+
+
 def test_head_on_a_snapshot_page_answers_like_get(shell_root, monkeypatch):
     # A bound page's max-age counts down on cache hits: keep the clock still.
     monkeypatch.setattr(pages, 'monotonic', lambda: 1000.0)
