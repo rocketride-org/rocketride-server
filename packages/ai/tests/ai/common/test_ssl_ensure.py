@@ -28,8 +28,12 @@ def reset_guard(monkeypatch):
     """Clear the one-shot guard and the env vars the fallback writes."""
     monkeypatch.setattr(ssl_module, '_attempted', False)
     monkeypatch.setattr(ssl_module, '_lock', threading.Lock())
-    monkeypatch.delenv('SSL_CERT_FILE', raising=False)
-    monkeypatch.delenv('REQUESTS_CA_BUNDLE', raising=False)
+    for name in ('SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE'):
+        # Set first: monkeypatch only undoes what it recorded, and it records nothing when it
+        # deletes a variable that is not set. The fallback writes straight into os.environ, so
+        # without this its fake bundle path stayed set for every test that ran afterwards.
+        monkeypatch.setenv(name, '')
+        monkeypatch.delenv(name)
     yield
 
 

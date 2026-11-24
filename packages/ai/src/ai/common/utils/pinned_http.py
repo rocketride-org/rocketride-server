@@ -208,13 +208,21 @@ class _PinnedConnectionMixin:
         *args,
         validated_addresses: Tuple[ResolvedAddress, ...],
         on_socket: Optional[Callable[['_PinnedConnectionMixin', socket.socket], bool]] = None,
+        on_connected: Optional[Callable[['_PinnedConnectionMixin', socket.socket], bool]] = None,
+        on_connect_end: Optional[Callable[['_PinnedConnectionMixin'], None]] = None,
         **kwargs,
     ):
         self.validated_addresses = validated_addresses
         # Called with each new socket before it connects; True means the
         # session was aborted and the socket must not be used.
         self.on_socket = on_socket
-        self.pinned_connecting = False
+        # Called with the socket once it has connected, before TLS wraps it;
+        # True means the session was aborted while it connected. Otherwise the
+        # session keeps its own handle on the socket until ``on_connect_end``
+        # (see PinnedAddressAdapter.abort).
+        self.on_connected = on_connected
+        # Called when ``connect`` returns or fails.
+        self.on_connect_end = on_connect_end
         # The socket ``connect`` ended with (the SSLSocket for HTTPS). Kept
         # because http.client drops ``self.sock`` on a ``Connection: close``
         # response while the response still reads through it.
@@ -222,15 +230,14 @@ class _PinnedConnectionMixin:
         super().__init__(*args, **kwargs)
 
     def connect(self):
-        # While this runs, the TLS wrap may own the socket's descriptor
-        # without ``self.sock`` pointing at the live object yet (see
-        # PinnedAddressAdapter.abort).
-        self.pinned_connecting = True
         try:
             super().connect()
             self.pinned_live_sock = self.sock
         finally:
-            self.pinned_connecting = False
+            # The TLS wrap no longer holds the socket's descriptor out of
+            # reach: ``self.sock`` is the live object, or connecting failed.
+            if self.on_connect_end is not None:
+                self.on_connect_end(self)
 
     def _new_conn(self):
         last_error: Optional[OSError] = None
@@ -260,6 +267,9 @@ class _PinnedConnectionMixin:
                 if self.source_address:
                     sock.bind(self.source_address)
                 sock.connect(sockaddr)
+                if self.on_connected is not None and self.on_connected(self, sock):
+                    sock.close()
+                    raise NewConnectionError(self, 'The request was aborted while it connected')
                 sys.audit('http.client.connect', self, self.host, self.port)
                 return sock
             except OSError as error:
@@ -296,8 +306,13 @@ class PinnedAddressAdapter(HTTPAdapter):
     def __init__(self, validated_addresses: Tuple[ResolvedAddress, ...]):
         self.validated_addresses = validated_addresses
         self._pinned_pools = []
-        # (connection, raw socket, raw descriptor) for every socket opened.
+        # (connection, raw socket) for every socket opened.
         self._connections: list = []
+        # connection -> this adapter's own duplicate of its connected socket,
+        # held until the connection's ``connect`` returns or fails.
+        self._handles: dict = {}
+        # Guards ``_aborted``, ``_connections`` and ``_handles``; a handle is
+        # used and released only under it.
         self._connections_lock = threading.Lock()
         self._aborted = False
         super().__init__()
@@ -309,21 +324,41 @@ class PinnedAddressAdapter(HTTPAdapter):
         TLS handshake, on response headers or on the body: the blocked read
         returns and the request fails. A per-socket timeout cannot do this,
         because each byte that arrives restarts it. A connection opened after
-        ``abort()`` is refused before it connects.
+        ``abort()`` is refused before it connects, and one that was connecting
+        is refused once its connect returns.
         """
         with self._connections_lock:
             self._aborted = True
-            connections = list(self._connections)
-        for connection, raw, descriptor in connections:
-            _abort_connection(connection, raw, descriptor)
+            for connection, raw in self._connections:
+                _abort_connection(connection, raw, self._handles.get(connection))
 
     def _track_socket(self, connection: _PinnedConnectionMixin, sock: socket.socket) -> bool:
         """Record a new socket; returns True when the adapter was already aborted."""
         with self._connections_lock:
             if self._aborted:
                 return True
-            self._connections.append((connection, sock, sock.fileno()))
+            self._connections.append((connection, sock))
             return False
+
+    def _hold_handle(self, connection: _PinnedConnectionMixin, sock: socket.socket) -> bool:
+        """Re-check the abort once ``sock`` has connected; returns True when the adapter was aborted meanwhile.
+
+        Otherwise keeps a duplicate of ``sock`` for ``connection`` until
+        :meth:`_release_handle`: the TLS wrap is about to take the socket's
+        descriptor out of reach, and the duplicate still shuts it down.
+        """
+        with self._connections_lock:
+            if self._aborted:
+                return True
+            self._handles[connection] = sock.dup()
+            return False
+
+    def _release_handle(self, connection: _PinnedConnectionMixin) -> None:
+        """Close the handle :meth:`_hold_handle` kept for ``connection``, whose ``connect`` has ended."""
+        with self._connections_lock:
+            handle = self._handles.pop(connection, None)
+            if handle is not None:
+                handle.close()
 
     def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
         if select_proxy(request.url, proxies):
@@ -344,6 +379,8 @@ class PinnedAddressAdapter(HTTPAdapter):
             block=True,
             validated_addresses=self.validated_addresses,
             on_socket=self._track_socket,
+            on_connected=self._hold_handle,
+            on_connect_end=self._release_handle,
         )
         self._pinned_pools.append(pool)
         return pool
@@ -362,33 +399,33 @@ def _shutdown(sock: socket.socket) -> None:
         pass  # not connected yet, or already closed
 
 
-def _abort_connection(connection: _PinnedConnectionMixin, raw: socket.socket, descriptor: int) -> None:
+def _abort_connection(connection: _PinnedConnectionMixin, raw: socket.socket, handle: Optional[socket.socket]) -> None:
     """Shut down the live socket of one connection, whichever object holds it now.
 
-    TLS wrapping detaches the raw socket and moves its descriptor into a new
-    ``SSLSocket``, so the raw object no longer reaches the connection:
+    Called with the adapter's lock held. TLS wrapping detaches the raw socket
+    and moves its descriptor into a new ``SSLSocket`` that nothing can reach
+    until the handshake ends, so:
 
-    * after the handshake, the live ``SSLSocket`` is ``connection.sock``, or
+    * from the moment the socket connects until ``connect`` returns or fails,
+      ``handle`` is the adapter's own duplicate of it. Shutting it down ends
+      the connection whichever object holds the original descriptor (the raw
+      socket, the wrap, or no one after a failed handshake closed it), and it
+      can never name a socket that another owner opened since;
+    * after that, the live ``SSLSocket`` is ``connection.sock``, or
       ``pinned_live_sock`` once http.client has dropped ``sock`` for a
       ``Connection: close`` response it is still reading;
-    * before TLS (or on plain HTTP), the raw socket is still live;
-    * during the handshake no object is reachable, so the descriptor
-      recorded at creation is shut down directly. It is still open then:
-      the wrap owns it until ``connect`` returns or fails.
+    * before the socket connects, the raw socket is live, and nothing wraps
+      it until the adapter holds a handle.
 
-    Objects are tried first because a closed one reports ``fileno() == -1``,
-    while a bare descriptor number could already belong to another socket.
+    A closed object reports ``fileno() == -1`` and is skipped.
     """
+    if handle is not None:
+        _shutdown(handle)
+        return
     for candidate in (getattr(connection, 'sock', None), connection.pinned_live_sock, raw):
         if candidate is not None and candidate.fileno() != -1:
             _shutdown(candidate)
             return
-    if connection.pinned_connecting:
-        handle = socket.socket(fileno=descriptor)
-        try:
-            _shutdown(handle)
-        finally:
-            handle.detach()  # the descriptor still belongs to the TLS socket
 
 
 class PinnedSession(requests.Session):

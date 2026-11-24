@@ -3,82 +3,20 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Regression tests for HTTP-tool configuration and URL guardrails."""
+"""Regression tests for HTTP-tool configuration and URL guardrails.
+
+The node files come from the ``node_modules`` fixture in ``conftest.py``.
+"""
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import sys
 import types
-from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
 pytest.importorskip('requests')
-
-NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_http_request'
-SHARED_UTILS_DIR = Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils'
-
-
-def _load_shared_util(name: str):
-    """Load one real ``ai.common.utils`` submodule standalone (it has no engine imports)."""
-    spec = importlib.util.spec_from_file_location(
-        f'_tool_http_request_guardrail_{name}', SHARED_UTILS_DIR / f'{name}.py'
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _load_node_modules(monkeypatch: pytest.MonkeyPatch):
-    """Load the node files with small engine-runtime stubs."""
-    package_name = f'_tool_http_request_guardrail_test_{id(monkeypatch)}'
-    package = types.ModuleType(package_name)
-    package.__path__ = [str(NODE_DIR)]
-    monkeypatch.setitem(sys.modules, package_name, package)
-
-    # The real base: its ``config`` property resolves self.glb.connConfig against
-    # the engine's schema for tool_http_request (rocketlib.filters is never stubbed).
-    from rocketlib.filters import IGlobalBase
-
-    rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IGlobalBase = IGlobalBase
-    rocketlib.IInstanceBase = object
-    rocketlib.engine = importlib.import_module('rocketlib.engine')
-    rocketlib.config = importlib.import_module('rocketlib.config')
-    rocketlib.warning = Mock()
-    rocketlib.tool_function = lambda **_kwargs: lambda function: function
-    monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
-
-    utils_module = types.ModuleType('ai.common.utils')
-    url_policy = _load_shared_util('url_policy')
-    utils_module.url_matches_pattern = url_policy.url_matches_pattern
-    utils_module.canonicalize_url = url_policy.canonicalize_url
-    utils_module.url_has_dot_segments = url_policy.url_has_dot_segments
-    pinned_http = _load_shared_util('pinned_http')
-    utils_module.HostResolutionError = pinned_http.HostResolutionError
-    utils_module.pinned_session = pinned_http.pinned_session
-    utils_module.resolve_public_addresses = pinned_http.resolve_public_addresses
-    ai_module = types.ModuleType('ai')
-    common_module = types.ModuleType('ai.common')
-    monkeypatch.setitem(sys.modules, 'ai', ai_module)
-    monkeypatch.setitem(sys.modules, 'ai.common', common_module)
-    monkeypatch.setitem(sys.modules, 'ai.common.utils', utils_module)
-
-    def load(name: str):
-        qualified_name = f'{package_name}.{name}'
-        spec = importlib.util.spec_from_file_location(qualified_name, NODE_DIR / f'{name}.py')
-        module = importlib.util.module_from_spec(spec)
-        monkeypatch.setitem(sys.modules, qualified_name, module)
-        spec.loader.exec_module(module)
-        return module
-
-    http_client = load('http_client')
-    iglobal = load('IGlobal')
-    iinstance = load('IInstance')
-    return http_client, iglobal, iinstance
 
 
 @pytest.mark.parametrize(
@@ -95,17 +33,17 @@ def _load_node_modules(monkeypatch: pytest.MonkeyPatch):
         (0, 'must be a list of rows'),
     ],
 )
-def test_invalid_url_whitelist_fails_closed(monkeypatch, whitelist, error):
+def test_invalid_url_whitelist_fails_closed(node_modules, whitelist, error):
     """A malformed intended restriction cannot silently become allow-all."""
-    _http_client, iglobal, _iinstance = _load_node_modules(monkeypatch)
+    _http_client, iglobal, _iinstance = node_modules
 
     with pytest.raises(ValueError, match=error):
         iglobal.IGlobal._build_guardrails({'urlWhitelist': whitelist})
 
 
-def test_empty_url_whitelist_still_allows_all_public_urls(monkeypatch):
+def test_empty_url_whitelist_still_allows_all_public_urls(node_modules):
     """An intentionally empty whitelist keeps the documented public-only default."""
-    _http_client, iglobal, _iinstance = _load_node_modules(monkeypatch)
+    _http_client, iglobal, _iinstance = node_modules
 
     _enabled, patterns = iglobal.IGlobal._build_guardrails({'urlWhitelist': []})
 
@@ -119,18 +57,18 @@ def test_empty_url_whitelist_still_allows_all_public_urls(monkeypatch):
         [{'whitelistPattern': ' \t '}],
     ],
 )
-def test_placeholder_only_url_whitelist_is_treated_as_empty(monkeypatch, whitelist):
+def test_placeholder_only_url_whitelist_is_treated_as_empty(node_modules, whitelist):
     """Empty UI placeholder rows preserve the documented public-only default."""
-    _http_client, iglobal, _iinstance = _load_node_modules(monkeypatch)
+    _http_client, iglobal, _iinstance = node_modules
 
     _enabled, patterns = iglobal.IGlobal._build_guardrails({'urlWhitelist': whitelist})
 
     assert patterns == []
 
 
-def test_blank_url_whitelist_rows_are_ignored_alongside_valid_patterns(monkeypatch):
+def test_blank_url_whitelist_rows_are_ignored_alongside_valid_patterns(node_modules):
     """Placeholder rows never broaden a whitelist containing real patterns."""
-    _http_client, iglobal, _iinstance = _load_node_modules(monkeypatch)
+    _http_client, iglobal, _iinstance = node_modules
 
     _enabled, patterns = iglobal.IGlobal._build_guardrails(
         {
@@ -145,9 +83,9 @@ def test_blank_url_whitelist_rows_are_ignored_alongside_valid_patterns(monkeypat
     assert [pattern.pattern for pattern in patterns] == [r'^https://service\.example/public/']
 
 
-def test_config_preserves_arbitrary_valid_python_regex_syntax(monkeypatch):
+def test_config_preserves_arbitrary_valid_python_regex_syntax(node_modules):
     """Config compilation does not reject or rewrite valid Python regex syntax."""
-    _http_client, iglobal, _iinstance = _load_node_modules(monkeypatch)
+    _http_client, iglobal, _iinstance = node_modules
     sources = [
         r'^https://service\.example(?=/|$)',
         r'^https://service\.example/(?# (?= is comment text)[a-z]+$',
@@ -168,9 +106,9 @@ def test_config_preserves_arbitrary_valid_python_regex_syntax(monkeypatch):
     assert [pattern.pattern for pattern in patterns] == sources
 
 
-def test_whitelist_checks_path_resolved_url(monkeypatch):
+def test_whitelist_checks_path_resolved_url(node_modules):
     """The allowlist sees the exact path that will be sent on the wire."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -188,9 +126,9 @@ def test_whitelist_checks_path_resolved_url(monkeypatch):
     assert resolved_url == 'https://service.example/users/42'
 
 
-def test_whitelist_rejects_path_after_resolution(monkeypatch):
+def test_whitelist_rejects_path_after_resolution(node_modules):
     """A template cannot be approved before its final path is known."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -225,9 +163,9 @@ def test_whitelist_rejects_path_after_resolution(monkeypatch):
         ),
     ],
 )
-def test_whitelist_rejects_final_query_mutations(monkeypatch, request_options, expected_url):
+def test_whitelist_rejects_final_query_mutations(node_modules, request_options, expected_url):
     """Exact URL patterns reject query data added after path substitution."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -265,9 +203,9 @@ def test_whitelist_rejects_final_query_mutations(monkeypatch, request_options, e
         ),
     ],
 )
-def test_whitelist_checks_final_query_url(monkeypatch, request_options, expected_url):
+def test_whitelist_checks_final_query_url(node_modules, request_options, expected_url):
     """Exact URL patterns see the canonical query string sent to transport."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -294,9 +232,9 @@ def test_whitelist_checks_final_query_url(monkeypatch, request_options, expected
         (r'^https://api\.example\.com:4', 'https://api.example.com:443/x'),
     ],
 )
-def test_whitelist_rejects_matches_ending_inside_authority(monkeypatch, pattern, url):
+def test_whitelist_rejects_matches_ending_inside_authority(node_modules, pattern, url):
     """Whitelist matches must consume some authority without stopping inside a field."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -350,9 +288,9 @@ def test_whitelist_rejects_matches_ending_inside_authority(monkeypatch, pattern,
         (r'^https://api\.example\.com(?=:443).*', 'https://api.example.com:4434/private'),
     ],
 )
-def test_whitelist_rejects_consuming_authority_prefixes(monkeypatch, pattern, url):
+def test_whitelist_rejects_consuming_authority_prefixes(node_modules, pattern, url):
     """Full matches cannot hide hostname or port prefixes behind later syntax."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -371,9 +309,9 @@ def test_whitelist_rejects_consuming_authority_prefixes(monkeypatch, pattern, ur
         (r'^https://\[2001:db8::1.*/private$', 'https://[2001:db8::10]/private'),
     ],
 )
-def test_canonical_match_rejects_extended_hostnames_for_each_address_family(monkeypatch, pattern, url):
+def test_canonical_match_rejects_extended_hostnames_for_each_address_family(node_modules, pattern, url):
     """DNS, IPv4, and bracketed IPv6 prefixes are detected semantically."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
 
     assert not iinstance.url_matches_pattern(re.compile(pattern), url)
 
@@ -388,20 +326,20 @@ def test_canonical_match_rejects_extended_hostnames_for_each_address_family(monk
         (r'^https://api\.example\.com.{,}$', 'https://api.example.com.evil.net/private'),
     ],
 )
-def test_canonical_match_rejects_forced_suffix_regex_constructs(monkeypatch, pattern, url):
+def test_canonical_match_rejects_forced_suffix_regex_constructs(node_modules, pattern, url):
     """Path/query suffixes and legal brace forms cannot conceal a hostname prefix."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
 
     assert not iinstance.url_matches_pattern(re.compile(pattern), url)
 
 
-def test_canonical_match_rejects_python_314_terminal_z(monkeypatch):
+def test_canonical_match_rejects_python_314_terminal_z(node_modules):
     """Python 3.14's terminal z anchor cannot force an unsafe match past the host."""
     try:
         pattern = re.compile(r'^https://api\.example\.com.*\z')
     except re.error:
         pytest.skip(r'Python does not support \z')
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
 
     assert not iinstance.url_matches_pattern(pattern, 'https://api.example.com.evil.net/private')
 
@@ -422,9 +360,9 @@ def test_canonical_match_rejects_python_314_terminal_z(monkeypatch):
         ),
     ],
 )
-def test_canonical_match_rejects_unsupported_authority_syntax(monkeypatch, pattern, url):
+def test_canonical_match_rejects_unsupported_authority_syntax(node_modules, pattern, url):
     """Ambiguous authority syntax fails closed even when the regex matches the URL."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
 
     assert re.compile(pattern).match(url)
     assert not iinstance.url_matches_pattern(re.compile(pattern), url)
@@ -464,25 +402,25 @@ def test_canonical_match_rejects_unsupported_authority_syntax(monkeypatch, patte
         (r'^https://api\.example\.com\Z', 'https://api.example.com'),
     ],
 )
-def test_canonical_match_preserves_safe_full_url_patterns(monkeypatch, pattern, url):
+def test_canonical_match_preserves_safe_full_url_patterns(node_modules, pattern, url):
     """Authority-safe URL, path, escaped, lazy, and bounded patterns still work."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
 
     assert iinstance.url_matches_pattern(re.compile(pattern), url)
 
 
-def test_canonical_match_rejects_multiline_authority_boundary(monkeypatch):
+def test_canonical_match_rejects_multiline_authority_boundary(node_modules):
     """MULTILINE must not turn a line end into an authority boundary."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     pattern = re.compile(r'^https://api\.example\.com$', re.MULTILINE)
 
     assert pattern.match('https://api.example.com\n.evil')
     assert not iinstance.url_matches_pattern(pattern, 'https://api.example.com\n.evil')
 
 
-def test_canonical_match_allows_multiline_after_consuming_path_boundary(monkeypatch):
+def test_canonical_match_allows_multiline_after_consuming_path_boundary(node_modules):
     """Post-boundary regex flags do not weaken a consumed authority delimiter."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     pattern = re.compile(r'^https://api\.example\.com/data$', re.MULTILINE)
 
     assert iinstance.url_matches_pattern(pattern, 'https://api.example.com/data')
@@ -498,9 +436,9 @@ def test_canonical_match_allows_multiline_after_consuming_path_boundary(monkeypa
         (r'^https://\[2001:db8::1\]:443(?:/|$)', 'https://[2001:db8::1]:443/data'),
     ],
 )
-def test_whitelist_allows_matches_ending_at_authority_boundaries(monkeypatch, pattern, url):
+def test_whitelist_allows_matches_ending_at_authority_boundaries(node_modules, pattern, url):
     """Host-agnostic, path, port, and IPv6 boundary patterns remain valid."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -511,9 +449,9 @@ def test_whitelist_allows_matches_ending_at_authority_boundaries(monkeypatch, pa
 
 
 @pytest.mark.parametrize('encoded_segment', ['%2e%2e', '%252e%252e', '%2e%2e%5cadmin'])
-def test_whitelist_rejects_encoded_dot_segments(monkeypatch, encoded_segment):
+def test_whitelist_rejects_encoded_dot_segments(node_modules, encoded_segment):
     """Requests cannot decode traversal syntax after the whitelist approves it."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -536,9 +474,9 @@ def test_whitelist_rejects_encoded_dot_segments(monkeypatch, encoded_segment):
         'https://attacker.example/#https://service.example/public/data',
     ],
 )
-def test_whitelist_pattern_cannot_match_inside_query_or_fragment(monkeypatch, url):
+def test_whitelist_pattern_cannot_match_inside_query_or_fragment(node_modules, url):
     """Only the request URL prefix—not embedded URL-shaped data—can satisfy a pattern."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -549,9 +487,9 @@ def test_whitelist_pattern_cannot_match_inside_query_or_fragment(monkeypatch, ur
         instance._validate_guardrails({'url': url, 'method': 'GET'})
 
 
-def test_whitelist_checks_url_without_fragment(monkeypatch):
+def test_whitelist_checks_url_without_fragment(node_modules):
     """A fragment that is never sent cannot change allowlist matching."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
@@ -573,9 +511,9 @@ def test_whitelist_checks_url_without_fragment(monkeypatch):
         'https://@service.example/data',
     ],
 )
-def test_guardrails_reject_userinfo_urls(monkeypatch, url):
+def test_guardrails_reject_userinfo_urls(node_modules, url):
     """Instance validation rejects URL credentials before whitelist matching."""
-    _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
+    _http_client, _iglobal, iinstance = node_modules
     instance = object.__new__(iinstance.IInstance)
     instance._http_guardrails = types.SimpleNamespace(enabled_methods={'GET'}, url_patterns=[])
 

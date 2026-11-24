@@ -318,6 +318,20 @@ def test_execute_request_rejects_encoded_path_param_traversal(monkeypatch):
     request.assert_not_called()
 
 
+@pytest.mark.parametrize('query_params', [None, {'page': '2'}])
+def test_execute_request_rejects_port_zero_before_requests_drops_it(monkeypatch, query_params):
+    """Requests drops an explicit ":0" while preparing; the URL as given is refused instead of reaching port 443."""
+    resolver = _mock_dns(monkeypatch, '93.184.216.34')
+    request = Mock()
+    monkeypatch.setattr(http_client, '_request_with_validated_addresses', request)
+
+    with pytest.raises(ValueError, match='port'):
+        http_client.execute_request(url='https://service.example:0/data', method='GET', query_params=query_params)
+
+    resolver.assert_not_called()
+    request.assert_not_called()
+
+
 def test_execute_request_query_value_cannot_change_destination(monkeypatch):
     """An internal URL inside a query value is data, not the request destination."""
     resolver = _mock_dns(monkeypatch, '93.184.216.34')

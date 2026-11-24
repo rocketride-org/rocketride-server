@@ -28,8 +28,8 @@ from __future__ import annotations
 import importlib.util
 import ipaddress
 import socket
+import ssl
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -282,10 +282,19 @@ def test_pinned_session_connects_to_validated_address_only(local_port):
 
 
 def test_pinned_session_ignores_environment_proxies(local_port, monkeypatch):
-    monkeypatch.setenv('HTTP_PROXY', 'http://127.0.0.1:9')
-    addresses = resolve_addresses(f'http://127.0.0.1:{local_port}/', is_allowed=lambda address: address.is_loopback)
+    url = f'http://127.0.0.1:{local_port}/'
+    # No inherited exclusion (NO_PROXY, or the CGI guard REQUEST_METHOD) may
+    # bypass the proxy, and both spellings name it (lowercase wins on POSIX).
+    for name in ('NO_PROXY', 'no_proxy', 'REQUEST_METHOD'):
+        monkeypatch.delenv(name, raising=False)
+    for name in ('HTTP_PROXY', 'http_proxy'):
+        monkeypatch.setenv(name, 'http://127.0.0.1:9')
+    # A session that trusted the environment would use it for this URL.
+    assert requests.utils.get_environ_proxies(url).get('http') == 'http://127.0.0.1:9'
+
+    addresses = resolve_addresses(url, is_allowed=lambda address: address.is_loopback)
     with pinned_session(addresses) as session:
-        assert session.get(f'http://127.0.0.1:{local_port}/', timeout=5).status_code == 200
+        assert session.get(url, timeout=5).status_code == 200
 
 
 _TLS_HELPER = Path(__file__).with_name('tls_test_server.py')
@@ -298,28 +307,58 @@ def _loopback(url):
     return resolve_addresses(url, is_allowed=lambda address: address.is_loopback)
 
 
-def _get_until_aborted(session, url, abort_after=0.5):
-    """GET ``url`` while ``session.abort()`` fires after ``abort_after`` s; returns the seconds it took.
+def _start_get(session, url):
+    """GET ``url`` (and read the body) on a thread; returns (thread, done event, outcome list).
 
-    Whether the aborted request raises or returns a cut-off response depends
-    on the platform (Linux reads EOF, Windows raises); what matters is that
-    it ends.
+    The outcome is the body read, or the exception the request raised. The
+    timeout is far longer than any test waits, so only an abort ends it early.
     """
-    threading.Timer(abort_after, session.abort).start()
-    start = time.monotonic()
-    try:
-        response = session.get(url, timeout=5)
-        response.content  # noqa: B018 - read the body, which a slow-body server holds open
-    except (requests.RequestException, OSError):
-        pass
-    return time.monotonic() - start
+    done = threading.Event()
+    outcome = []
+
+    def get():
+        try:
+            outcome.append(session.get(url, timeout=30).content)  # a slow-body server holds the body open
+        except (requests.RequestException, OSError) as error:
+            outcome.append(error)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=get, daemon=True)
+    thread.start()
+    return thread, done, outcome
+
+
+def _abort_once_stalled(session, url, stalled):
+    """GET ``url``; once the server signals ``stalled``, abort and require the request to end within 3 s.
+
+    The request must still be pending when ``abort()`` runs, so an early end
+    (a certificate error, say) cannot pass for an abort. Whether the aborted
+    request raises or returns a cut-off response depends on the platform
+    (Linux reads EOF, Windows raises); either is accepted, a timeout is not.
+    Returns the outcome: the cut-off body or the exception.
+    """
+    stalled.clear()
+    thread, done, outcome = _start_get(session, url)
+    assert stalled.wait(10), 'the server never reached the slow phase'
+    assert not done.is_set(), f'the request ended before abort(): {outcome}'
+    session.abort()
+    assert done.wait(3), 'abort() did not end the request'
+    thread.join()
+    (result,) = outcome
+    if isinstance(result, bytes):
+        assert len(result) < 100  # the servers trickle 100 bytes; the response was cut off
+    else:
+        assert isinstance(result, (requests.ConnectionError, requests.exceptions.ChunkedEncodingError)), result
+        assert not isinstance(result, requests.Timeout), result
+    return result
 
 
 @pytest.fixture(scope='module')
 def http_trickle():
-    httpd = ThreadingHTTPServer(('127.0.0.1', 0), tls_test_server.TrickleHandler)
+    httpd = tls_test_server.TrickleServer()
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    yield f'http://127.0.0.1:{httpd.server_address[1]}'
+    yield f'http://127.0.0.1:{httpd.server_address[1]}', httpd.trickling
     httpd.shutdown()
 
 
@@ -327,33 +366,184 @@ def http_trickle():
 def https_trickle(tmp_path_factory):
     cert, key = tls_test_server.make_cert(tmp_path_factory.mktemp('tls'))
     httpd, port = tls_test_server.serve_https(cert, key)
-    yield f'https://127.0.0.1:{port}', cert
+    yield f'https://127.0.0.1:{port}', cert, httpd.trickling
     httpd.shutdown()
 
 
 @pytest.mark.parametrize('path', ['/slow-headers', '/slow-body'])
 def test_abort_ends_a_slow_http_request(http_trickle, path):
-    with pinned_session(_loopback(http_trickle + '/')) as session:
-        assert _get_until_aborted(session, http_trickle + path) < 3
+    base, trickling = http_trickle
+    with pinned_session(_loopback(base + '/')) as session:
+        _abort_once_stalled(session, base + path, trickling)
 
 
 @pytest.mark.parametrize('path', ['/slow-headers', '/slow-body'])
 def test_abort_ends_a_slow_https_request(https_trickle, path):
     """TLS wrapping detaches the raw socket; abort must reach the live SSLSocket."""
-    base, cert = https_trickle
+    base, cert, trickling = https_trickle
     with pinned_session(_loopback(base + '/')) as session:
         session.verify = cert
-        assert _get_until_aborted(session, base + path) < 3
+        _abort_once_stalled(session, base + path, trickling)
 
 
-def test_abort_ends_a_slow_tls_handshake():
+@pytest.fixture
+def default_ca_bundle(monkeypatch):
+    """No inherited CA bundle for a session that verifies against the default one.
+
+    A pinned session reads the bundle from the environment, and a path that
+    does not exist (left by an earlier test, or set on the machine) fails the
+    request before the handshake these tests need.
+    """
+    monkeypatch.delenv('REQUESTS_CA_BUNDLE', raising=False)
+    monkeypatch.delenv('CURL_CA_BUNDLE', raising=False)
+
+
+def test_abort_ends_a_slow_tls_handshake(default_ca_bundle):
     """During the handshake neither socket object is reachable; abort must still end it."""
-    listener, port = tls_test_server.serve_slow_handshake()
+    with tls_test_server.serve_slow_handshake() as server:
+        url = f'https://127.0.0.1:{server.port}/'
+        with pinned_session(_loopback(url)) as session:
+            outcome = _abort_once_stalled(session, url, server.stalled)
+    assert isinstance(outcome, requests.ConnectionError)
+
+
+def test_an_abort_while_the_socket_connects_ends_the_request(monkeypatch):
+    """abort() after a socket is registered but before its connect returns still ends the request."""
+    listener = socket.create_server(('127.0.0.1', 0))
+    listener.settimeout(5)
+    url = f'http://127.0.0.1:{listener.getsockname()[1]}/'
+    received = []
+
+    def serve():
+        try:
+            conn, _ = listener.accept()
+        except OSError:
+            return
+        with conn:
+            conn.settimeout(5)
+            try:
+                while chunk := conn.recv(4096):
+                    received.append(chunk)
+            except OSError:
+                pass
+
+    server = threading.Thread(target=serve, daemon=True)
+    server.start()
     try:
-        with pinned_session(_loopback(f'https://127.0.0.1:{port}/')) as session:
-            assert _get_until_aborted(session, f'https://127.0.0.1:{port}/') < 3
+        with pinned_session(_loopback(url)) as session:
+            adapter = session.get_adapter(url)
+            track_socket = adapter._track_socket
+
+            def track_then_abort(connection, sock):
+                aborted = track_socket(connection, sock)
+                session.abort()  # the socket is registered; its connect has not started
+                return aborted
+
+            monkeypatch.setattr(adapter, '_track_socket', track_then_abort)
+            with pytest.raises(requests.ConnectionError):
+                session.get(url, timeout=5)
+        server.join(10)
     finally:
         listener.close()
+    assert received == []  # no request bytes went out after abort() returned
+
+
+def test_an_abort_while_tls_takes_over_the_socket_is_not_lost(monkeypatch, default_ca_bundle):
+    """abort() picks its target while the raw socket is live; TLS detaches it before the shutdown lands."""
+    with tls_test_server.serve_slow_handshake() as server:
+        url = f'https://127.0.0.1:{server.port}/'
+        with pinned_session(_loopback(url)) as session:
+            aborter = threading.Thread(target=session.abort, daemon=True)
+            aborting = threading.Event()
+            handshaking = threading.Event()
+            real_shutdown = socket.socket.shutdown
+            real_wrap_socket = ssl.SSLContext.wrap_socket
+            real_do_handshake = ssl.SSLSocket.do_handshake
+
+            def shutdown(sock, how):
+                if threading.current_thread() is aborter:
+                    aborting.set()
+                    handshaking.wait(5)  # by now the wrap has detached the raw socket
+                return real_shutdown(sock, how)
+
+            def wrap_socket(context, sock, *args, **kwargs):
+                aborter.start()
+                aborting.wait(5)  # abort() has chosen what to shut down
+                return real_wrap_socket(context, sock, *args, **kwargs)
+
+            def do_handshake(sslsock, *args, **kwargs):
+                handshaking.set()
+                return real_do_handshake(sslsock, *args, **kwargs)
+
+            monkeypatch.setattr(socket.socket, 'shutdown', shutdown)
+            monkeypatch.setattr(ssl.SSLContext, 'wrap_socket', wrap_socket)
+            monkeypatch.setattr(ssl.SSLSocket, 'do_handshake', do_handshake)
+
+            thread, done, outcome = _start_get(session, url)
+            assert aborting.wait(10), 'abort() never reached a shutdown'
+            aborter.join(10)
+            assert not aborter.is_alive()
+            assert done.wait(3), 'the handshake went on after abort() returned'
+            thread.join()
+    assert isinstance(outcome[0], requests.ConnectionError)
+
+
+def test_abort_after_a_failed_handshake_leaves_other_sockets_alone(monkeypatch, default_ca_bundle):
+    """A failed handshake closes its descriptor before connect() returns; abort() must not reach its next owner."""
+    refuser = socket.create_server(('127.0.0.1', 0))  # closes each connection: the handshake fails
+    other_server = socket.create_server(('127.0.0.1', 0))
+    stop = threading.Event()
+
+    def refuse():
+        refuser.settimeout(0.1)
+        while not stop.is_set():
+            try:
+                conn, _ = refuser.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            conn.close()
+
+    refusing = threading.Thread(target=refuse, daemon=True)
+    refusing.start()
+    url = f'https://127.0.0.1:{refuser.getsockname()[1]}/'
+    seen = {}
+    real_wrap_socket = ssl.SSLContext.wrap_socket
+
+    def wrap_socket(context, sock, *args, **kwargs):
+        descriptor = sock.fileno()
+        try:
+            return real_wrap_socket(context, sock, *args, **kwargs)
+        except OSError:
+            # The TLS socket has closed ``descriptor``; connect() has not returned.
+            other = socket.create_connection(other_server.getsockname(), timeout=5)
+            peer, _ = other_server.accept()
+            seen['reused'] = other.fileno() == descriptor
+            try:
+                session.abort()
+                other.sendall(b'ping')
+                peer.settimeout(5)
+                seen['delivered'] = peer.recv(4)
+            except OSError as error:
+                seen['error'] = error
+            finally:
+                other.close()
+                peer.close()
+            raise
+
+    monkeypatch.setattr(ssl.SSLContext, 'wrap_socket', wrap_socket)
+    try:
+        with pinned_session(_loopback(url)) as session:
+            with pytest.raises(requests.ConnectionError):
+                session.get(url, timeout=5)
+    finally:
+        stop.set()
+        refusing.join(5)
+        refuser.close()
+        other_server.close()
+    assert 'error' not in seen, seen
+    assert seen['delivered'] == b'ping'
 
 
 def test_a_session_aborted_before_it_connects_never_connects():

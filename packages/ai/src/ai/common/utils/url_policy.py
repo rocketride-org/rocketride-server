@@ -420,12 +420,20 @@ def canonicalize_url(url: str) -> str:
     """Return the stable URL form ``requests`` will put on the wire.
 
     The fragment is dropped (it never reaches the server). Raises
-    ``ValueError`` for userinfo in the URL, a dot segment, or a URL whose
-    normalization does not settle.
+    ``ValueError`` for userinfo in the URL, an explicit port zero, a dot
+    segment, or a URL whose normalization does not settle. Call it on the URL
+    as given, before anything else prepares it: preparing drops a ``:0`` port,
+    which would send the request to the scheme's default port instead.
     """
     parsed = urlsplit(url)
     if parsed.username is not None:
         raise ValueError('URL must not include userinfo')
+    try:
+        explicit_port = parsed.port
+    except ValueError:
+        explicit_port = None  # out of range or not a number: preparing the URL rejects it
+    if explicit_port == 0:
+        raise ValueError('URL port is invalid')
     prepared_url = parsed._replace(fragment='').geturl()
     for _attempt in range(3):
         if url_has_dot_segments(prepared_url):
