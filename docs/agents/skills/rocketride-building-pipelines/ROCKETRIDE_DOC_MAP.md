@@ -26,7 +26,7 @@ Base URL: `https://docs.rocketride.ai`  ·  Pinned: 2026-09-11 from a local `./b
 
 # RocketRide Documentation
 
-> RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Build, test and publish durable agents that scale in production.
+> RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
 
 MIT licensed. Run the engine free on your own machine with Docker, the VS Code extension or a native download, or use RocketRide Cloud. Use it from MCP, the CLI, the Python or TypeScript SDK, or the VS Code extension.
 
