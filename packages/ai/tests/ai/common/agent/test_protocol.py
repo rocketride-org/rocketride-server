@@ -621,7 +621,7 @@ class TestJsonEnvelope:
         ],
     )
     def test_a_tool_call_is_found_inside_noise(self, raw, name):
-        assert parse(raw).tool_calls[0]['name'] == name
+        assert [call['name'] for call in parse(raw).tool_calls] == [name]
 
     @pytest.mark.parametrize(
         'raw',

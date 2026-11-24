@@ -161,9 +161,10 @@ on its line is quoted and does not override the sentinel, and one wrapped
 inside another object that parses is not read. A marker inside or after a broken
 `final` envelope is ambiguous and the reply is retried. A `final` envelope kept after the
 marker is unwrapped; a truncated one is retried. A whole tool-call envelope
-after the marker is retried with guidance to omit the marker, and a valid
-`final` followed by pending tool work is also retried instead of delivering
-its claim. A new closed markdown block after a parsed final quotes examples,
+after the marker, including one with malformed JSON, is retried with guidance to
+omit the marker. A valid `final` followed by pending tool work or a broken
+envelope is also retried instead of delivering its claim. A new closed markdown
+block after a parsed final quotes examples,
 including malformed calls, and does not prevent delivery of that final. Calls
 outside that block, in the final's own fence, or in an unclosed block remain
 pending work. LF, CRLF and bare CR all start a new `FINAL>>>` line.
@@ -175,15 +176,21 @@ only `FINAL>>>` and the answer otherwise. This deliberately favors a retry over
 guessing whether the call was intended.
 
 Without a sentinel the first JSON object in the reply is the envelope, also
-inside a markdown fence or after a line of prose. A JSON array of `tool_call`
-envelopes is read as a complete parallel batch, including in a fence or after a
+inside a markdown fence or after a line of prose. If that object is not an
+envelope, the parser can select a standalone envelope on a later line; for
+example, `Example: {"x":1}` does not hide a later `tool_calls` envelope. It does
+not recover a nested call from an unclosed object, even with comments between
+the wrapper and the call. A JSON array of `tool_call` envelopes is read as a
+complete parallel batch, including in a fence or after a
 preamble. Every entry in that array or a `tool_calls` list is validated before
 any call runs. An invalid entry retries the whole batch with its zero-based index
 in the diagnostic; a missing or blank tool name, a non-string name, a non-object
 entry, or another envelope type is invalid. Empty `tool_calls` lists and truncated
 call arrays are refused. Ordinary arrays containing no call envelopes
 remain answer data. `agent_langchain` accepts only a single-call array and retries
-multi-call arrays. Non-string `final` content is serialized as JSON. Tool
+multi-call arrays. Preamble citations such as `Note [1].` do not bypass whole-array
+validation. Non-string `final` content is serialized as JSON; numeric overflow
+or non-finite values are retried instead of emitting `Infinity` or `NaN`. Tool
 arguments that are not an object are passed as `{"input": value}`, the values
 `false`, `0`, `""` and `[]` included; only a missing or `null` `args` becomes
 `{}`. A malformed `final` envelope is recovered only when it opens the reply
@@ -191,9 +198,8 @@ and closes it; one that was cut off, or is followed by more text, by other
 members (including strings with broken escaping) or by a second envelope, is retried. An answer cut off exactly at an
 unescaped inner `"}` can look complete.
 
-A preamble containing braces or ordinary JSON no longer hides a standalone
-envelope on a later line. Nested objects, quoted examples and template
-wrappers are not newly dispatched; an ambiguous mix with `FINAL>>>` is
+Nested objects, quoted examples and template wrappers are not newly dispatched;
+an ambiguous mix with `FINAL>>>` is
 retried. Final recovery accepts fence labels such as `json5`, `c++` and
 `objective-c`. The marker itself must be plain: markdown wrappers such as
 `**FINAL>>>**` are not recognized.
@@ -205,8 +211,9 @@ This deliberately retains up to three model calls and their latency and
 token cost. Hints include only an excerpt of the failed reply, so they ask
 the model to generate the call from the task and tool schema. A parsed
 `final` with missing, null, empty or whitespace-only content remains a
-successful answer for compatibility. An
-empty reply, a `FINAL>>>` with nothing after it, a reply that opens with a
+successful answer for compatibility. An empty `FINAL>>>` after a valid `final`
+envelope delivers that envelope's content on the first attempt. An
+empty reply, an isolated `FINAL>>>` with no answer, a reply that opens with a
 JSON object that is neither shape, a tool call or an answer that never parsed,
 and an object that has a tool call's `name` and `args` and no `type`, is not
 quoted, and is the reply's first object or has no word before it on its line

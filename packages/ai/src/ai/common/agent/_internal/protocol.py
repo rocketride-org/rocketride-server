@@ -75,6 +75,10 @@ _STRINGS_BEFORE_A_KEY = 3
 #: What the walk over an object stops at: a string, the quote of a string that never ends, a brace or a bracket.
 _TOKEN = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|["{}\[\]]', re.S)
 
+#: Container boundaries, ignoring quoted strings and comments inside a container.
+_CONTAINER_TOKEN = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|//|/\*|[{}\[\]]', re.S)
+_LINE_BREAK = re.compile(r'[\r\n]')
+
 #: What follows a key: its colon, and its value when that is a string. Group 1 is the value, as written.
 _MEMBER_VALUE = re.compile(r'\s*:(?:\s*"([^"\\]*(?:\\.[^"\\]*)*)")?', re.S)
 
@@ -624,11 +628,46 @@ def _looks_like_envelope(raw: Any) -> bool:
     return isinstance(raw, str) and bool(_ENVELOPE_OPEN.match(raw) or _LOOSE_FINAL_OPEN.match(_without_fence(raw)))
 
 
+def _containers_before(text: str, at: int) -> List[int]:
+    """Open object/array positions before a candidate, without reading quoted examples as structure."""
+    stack: List[int] = []
+    read = 0
+    while token := _CONTAINER_TOKEN.search(text, read, at):
+        written = token.group()
+        read = token.end()
+        if written.startswith('/'):
+            # Outside a container this may be a URL in a prose preamble, not a comment.
+            if stack:
+                if written == '//':
+                    closing = _LINE_BREAK.search(text, read, at)
+                    read = closing.end() if closing else at
+                else:
+                    end = text.find('*/', read, at)
+                    read = end + 2 if end >= 0 else at
+        elif written in ('{', '['):
+            stack.append(token.start())
+        elif written in ('}', ']') and stack:
+            if text[stack[-1]] == ('{' if written == '}' else '['):
+                stack.pop()
+    return stack
+
+
 def _call_array(raw: str) -> Optional[Tuple[Dict[str, Any], int]]:
     """A call array as a batch and its end offset; never extract a partial batch."""
-    start, brace = raw.find('['), raw.find('{')
-    if start < 0 or 0 <= brace < start:
+    if '[' not in raw:
         return None
+    # Find the selected envelope's containing array, not an unrelated citation in the preamble.
+    obj = _extract_first_json_object(raw)
+    at = raw.find('{')
+    if not isinstance(obj, dict) or obj.get('type') not in _ENVELOPE_KINDS:
+        candidate = next(_envelopes(raw), None)
+        if candidate is None:
+            return None
+        at = candidate[2]
+    containers = _containers_before(raw, at)
+    if not containers or any(raw[start] == '{' for start in containers):
+        return None
+    start = containers[0]
     try:
         entries, end = json.JSONDecoder().raw_decode(raw, start)
     except (ValueError, RecursionError):
@@ -746,14 +785,22 @@ def _sentinel_answer(text: str) -> Optional[str]:
         if obj.get('type') == 'final':
             return _final_text(obj.get('content', ''))
     broken = _looks_like_envelope(text) and not isinstance(_extract_first_json_object(text), dict)
+    if candidate.lstrip().startswith('{') and _attempted_kind(candidate) in _TOOL_CALL_KINDS:
+        # Includes comments or damaged type keys that do not match _ENVELOPE_OPEN.
+        # A complete envelope with trailing prose is still a quoted answer example.
+        if not isinstance(_extract_first_json_object(candidate), dict):
+            return None
     return _salvage_final_content(whole) if broken and _attempted_kind(text) == 'final' else text
 
 
-def _final_text(content: Any) -> str:
-    """The text of a `final` envelope's content. Anything but a string is written back as JSON, not as a Python repr."""
+def _final_text(content: Any) -> Optional[str]:
+    """Final content as text or strict JSON; unrepresentable numeric values require a retry."""
     if content is None:
         return ''
-    text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+    try:
+        text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, allow_nan=False)
+    except (ValueError, RecursionError):
+        return None
     # json.loads accepts lone surrogates; keep them as escape text, including in nested JSON content.
     return text.encode('utf-8', errors='backslashreplace').decode('utf-8')
 
@@ -809,7 +856,8 @@ def parse_reply(raw: Any, *, allow_parallel: bool = False) -> Optional[ParsedRep
         # Nothing after the marker: a `final` envelope that parses before it is still the answer.
         obj = _extract_first_json_object(raw) if not raw[marker.end() :].strip() else None
         if isinstance(obj, dict) and obj.get('type') == 'final':
-            return _message(content=_final_text(obj.get('content', '')))
+            answer = _final_text(obj.get('content', ''))
+            return _message(content=answer) if answer is not None else None
         return None
 
     array = _call_array(raw)
@@ -828,7 +876,7 @@ def parse_reply(raw: Any, *, allow_parallel: bool = False) -> Optional[ParsedRep
             line = max(raw.rfind('\n', 0, at), raw.rfind('\r', 0, at)) + 1
             # Only a new line can introduce a later envelope. A template's extra
             # brace does not authorize a nested call, nor does a mixed sentinel reply.
-            if not raw[line:at].strip() and not raw[:at].rstrip().endswith('{'):
+            if not raw[line:at].strip() and not any(raw[pos] == '{' for pos in _containers_before(raw, at)):
                 obj = parsed
     if not isinstance(obj, dict):
         salvaged = _salvage_final_content(raw)
@@ -836,9 +884,10 @@ def parse_reply(raw: Any, *, allow_parallel: bool = False) -> Optional[ParsedRep
 
     if obj.get('type') == 'final':
         # A claimed result followed by pending work is not a completed turn.
-        if _unfinished_envelope(raw) in _TOOL_CALL_KINDS:
+        if _unfinished_envelope(raw) is not None:
             return None
-        return _message(content=_final_text(obj.get('content', '')))
+        answer = _final_text(obj.get('content', ''))
+        return _message(content=answer) if answer is not None else None
     if obj.get('type') == 'tool_call':
         call = _tool_call(obj)
         return _message(tool_calls=[call]) if call else None
@@ -874,13 +923,15 @@ def _diagnose(raw: Any, *, allow_parallel: bool = False) -> Tuple[str, str, str]
     marker = _sentinel(text)
     if marker:
         # What was wrong is in the text after the marker: nothing at all, or an envelope that was cut off.
-        text = text[marker.end() :].strip()
-        if not text:
+        before, after = text[: marker.start()], text[marker.end() :].strip()
+        previous = _extract_first_json_object(before) if not after else None
+        if not after and not (isinstance(previous, dict) and previous.get('type') == 'final'):
             return (
                 f'ended at {FINAL_SENTINEL} with no answer after it.',
                 '',
                 f'Write the answer after {FINAL_SENTINEL}.',
             )
+        text = after or before
 
     # A broken answer should come back after the sentinel, where nothing can break again. A broken
     # tool call must come back as a tool call: the sentinel would trade the work for a sentence about it.
@@ -905,6 +956,12 @@ def _diagnose(raw: Any, *, allow_parallel: bool = False) -> Tuple[str, str, str]
     if array is not None and not allow_parallel:
         return 'contained an array of tool calls.', '', f'Send one tool call per reply, as {_TOOL_CALL_SHAPE}.'
     batch = array[0] if array is not None else _extract_first_json_object(text)
+    if isinstance(batch, dict) and batch.get('type') == 'final' and _final_text(batch.get('content', '')) is None:
+        return (
+            'contained final content that cannot be serialized as strict JSON.',
+            '',
+            'Use finite JSON numbers; express out-of-range or non-finite values as strings instead.',
+        )
     if allow_parallel and isinstance(batch, dict) and batch.get('type') == 'tool_calls':
         problem = _batch_problem(batch.get('calls'))
         if problem:

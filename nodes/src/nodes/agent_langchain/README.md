@@ -108,6 +108,7 @@ also enables parallel `tool_calls`. The shared reply handling works as follows:
 A single call wrapped in a JSON array is accepted. An array with multiple calls
 is retried with the single-call hint; no first call is dispatched while the rest
 are discarded. DeepAgent can accept the whole array as a parallel batch.
+Preamble citations such as `Note [1].` do not bypass whole-array validation.
 
 - A `final` envelope whose content was not escaped correctly (an inner `"`, a
   literal line break) is recovered when the envelope opens the reply and the
@@ -121,18 +122,21 @@ are discarded. DeepAgent can accept the whole array as a parallel batch.
   inside the answer.
 - A valid envelope can follow a preamble containing braces or ordinary JSON.
   When the first object is not an envelope, a standalone envelope on a later
-  line is read. Nested objects and quoted examples are not dispatched. Replies
+  line is read. Nested objects, including calls inside unclosed wrappers with
+  comments, and quoted examples are not dispatched. Replies
   mixing this fallback with `FINAL>>>` are retried instead of guessing.
 - A `content` that is not a string (a JSON object, array, number or boolean) is
-  delivered as JSON text. For compatibility, a parsed `final` with missing,
+  delivered as JSON text. Numeric overflow and non-finite values retry instead
+  of emitting `Infinity` or `NaN`. For compatibility, a parsed `final` with missing,
   null, empty or whitespace-only content remains a successful answer; this is
   distinct from an empty model reply, which is retried.
 - `FINAL>>>` at the start of a line, followed by the answer as plain text, is
   also an answer. Nothing after the marker needs escaping. The prompt does not
   ask for this form; a retry does, when an answer did not parse. When all that
   follows the marker is a `final` envelope, its content is the answer, and one
-  that was cut off there is retried. A whole tool-call envelope after the
-  marker, with or without a fence, is retried with instructions to omit the
+  that was cut off there is retried. A whole tool-call envelope, including one
+  with malformed JSON, after the marker, with or without a fence, is retried
+  with instructions to omit the
   marker; it is never presented as the answer. A space, tab, LF, CRLF or bare
   CR separates the marker from its answer, and only one separator is removed.
   LF, CRLF and bare CR also start a new marker line.
@@ -151,8 +155,9 @@ are discarded. DeepAgent can accept the whole array as a parallel batch.
   after it on its line. It is prose, and a `FINAL>>>` line after it is the
   answer. Punctuation, a brace, a closing, a markup tag or a comment around a
   call is no word. A tool call wrapped inside another object that parses is not read.
-- A valid `final` followed by a pending tool call is retried. Its claim is
-  withheld until the model sends the call and that work runs. A quoted, valid
+- A valid `final` followed by a pending tool call or a broken envelope is retried.
+  Its claim is withheld until the model sends a valid reply and any pending work
+  runs. A quoted, valid
   call example after the final is still ordinary trailing prose. A new, closed
   markdown code block after that final also quotes examples, including malformed
   calls. An unfenced trailing call, a call in the same fence as the final, or a
@@ -172,7 +177,7 @@ three-attempt budget is deliberate: a model that keeps replying in prose can
 use three model calls, with their latency and token cost, before the fallback
 accepts its text. After the third reply, prose is delivered as the answer, also when it
 starts with a brace that opens no object (`{curly} braces`) or mentions a
-`type`. An empty reply, a `FINAL>>>` with nothing after it, a reply that opens
+`type`. An empty reply, an isolated `FINAL>>>` with no answer, a reply that opens
 with a JSON object that is neither shape, an envelope that was refused, a
 broken envelope that is not quoted, and a broken tool call anywhere in the
 reply are not answers: the run fails with `stop_reason: error`, and its answer

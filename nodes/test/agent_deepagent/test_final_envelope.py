@@ -72,6 +72,9 @@ def _install_stubs():
     """
     saved = {}
     before = set(sys.modules)
+    parent = sys.modules.get('ai.common.agent._internal')
+    absent = object()
+    saved_protocol = getattr(parent, 'protocol', absent)
     stubs = {
         'rocketlib': types.ModuleType('rocketlib'),
         'ai': types.ModuleType('ai'),
@@ -113,6 +116,11 @@ def _install_stubs():
         # The shared module was loaded through the stub packages: it goes with them.
         for name in [loaded for loaded in sys.modules if loaded not in before and loaded.startswith('ai.')]:
             sys.modules.pop(name, None)
+        if parent is not None:
+            if saved_protocol is absent:
+                parent.__dict__.pop('protocol', None)
+            else:
+                parent.protocol = saved_protocol
 
     try:
         spec = importlib.util.spec_from_file_location('deepagent_under_test', os.path.join(_NODE_DIR, 'deepagent.py'))
@@ -133,6 +141,29 @@ def dp():
     mod, restore = _install_stubs()
     yield mod
     restore()
+
+
+@pytest.mark.parametrize('had_protocol', [False, True])
+def test_stub_teardown_restores_the_retained_parent_attribute(monkeypatch, had_protocol):
+    parent = types.ModuleType('ai.common.agent._internal')
+    parent.__path__ = [str(Path(__file__).resolve().parents[3] / 'packages/ai/src/ai/common/agent/_internal')]
+    original = types.ModuleType('original_protocol')
+    if had_protocol:
+        parent.protocol = original
+    monkeypatch.setitem(sys.modules, 'ai.common.agent._internal', parent)
+    monkeypatch.delitem(sys.modules, 'ai.common.agent._internal.protocol', raising=False)
+    _mod, restore = _install_stubs()
+    try:
+        # Importing through the retained package must not leave a stub-backed module behind.
+        importlib.import_module('ai.common.agent._internal.protocol')
+        assert parent.protocol is not original
+    finally:
+        restore()
+    assert 'ai.common.agent._internal.protocol' not in sys.modules
+    if had_protocol:
+        assert parent.protocol is original
+    else:
+        assert not hasattr(parent, 'protocol')
 
 
 # ---------------------------------------------------------------------------

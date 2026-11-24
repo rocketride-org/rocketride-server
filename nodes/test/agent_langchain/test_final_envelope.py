@@ -90,6 +90,8 @@ ANSWERED = {
         1,
         ANSWER_JSON,
     ),
+    'empty_marker_keeps_the_preceding_final': ('{"type":"final","content":"Done."}\nFINAL>>>', 1, 'Done.'),
+    'large_finite_number_stays_json': ('{"type":"final","content":{"estimate":1e300}}', 1, '{"estimate": 1e+300}'),
     'final_wrapped_in_an_array': ('[' + json.dumps({'type': 'final', 'content': ANSWER_JSON}) + ']', 1, ANSWER_JSON),
     'final_with_a_fenced_tool_example': (
         '{"type":"final","content":"Here is how to call it."}\n```json\n'
@@ -115,6 +117,17 @@ FAILED = {
     'D_raw_json_object_no_envelope': (ANSWER_JSON, 'not one of the allowed shapes'),
     'I_envelope_cut_off_mid_answer': ('{"type":"final","content":"Acme reported revenue of 12', 'not valid JSON'),
     'tool_call_that_never_parses': (BROKEN_TOOL_CALL, 'not valid JSON'),
+    'broken_tool_call_after_the_marker': ('FINAL>>> ' + BROKEN_TOOL_CALL, 'put a tool-call envelope after FINAL>>>'),
+    'non_finite_final_content': ('{"type":"final","content":{"estimate":1e400}}', 'strict JSON'),
+    'call_inside_a_commented_wrapper': (
+        '{\n  // example wrapper\n  {"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}\n}',
+        'not valid JSON',
+    ),
+    'broken_final_masks_a_later_call': (
+        '{"type":"final","content":"Done."}\n{"type":"final","content":"bad "quote" here"}\n'
+        '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}',
+        'not valid JSON',
+    ),
     'parallel_form_the_node_does_not_offer': (PARALLEL_CALLS, 'not one of the allowed shapes'),
     'empty_reply': ('', 'The last reply was empty.'),
     'broken_tool_call_after_a_line_of_prose': ('Sure, let me do that.\n' + BROKEN_TOOL_CALL, 'not valid JSON'),

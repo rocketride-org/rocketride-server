@@ -104,7 +104,8 @@ def by_deal(invocations):
 
 
 @pytest.mark.parametrize('as_array', [False, True])
-def test_parallel_tools_execute_and_feed_the_next_turn(run, as_array):
+@pytest.mark.parametrize('prefix', ['', 'Note [1].\n'])
+def test_parallel_tools_execute_and_feed_the_next_turn(run, as_array, prefix):
     # Each call waits for the other to start. Dispatched one after the other, the first would wait alone,
     # the barrier would break, and the tool would fail instead of answering.
     both_started = threading.Barrier(2, timeout=10)
@@ -113,7 +114,7 @@ def test_parallel_tools_execute_and_feed_the_next_turn(run, as_array):
         {'type': 'tool_call', 'name': 'crm.get_deal', 'args': {'deal_id': 42}},
     ]
     result = run(
-        json.dumps(calls if as_array else {'type': 'tool_calls', 'calls': calls}),
+        prefix + json.dumps(calls if as_array else {'type': 'tool_calls', 'calls': calls}),
         'FINAL>>> Both deals are won.',
         tools=(GET_DEAL,),
         before_invoke=both_started.wait,
@@ -124,10 +125,18 @@ def test_parallel_tools_execute_and_feed_the_next_turn(run, as_array):
     assert result.stop_reason is None
     assert result.payload['meta']['tool_calls'] == 2
     assert len(result.prompts) == 2
-    # Both results reach the next turn, not only one of them.
-    assert '"deal_id": 41' in result.prompts[1]
-    assert '"deal_id": 42' in result.prompts[1]
-    assert '"stage": "won"' in result.prompts[1]
+    # Match each result to the call ID from the assistant envelope, not to arguments
+    # elsewhere in the prompt, so missing or swapped results cannot pass.
+    lines = result.prompts[1].splitlines()
+    assistant = next(json.loads(line.removeprefix('assistant: ')) for line in lines if line.startswith('assistant: '))
+    tool_results = {}
+    for line in lines:
+        if line.startswith('tool['):
+            label, content = line.removeprefix('tool[').split(']: ', 1)
+            tool_results[label] = json.loads(content)
+    assert len(tool_results) == 2
+    for call in assistant['calls']:
+        assert tool_results[f'{call["name"]}#{call["id"]}'] == {'deal_id': call['args']['deal_id'], 'stage': 'won'}
     assert 'system: Parallel tool calls' in result.prompts[0]
 
 
@@ -164,12 +173,13 @@ def test_both_tool_calls_in_an_array_run(run):
 
 
 @pytest.mark.parametrize('as_array', [False, True])
-def test_a_bad_entry_blocks_the_whole_batch_until_repaired(run, as_array):
+@pytest.mark.parametrize('prefix', ['', 'Note [1].\n'])
+def test_a_bad_entry_blocks_the_whole_batch_until_repaired(run, as_array, prefix):
     calls = [
         {'type': 'tool_call', 'name': 'crm.get_deal', 'args': {'deal_id': 41}},
         {'args': {'deal_id': 42}},
     ]
-    raw = json.dumps(calls if as_array else {'type': 'tool_calls', 'calls': calls})
+    raw = prefix + json.dumps(calls if as_array else {'type': 'tool_calls', 'calls': calls})
     failed = run(raw, tools=(GET_DEAL,))
     assert failed.stop_reason == 'error'
     assert failed.invocations == []
