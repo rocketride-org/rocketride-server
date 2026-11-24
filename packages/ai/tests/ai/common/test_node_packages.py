@@ -163,8 +163,11 @@ def test_an_unpack_that_was_killed_is_swept_once_it_is_old(nodes):
     assert not os.path.exists(old) and os.path.exists(fresh)
 
 
-def _failing_replace(monkeypatch, *failing_calls):
-    """Make os.replace raise on the given calls (1-based) and pass the rest through."""
+def _failing_replace(monkeypatch, *failing_calls, tries=1):
+    """Make os.replace raise on the given calls (1-based) and pass the rest through.
+
+    Each rename is tried ``tries`` times without a pause (one by default, so a call number names one rename).
+    """
     replace = os.replace
     calls = []
 
@@ -175,6 +178,8 @@ def _failing_replace(monkeypatch, *failing_calls):
         return replace(src, dst)
 
     monkeypatch.setattr(node_packages.os, 'replace', flaky)
+    monkeypatch.setattr(node_packages, '_MOVE_TRIES', tries)
+    monkeypatch.setattr(node_packages, '_MOVE_PAUSE_SECS', 0)
     return calls
 
 
@@ -219,6 +224,49 @@ def test_a_replacement_leaves_no_backup_behind(nodes):
 
     assert os.listdir(nodes) == ['railnode']
     assert node_packages.digest_of(os.path.join(nodes, 'railnode')) == new_sha
+
+
+def test_a_rename_refused_for_a_moment_is_tried_again(nodes, monkeypatch):
+    # Windows refuses the rename of a folder while a scanner still holds a file just written into it
+    data, sha256 = _package()
+    calls = _failing_replace(monkeypatch, 1, 2, tries=3)
+
+    node_dir = node_packages.unpack('railnode', data, sha256, nodes)
+
+    assert len(calls) == 3 and node_packages.digest_of(node_dir) == sha256
+    assert os.listdir(nodes) == ['railnode']
+
+
+def test_a_rename_that_stays_refused_fails_after_the_last_try(nodes, monkeypatch):
+    data, sha256 = _package()
+    calls = _failing_replace(monkeypatch, 1, 2, 3, tries=3)
+
+    with pytest.raises(PermissionError):
+        node_packages.unpack('railnode', data, sha256, nodes)
+
+    assert len(calls) == 3 and os.listdir(nodes) == []
+
+
+def test_only_a_permission_error_is_tried_again(nodes, monkeypatch):
+    data, sha256 = _package()
+    calls = []
+
+    def full(src, dst):
+        calls.append(dst)
+        raise OSError(28, 'No space left on device', dst)
+
+    monkeypatch.setattr(node_packages.os, 'replace', full)
+    monkeypatch.setattr(node_packages, '_MOVE_TRIES', 3)
+    monkeypatch.setattr(node_packages, '_MOVE_PAUSE_SECS', 0)
+
+    with pytest.raises(OSError, match='No space left'):
+        node_packages.unpack('railnode', data, sha256, nodes)
+
+    assert len(calls) == 1
+
+
+def test_a_rename_is_tried_once_except_on_windows():
+    assert node_packages._MOVE_TRIES == (10 if os.name == 'nt' else 1)
 
 
 def test_a_package_unpacks_when_only_nodes_is_writable(nodes, monkeypatch):
