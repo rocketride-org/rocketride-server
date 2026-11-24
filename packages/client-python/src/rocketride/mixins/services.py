@@ -227,7 +227,8 @@ class ServicesMixin(DAPClient):
             ALWAYS lists.
 
         Raises:
-            RuntimeError: If the server refuses the request.
+            CommandException: If the server refuses the command (``code`` says why, when it
+                sends one). It is a ``RuntimeError``, as this call raised before.
 
         Example:
             result = await client.convert(pipeline, name_hint='docBrain')
@@ -241,5 +242,8 @@ class ServicesMixin(DAPClient):
             result.setdefault('errors', [])
             result.setdefault('touched', False)
             return result
+        except CommandException as err:
+            # Keep the server's code with the message, as validate() does
+            raise CommandException({**err.dap_result, 'message': f'Pipeline conversion failed: {err}'}) from err
         except Exception as err:
             raise RuntimeError(f'Pipeline conversion failed: {err}') from err

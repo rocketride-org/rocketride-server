@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 7257e7c359f843956324bbe5a0823e254922867e
+// Source commit: 9abba4ca7c50d26e5ce46c3d99ef4cc8aa08acfe
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -6044,7 +6044,7 @@ export declare class RocketRideClient extends DAPClient {
      * @returns The pipeline to use (the input when `touched` is false), what
      *          changed per component, and the components that could not be
      *          converted (they keep their original config)
-     * @throws Error if the server refuses the request
+     * @throws CommandException if the server refuses the command (`code` says why, when it sends one)
      *
      * @example
      * ```typescript

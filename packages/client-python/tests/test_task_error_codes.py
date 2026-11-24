@@ -149,6 +149,18 @@ async def test_a_refused_validation_keeps_the_code():
         raise AssertionError('validate() did not raise')
 
 
+async def test_a_refused_conversion_keeps_the_code():
+    from rocketride.core.exceptions import CommandException
+
+    try:
+        await _refusing_client(code='INVALID_PIPELINE', message='the pipeline has no components').convert({})
+    except CommandException as e:
+        assert e.code == 'INVALID_PIPELINE' and isinstance(e, RuntimeError)
+        assert str(e) == 'Pipeline conversion failed: the pipeline has no components'
+    else:
+        raise AssertionError('convert() did not raise')
+
+
 async def test_a_refused_restart_keeps_the_code():
     from rocketride.core.exceptions import CommandException
 

@@ -16,7 +16,8 @@ What the SDK raises, when, and how to catch it.
 | Data-pipe errors (open / write / close) | `PipeException` |
 | `use()` argument problems (neither `filepath` nor `pipeline`; both; bad types) | `ValueError` |
 | `use()` with a missing pipeline file | `FileNotFoundError` |
-| Server rejects a pipeline start or a DAP request | `CommandException` (also a `RuntimeError`) |
+| The server refuses a command: `use()`, `validate()`, `convert()`, `restart()`, or any `call()` | `CommandException` (also a `RuntimeError`); `code` says why, when the server sends one |
+| The server refuses a `submit()` | `PipeException` (also a `RuntimeError`), with the server's `code` |
 | `get_service('')` / unknown service name | `ValueError` / `RuntimeError` |
 | `send_files` without an API key, or a missing file | `RuntimeError` / `ValueError` |
 | `Answer.getJson()` on non-JSON content | `ValueError` |
@@ -90,5 +91,6 @@ except PipeException as e:
 
 `ConnectionException`, `ExecutionException`, and `ValidationException` exist in
 `rocketride.core.exceptions` but the SDK does not currently raise them: transport
-failures surface as the builtin `ConnectionError`, and a refused pipeline start
-or validation as `CommandException`. Don't write handlers that rely on them.
+failures surface as the builtin `ConnectionError`, a refused pipeline start,
+validation or conversion as `CommandException`, and a refused `submit()` as
+`PipeException`. Don't write handlers that rely on them.

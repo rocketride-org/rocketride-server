@@ -197,6 +197,16 @@ describe('RocketRideClient.validate() and restart() failure', () => {
 		expect((caught as CommandException).message).toBe('Pipeline validation failed: acme.echo is not published to you');
 	});
 
+	it('convert() keeps the server code', async () => {
+		const caught = await refusingClient()
+			.convert({ pipeline: { components: [] } })
+			.catch((e: unknown) => e);
+
+		expect(caught).toBeInstanceOf(CommandException);
+		expect((caught as CommandException).code).toBe('NODE_NOT_ENTITLED');
+		expect((caught as CommandException).message).toBe('Pipeline conversion failed: acme.echo is not published to you');
+	});
+
 	it('restart() keeps the server code', async () => {
 		const caught = await refusingClient()
 			.restart({ token: 'tk', projectId: 'p', source: 's', pipeline: {} })

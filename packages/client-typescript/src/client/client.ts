@@ -1558,7 +1558,7 @@ export class RocketRideClient extends DAPClient {
 	 * @returns The pipeline to use (the input when `touched` is false), what
 	 *          changed per component, and the components that could not be
 	 *          converted (they keep their original config)
-	 * @throws Error if the server refuses the request
+	 * @throws CommandException if the server refuses the command (`code` says why, when it sends one)
 	 *
 	 * @example
 	 * ```typescript
@@ -1580,7 +1580,10 @@ export class RocketRideClient extends DAPClient {
 				touched: Boolean(result?.touched),
 			};
 		} catch (err) {
-			throw new Error(`Pipeline conversion failed: ${err instanceof Error ? err.message : err}`);
+			const message = `Pipeline conversion failed: ${err instanceof Error ? err.message : err}`;
+			// Keep the server's code with the message, as validate() does
+			if (err instanceof CommandException) throw new CommandException({ ...err.dapResult, message });
+			throw new Error(message);
 		}
 	}
 
