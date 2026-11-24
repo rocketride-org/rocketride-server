@@ -415,19 +415,26 @@ class DeviceBudget:
                 self._warm_warned = True
                 logger.warning('%s: cannot set up the cuBLAS workspace in its own pool (%s)', self.device, e)
 
-    def _load_started(self, base_mb: Optional[float], loads: int = 1) -> None:
+    def _load_started(self, base_mb: Optional[float], loads: int = 1, reread: bool = False) -> None:
         """Note models starting to load in this process: from then on the base stays as it is until they end.
 
         Args:
             base_mb: What the device held when the first of them started, or ``None`` if not measured; an idle guard
                 takes it as its base, since what changed while it sat idle is no call's progress.
             loads: How many started.
+            reread: ``base_mb`` was read just now, before this guard's lock was taken (a load starting, not a guard
+                made during one, whose base is the one kept since the first load). An idle guard then reads its
+                device again under the lock: a call inside at the first reading may have freed its memory and left
+                since, and what it held is no base.
         """
         if not self._gpu:
             return
         with self._cond:
             # the calls inside measure their progress from the base they entered with
             if base_mb is not None and not self._inside and not self._loads:
+                if reread:
+                    # no call can leave while the lock is held, so this reading holds no departed call's memory
+                    base_mb = _measure(_allocated_mb).get(self.device, base_mb)
                 self._idle_allocated = base_mb
             self._loads += loads
 
@@ -605,7 +612,8 @@ def _begin_load() -> None:
             _load_base.update(_measure(_allocated_mb))
         _loads += 1
         for budget in _budgets.values():
-            budget._load_started(_load_base.get(budget.device))
+            # only a guard with no load in flight takes the base, and for it this reading is the fresh one
+            budget._load_started(_load_base.get(budget.device), reread=True)
 
 
 def _end_load(sizes: Dict[str, float]) -> None:

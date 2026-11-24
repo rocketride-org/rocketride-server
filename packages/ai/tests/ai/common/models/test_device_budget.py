@@ -1455,6 +1455,57 @@ def test_a_call_that_leaves_during_the_load_does_not_hide_the_weights(loads):
     b.leave()
 
 
+def test_a_call_that_leaves_before_the_guard_notes_the_load_is_not_in_the_base(loads):
+    """A call inside when a load's base is read may free its memory and leave before the guard notes the load.
+
+    The guard is idle by then and takes a base; it must be the device as it stands, not the reading that still
+    held the departed call's memory.
+    """
+    probe = _Probe(free=6000)
+    budget = _registered(_gpu(probe))
+    a = _Call(budget, 1000)
+    assert a.enters()
+    _load_weights(probe, 800)  # call A's memory when the load starts
+    readings = []
+
+    def allocated(torch=None):
+        """Read the device; right after the load's first reading, call A frees its memory and leaves.
+
+        Args:
+            torch: Ignored.
+
+        Returns:
+            The MB allocated on ``cuda:0`` at this reading.
+        """
+        held = {'cuda:0': probe.allocated}
+        readings.append(held)
+        if len(readings) == 1:
+            _load_weights(probe, -800)
+            a.leave()
+        return held
+
+    loads.setattr(budgetmod, '_allocated_mb', allocated)
+    calls = []
+
+    def load():
+        """Load 3000 MB of weights while call C enters the idle device.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 3000)
+        calls.append(_Call(budget, 500))
+        assert calls[0].enters()
+        return _Model({'cuda:0': 3000.0})
+
+    budgetmod.loading_model(load)
+    assert readings[0] == {'cuda:0': 800.0}  # the reading that still held A's memory
+    assert budget._idle_allocated == 3000.0  # that reading as the base would give 3800
+    d = _Call(budget, 1500)  # 3000 free, less C's 500 and the margin, leaves 1988
+    assert d.enters()  # with A's 800 in the base C would seem to claim 1300, and D would wait
+    _leave_all(calls + [d])
+
+
 def test_the_base_is_not_taken_again_while_a_model_loads(loads):
     """A call entering an idle device mid-load leaves the base without the half-loaded weights (#3064, scenario S1)."""
     probe = _Probe(free=6000)
