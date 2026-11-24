@@ -168,11 +168,22 @@ including malformed calls, and does not prevent delivery of that final. Calls
 outside that block, in the final's own fence, or in an unclosed block remain
 pending work. LF, CRLF and bare CR all start a new `FINAL>>>` line.
 
+If text on later lines follows a call before the marker, it may retract the call
+or describe an example. The reply is retried without dispatching the call or
+delivering the claim. The model is asked for a standalone call if needed, or
+only `FINAL>>>` and the answer otherwise. This deliberately favors a retry over
+guessing whether the call was intended.
+
 Without a sentinel the first JSON object in the reply is the envelope, also
-inside a markdown fence, after a line of prose, or inside a JSON array.
-Objects after the first one are not read: of two tool calls sent
-as a bare array only the first runs, so several calls belong in one
-`tool_calls` envelope. Non-string `final` content is serialized as JSON. Tool
+inside a markdown fence or after a line of prose. A JSON array of `tool_call`
+envelopes is read as a complete parallel batch, including in a fence or after a
+preamble. Every entry in that array or a `tool_calls` list is validated before
+any call runs. An invalid entry retries the whole batch with its zero-based index
+in the diagnostic; a missing or blank tool name, a non-string name, a non-object
+entry, or another envelope type is invalid. Empty `tool_calls` lists and truncated
+call arrays are refused. Ordinary arrays containing no call envelopes
+remain answer data. `agent_langchain` accepts only a single-call array and retries
+multi-call arrays. Non-string `final` content is serialized as JSON. Tool
 arguments that are not an object are passed as `{"input": value}`, the values
 `false`, `0`, `""` and `[]` included; only a missing or `null` `args` becomes
 `{}`. A malformed `final` envelope is recovered only when it opens the reply

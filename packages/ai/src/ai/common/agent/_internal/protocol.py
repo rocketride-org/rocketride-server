@@ -130,6 +130,8 @@ _ENVELOPE_KINDS = _TOOL_CALL_KINDS + ('final',)
 
 _TOOL_CALL_SHAPE = '{"type":"tool_call","name":"server.tool","args":{...}}'
 
+_TOOL_CALLS_SHAPE = '{"type":"tool_calls","calls":[{"name":"server.tool","args":{...}}, ...]}'
+
 
 def _message(content: str = '', tool_calls: Optional[List[Dict[str, Any]]] = None) -> ParsedReply:
     """The final answer or tool calls to give to the framework adapter."""
@@ -622,6 +624,67 @@ def _looks_like_envelope(raw: Any) -> bool:
     return isinstance(raw, str) and bool(_ENVELOPE_OPEN.match(raw) or _LOOSE_FINAL_OPEN.match(_without_fence(raw)))
 
 
+def _call_array(raw: str) -> Optional[Tuple[Dict[str, Any], int]]:
+    """A call array as a batch and its end offset; never extract a partial batch."""
+    start, brace = raw.find('['), raw.find('{')
+    if start < 0 or 0 <= brace < start:
+        return None
+    try:
+        entries, end = json.JSONDecoder().raw_decode(raw, start)
+    except (ValueError, RecursionError):
+        if _without_fence(raw).startswith('[') and _attempted_kind(raw) in _TOOL_CALL_KINDS:
+            return {'type': 'tool_calls', 'calls': None}, len(raw)
+        return None
+    if not isinstance(entries, list):
+        return None
+    if not any(isinstance(entry, dict) and entry.get('type') in _TOOL_CALL_KINDS for entry in entries):
+        if _attempted_kind(raw[start:end]) not in _TOOL_CALL_KINDS:
+            return None
+    # An array contains complete call envelopes, unlike a tool_calls list's name/args entries.
+    calls = [entry if isinstance(entry, dict) and entry.get('type') == 'tool_call' else None for entry in entries]
+    return {'type': 'tool_calls', 'calls': calls}, end
+
+
+def _batch_problem(entries: Any) -> Optional[str]:
+    """Validate every call before any of a parallel batch can run; report only its index."""
+    if not isinstance(entries, list) or not entries:
+        return 'needs a non-empty calls list.'
+    for index, entry in enumerate(entries):
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get('name'), str)
+            or not entry['name'].strip()
+            or entry.get('type', 'tool_call') != 'tool_call'
+        ):
+            return f'has an invalid call at index {index}; each entry must name a tool.'
+    return None
+
+
+def _ambiguous_call_before_sentinel(raw: str) -> bool:
+    """Later prose can retract or quote a call: retry this mix instead of dispatching it."""
+    marker = _SENTINEL_LINE.search(raw)
+    if marker is None:
+        return False
+    before = raw[: marker.start()]
+    array = _call_array(before)
+    if array is not None:
+        ends = [array[1]]
+    else:
+        ends = [
+            json.JSONDecoder().raw_decode(before, at)[1]
+            for kind, parsed, at in _envelopes(before, allow_code=False)
+            if kind in _TOOL_CALL_KINDS and parsed is not None
+        ]
+    # Find the last word's line once, rather than rescan the suffix after every call.
+    last_word = -1
+    for word in _WORD.finditer(before):
+        last_word = word.start()
+    if last_word < 0:
+        return False
+    line = max(before.rfind('\r', 0, last_word), before.rfind('\n', 0, last_word))
+    return any(end <= line for end in ends)
+
+
 def _sentinel(raw: str) -> Optional['re.Match[str]']:
     """
     The ``FINAL>>>`` line that announces the answer, or None when the reply has no line that does.
@@ -669,8 +732,12 @@ def _sentinel_answer(text: str) -> Optional[str]:
     if not whole:
         return None
     inside = _inside_fence(whole)
+    candidate = whole if inside is None else inside
+    array = _call_array(candidate)
+    if array is not None and not candidate[array[1] :].strip():
+        return None
     try:
-        obj = json.loads(whole if inside is None else inside)
+        obj = json.loads(candidate)
     except Exception:
         obj = None
     if isinstance(obj, dict):
@@ -719,13 +786,18 @@ def parse_reply(raw: Any, *, allow_parallel: bool = False) -> Optional[ParsedRep
 
     Everything else is refused: a bare JSON object (it may be a tool call that lost its
     ``"type"``), a tool call that names no tool, and the ``tool_calls`` form with several calls
-    in one reply unless the driver enables ``allow_parallel``.
+    in one reply unless the driver enables ``allow_parallel``. A call array is a batch too;
+    only a single-call array is accepted without parallel support. Every batch entry must be
+    valid before any call runs. Prose on later lines between a call and the sentinel is
+    ambiguous and is retried rather than dispatched.
 
     Returns:
         An ``ParsedReply`` carrying the answer or the tool call, or None when the reply is
         neither. None sends the model through the retry loop.
     """
     if not isinstance(raw, str):
+        return None
+    if _ambiguous_call_before_sentinel(raw):
         return None
 
     marker = _sentinel(raw)
@@ -740,7 +812,13 @@ def parse_reply(raw: Any, *, allow_parallel: bool = False) -> Optional[ParsedRep
             return _message(content=_final_text(obj.get('content', '')))
         return None
 
-    obj = _extract_first_json_object(raw)
+    array = _call_array(raw)
+    obj = array[0] if array is not None else _extract_first_json_object(raw)
+    if array is not None and not allow_parallel:
+        entries = obj['calls']
+        if _batch_problem(entries) or len(entries) != 1:
+            return None
+        obj = entries[0]
     if (not isinstance(obj, dict) or obj.get('type') not in _ENVELOPE_KINDS) and not _SENTINEL_LINE.search(raw):
         # A brace in a preamble must not hide the envelope. Read only standing,
         # outer objects; never skip an unfinished envelope to execute a later one.
@@ -766,10 +844,9 @@ def parse_reply(raw: Any, *, allow_parallel: bool = False) -> Optional[ParsedRep
         return _message(tool_calls=[call]) if call else None
     if obj.get('type') == 'tool_calls' and allow_parallel:
         entries = obj.get('calls')
-        if not isinstance(entries, list):
+        if _batch_problem(entries):
             return None
-        calls = [call for entry in entries if isinstance(entry, dict) and (call := _tool_call(entry)) is not None]
-        return _message(tool_calls=calls) if calls else None
+        return _message(tool_calls=[_tool_call(entry) for entry in entries])
     return None
 
 
@@ -786,6 +863,14 @@ def _diagnose(raw: Any, *, allow_parallel: bool = False) -> Tuple[str, str, str]
     text = safe_str(raw).strip()
     if not text:
         return 'was empty.', '', ''
+    shapes = f'{_TOOL_CALL_SHAPE} or {_TOOL_CALLS_SHAPE}' if allow_parallel else _TOOL_CALL_SHAPE
+    if _ambiguous_call_before_sentinel(text):
+        return (
+            f'mixed a tool call with later prose before {FINAL_SENTINEL}.',
+            '',
+            f'If a tool is needed, send {shapes} without surrounding prose. '
+            f'Otherwise send only {FINAL_SENTINEL} followed by the answer.',
+        )
     marker = _sentinel(text)
     if marker:
         # What was wrong is in the text after the marker: nothing at all, or an envelope that was cut off.
@@ -799,7 +884,8 @@ def _diagnose(raw: Any, *, allow_parallel: bool = False) -> Tuple[str, str, str]
 
     # A broken answer should come back after the sentinel, where nothing can break again. A broken
     # tool call must come back as a tool call: the sentinel would trade the work for a sentence about it.
-    attempted = _attempted_kind(text)
+    array = _call_array(text)
+    attempted = 'tool_calls' if array is not None else _attempted_kind(text)
     began_with_final = attempted == 'final'
     if began_with_final or _SENTINEL_LINE.search(text):
         attempted = _unfinished_envelope(text) or attempted
@@ -808,9 +894,25 @@ def _diagnose(raw: Any, *, allow_parallel: bool = False) -> Tuple[str, str, str]
         return (
             f'put a tool-call envelope after {FINAL_SENTINEL}.',
             '',
-            f'Generate the required tool call from the task and tool schema as {_TOOL_CALL_SHAPE}, '
-            f'without {FINAL_SENTINEL}.',
+            f'Generate the required tool call from the task and tool schema as {shapes}, without {FINAL_SENTINEL}.',
         )
+    if began_with_final and wanted_a_tool_call:
+        return (
+            'combined a final answer with a pending tool call.',
+            '',
+            'Generate the required tool call from the task and tool schema as one valid JSON object; do not answer in prose.',
+        )
+    if array is not None and not allow_parallel:
+        return 'contained an array of tool calls.', '', f'Send one tool call per reply, as {_TOOL_CALL_SHAPE}.'
+    batch = array[0] if array is not None else _extract_first_json_object(text)
+    if allow_parallel and isinstance(batch, dict) and batch.get('type') == 'tool_calls':
+        problem = _batch_problem(batch.get('calls'))
+        if problem:
+            return (
+                problem,
+                '',
+                'Send tool_calls with a non-empty calls list; correct every invalid entry before retrying.',
+            )
     # Diagnose the JSON itself: without its fence, and from its opening brace when prose came first.
     candidate = _without_fence(text)
     if attempted:
@@ -834,13 +936,6 @@ def _diagnose(raw: Any, *, allow_parallel: bool = False) -> Tuple[str, str, str]
         return problem, shown, f'Do not retype it as JSON: send the answer as {FINAL_SENTINEL} followed by plain text.'
     except Exception:  # noqa: BLE001 - any other parse failure gets the same advice
         return 'could not be parsed.', '', ''
-
-    if began_with_final and wanted_a_tool_call:
-        return (
-            'combined a final answer with a pending tool call.',
-            '',
-            'Generate the required tool call from the task and tool schema as one valid JSON object; do not answer in prose.',
-        )
 
     # Valid JSON that is neither shape: a bare JSON answer, an unknown "type", a
     # tool call with no name, or several calls in one reply.
@@ -890,7 +985,7 @@ def run_model_turn(ask: Callable[[str], Any], *, allow_parallel: bool = False) -
         ask: Sends the turn's prompt with the given text appended, and returns the model's reply.
             The text is empty on the first attempt and grows by one ``_parse_failure_hint`` line
             for each reply that did not parse.
-        allow_parallel: Accept the plural tool_calls envelope when the driver supports it.
+        allow_parallel: Accept plural tool_calls envelopes and arrays of call envelopes.
 
     Raises:
         ValueError: No attempt produced a tool call or a deliverable answer.

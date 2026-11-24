@@ -105,6 +105,10 @@ three-attempt retry loop in `ai.common.agent._internal.protocol`. This node
 keeps its JSON-envelope prompt and accepts one tool call per reply; DeepAgent
 also enables parallel `tool_calls`. The shared reply handling works as follows:
 
+A single call wrapped in a JSON array is accepted. An array with multiple calls
+is retried with the single-call hint; no first call is dispatched while the rest
+are discarded. DeepAgent can accept the whole array as a parallel batch.
+
 - A `final` envelope whose content was not escaped correctly (an inner `"`, a
   literal line break) is recovered when the envelope opens the reply and the
   reply ends with its closing `"}`, with or without a markdown fence around
@@ -134,8 +138,12 @@ also enables parallel `tool_calls`. The shared reply handling works as follows:
   LF, CRLF and bare CR also start a new marker line.
 - A tool call, the first line included, is not replaced by a `FINAL>>>` line
   after it: the line is a claim about work not yet done. The reply is then
-  read as its first JSON object, as always: a tool call there runs, and
-  anything else is retried. That holds for a tool call that lost its `type`
+  read as its first JSON object: a tool call there runs, and anything else is
+  retried. If text on later lines comes between the call and the marker, the
+  reply is ambiguous: that text may retract the call or describe an example.
+  Neither the call nor the claim is delivered. The retry asks for a standalone
+  call if needed, or just the answer after the marker otherwise. That holds
+  for a tool call that lost its `type`
   and is the reply's first object or has no word before it on its line, and
   for one that does not parse wherever in the reply it sits: they do not
   run, and the claim after them is not delivered either. One kind of tool

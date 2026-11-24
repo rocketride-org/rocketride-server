@@ -457,7 +457,7 @@ def test_a_run_that_fails_after_a_tool_call_still_reports_the_call(run):
 
 
 def test_a_tool_call_wrapped_in_an_array_still_runs(run):
-    """The node has always taken the first object of an array. Refusing it would fail runs that work today."""
+    """A single call wrapped in an array remains compatible with existing model output."""
     result = run(
         '[{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}]',
         '{"type":"final","content":"Deal 42 is won."}',
@@ -467,6 +467,38 @@ def test_a_tool_call_wrapped_in_an_array_still_runs(run):
     assert result.invocations == [('crm.get_deal', {'deal_id': 42})]
     assert result.content == 'Deal 42 is won.'
     assert result.stop_reason is None
+
+
+def test_multiple_array_calls_retry_then_run_sequentially(run):
+    first = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":41}}'
+    second = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}'
+    raw = '[' + first + ',' + second + ']'
+    failed = run(raw, tools=(GET_DEAL,))
+    assert failed.stop_reason == 'error'
+    assert failed.invocations == []
+    assert len(failed.prompts) == 3
+    assert 'one tool call per reply' in failed.prompts[1]
+    repaired = run(raw, first, second, 'FINAL>>> Both checked.', tools=(GET_DEAL,))
+    assert repaired.stop_reason is None
+    assert repaired.invocations == [('crm.get_deal', {'deal_id': 41}), ('crm.get_deal', {'deal_id': 42})]
+    assert repaired.content == 'Both checked.'
+    assert len(repaired.prompts) == 4
+
+
+def test_a_call_retracted_by_later_prose_never_runs(run):
+    raw = (
+        'I could run\n{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}\n'
+        'but it is not needed.\nFINAL>>> Nothing to do.'
+    )
+    failed = run(raw, tools=(GET_DEAL,))
+    assert failed.stop_reason == 'error'
+    assert failed.invocations == []
+    assert len(failed.prompts) == 3
+    repaired = run(raw, 'FINAL>>> Nothing to do.', tools=(GET_DEAL,))
+    assert repaired.stop_reason is None
+    assert repaired.invocations == []
+    assert repaired.content == 'Nothing to do.'
+    assert len(repaired.prompts) == 2
 
 
 def test_a_tool_call_runs_and_its_result_reaches_the_next_turn(run):

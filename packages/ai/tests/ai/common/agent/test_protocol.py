@@ -235,7 +235,6 @@ class TestSentinel:
             ('- ', ' is the next step.'),
             # A carriage return ends a line as a newline does.
             ('Note:\r', ' now'),
-            ('Action: ', '\rnow'),
         ],
     )
     def test_a_tool_call_that_is_not_quoted_stands(self, before, after):
@@ -244,6 +243,9 @@ class TestSentinel:
 
         assert turn.content == ''
         assert turn.tool_calls[0]['name'] == 'crm.create'
+
+    def test_prose_after_a_carriage_return_makes_a_call_and_marker_ambiguous(self):
+        assert parse('Action: ' + TOOL_CALL + '\rnow' + STACKED_FINAL) is None
 
     @pytest.mark.parametrize('before, after', [('{', '} (searching)'), ('{ ', ' } now'), ('{-} ', ' now')])
     def test_a_brace_before_a_tool_call_on_its_line_is_no_word(self, before, after):
@@ -625,13 +627,11 @@ class TestJsonEnvelope:
         'raw',
         [
             '[' + TOOL_CALL + ']',
-            '[' + TOOL_CALL + ',{"type":"tool_call","name":"b.two","args":{}}]',
-            '[' + TOOL_CALL + ',{"type":"tool_call","name":"b.two","args":{}}] Done.',
-            'Here are the calls: [' + TOOL_CALL + ',{"type":"tool_call","name":"b.two","args":{}}]',
+            'Here is the call: [' + TOOL_CALL + ']',
         ],
     )
-    def test_the_first_object_of_an_array_is_the_envelope(self, raw):
-        """As it always was in this node, with or without text around the array. Refusing it failed runs that work."""
+    def test_a_single_call_wrapped_in_an_array_is_still_the_envelope(self, raw):
+        """A single call remains compatible; a multi-call array requires parallel support."""
         assert [c['name'] for c in parse(raw).tool_calls] == ['crm.create']
 
     def test_a_final_wrapped_in_an_array_is_the_answer(self):

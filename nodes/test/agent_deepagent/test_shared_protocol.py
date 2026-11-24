@@ -103,20 +103,17 @@ def by_deal(invocations):
     return sorted(invocations, key=lambda call: call[1]['deal_id'])
 
 
-def test_parallel_tools_execute_and_feed_the_next_turn(run):
+@pytest.mark.parametrize('as_array', [False, True])
+def test_parallel_tools_execute_and_feed_the_next_turn(run, as_array):
     # Each call waits for the other to start. Dispatched one after the other, the first would wait alone,
     # the barrier would break, and the tool would fail instead of answering.
     both_started = threading.Barrier(2, timeout=10)
+    calls = [
+        {'type': 'tool_call', 'name': 'crm.get_deal', 'args': {'deal_id': 41}},
+        {'type': 'tool_call', 'name': 'crm.get_deal', 'args': {'deal_id': 42}},
+    ]
     result = run(
-        json.dumps(
-            {
-                'type': 'tool_calls',
-                'calls': [
-                    {'name': 'crm.get_deal', 'args': {'deal_id': 41}},
-                    {'name': 'crm.get_deal', 'args': {'deal_id': 42}},
-                ],
-            }
-        ),
+        json.dumps(calls if as_array else {'type': 'tool_calls', 'calls': calls}),
         'FINAL>>> Both deals are won.',
         tools=(GET_DEAL,),
         before_invoke=both_started.wait,
@@ -155,15 +152,50 @@ def test_a_claim_stacked_onto_parallel_calls_is_not_delivered(run):
     assert len(result.prompts) == 2
 
 
-def test_of_two_tool_calls_sent_as_an_array_only_the_first_runs(run):
-    """The first JSON object is the envelope, as in agent_langchain. Several calls belong in one tool_calls envelope."""
+def test_both_tool_calls_in_an_array_run(run):
+    """Array batches have the same all-call dispatch as the plural envelope."""
     first = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":41}}'
     second = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}'
-    result = run('[' + first + ',' + second + ']', 'FINAL>>> Deal 41 is won.', tools=(GET_DEAL,))
-    assert result.invocations == [('crm.get_deal', {'deal_id': 41})]
-    assert result.content == 'Deal 41 is won.'
+    result = run('[' + first + ',' + second + ']', 'FINAL>>> Both are won.', tools=(GET_DEAL,))
+    assert by_deal(result.invocations) == BOTH_DEALS
+    assert result.content == 'Both are won.'
     assert result.stop_reason is None
     assert len(result.prompts) == 2
+
+
+@pytest.mark.parametrize('as_array', [False, True])
+def test_a_bad_entry_blocks_the_whole_batch_until_repaired(run, as_array):
+    calls = [
+        {'type': 'tool_call', 'name': 'crm.get_deal', 'args': {'deal_id': 41}},
+        {'args': {'deal_id': 42}},
+    ]
+    raw = json.dumps(calls if as_array else {'type': 'tool_calls', 'calls': calls})
+    failed = run(raw, tools=(GET_DEAL,))
+    assert failed.stop_reason == 'error'
+    assert failed.invocations == []
+    assert len(failed.prompts) == 3
+    assert 'index 1' in failed.content
+    repaired = run(raw, PARALLEL_CALLS, 'FINAL>>> Both checked.', tools=(GET_DEAL,))
+    assert repaired.stop_reason is None
+    assert by_deal(repaired.invocations) == BOTH_DEALS
+    assert len(repaired.prompts) == 3
+    assert 'index 1' in repaired.prompts[1]
+
+
+def test_a_call_retracted_by_later_prose_never_runs(run):
+    raw = (
+        'I could run\n{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}\n'
+        'but it is not needed.\nFINAL>>> Nothing to do.'
+    )
+    failed = run(raw, tools=(GET_DEAL,))
+    assert failed.stop_reason == 'error'
+    assert failed.invocations == []
+    assert len(failed.prompts) == 3
+    repaired = run(raw, 'FINAL>>> Nothing to do.', tools=(GET_DEAL,))
+    assert repaired.stop_reason is None
+    assert repaired.invocations == []
+    assert repaired.content == 'Nothing to do.'
+    assert len(repaired.prompts) == 2
 
 
 def test_a_sub_agent_turn_with_no_reply_fails_the_run(run):
