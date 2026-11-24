@@ -797,9 +797,8 @@ class TestIInstanceLifecycle:
 
         IInstance, EngineClass, _, _, _ = self._load_iinstance_class()
         inst = IInstance()
-        inst.IGlobal = types.SimpleNamespace(
-            engine=EngineClass({'policy_mode': 'block', 'enable_prompt_injection': True}), config={}
-        )
+        # The call's own engine: this node keeps nothing on an IGlobal
+        inst.engine = EngineClass({'policy_mode': 'block', 'enable_prompt_injection': True})
         forwarded = []
         inst.instance = types.SimpleNamespace(writeQuestions=forwarded.append)
 
@@ -823,9 +822,8 @@ class TestIInstanceLifecycle:
 
         IInstance, EngineClass, _, _, _ = self._load_iinstance_class()
         inst = IInstance()
-        inst.IGlobal = types.SimpleNamespace(
-            engine=EngineClass({'policy_mode': 'block', 'enable_pii_detection': True}), config={}
-        )
+        # The call's own engine: this node keeps nothing on an IGlobal
+        inst.engine = EngineClass({'policy_mode': 'block', 'enable_pii_detection': True})
         inst.source_documents = []
         forwarded = []
         inst.instance = types.SimpleNamespace(writeAnswers=forwarded.append)
