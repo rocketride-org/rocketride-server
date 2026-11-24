@@ -52,8 +52,13 @@ REPAIRED_TOOL_CALL = '{"type":"tool_call","name":"crm.note_create","args":{"cont
 CUT_OFF_FINAL = '{"type":"final","content":"Acme reported revenue of 12'
 PARALLEL_CALLS = '{"type":"tool_calls","calls":[{"name":"a.one","args":{}},{"name":"b.two","args":{"x":1}}]}'
 TOOL_CALL = '{"type":"tool_call","name":"crm.create","args":{"name":"Acme"}}'
+PRETTY_BROKEN_TOOL_CALL = '{\n  "name": "crm.create",\n  "args": {"note": "a "quoted" word"},\n  "type": "tool_call"\n}'
 # Text a model stacks onto a call: an answer about the result of work that has not run yet.
 STACKED_FINAL = '\nFINAL>>> I created the Acme record.'
+
+CODE_WITH_A_NAME_AND_ARGS = (
+    'function run(job) {\n  return spawn(job.name, job.args);\n}\nrun({"name": "ls", "args": ["-la"]});'
+)
 
 
 class _Adapter:
@@ -196,23 +201,6 @@ class TestSentinel:
         """Unwrapping it would drop the text around the envelope. Only text that is the envelope, whole, is read as one."""
         assert answer_of(parse(FINAL_SENTINEL + ' ' + after)) == after
 
-    @pytest.mark.parametrize(
-        'after',
-        [
-            '{"type":"final","content":"Acme reported revenue of 12',
-            '{"type":"final","content":"a "b" c"} Hope that helps!',
-            # Cut off inside content that is an object, and with the members the other way round.
-            '{"type":"final","content":{"company":"Acme"',
-            '{"content":"Acme reported revenue","type":"final"',
-            # A type named inside the content does not make it something else, in either member order.
-            '{"type":"final","content":{"type":"tool_call","note":"unfinished',
-            '{"content":{"type":"tool_call","note":"unfinished"},"type":"final"',
-        ],
-    )
-    def test_an_envelope_that_was_cut_off_after_the_marker_is_not_an_answer(self, after):
-        """It is retried, as the same reply is without the marker. Delivered, it was a partial answer inside the protocol."""
-        assert parse(FINAL_SENTINEL + ' ' + after) is None
-
     def test_an_answer_keeps_the_whitespace_that_means_something(self):
         """Four leading spaces make a markdown code block. Only the one separator comes off."""
         assert parse(FINAL_SENTINEL + '\n    indented = "code"').content == '    indented = "code"'
@@ -246,6 +234,67 @@ class TestSentinel:
         assert turn.content == ''
         assert [(c['name'], c['args']) for c in turn.tool_calls] == [('crm.create', {'name': 'Acme'})]
 
+    def test_a_broken_tool_call_with_a_final_line_stacked_after_it_is_retried(self):
+        """Not delivered as the stacked answer, and the hint asks for the call, not for prose."""
+        raw = BROKEN_TOOL_CALL + STACKED_FINAL
+
+        assert parse(raw) is None
+        assert reply._parse_failure_hint(raw).endswith(
+            'Send the SAME tool call again as one valid JSON object: repair the JSON, do not answer in prose.'
+        )
+
+    def test_a_tool_call_after_a_line_of_prose_keeps_its_stacked_final_out_too(self):
+        """Prose before a call never stopped the call from running, and a stacked final does not change that."""
+        turn = parse('Sure, creating it now.\n' + TOOL_CALL + STACKED_FINAL)
+
+        assert turn.content == ''
+        assert turn.tool_calls[0]['name'] == 'crm.create'
+        assert parse('Sure, creating it now.\n' + BROKEN_TOOL_CALL + STACKED_FINAL) is None
+
+    def test_a_tool_call_on_a_line_of_its_own_is_read_in_any_member_order(self):
+        """It parses, so its own type decides. Reading only a type-first call delivered the claim and ran nothing."""
+        raw = 'Sure, creating it now.\n{"name":"crm.create","args":{"name":"Acme"},"type":"tool_call"}' + STACKED_FINAL
+
+        assert [(c['name'], c['args']) for c in parse(raw).tool_calls] == [('crm.create', {'name': 'Acme'})]
+
+    @pytest.mark.parametrize(
+        'before, after',
+        [
+            ('Thought: I need to search.\nAction: ', ''),
+            ('- ', ''),
+            ('> ', ''),
+            ('1. ', ''),
+            ('`', '`'),
+            ('```json5 ', '\n```'),
+            ('Here are the calls: [', ']'),
+            # A closing, a full stop, emphasis, a markup tag or a comment after it is no word.
+            ('Action: ', '}'),
+            ('Calling: ', '.'),
+            ('Action: **', '**'),
+            ('<tool_call>', '</tool_call>'),
+            ('Action: ', ' // run it'),
+            # Neither is another object that opens after it.
+            ('Action: ', ' {"note": "next"}'),
+            # And one with no word before it stands whatever comes after it.
+            ('', ' is the call I am making.'),
+            ('- ', ' is the next step.'),
+            # A carriage return ends a line as a newline does.
+            ('Note:\r', ' now'),
+            ('Action: ', '\rnow'),
+        ],
+    )
+    def test_a_tool_call_that_is_not_quoted_stands(self, before, after):
+        """Only a call with a word before it and a word after it on its line is quoted. Read as quoted, its claim was delivered and nothing ran."""
+        turn = parse(before + TOOL_CALL + after + STACKED_FINAL)
+
+        assert turn.content == ''
+        assert turn.tool_calls[0]['name'] == 'crm.create'
+
+    @pytest.mark.parametrize('before, after', [('{', '} (searching)'), ('{ ', ' } now'), ('{-} ', ' now')])
+    def test_a_brace_before_a_tool_call_on_its_line_is_no_word(self, before, after):
+        """So the call is not quoted and its claim is not delivered. The reply is read as its first object, which is no envelope."""
+        assert parse(before + TOOL_CALL + after + STACKED_FINAL) is None
+
     def test_a_type_nested_in_the_arguments_does_not_decide_what_the_reply_is(self):
         """The envelope's own "type" does, whatever the key order."""
         raw = '{"args":{"type":"final"},"type":"tool_call","name":"crm.create"}' + STACKED_FINAL
@@ -278,78 +327,221 @@ class TestSentinel:
         assert parse(raw) is None
         assert reply._parse_failure_hint(raw).endswith('do not answer in prose.')
 
-    def test_a_broken_tool_call_with_a_final_line_stacked_after_it_is_retried(self):
-        """Not delivered as the stacked answer, and the hint asks for the call, not for prose."""
-        raw = BROKEN_TOOL_CALL + STACKED_FINAL
-
-        assert parse(raw) is None
-        assert reply._parse_failure_hint(raw).endswith(
-            'Send the SAME tool call again as one valid JSON object: repair the JSON, do not answer in prose.'
-        )
-
-    def test_a_tool_call_after_a_line_of_prose_keeps_its_stacked_final_out_too(self):
-        """Prose before a call never stopped the call from running, and a stacked final does not change that."""
-        turn = parse('Sure, creating it now.\n' + TOOL_CALL + STACKED_FINAL)
-
-        assert turn.content == ''
-        assert turn.tool_calls[0]['name'] == 'crm.create'
-        assert parse('Sure, creating it now.\n' + BROKEN_TOOL_CALL + STACKED_FINAL) is None
-
     def test_prose_with_braces_before_the_sentinel_does_not_take_it_away(self):
         assert parse('Use {curly} braces here.\nFINAL>>> Done.').content == 'Done.'
 
     @pytest.mark.parametrize(
         'before',
         [
-            '{"note": "x"}',
-            '{"type":"final","content":"old"}',
+            'Previously: {"type":"tool_call","name":"s","args":{}} returned 5.',
+            # The same when the quoted call has no "type".
+            'Previously: {"name":"s","args":{}} returned 5.',
+        ],
+    )
+    def test_a_tool_call_quoted_inside_a_sentence_does_not_take_the_sentinel_away(self, before):
+        """It is prose about a call. Reading it as the call ran the tool again and dropped the answer."""
+        assert answer_of(parse(before + '\nFINAL>>> 5')) == '5'
+
+    @pytest.mark.parametrize(
+        'before',
+        [
             'Thinking about a tool call.',
+            'A note such as {"note": "x"} was kept.',
+            '{"note": "x"}',
             # A JSON object that does not parse and was never an envelope.
             '{"note": "a "quoted" word"}',
             # A name alone is not a tool call that lost its type.
             '{"name": "crm.create"}',
+            # Arguments named after an object are a tool call's only when the object has a name.
+            '{"note": "a "quoted" word"}\nThe "args": member was empty.',
+            # An unquoted type counts only when it is a tool call's: an unquoted `final` is not an envelope.
+            '{type: "final", content: "old"}',
+            # A block of code with its brace on a line of its own is not an envelope, whatever it holds
+            # further in or is followed by.
+            'if (x)\n{\n    call(args);\n}',
+            'function run()\n{\n  return call({ name: "x", args: { id: 1 } });\n}',
+            '    void Run()\n    {\n        Go();\n    }\nCall it with "args": none.',
+            # A config with a comment in it does not parse. Its members are not a tool call's:
+            # arguments with no name, and a name and arguments one level further in.
+            '{\n  "cmd": "run",\n  "args": ["--fast"]  // fast\n}',
+            '{\n  "configurations": [\n    {\n      "name": "Launch",\n      "args": ["--verbose"],  // flags\n    }\n  ]\n}',
+            # Code that names a name and arguments is not a tool call: a Python dict with a literal JSON does
+            # not have, a list of jobs in single quotes, an object literal with no quotes, a sentence about one.
+            'payload = {"name": "demo", "enabled": True}\nrequests.post(url, json={"args": payload})',
+            "JOBS = [\n    {\n        'name': 'resize',\n        'args': {'w': 100},\n    },\n]",
+            '{name: "crm.get_deal", args: {deal_id: 42}}',
+            'Use { "name": "Launch", request: "launch" } and set "args": ["--inspect"].',
+            '{\n  "name": "Launch",\n  "configurations": [{"args": ["--verbose"]}],  // flags\n}',
+            # What is inside an answer that parses is the answer's own: a value that looks like a call, a list of jobs.
+            '{\n  "company": "Acme",\n  "last_call": {"type":"tool_call","name":"x","args":{}}\n}',
+            '```json\n{\n  "jobs": [\n    {"name": "build", "args": ["-v"]},\n    {"name": "test", "args": []}\n  ]\n}\n```',
+            # After an object of another type that never closes, only a tool call counts.
+            '{"type":"note","draft":[\n{"type":"final","content":"old"}',
+            # What the text names before an object says nothing about it.
+            'A call has "type": "tool_call" in it.\n{"note": "a "quoted" word"}',
+            # A type with no quotes makes a tool call only with no word before it on its line, and only a tool call's does.
+            'In JavaScript the call is {type: "tool_call", name: "s"} and it returned 5.',
+            "call = {'type': 'tool_call', 'name': 'search', 'args': {}}",
+            "{'type': 'final', 'content': 'old'}",
+            # A brace that opens no object is prose, whatever is named after it.
+            'Use {curly} braces. A call has "type": "tool_call" in it.',
+            # A tool call that parses inside a sentence is quoted, also when it runs over several lines.
+            'The call was {\n  "type": "tool_call",\n  "name": "s",\n  "args": {}\n} and it returned 5.',
+            # A `final` envelope on a line of its own after prose is not work left undone.
+            'The format is:\n{"type":"final","content":"old"}',
+            # A name and arguments with no type are a tool call only as the first object or with no word before them.
+            CODE_WITH_A_NAME_AND_ARGS,
+            # And only when the name is a string.
+            'Contact:\n{"name": {"first": "Ada", "last": "Lovelace"}, "args": []}',
         ],
     )
     def test_other_text_before_the_sentinel_does_not_take_it_away(self, before):
-        """Only an attempt at a tool-call envelope before the marker keeps the marker from being read."""
+        """
+        Only an envelope that is not finished keeps the marker from being read: a tool call or a
+        broken `final` that is not quoted, or a tool call anywhere that does not parse.
+        """
         assert parse(before + '\nFINAL>>> Done.').content == 'Done.'
 
-    def test_an_escaped_quote_before_a_marker_line_does_not_close_the_envelope(self):
-        """The content is escaped as it should be, apart from its line break. Its own quote and brace close nothing."""
-        raw = '{"type":"final","content":"see {\\"k\\":\\"v\\"} and\nFINAL>>> more"}'
+    def test_code_that_passes_a_name_and_arguments_is_an_answer(self):
+        """The object is not the reply's first and has a word before it on its line: it is code, not a tool call that lost its type."""
+        ask, _feedback = scripted(CODE_WITH_A_NAME_AND_ARGS)
 
-        assert parse(raw).content == 'see {"k":"v"} and\nFINAL>>> more'
+        assert reply._run_model_turn(ask).content == CODE_WITH_A_NAME_AND_ARGS
 
-    def test_a_marker_line_inside_a_final_envelope_is_the_answers_own_text(self):
+    def test_a_marker_with_nothing_after_it_leaves_a_final_envelope_that_parses_as_the_answer(self):
+        """Only a `final` envelope: a quoted tool call before a bare marker does not run and is not an answer."""
+        assert parse('{"type":"final","content":"42"}\n' + FINAL_SENTINEL).content == '42'
+        assert parse('Earlier ' + TOOL_CALL + ' returned 5.\n' + FINAL_SENTINEL) is None
+
+    @pytest.mark.parametrize(
+        'before',
+        [
+            # A tool call that is not the first object does not run, and its claim is not delivered either.
+            '{"note":"planning"}\n' + TOOL_CALL,
+            # A name and its arguments with no "type" is a call that will not run.
+            '{"name":"crm.create","args":{}}',
+            'Calling it:\n{"name":"crm.create","args":{"name":"Acme"}}',
+            # A call too broken to parse is still one, with its type last or with none.
+            '{"name":"notes.save","args":{"text":"He said "hi""},"type":"tool_call"}',
+            '{"name":"crm.create","args":{"note":"a "quoted" word"}}',
+            # The same pretty-printed, its type last: every line up to the closing brace is the call's.
+            PRETTY_BROKEN_TOOL_CALL,
+            PRETTY_BROKEN_TOOL_CALL.replace('\n', '\r\n'),
+            '{\n"name": "crm.create",\n"args": {"note": "a "quoted" word"}\n}',
+            '{"name":"crm.\\u0063reate","args":{"note":"a "quoted" word"}}',
+            'Creating.\n{"name":"crm.create","type":"tool_call","args":{"note":"a "b" c"}}',
+            # Its first member on the line of its brace, a comment there, or an object among its members.
+            '{ "name": "crm.create",\n  "args": {"note": "a "quoted" word"},\n  "type": "tool_call" }',
+            '{ // call\n  "name": "crm.create",\n  "args": {"note": "a "quoted" word"},\n  "type": "tool_call"\n}',
+            '{\n"meta": {\n"x": 1\n},\n"name": "crm.create",\n"args": {"note": "a "quoted" word"},\n"type": "tool_call"\n}',
+            # A call that does not parse is one inside a sentence too, on one line or on several.
+            'Creating it now: ' + BROKEN_TOOL_CALL,
+            'Calling: ' + PRETTY_BROKEN_TOOL_CALL,
+            'Calling: {"name":"crm.create","args":{"note":"a "quoted" word"}}',
+            # A stray quote puts the reading out of step. What the text names after it then decides:
+            # a tool call's type, or the arguments of an object that has a name and no type.
+            '{\n  "name": "crm."create",\n  "args": {"name": "Acme"},\n  "type": "tool_call"\n}',
+            '{\n  "name": "crm."create",\n  "args": {"name": "Acme"}\n}',
+            '{"args": {"src": "print("}")"}, "name": "code.run", "type": "tool_call"}',
+            # Inside a second pair of braces it is still the call.
+            '{' + TOOL_CALL + '}',
+            # An object of another type that never closes, or has a quote out of place, does not take
+            # the call after it with it.
+            '{"type":"note","draft":[\n' + TOOL_CALL,
+            'Schema: {"type": "object", "properties": {\n' + BROKEN_TOOL_CALL,
+            '{"type":"text","text":"use "{" here"}\n' + TOOL_CALL,
+            # A brace that opens no object hides nothing after it: a block of code that was never closed,
+            # a lone brace, a brace in a sentence with an odd quote in it or with the call behind it.
+            '```c\nint main()\n{\n    return 0;\n```\n' + TOOL_CALL,
+            '{\n' + TOOL_CALL,
+            'Sizes like {12" pipe} are common.\n{"type":"tool_call","name":"grep","args":{"pattern":"^}"}}',
+            'The `{` key opens a block. Searching: ' + BROKEN_TOOL_CALL,
+            # A call with no type and no word after it stands as written, whatever comes before it on the line.
+            'Calling it: {"name":"crm.create","args":{}}',
+            # A comment does not make it less of a call, with its type or without.
+            '{\n  // create it\n  "name": "crm.create",\n  "args": {"name": "Acme"}\n}',
+            # Written as a JavaScript object or a Python dict, its type right after the brace.
+            '{type: "tool_call", name: "crm.get_deal", args: {deal_id: 42}}',
+            "{'type': 'tool_call', 'name': 'crm.create', 'args': {'name': 'Acme'}}",
+            # Wrapped in an object that does not parse for a comment: the wrapper's own text names the call.
+            '{\n  "step": 1, // one\n  "call":\n  ' + TOOL_CALL + '\n}',
+        ],
+    )
+    def test_a_claim_after_a_tool_call_that_does_not_run_is_not_delivered(self, before):
         """
-        The content has literal line breaks and one of its lines starts with the marker. The envelope
-        is still open there and closes at the end of the reply, so its content is the answer. Reading
-        the sentinel first lost the text before it and delivered the envelope's closing with the rest.
+        The marker line is a claim about the call: one that is not quoted, or one anywhere that
+        does not parse. The reply is retried.
         """
-        raw = '{"type":"final","content":"Example:\nFINAL>>> sample"}'
+        assert parse(before + '\nFINAL>>> Created.') is None
 
-        assert parse(raw).content == 'Example:\nFINAL>>> sample'
+    def test_a_tool_call_after_another_object_is_asked_for_again(self):
+        """The retry must not point that reply at the sentinel: the claim alone would then be delivered."""
+        raw = '{"note":"planning"}\n' + TOOL_CALL + '\nFINAL>>> Created.'
+
+        assert reply._parse_failure_hint(raw).endswith('do not answer in prose.')
+
+    @pytest.mark.parametrize('wrapped', ['[' + TOOL_CALL + ']', '```json [' + TOOL_CALL + ']\n```'])
+    def test_a_tool_call_in_an_array_keeps_its_stacked_final_out_too(self, wrapped):
+        assert parse(wrapped + STACKED_FINAL).tool_calls[0]['name'] == 'crm.create'
+
+    @pytest.mark.parametrize('before', ['{"type":"final","content":"old"}', '{"type":"final","content":"old"} Done.'])
+    def test_a_marker_after_a_final_envelope_that_parses_is_still_the_sentinel(self, before):
+        """An envelope that parses is finished. Also when the answer after the marker ends the way an envelope does."""
+        assert parse(before + '\nFINAL>>> {"company":"Acme"}').content == '{"company":"Acme"}'
+
+    @pytest.mark.parametrize(
+        'raw',
+        [
+            # The line may be the answer's own text ...
+            '{"type":"final","content":"Example:\nFINAL>>> sample"}',
+            # ... or the sentinel after an envelope that had already closed.
+            '{"type":"final","content":"an "old" one"} Done.\nFINAL>>> {"company":"Acme"}',
+            '{"type":"final","content":"an "old" one"}\nFINAL>>> Done.',
+        ],
+    )
+    def test_a_marker_line_in_or_after_a_broken_final_envelope_is_retried(self, raw):
+        """
+        Unescaped content cannot say which quote and brace were the envelope's own, so neither reading
+        can be trusted. The hint sends the answer to the marker, where nothing is ambiguous.
+        """
+        assert parse(raw) is None
+        assert reply._salvage_final_content(raw) is None
+        assert f'send the answer as {FINAL_SENTINEL}' in reply._parse_failure_hint(raw)
 
     @pytest.mark.parametrize(
         'raw',
         [
             '{"type":"final","content":"Example:\nFINAL>>> partial',
+            # An escaped quote and a brace in the content close nothing.
+            '{"type":"final","content":"see {\\"k\\":\\"v\\"} and\nFINAL>>> partial',
             # The same with content that is an object, and with the members the other way round.
             '{"type":"final","content":{"note":"Example:\nFINAL>>> partial',
             '{"content":{"note":"Example:"},"type":"final","more":"x\nFINAL>>> partial',
-            # An escaped quote and a brace in the content close nothing.
-            '{"type":"final","content":"see {\\"k\\":\\"v\\"} and\nFINAL>>> partial',
-            # A line of prose before the envelope changes nothing.
+            # A line of prose before the envelope, or an array around it, changes nothing.
             'Here is the result:\n{"type":"final","content":"Example:\nFINAL>>> partial',
+            '[{"type":"final","content":"Example:\nFINAL>>> partial',
         ],
     )
     def test_a_marker_line_inside_an_envelope_that_never_closes_is_not_an_answer(self, raw):
-        """
-        The reply is a cut-off envelope, whatever one of its lines starts with. Reading the marker
-        there delivered the tail of a partial answer as a finished one.
-        """
+        """The reply is a cut-off envelope, whatever one of its lines starts with."""
         assert parse(raw) is None
-        assert reply._salvage_final_content(raw) is None
+
+    @pytest.mark.parametrize(
+        'after',
+        [
+            '{"type":"final","content":"Acme reported revenue of 12',
+            '{"type":"final","content":"a "b" c"} Hope that helps!',
+            # Cut off inside content that is an object, and with the members the other way round.
+            '{"type":"final","content":{"company":"Acme"',
+            '{"content":"Acme reported revenue","type":"final"',
+            # A type named inside the content does not make it something else, in either member order.
+            '{"type":"final","content":{"type":"tool_call","note":"unfinished',
+            '{"content":{"type":"tool_call","note":"unfinished"},"type":"final"',
+        ],
+    )
+    def test_an_envelope_that_was_cut_off_after_the_marker_is_not_an_answer(self, after):
+        """It is retried, as the same reply is without the marker. Delivered, it was a partial answer inside the protocol."""
+        assert parse(FINAL_SENTINEL + ' ' + after) is None
 
     def test_a_marker_after_an_object_content_envelope_that_closed_is_still_the_sentinel(self):
         raw = '{"type":"final","content":{"old":true}}\nFINAL>>> {"company":"Acme"}'
@@ -576,6 +768,16 @@ class TestSalvage:
         assert turn.content == document
         assert json.loads(turn.content) == answer
 
+    def test_a_fenced_json_answer_pasted_unescaped_keeps_its_own_escapes(self):
+        """The same document in a markdown fence, which is how models like to write JSON."""
+        document = json.dumps({'company': 'Acme Corp', 'quote': 'Its CEO called it a "record" year.'})
+        fenced = '```json\n' + document + '\n```'
+
+        turn = parse('{"type":"final","content":"' + fenced + '"}')
+
+        assert turn.content == fenced
+        assert json.loads(document) == {'company': 'Acme Corp', 'quote': 'Its CEO called it a "record" year.'}
+
     def test_prose_with_a_stray_quote_still_has_its_escapes_undone(self):
         """Content that is not a JSON document was escaped for the envelope, apart from the quote that broke it."""
         assert (
@@ -630,11 +832,34 @@ class TestSalvage:
     def test_an_escaped_backslash_before_the_closing_quote_still_closes(self):
         assert parse('{"type":"final","content":"a "b" path C:\\\\"}').content == 'a "b" path C:\\'
 
-    def test_a_member_after_the_content_is_taken_for_part_of_the_answer(self):
-        """Another limit of reading unescaped content, pinned: nothing says where the content ended."""
-        raw = '{"type":"final","content":"a "b" c", "confidence": "high"}'
+    @pytest.mark.parametrize(
+        'raw',
+        [
+            '{"type":"final","content":"a "b"","note":"z"}',
+            '{"type":"final","content":"a "b" c", "confidence": "high"}',
+        ],
+    )
+    def test_a_member_after_the_content_is_not_delivered_with_the_answer(self, raw):
+        """The content ended before the reply did. Reading on to the last quote and brace delivered the other member too."""
+        assert reply._salvage_final_content(raw) is None
+        assert parse(raw) is None
+        assert f'send the answer as {FINAL_SENTINEL}' in reply._parse_failure_hint(raw)
 
-        assert parse(raw).content == 'a "b" c", "confidence": "high'
+    @pytest.mark.parametrize(
+        'answer',
+        [
+            # The structured answer of #3367 with a fence or a lead-in, and one with text after it.
+            '```json\n{"company":"Acme","stage":"won"}\n```',
+            'Result: {"company": "Acme", "revenue": 1200}',
+            '[{"a":"x","b":"y"}] is the list.',
+            # A list of quoted words, and a quoted word before a colon.
+            'Say "yes", "no" or "maybe".',
+            'Either "yes", "no": pick one.',
+        ],
+    )
+    def test_json_and_quoted_words_inside_the_answer_are_not_taken_for_a_member(self, answer):
+        """Only text that reads as the envelope's other members, up to its closing brace, ends the content early."""
+        assert parse('{"type":"final","content":"' + answer + '"}').content == answer
 
     def test_a_fenced_envelope_is_recovered_like_a_bare_one(self):
         """Models fence JSON whatever the prompt says. The fence is not part of the answer."""
@@ -642,18 +867,23 @@ class TestSalvage:
 
         assert answer_of(parse(raw)) == 'No org named "EARTH" was found.'
 
-    def test_a_marker_line_inside_a_fenced_envelope_is_the_answers_own_text(self):
-        raw = '```json\n{"type":"final","content":"Example:\nFINAL>>> sample"}\n```'
-
-        assert answer_of(parse(raw)) == 'Example:\nFINAL>>> sample'
-
     def test_a_fenced_envelope_that_was_cut_off_is_not_salvaged(self):
         raw = '```json\n{"type":"final","content":"Acme reported "revenue" of 12'
 
         assert reply._salvage_final_content(raw) is None
         assert parse(raw) is None
 
-    @pytest.mark.parametrize('second', ['{"type":"final","content":"second"}', '{"content":"second","type":"final"}'])
+    @pytest.mark.parametrize(
+        'second',
+        [
+            '{"type":"final","content":"second"}',
+            '{"content":"second","type":"final"}',
+            '{"type":"final"}',
+            # Its type decides wherever it comes, also after content that is no string.
+            '{"content":42,"type":"final"}',
+            '{"content":{"a":1},"note":true,"type":"final"}',
+        ],
+    )
     def test_a_second_envelope_stacked_after_a_broken_one_is_not_its_content(self, second):
         """Its closing would otherwise be taken for the first one's, and the person shown both envelopes."""
         raw = '{"type":"final","content":"a "b" c"}\n' + second
@@ -776,12 +1006,162 @@ class TestRetryHint:
         )
         assert 'Write the answer after' not in hint
 
+    @pytest.mark.parametrize(
+        'text, kind',
+        [
+            # The type the envelope opens with, whatever its members hold.
+            ('{"type":"final","content":{"type":"tool_call","note":"unfin', 'final'),
+            ('Sure.\n{"type":"tool_call","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
+            # Read as JSON would read it, escapes included.
+            ('{"type":"tool\\u005fcall","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
+            ('{"type":"fin\\u0061l","content":"cut off', 'final'),
+            # A type that is no envelope's is none, whatever is nested under it.
+            ('{"type":"task","args":{"type":"tool_call","x":"a "b" c"}}', None),
+            # Text that mentions a type with no object opening on it is not an attempt.
+            ('Answer: set "type": "final" in config.', None),
+            # The object's own type, wherever it comes among its members.
+            ('{"content":{"type":"tool_call","note":"x"},"type":"final"', 'final'),
+            ('{"args":{"type":"final","note":"a "quoted" word"},"type":"tool_call","name":"crm.create"}', 'tool_call'),
+            ('{"name":"crm.create","type":"tool_call","args":{"type":"final","note":"a "quoted" word"}}', 'tool_call'),
+            # A tool call written as a JavaScript object, its keys unquoted, is one by the type right after its brace.
+            ('{type: "tool_call", name: "crm.get_deal", args: {deal_id: 42}}', 'tool_call'),
+            ('{type: "tool_call", name: "crm.get_deal"}', 'tool_call'),
+            # With no type it is an object literal, as code has them.
+            ('{name: "crm.get_deal", args: {deal_id: 42}}', None),
+            # An unquoted type that names no envelope, and the word args in a sentence, are prose.
+            ('{type: "object"} is the JSON Schema root.', None),
+            ('{type: "final", content: "cut off', None),
+            ('{x} is a set. Its args: none.', None),
+            ('{x} is a set, args: none.', None),
+            # An unquoted type that is no tool call's does not hide the broken call after it.
+            (
+                'The field is {type: "string"}. Calling: {"type":"tool_call","name":"t","args":{"a":"x "y" z"}}',
+                'tool_call',
+            ),
+            # A `final` named in an object inside a sentence is prose.
+            ('Set msg = {"type": "final", "content": text} before returning.', None),
+            # A broken tool call is one in any member order, on a line of its own or inside a sentence.
+            ('Calling: {"name":"crm.create","args":{"note":"a "b" c"},"type":"tool_call"}', 'tool_call'),
+            ('Calling: {"name":"crm.create","args":{"note":"a "b" c"}}', 'tool_call'),
+            # A stray quote puts the reading out of step, and the types named after it decide: a tool call's first.
+            ('{"args":{"type":"final","note":"5" tall"},"type":"tool_call","name":"crm.create"}', 'tool_call'),
+            ('{"content":"5" tall","type":"final"}', 'final'),
+            # A name that is no string is not a tool's, with arguments or without.
+            ('{"name": {"first": "x"}, "args": ["a "b" c"]}', None),
+            ('Sure.\n{"name":"crm.create","type":"tool_call","args":{"note":"a "b" c"}}', 'tool_call'),
+            ('{"name":"crm.create","args":{"note":"a "quoted" word"}}', 'tool_call'),
+            (PRETTY_BROKEN_TOOL_CALL, 'tool_call'),
+            # A broken tool call is one wherever it sits, and in a Python dict's quotes too.
+            ('Creating it now: {"type":"tool_call","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
+            ("{'type': 'tool_call', 'name': 'crm.create', 'args': {'name': 'Acme'}}", 'tool_call'),
+            ("{'name': 'crm.create', 'args': {'name': 'Acme'}, 'type': 'tool_call'}", None),
+            # The first object the reply parses to counts wherever it sits, as the parser reads it.
+            ('The format is {"type":"final","content":"x"} ok', 'final'),
+            # A broken `final` that ends its line stands, and a call behind a brace that opens nothing is still one.
+            ('Our API returns {\n  "type": "final",\n  "content": "text",\n}', 'final'),
+            ('{\n{"type":"tool_call","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
+            # An object that parses apart from a literal JSON does not have is read by what it holds, not by what follows it.
+            ('The config {"name": "demo", "debug": tru} is wrong. Set "args": [] and "type": "tool_call".', None),
+            # With a word before it on its line, an object in JavaScript's or Python's spelling is code.
+            ('Creating it: {type: "tool_call", name: "crm.get_deal", args: {deal_id: 42}}', None),
+            ("call = {'type': 'tool_call', 'name': 'search', 'args': {}}", None),
+            # A call that parses and is quoted after another object is prose.
+            ('Plan: {"note": 1} then {"type":"tool\\u005fcall","name":"t","args":{}} runs.', None),
+            # Arguments with no name are not a tool call's, and neither are unquoted keys inside a sentence.
+            ('{\n  "cmd": "run",\n  "args": ["--fast"]  // fast\n}', None),
+            ('{name: "build", args: ["--fast"]}', None),
+            ('Call run({name: "build", args: {fast: true}}) to start.', None),
+            # A broken `final` on a line of its own after braces that are prose.
+            ('Use {curly} here.\n{"content":"a "b" c","type":"final"', 'final'),
+            # An envelope on a later line is, when the first object is none.
+            ('{"note":"first"}\n{"type":"tool_call","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
+            ('{"content":"abc', None),
+            ('no braces at all', None),
+            # The type right after the brace, with its colon missing or miswritten, or its key in curly
+            # quotes or without its closing quote. Also after a word on its line.
+            ('{"type" "tool_call", "name": "search", "args": {"q": "weather"}}', 'tool_call'),
+            ('Action: {"type"="tool_call","name":"s","args":{}}', 'tool_call'),
+            ('{"type"："tool_calls","calls":[]}', 'tool_calls'),
+            ('Action: {“type”: "tool_call","name":"s","args":{}}', 'tool_call'),
+            ('{"type: "tool_call","name":"s","args":{}}', 'tool_call'),
+            # A key that lost its colon, or a comment's quoted word, before the type.
+            ('Action: {"name" "s","type":"tool_call","args":{"q":"a"}}', 'tool_call'),
+            ('{ /* "search" */ "type":"tool_call","name":"s","args":{"q":"a"}}', 'tool_call'),
+            # A name and arguments with no type, on a line of their own after a brace that is prose.
+            ('Use {curly} here.\n{"name":"crm.create","args":{}}', 'tool_call'),
+            # Its own type decides, whatever is nested in its members.
+            ('{"args":[{"type":"final"}],"type":"tool_calls","calls":[{"name":"a "b""}]}', 'tool_calls'),
+            ('{"note":"x "y z","args":{"type":"tool_call"', 'tool_call'),
+            (
+                '{"note":"x "y z","content":{"type":"final"},"args":{"type":"tool_call"},"calls":{"type":"tool_calls"',
+                'tool_call',
+            ),
+        ],
+    )
+    def test_what_an_unparsed_reply_set_out_to_be(self, text, kind):
+        assert reply._attempted_kind(text) == kind
+
+    @pytest.mark.parametrize(
+        'text, members, rest, stray',
+        [
+            # Its own members, with the values that are strings. Not the ones nested in a value.
+            (
+                '{"type":"tool_call","name":"t","args":{"type":"final","n":[1]}} and more',
+                {'type': 'tool_call', 'name': 't', 'args': None},
+                ' and more',
+                False,
+            ),
+            # Read as JSON reads them, escapes included.
+            ('{"ty\\u0070e":"tool\\u005fcall","name":"a\\"b"}', {'type': 'tool_call', 'name': 'a"b'}, '', False),
+            # A literal JSON does not have, comments and a trailing comma put no quote out of place.
+            (
+                '{ // a job\n"name": "demo", // its name\n"on": True, /* yes */ "z": "q" // end\n,}',
+                {'name': 'demo', 'on': None, 'z': 'q'},
+                '',
+                False,
+            ),
+            # An object that never closes has no end. A string that never ends takes the rest with it.
+            ('{"a": {"b": 1}', {'a': None}, None, False),
+            ('{"a": 1, "b": "cut off }', {'a': None, 'b': None}, None, False),
+            # A quote out of place: a string that is not followed, or not preceded, by what JSON has there.
+            ('{"name": "crm."create", "args": {}}', {'name': 'crm.'}, None, True),
+            ('{"args": {"src": "print("}")"}, "name": "x"}', {'args': None}, ', "name": "x"}', True),
+            ('{"a": {"note": "5" tall"}, "b": 1}', {'a': None}, None, True),
+            ('{"a": "b" c}', {'a': 'b'}, '', True),
+            # A comment that never ends is cut off where it starts, like one that does.
+            ('{"a": 1, /* never closed\n"b": 2}', {'a': None, 'b': None}, '', False),
+            # A brace that is not followed by a key opens no object, and nothing more of it is read.
+            ('{x} is a set', {}, ' is a set', False),
+            ('{12" pipe} and {"type":"tool_call"}', {}, None, True),
+            ('{\n{"type":"tool_call","name":"s","args":{}}', {}, None, False),
+            ('{name: "x", args: {}}', {}, None, False),
+            ('{"a", "b"}', {}, '', True),
+            # A key that lost its colon is still the opening of an object. More than three strings are not.
+            ('{"type" "tool_call", "name": "s", "args": {}}', {'name': 's', 'args': None}, '', True),
+            ('{"a" "b" "c" "d" "name": "s"}', {}, None, False),
+        ],
+    )
+    def test_the_members_an_object_carries_itself(self, text, members, rest, stray):
+        """How an object that does not parse is still read, and what is no object at all."""
+        found, end, out_of_place = reply._own_members(text, 0)
+
+        assert found == members
+        assert (None if end is None else text[end:]) == rest
+        assert out_of_place is stray
+
     def test_a_cut_off_final_is_asked_for_as_an_answer_whatever_its_content_names(self):
         """The envelope's own type decides the hint. A tool call named inside the content asked for a tool call."""
         hint = reply._parse_failure_hint('FINAL>>> {"type":"final","content":{"type":"tool_call","note":"unfinished')
 
         assert 'SAME tool call' not in hint
         assert hint.endswith(f'send the answer as {FINAL_SENTINEL} followed by plain text.')
+
+    def test_a_broken_envelope_after_the_marker_is_diagnosed_without_the_marker(self):
+        """The envelope is what did not parse. Diagnosed with the marker in front of it, it broke at character 0."""
+        hint = reply._parse_failure_hint(FINAL_SENTINEL + ' {"type":"final","content":"a "b" c"} Hope that helps!')
+
+        assert 'at character 0' not in hint
+        assert '"content":"a "b' in hint
 
     @pytest.mark.parametrize(
         'raw',
@@ -795,33 +1175,64 @@ class TestRetryHint:
         assert hint.endswith('Send the tool call again as {"type":"tool_call","name":"server.tool","args":{...}}.')
         assert FINAL_SENTINEL not in hint
 
+    def test_a_claim_after_a_tool_call_that_lost_its_type_is_not_asked_for_as_an_answer(self):
+        """Followed, that hint would deliver the claim on the next attempt."""
+        hint = reply._parse_failure_hint('Calling it:\n{"name":"crm.create","args":{}}\nFINAL>>> Created.')
+
+        assert hint.endswith('do not answer in prose.')
+        assert 'send the answer as' not in hint
+
+    def test_a_tool_call_of_the_wrong_shape_is_asked_for_again_as_a_tool_call(self):
+        """Valid JSON, but it names no tool."""
+        hint = reply._parse_failure_hint('{"type":"tool_call","name":"","args":{}}')
+
+        assert 'not one of the allowed shapes' in hint
+        assert 'Send the tool call again as {"type":"tool_call"' in hint
+        assert FINAL_SENTINEL not in hint
+
     @pytest.mark.parametrize(
-        'text, kind',
+        'raw', [PARALLEL_CALLS, '{"type":"tool_calls","calls":[]}', '{"calls":[],"type":"tool_calls"}']
+    )
+    def test_several_calls_in_one_reply_are_asked_for_one_at_a_time(self, raw):
+        hint = reply._parse_failure_hint(raw)
+
+        assert 'Send one tool call per reply, as {"type":"tool_call"' in hint
+        assert FINAL_SENTINEL not in hint
+
+    def test_a_bare_marker_line_at_the_end_of_a_cut_off_answer_is_not_asked_for_text_after_it(self):
+        """The parser reads that line as part of the answer. Asking for text after it would lose what came before."""
+        hint = reply._parse_failure_hint('{"type":"final","content":"Here is the long answer so far\n' + FINAL_SENTINEL)
+
+        assert 'with no answer after it' not in hint
+        assert 'not valid JSON' in hint
+        assert hint.endswith(f'send the answer as {FINAL_SENTINEL} followed by plain text.')
+
+    @pytest.mark.parametrize('raw', [FINAL_SENTINEL, 'Let me think.\n' + FINAL_SENTINEL + '  '])
+    def test_a_sentinel_with_nothing_after_it_is_named_as_that(self, raw):
+        """Not as invalid JSON at character 0, which tells a model that did write the marker nothing."""
+        assert reply._parse_failure_hint(raw) == (
+            f'Your last output ended at {FINAL_SENTINEL} with no answer after it. Write the answer after {FINAL_SENTINEL}.'
+        )
+
+    @pytest.mark.parametrize(
+        'raw',
         [
-            # The envelope's own type, whatever its members hold and in whatever order they come.
-            ('{"type":"final","content":{"type":"tool_call","note":"unfin', 'final'),
-            ('{"content":{"type":"tool_call","note":"x"},"type":"final"', 'final'),
-            ('{"args":{"type":"final","note":"a "quoted" word"},"type":"tool_call","name":"crm.create"}', 'tool_call'),
-            ('{"args":[{"type":"final"}],"type":"tool_calls","calls":[{"name":"a "b""}]}', 'tool_calls'),
-            ('Sure.\n{"type":"tool_call","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
-            # Read as JSON would read it, escapes included.
-            ('{"type":"tool\\u005fcall","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
-            ('{"type":"fin\\u0061l","content":"cut off', 'final'),
-            # A type that is no envelope's is none, whatever is nested under it.
-            ('{"type":"task","args":{"type":"tool_call","x":"a "b" c"}}', None),
-            # No type of its own to read: the text is searched, and a tool call wins.
-            ('{"note":"x "y z","args":{"type":"tool_call"', 'tool_call'),
-            # The first tool-call type named wins, also when `final` is named before it.
-            (
-                '{"note":"x "y z","content":{"type":"final"},"args":{"type":"tool_call"},"calls":{"type":"tool_calls"',
-                'tool_call',
-            ),
-            ('{"content":"abc', None),
-            ('no braces at all', None),
+            '```json\n' + BROKEN_TOOL_CALL + '\n```',
+            'Sure, let me do that.\n' + BROKEN_TOOL_CALL,
+            'Creating it now: ' + BROKEN_TOOL_CALL,
         ],
     )
-    def test_what_an_unparsed_reply_set_out_to_be(self, text, kind):
-        assert reply._attempted_kind(text) == kind
+    def test_the_break_is_found_inside_a_fence_and_after_a_line_of_prose(self, raw):
+        """The position is the one in the JSON, where the model can see the stray quote, not character 0."""
+        hint = reply._parse_failure_hint(raw)
+
+        assert hint == reply._parse_failure_hint(BROKEN_TOOL_CALL)
+        assert 'at character 67' in hint
+        assert '"content":"a "quoted' in hint
+
+    @pytest.mark.parametrize('raw', [CUT_OFF_FINAL, 'I think the answer is "42", probably.'])
+    def test_a_cut_off_answer_and_plain_prose_are_pointed_at_the_sentinel(self, raw):
+        assert FINAL_SENTINEL in reply._parse_failure_hint(raw)
 
     @pytest.mark.parametrize(
         'text, lost',
@@ -852,56 +1263,18 @@ class TestRetryHint:
         assert 'SAME tool call again' in hint
         assert FINAL_SENTINEL not in hint
 
-    def test_a_tool_call_of_the_wrong_shape_is_asked_for_again_as_a_tool_call(self):
-        """Valid JSON, but it names no tool."""
-        hint = reply._parse_failure_hint('{"type":"tool_call","name":"","args":{}}')
-
-        assert 'not one of the allowed shapes' in hint
-        assert 'Send the tool call again as {"type":"tool_call"' in hint
-        assert FINAL_SENTINEL not in hint
-
-    @pytest.mark.parametrize('raw', [PARALLEL_CALLS, '{"type":"tool_calls","calls":[]}'])
-    def test_several_calls_in_one_reply_are_asked_for_one_at_a_time(self, raw):
-        hint = reply._parse_failure_hint(raw)
-
-        assert 'Send one tool call per reply, as {"type":"tool_call"' in hint
-        assert FINAL_SENTINEL not in hint
-
-    def test_a_bare_marker_line_at_the_end_of_a_cut_off_answer_is_not_asked_for_text_after_it(self):
-        """The parser reads that line as part of the answer. Asking for text after it would lose what came before."""
-        hint = reply._parse_failure_hint('{"type":"final","content":"Here is the long answer so far\n' + FINAL_SENTINEL)
-
-        assert 'with no answer after it' not in hint
-        assert 'not valid JSON' in hint
-        assert hint.endswith(f'send the answer as {FINAL_SENTINEL} followed by plain text.')
-
-    @pytest.mark.parametrize('raw', [FINAL_SENTINEL, 'Let me think.\n' + FINAL_SENTINEL + '  '])
-    def test_a_sentinel_with_nothing_after_it_is_named_as_that(self, raw):
-        """Not as invalid JSON at character 0, which tells a model that did write the marker nothing."""
-        assert reply._parse_failure_hint(raw) == (
-            f'Your last output ended at {FINAL_SENTINEL} with no answer after it. Write the answer after {FINAL_SENTINEL}.'
-        )
-
-    @pytest.mark.parametrize(
-        'raw', ['```json\n' + BROKEN_TOOL_CALL + '\n```', 'Sure, let me do that.\n' + BROKEN_TOOL_CALL]
-    )
-    def test_the_break_is_found_inside_a_fence_and_after_a_line_of_prose(self, raw):
-        """The position is the one in the JSON, where the model can see the stray quote, not character 0."""
-        hint = reply._parse_failure_hint(raw)
-
-        assert hint == reply._parse_failure_hint(BROKEN_TOOL_CALL)
-        assert 'at character 67' in hint
-        assert '"content":"a "quoted' in hint
-
-    @pytest.mark.parametrize('raw', [CUT_OFF_FINAL, 'I think the answer is "42", probably.'])
-    def test_a_cut_off_answer_and_plain_prose_are_pointed_at_the_sentinel(self, raw):
-        assert FINAL_SENTINEL in reply._parse_failure_hint(raw)
-
 
 def test_an_envelope_is_recognised_inside_a_markdown_fence():
     assert reply._looks_like_envelope('```json\n{"type":"tool_call"')
     assert reply._looks_like_envelope('  {"type":"tool_calls"')
     assert not reply._looks_like_envelope('I could not do that.')
+    assert not reply._looks_like_envelope('{curly} braces are used in sets.')
+    assert not reply._looks_like_envelope('{"a", "b"} is a set literal in Python.')
+    assert reply._looks_like_envelope('{}')
+    assert reply._looks_like_envelope("{'type': 'tool_call'}")
+    assert reply._looks_like_envelope('{"customer\'s name": "Acme"}')
+    assert not reply._looks_like_envelope('{a: 1} is an object literal in JavaScript.')
+    assert not reply._looks_like_envelope('{name: value} pairs are written like this.')
     assert not reply._looks_like_envelope('[' + ANSWER_JSON + ']')
     assert not reply._looks_like_envelope('')
     assert not reply._looks_like_envelope(None)
@@ -977,21 +1350,51 @@ class TestRunModelTurn:
             ('{"type":"tool_call","name":""}', 'not one of the allowed shapes'),
             ('', 'The last reply was empty.'),
             (None, 'The last reply was empty.'),
-            # A tool call that never parsed is work that never ran, wherever in the reply it sits.
+            # A tool call that never parsed is work that never ran, also after a line of prose and before a claim.
             ('Sure, let me do that.\n' + BROKEN_TOOL_CALL, 'not valid JSON'),
             (BROKEN_TOOL_CALL + STACKED_FINAL, 'not valid JSON'),
             ('Sure, let me do that.\n' + BROKEN_TOOL_CALL + STACKED_FINAL, 'not valid JSON'),
             # A cut-off answer is not prose to deliver either, with or without a line before it.
             ('Here is the answer:\n' + CUT_OFF_FINAL, 'Unterminated string'),
-            # A tool call that lost its "type" is work that never ran, also after a line of prose,
-            # and also with a claim about it stacked on.
+            # An envelope on a line of its own counts, also when the first object parses and is no envelope.
+            ('Two objects.\n{"note":"first"}\n' + BROKEN_TOOL_CALL, 'not valid JSON'),
+            # A member after the content: where the answer ended cannot be told, so it is not recovered.
+            ('{"type":"final","content":"a "b"","note":"z"}', 'not valid JSON'),
+            # An envelope the reply parses to counts wherever it sits. The error names the text after it.
+            ('I will call {"name":"","type":"tool_call"} now.', 'not valid JSON'),
+            # A broken tool call inside a sentence, and one written as a Python dict, are work that never ran.
+            ('Creating it now: ' + BROKEN_TOOL_CALL, 'not valid JSON'),
+            ("{'type': 'tool_call', 'name': 'crm.create', 'args': {'name': 'Acme'}}", 'not valid JSON'),
+            # A tool call that lost its "type" is work that never ran, and a claim after it is not an answer.
             ('Here is the result:\n{"name":"crm.create","args":{}}', 'named a tool and its arguments with no "type"'),
+            (
+                'Calling it:\n{"name":"crm.create","args":{}}\nFINAL>>> Created.',
+                'named a tool and its arguments with no "type"',
+            ),
             (
                 'Here is the result:\n{"name":"crm.create","args":{}}\nFINAL>>> Created.',
                 'named a tool and its arguments with no "type"',
             ),
-            # A type written out anywhere in the reply counts, also when the first object parses and is no envelope.
-            ('Two objects.\n{"note":"first"}\n' + BROKEN_TOOL_CALL, 'not valid JSON'),
+            # A tool call whose type lost its colon is work that never ran, with a claim after it or not.
+            (
+                '{"type" "tool_call", "name": "search", "args": {"q": "weather"}}',
+                'named a tool and its arguments with no "type"',
+            ),
+            (
+                '{"type" "tool_call", "name": "search", "args": {"q": "weather"}}\nFINAL>>> It is sunny.',
+                'named a tool and its arguments with no "type"',
+            ),
+            ('Sure.\n{"name":"crm.create","type":"tool_call","args":{"note":"a "b" c"}}', 'not valid JSON'),
+            # A tool call with unquoted keys is work that never ran, not prose.
+            ('{type: "tool_call", name: "crm.get_deal", args: {deal_id: 42}}', 'not valid JSON'),
+            ('{type: "tool_call", name: "crm.get_deal"}', 'not valid JSON'),
+            # A reply that was cut off right after its brace is not prose.
+            ('{', 'not valid JSON'),
+            ('```json\n{', 'not valid JSON'),
+            # A pretty-printed broken tool call is work that never ran, and the claim after it is not an answer.
+            (PRETTY_BROKEN_TOOL_CALL + '\nFINAL>>> Created.', 'not valid JSON'),
+            # A key with an apostrophe in it is still a key.
+            ('{"customer\'s name": "Acme"}', 'not one of the allowed shapes'),
             # The marker alone is protocol text, not an answer.
             (FINAL_SENTINEL, f'ended at {FINAL_SENTINEL} with no answer after it'),
             ('Let me think.\n' + FINAL_SENTINEL, f'ended at {FINAL_SENTINEL} with no answer after it'),
@@ -1073,12 +1476,6 @@ class TestRunModelTurn:
             reply._run_model_turn(ask)
         assert len(feedback) == 3
 
-    def test_a_marker_after_an_envelope_that_closed_costs_one_call(self):
-        ask, feedback = scripted('{"type":"final","content":"old"}\nFINAL>>> {"company":"Acme"}')
-
-        assert answer_of(reply._run_model_turn(ask)) == '{"company":"Acme"}'
-        assert len(feedback) == 1
-
     def test_a_reply_whose_envelope_may_have_closed_is_answered_on_the_retry(self):
         ask, feedback = scripted(
             '{"type":"final","content":"an "old" one"} Done.\nFINAL>>> {"company":"Acme"}',
@@ -1096,19 +1493,6 @@ class TestRunModelTurn:
         assert len(feedback) == 3
         assert f'send the answer as {FINAL_SENTINEL} followed by plain text' in feedback[1]
 
-    def test_a_tool_call_that_lost_its_type_runs_once_the_hint_is_followed(self):
-        """The claim stacked onto it is not delivered. The hint asks for the call, and the repaired call is the turn."""
-        ask, feedback = scripted(
-            'Here is the result:\n{"name":"crm.create","args":{"name":"Acme"}}\nFINAL>>> Created.',
-            TOOL_CALL,
-        )
-
-        turn = reply._run_model_turn(ask)
-
-        assert [(c['name'], c['args']) for c in turn.tool_calls] == [('crm.create', {'name': 'Acme'})]
-        assert len(feedback) == 2
-        assert FINAL_SENTINEL not in feedback[1].split('It broke here')[0]
-
     def test_a_stacked_final_does_not_replace_the_tool_call_it_follows(self):
         ask, feedback = scripted(TOOL_CALL + STACKED_FINAL)
 
@@ -1124,6 +1508,16 @@ class TestRunModelTurn:
             'Here is the JSON you asked for:\n' + ANSWER_JSON,
             'The config is {"debug": true} by default, and that is fine.',
             'The tool is {"name":"crm.create"} and it takes no arguments.',
+            # Prose that starts with a brace, mentions a type, or shows an object with no type is still prose.
+            '{curly} braces are used in sets.',
+            '{"a", "b"} is a set literal in Python.',
+            '{a: 1} is an object literal in JavaScript.',
+            '{name: value} pairs are written like this.',
+            '{type: "object"} is the JSON Schema root.',
+            '{x} is a set. Its args: none.',
+            '{x} is a set, args: none.',
+            'Answer: set "type": "final" in config.',
+            "Set msg = {'type': 'final', 'content': text} before returning.",
         ],
     )
     def test_prose_that_skipped_the_sentinel_is_still_the_answer(self, text):
@@ -1138,3 +1532,65 @@ class TestRunModelTurn:
         with pytest.raises(ValueError, match='not one of the allowed shapes'):
             reply._run_model_turn(ask)
         assert len(feedback) == 3
+
+    def test_a_final_with_a_member_after_its_content_is_answered_on_the_retry(self):
+        ask, feedback = scripted('{"type":"final","content":"a "b"","note":"z"}', 'FINAL>>> a "b"')
+
+        assert answer_of(reply._run_model_turn(ask)) == 'a "b"'
+        assert len(feedback) == 2
+        assert f'send the answer as {FINAL_SENTINEL}' in feedback[1]
+
+    def test_a_marker_after_an_envelope_that_closed_costs_one_call(self):
+        ask, feedback = scripted('{"type":"final","content":"old"}\nFINAL>>> {"company":"Acme"}')
+
+        assert answer_of(reply._run_model_turn(ask)) == '{"company":"Acme"}'
+        assert len(feedback) == 1
+
+    def test_a_tool_call_that_lost_its_type_runs_once_the_hint_is_followed(self):
+        """The claim stacked onto it is not delivered. The hint asks for the call, and the repaired call is the turn."""
+        ask, feedback = scripted(
+            'Here is the result:\n{"name":"crm.create","args":{"name":"Acme"}}\nFINAL>>> Created.',
+            TOOL_CALL,
+        )
+
+        turn = reply._run_model_turn(ask)
+
+        assert [(c['name'], c['args']) for c in turn.tool_calls] == [('crm.create', {'name': 'Acme'})]
+        assert len(feedback) == 2
+        assert FINAL_SENTINEL not in feedback[1].split('It broke here')[0]
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        # A brace that opens no object costs a look at what follows it, not a walk to the end of the reply.
+        pytest.param('{' * 5000, id='braces_that_open_nothing'),
+        # An object that never closes is read once, not once from every line inside it.
+        pytest.param('{"a":\n' * 9000, id='objects_that_never_close'),
+        # An object that does not parse is refused on its own text, not on the text before it.
+        pytest.param('{"a": x}\n' * 30000, id='objects_that_do_not_parse'),
+        # The reply is searched to its end once, not once from every object with a quote out of place.
+        pytest.param('{"a": "b" c}\n' * 12000, id='objects_with_a_quote_out_of_place'),
+        # The objects inside an object are read with it, not again one by one.
+        pytest.param(('{"a": "' + 'x' * 4000 + '",\n"b":\n') * 400 + '1' + '}' * 400, id='objects_inside_each_other'),
+        # A fence that never closes is not tried against the fence pattern, and a comment is cut off where it starts.
+        pytest.param(FINAL_SENTINEL + ' ```python\n' + ' ' * 60000 + 'x = 1', id='a_fence_that_never_closes'),
+        pytest.param('{"a": 1, ' + '/* ' * 20000 + '\n"b": 2}', id='comments_that_never_close'),
+        # The objects after the closings in a broken `final` are read once each, not once from every closing.
+        pytest.param('{"type":"final","content":"a "b" c' + '"}{"k":["x' * 4000 + '"}', id='objects_after_closings'),
+    ],
+)
+def test_a_long_reply_is_read_in_linear_time(raw):
+    """
+    With its rule taken out, each of these takes from three seconds to over a minute. The bound
+    is wide: each takes a few tenths of a second at most.
+    """
+    import time
+
+    ask, _ = scripted(raw)
+    started = time.monotonic()
+    try:
+        reply._run_model_turn(ask)
+    except ValueError:
+        pass
+    assert time.monotonic() - started < 2.0

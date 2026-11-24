@@ -100,15 +100,19 @@ JSON object: `{"type":"tool_call","name":"server.tool","args":{...}}` or
 argument schemas from their declared input schemas, with a generic `input`
 field as the fallback.
 
-A reply is read the way `agent_deepagent` reads one, by this node's own code
-and without the parallel `tool_calls` form:
+The node reads a reply with its own code. Two things follow `agent_deepagent`,
+the `FINAL>>>` form and the recovery of a broken `final` envelope, and the rest
+is this node's own. The parallel `tool_calls` form is not taken:
 
 - A `final` envelope whose content was not escaped correctly (an inner `"`, a
-  literal line break) is recovered, as long as the reply ends with the
-  envelope's closing `"}`, with or without a markdown fence around it. One that
-  was cut off, or has more text after it, is retried. A JSON document pasted
-  in unescaped is delivered exactly as written. One cut-off cannot be told from
-  a finished answer and is delivered: a reply that stops exactly after a `"}`
+  literal line break) is recovered when the envelope opens the reply and the
+  reply ends with its closing `"}`, with or without a markdown fence around
+  it. A JSON document pasted in unescaped is delivered exactly as written. An
+  envelope that was cut off, has more text after it, has other members after
+  `content` (`","note":"z"}`), has a second envelope after it, or has a
+  `FINAL>>>` line inside it is retried:
+  where the answer ended cannot be told. One cut-off cannot be told from a
+  finished answer and is delivered: a reply that stops exactly after a `"}`
   inside the answer.
 - A `content` that is not a string (a JSON object, array, number or boolean) is
   delivered as JSON text.
@@ -117,23 +121,46 @@ and without the parallel `tool_calls` form:
   ask for this form; a retry does, when an answer did not parse. When all that
   follows the marker is a `final` envelope, its content is the answer, and one
   that was cut off there is retried.
-- A tool call with a `FINAL>>>` line stacked after it is run as the tool call:
-  the line is a claim about work not yet done. A tool call that lost its `type`
-  does not run, and the line stacked after it is not delivered either.
-- A `FINAL>>>` line after a `final` envelope is read when that envelope parses.
-  After a broken one that may or may not have closed, the reply is retried: the
-  line could as well be part of an answer that is still going.
+- A tool call, the first line included, is not replaced by a `FINAL>>>` line
+  after it: the line is a claim about work not yet done. The reply is then
+  read as its first JSON object, as always: a tool call there runs, and
+  anything else is retried. That holds for a tool call that lost its `type`
+  and is the reply's first object or has no word before it on its line, and
+  for one that does not parse wherever in the reply it sits: they do not
+  run, and the claim after them is not delivered either. One kind of tool
+  call is read as quoted: one that parses and has a word before it and a word
+  after it on its line. It is prose, and a `FINAL>>>` line after it is the
+  answer. Punctuation, a brace, a closing, a markup tag or a comment around a
+  call is no word. A tool call wrapped inside another object that parses is not read.
+- A `FINAL>>>` line after a `final` envelope that parses is read. With
+  nothing after the marker, the envelope's content is the answer. After the
+  opening of a broken one that is not quoted, inside its content or after it,
+  the reply is retried: the line could as well be the answer's own text.
 
 A reply that is neither a tool call nor an answer is retried twice, each time
-with a hint that says what was wrong and how to send it: a broken tool call, or
-one that lost its `type`, is asked for again as a tool call, a broken answer after `FINAL>>>`, and a bare
+with a hint that says what was wrong and how to send it: a broken tool call is
+asked for again as a tool call, a broken answer after `FINAL>>>`, and a bare
 JSON object (it may be an answer, or a tool call that lost its `type`) either
-way. After the third reply, prose with no envelope is delivered as the answer.
-An empty reply, a `FINAL>>>` with nothing after it, a JSON object that is
-neither shape, a tool call that lost its `type`, and an envelope that never
-parsed are not answers: the run fails with `stop_reason: error`, and its answer
-says what was wrong with the model's last reply without quoting it. Whitespace around a reply is trimmed before it is read, as it
-always was.
+way. After the third reply, prose is delivered as the answer, also when it
+starts with a brace that opens no object (`{curly} braces`) or mentions a
+`type`. An empty reply, a `FINAL>>>` with nothing after it, a reply that opens
+with a JSON object that is neither shape, an envelope that was refused, a
+broken envelope that is not quoted, and a broken tool call anywhere in the
+reply are not answers: the run fails with `stop_reason: error`, and its answer
+says what was wrong with the model's last reply without quoting it. An object
+that does not parse is read by the members it carries itself, not the ones
+nested in their values: its `type`, or a tool call's `name` and `args` when it
+has no type. Such an object with no type counts as a tool call only as the
+reply's first object or with no word before it on its line. Elsewhere it is
+data or code, as in an answer that shows a function called with one. A tool
+call's `type` right after the brace is still read when its colon is missing or
+miswritten, or its key is in curly quotes or lost its closing quote. A brace that opens no object, as in a block of code, is prose and
+hides nothing after it. With no word before it on its line, a tool call's
+`type` right after the brace is also read with no quotes or in single quotes.
+When a quote out of place or a missing closing kept the members from being
+read, a `type` named in the text after the object decides, or `args` for an
+object that has a name. Whitespace around a reply is trimmed before it is
+read, as it always was.
 
 ## Upstream docs
 

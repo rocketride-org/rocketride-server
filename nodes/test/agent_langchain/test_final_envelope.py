@@ -62,6 +62,28 @@ ANSWERED = {
     ),
     'G_plain_prose_no_envelope': ('Acme reported revenue of 1200.', 3, 'Acme reported revenue of 1200.'),
     'H_raw_json_array_no_envelope': ('[' + ANSWER_JSON + ']', 3, '[' + ANSWER_JSON + ']'),
+    'json_in_a_fence_inside_a_broken_final': (
+        '{"type":"final","content":"```json\n{"company":"Acme","stage":"won"}\n```"}',
+        1,
+        '```json\n{"company":"Acme","stage":"won"}\n```',
+    ),
+    'code_block_before_the_sentinel': (
+        'function run()\n{\n  return call({ args: { id: 1 } });\n}\nFINAL>>> Done.',
+        1,
+        'Done.',
+    ),
+    'code_that_names_a_name_and_arguments_before_the_sentinel': (
+        'payload = {"name": "demo", "enabled": True}\nrequests.post(url, json={"args": payload})\n'
+        'FINAL>>> That posts the job.',
+        1,
+        'That posts the job.',
+    ),
+    'prose_that_starts_with_a_brace': ('{curly} braces are used in sets.', 3, '{curly} braces are used in sets.'),
+    'prose_that_names_a_type': (
+        'Answer: set "type": "final" in config.',
+        3,
+        'Answer: set "type": "final" in config.',
+    ),
     'json_answer_after_the_sentinel': ('FINAL>>>' + ANSWER_JSON, 1, ANSWER_JSON),
     'envelope_kept_after_the_sentinel': (
         'FINAL>>> ' + json.dumps({'type': 'final', 'content': ANSWER_JSON}),
@@ -80,6 +102,15 @@ FAILED = {
     'empty_reply': ('', 'The last reply was empty.'),
     'broken_tool_call_after_a_line_of_prose': ('Sure, let me do that.\n' + BROKEN_TOOL_CALL, 'not valid JSON'),
     'marker_with_no_answer': ('FINAL>>>', 'ended at FINAL>>> with no answer after it'),
+    'claim_after_a_pretty_printed_broken_tool_call': (
+        '{\n  "name": "crm.get_deal",\n  "args": {"note": "a "quoted" word"},\n  "type": "tool_call"\n}\n'
+        'FINAL>>> Deal 42 is won.',
+        'not valid JSON',
+    ),
+    'broken_final_with_text_after_it': (
+        '{"type":"final","content":"No org named "EARTH" was found."} Hope that helps!',
+        'not valid JSON',
+    ),
     'tool_call_that_lost_its_type_after_a_line_of_prose': (
         'Here is the result:\n{"name":"crm.get_deal","args":{"deal_id":42}}',
         'named a tool and its arguments with no "type"',
@@ -88,10 +119,38 @@ FAILED = {
         '{"name":"crm.get_deal","args":{"note":"a "quoted" word"}}\nFINAL>>> Deal 42 is won.',
         'named a tool and its arguments with no "type"',
     ),
+    'claim_after_a_tool_call_whose_type_lost_its_colon': (
+        '{"type" "tool_call", "name": "crm.get_deal", "args": {"deal_id": 42}}\nFINAL>>> Deal 42 is won.',
+        'named a tool and its arguments with no "type"',
+    ),
     'final_line_stacked_onto_a_tool_call_that_lost_its_type': (
         'Here is the result:\n{"name":"crm.get_deal","args":{"deal_id":42}}\nFINAL>>> Deal 42 is won.',
         'named a tool and its arguments with no "type"',
     ),
+    'claim_after_a_tool_call_behind_a_code_block_that_never_closes': (
+        '```c\nint main()\n{\n    return 0;\n```\n'
+        '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}\nFINAL>>> Deal 42 is won.',
+        'not valid JSON',
+    ),
+    'claim_after_a_broken_tool_call_with_its_type_last': (
+        '{"name":"crm.get_deal","args":{"note":"a "quoted" word"},"type":"tool_call"}\nFINAL>>> Deal 42 is won.',
+        'not valid JSON',
+    ),
+    'tool_call_with_unquoted_keys': (
+        '{type: "tool_call", name: "crm.get_deal", args: {deal_id: 42}}',
+        'not valid JSON',
+    ),
+    'claim_after_a_broken_tool_call_that_opens_on_its_brace_line': (
+        '{ "name": "crm.get_deal",\n  "args": {"note": "a "quoted" word"},\n  "type": "tool_call" }\n'
+        'FINAL>>> Deal 42 is won.',
+        'not valid JSON',
+    ),
+    'claim_after_a_broken_tool_call_inside_a_sentence': (
+        'Looking it up: ' + BROKEN_TOOL_CALL + '\nFINAL>>> Deal 42 is won.',
+        'not valid JSON',
+    ),
+    'broken_tool_call_inside_a_sentence': ('Looking it up: ' + BROKEN_TOOL_CALL, 'not valid JSON'),
+    'member_after_the_content_of_a_broken_final': ('{"type":"final","content":"a "b"","note":"z"}', 'not valid JSON'),
     'cut_off_envelope_with_a_marker_line_in_it': (
         '{"type":"final","content":"Example:\nFINAL>>> partial',
         'not valid JSON',
@@ -291,6 +350,22 @@ def test_a_final_line_stacked_onto_a_tool_call_does_not_replace_the_call(run):
     assert len(result.prompts) == 2
 
 
+def test_a_tool_call_quoted_in_a_sentence_does_not_run_again(run):
+    """The reply is prose about an earlier call, then the answer. The tool is not invoked and the answer is delivered."""
+    result = run(
+        'Previously: {"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}} returned won.\n'
+        'FINAL>>> Deal 42 is won.',
+        # Reached only when the quoted call is run: it ends the run, so that this test fails and does not loop.
+        'FINAL>>>The tool ran again.',
+        tools=(GET_DEAL,),
+    )
+
+    assert result.invocations == []
+    assert result.content == 'Deal 42 is won.'
+    assert result.stop_reason is None
+    assert len(result.prompts) == 1
+
+
 def test_a_run_that_fails_after_a_tool_call_still_reports_the_call(run):
     """The tool ran once. The turn after it never gives an answer, so the run fails, and the work done is on record."""
     result = run(
@@ -302,6 +377,7 @@ def test_a_run_that_fails_after_a_tool_call_still_reports_the_call(run):
     assert result.invocations == [('crm.get_deal', {'deal_id': 42})]
     assert result.stop_reason == 'error'
     assert 'not one of the allowed shapes' in result.content
+    assert result.payload['meta']['tool_calls'] == 1
     assert len(result.prompts) == 4
 
 
