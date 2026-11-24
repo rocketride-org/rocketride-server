@@ -130,6 +130,7 @@ _JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl'
         ('connect(password="pw 1", region="us-east")', 'connect(password=[redacted], region="us-east")'),
         ("Service 'password='pw 1'' not found", "Service 'password=[redacted]' not found"),
         ('connect(password="ab\\"c d", region="us")', 'connect(password=[redacted], region="us")'),
+        ('open(path="C:\\d\\", password="p w")', 'open(path="C:\\d\\", password=[redacted])'),
         ("value 'token=' is empty, see 'docs'", "value 'token=[redacted]' is empty, see 'docs'"),
         ({'detail': 'rrmg_' + 'b' * 43}, "{'detail': '[redacted]'}"),
         ('Unknown component: parse_text (see list_components)', 'Unknown component: parse_text (see list_components)'),

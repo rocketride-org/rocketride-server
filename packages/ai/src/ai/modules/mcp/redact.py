@@ -21,33 +21,40 @@ import re
 
 from ai.web.access_log import REDACTED, is_sensitive_param, redact_text
 
-# A quoted value after a name. redact_text splits words at quotes, so it would
-# redact only the empty ``name=`` and keep the value after it. ``before`` and
-# ``after`` are the characters around the match. When ``name=`` sits inside a
-# quote of the same kind as the value's, the value must end right before that
-# outer quote closes (``'password='x''``). Otherwise the quote after ``name=``
-# closes the outer quote, and what follows is prose, not a value. A backslash
-# escapes the next character, so an escaped quote does not end the value.
+# ``name=`` followed by a quoted value. redact_text splits words at quotes, so it
+# would redact only the empty ``name=`` and keep the value after it. The value
+# and the character after it sit in a lookahead, so a match takes only
+# ``name=``: a value of another name that runs on (a path ending in a backslash)
+# cannot hide the name after it. A backslash escapes the next character. When
+# ``name=`` sits inside a quote of the same kind as the value's, the value must
+# end right before that outer quote closes (``'password='x''``). Otherwise the
+# quote after ``name=`` closes the outer quote, and what follows is prose.
 _QUOTED = re.compile(
-    r'(?P<before>^|[^\w.-])(?P<name>[\w.-]+)=(?P<value>"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\')(?=(?P<after>.?))'
+    r'(?P<before>^|[^\w.-])(?P<name>[\w.-]+)='
+    r'(?=(?P<value>"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\')(?P<after>.?))'
 )
 _KEY = re.compile(r'\b(?:rr|rrr|rrmg)_[A-Za-z0-9_-]{20,}')
 _JWT = re.compile(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*')
 
 
-def _drop_quoted_credential(match: re.Match) -> str:
-    """Leave ``name=`` for a credential name, so redact_text redacts it whole; keep anything else."""
-    quote = match['value'][0]
-    if match['before'] == quote and match['after'] != quote:
-        return match.group(0)
-    if not is_sensitive_param(match['name']):
-        return match.group(0)
-    return match['before'] + match['name'] + '='
+def _drop_quoted_credentials(text: str) -> str:
+    """Remove the quoted value after each credential name, leaving ``name=`` for redact_text."""
+    kept, pos = [], 0
+    for match in _QUOTED.finditer(text):
+        quote = match['value'][0]
+        if match.start('name') < pos or not is_sensitive_param(match['name']):
+            continue
+        if match['before'] == quote and match['after'] != quote:
+            continue
+        kept.append(text[pos : match.end()])
+        pos = match.end() + len(match['value'])
+    kept.append(text[pos:])
+    return ''.join(kept)
 
 
 def clean_text(value: object) -> str:
     """Return ``value`` as a string with credential-shaped text replaced by ``[redacted]``."""
-    text = _QUOTED.sub(_drop_quoted_credential, str(value))
+    text = _drop_quoted_credentials(str(value))
     text = redact_text(text)
     text = _KEY.sub(REDACTED, text)
     return _JWT.sub(REDACTED, text)
