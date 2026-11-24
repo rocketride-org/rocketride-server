@@ -464,6 +464,20 @@ class TaskConn(
             await self.send(self.build_error(request, 'Connection revoked'))
             return
 
+        # Re-authenticating as a different user on a live socket: the previous
+        # identity's event subscriptions and debugger attachments must not be
+        # inherited (a deauth would have dropped them). Same user keeps both.
+        if self._authenticated and self._account_info is not None and self._account_info.userId != result.userId:
+            monitors = getattr(self, '_monitors', None)
+            if monitors is not None:
+                monitors.clear()
+            await self._detach_debuggers()
+
+            # A revoke may have landed while detaching: install nothing.
+            if self._revoked:
+                await self.send(self.build_error(request, 'Connection revoked'))
+                return
+
         self._account_info = result
         self._authenticated = True
         self._authz_verified_at = t0
@@ -514,11 +528,15 @@ class TaskConn(
 
         self._drop_authority()
 
+        await self._detach_debuggers()
+
+        return self.build_response(request, body={})
+
+    async def _detach_debuggers(self) -> None:
+        """Detach this connection as the debugger of every task."""
         # detach_task is a no-op for a task this connection is not debugging
         for control in list(self._server._task_control.values()):
             await control.task.detach_task(self)
-
-        return self.build_response(request, body={})
 
     def _drop_authority(self) -> None:
         """
