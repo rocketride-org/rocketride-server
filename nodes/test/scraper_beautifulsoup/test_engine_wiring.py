@@ -31,6 +31,7 @@ stubbed fetcher, and ``build_fetcher``'s mapping of the node config.
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 import time
@@ -215,7 +216,7 @@ def test_validate_config_rejects_an_unpinned_allow_list():
 
 def test_validate_config_accepts_engine_ijson_params(monkeypatch):
     """The engine hands config arrays as IJson; _params() must unwrap them (#3434)."""
-    import scraper_beautifulsoup.IEndpoint as iep
+    iep = importlib.import_module('scraper_beautifulsoup.IEndpoint')
 
     # Mirror rocketlib.types.IJson: a subclass whose static toDict() unwraps
     # engine values (base-class instances) recursively into native dict/list.
@@ -252,7 +253,7 @@ def test_validate_config_accepts_engine_ijson_params(monkeypatch):
 
 def test_validate_config_accepts_empty_engine_ijson_allow_list(monkeypatch):
     """An empty IJson-wrapped allow-list must validate with zero patterns (#3434)."""
-    import scraper_beautifulsoup.IEndpoint as iep
+    iep = importlib.import_module('scraper_beautifulsoup.IEndpoint')
 
     class _EngineIJson:
         def __init__(self, value):
@@ -288,7 +289,7 @@ def test_validate_config_accepts_empty_engine_ijson_allow_list(monkeypatch):
 
 def test_validate_config_rejects_unpinned_engine_ijson_allow_list(monkeypatch):
     """An IJson-wrapped unpinned allow-list row must still be rejected (#3434)."""
-    import scraper_beautifulsoup.IEndpoint as iep
+    iep = importlib.import_module('scraper_beautifulsoup.IEndpoint')
 
     class _EngineIJson:
         def __init__(self, value):
@@ -315,7 +316,7 @@ def test_validate_config_rejects_unpinned_engine_ijson_allow_list(monkeypatch):
     })}
 
     # Unwrapped to a native list, the unpinned row must be rejected by build_fetcher.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='must start with a literal'):
         endpoint.validateConfig(False)
 
 
