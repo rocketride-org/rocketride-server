@@ -44,9 +44,9 @@ _OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads', 'pipelineTra
 
 # Sent in `truncated` when a run's output is cut to fit the result size limit.
 _OUTPUT_HINT = (
-    'The pipeline ran. Only the start of its output fits in one reply, and running it again will not return more. '
-    'To give the user all of it, have the pipeline write its output to the file store, then call store_get_url for '
-    'a download link.'
+    'The pipeline ran. Only the start of its output fits in one reply, and running it again as it is will not return '
+    'more. To get all of it on the next run, add a filestore component that saves the output as a file, then call '
+    "store_get_url with that file's path for a download link."
 )
 _OUTPUT_STEPS = (result_size.text('result'),)
 

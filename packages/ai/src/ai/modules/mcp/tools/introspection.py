@@ -88,6 +88,16 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
     return result
 
 
+def _profile_count(branches: list) -> int:
+    """How many profile names a list of profile branches covers: one branch can hold several."""
+    count = 0
+    for branch in branches:
+        if isinstance(branch, dict):
+            profile = (branch.get('properties') or {}).get('profile') or {}
+            count += len(profile.get('enum') or [])
+    return count
+
+
 def _profiles_note(section: str):
     """Note how many of a section's profile branches were kept, and how to read the rest."""
     name = '.'.join((section, *_PROFILE_BRANCHES))
@@ -95,10 +105,10 @@ def _profiles_note(section: str):
     def note(payload: dict, notes: Dict[str, Any], kept: int, full: list) -> None:
         notes[name] = {'returned': kept, 'total': len(full)}
         notes['hint'] = (
-            f'{section}.schema has the settings of only the first {kept} of {len(full)} profiles, and calling '
-            'describe_component again returns the same result. Every profile name is still in '
-            f'{section}.schema.properties.profile.enum. To see what one profile resolves to, call resolve_config '
-            'with this component as provider and config {"profile": "<name>"}.'
+            f'{section}.schema has the settings of only {_profile_count(full[:kept]):,} of '
+            f'{_profile_count(full):,} profiles, and calling describe_component again returns the same result. Every '
+            f'profile name is still in {section}.schema.properties.profile.enum. To see what one profile resolves '
+            'to, call resolve_config with this component as provider and config {"profile": "<name>"}.'
         )
 
     return note

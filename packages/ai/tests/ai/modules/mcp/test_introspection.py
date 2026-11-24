@@ -701,4 +701,4 @@ async def test_describe_component_over_the_size_limit_drops_the_layout_then_prof
     assert (result['Pipe']['ui'], 0 < kept < 100, len(json.dumps(result)) <= 3000) == ({}, True, True)
     assert result['truncated']['Pipe.ui'] == {'dropped': True}
     assert result['truncated']['Pipe.schema.dependencies.profile.oneOf'] == {'returned': kept, 'total': 100}
-    assert f'first {kept} of 100 profiles' in result['truncated']['hint']
+    assert f'only {kept} of 100 profiles' in result['truncated']['hint']

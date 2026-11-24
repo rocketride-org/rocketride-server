@@ -35,9 +35,16 @@ _DEFAULT_HINT = (
 _HINTS = {
     'store_read': 'Calling store_read again returns this same error. To give the user the whole file, call '
     'store_get_url for a download link.',
-    'store_list': 'Call store_list again on a folder inside this path.',
-    'deploy_list': 'Call deploy_list again with a smaller page_size, or narrow it with search.',
-    'deploy_versions': 'Call deploy_versions again with a smaller page_size.',
+    'store_list': 'Calling store_list again on this path returns this same error. Ask the user for a folder or file '
+    'inside it, then call store_list or store_read on that path.',
+    'load_template': 'Calling load_template again returns this same error. To give the user the whole template, call '
+    'store_get_url with path .templates/<template_id>.json for a download link.',
+    'deploy_list': 'Call deploy_list again with a smaller page_size, then use page for the rest. page_size is 50 when '
+    'it is not set, and search narrows the list.',
+    'deploy_versions': 'Call deploy_versions again with a smaller page_size, then use page for the rest. page_size is 50 '
+    'when it is not set.',
+    'log_chapters': 'Calling log_chapters again returns this same error. To look at the latest run, call log_traces '
+    'without chapterBeginSeq.',
 }
 
 _max_chars = DEFAULT_MAX_CHARS

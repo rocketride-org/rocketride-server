@@ -349,9 +349,17 @@ async def test_log_read_shortens_a_page_over_the_size_limit(fake_engine, result_
 
 
 @pytest.mark.asyncio
-async def test_log_trace_shortens_events_over_the_size_limit(fake_engine, result_limit):
+async def test_log_trace_and_log_traces_shorten_their_lists_over_the_size_limit(fake_engine, result_limit):
     result_limit(1000)
-    fake_engine.log_trace_result = {'summary': None, 'events': [{'seq': i, 'text': 'x' * 50} for i in range(100)]}
+    fake_engine.log_trace_result = {'summary': None, 'events': [_event(i, 'x' * 50) for i in range(100)]}
     result = await logs._log_trace(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'beginSeq': 3})
-    assert result['truncated']['events'] == {'returned': len(result['events']), 'total': 100}
-    assert 'log_read' in result['truncated']['hint'] and size_of(result) <= 1000
+    kept = len(result['events'])
+    assert result['truncated']['events'] == {'returned': kept, 'total': 100} and size_of(result) <= 1000
+    hint = result['truncated']['hint']
+    assert f'call log_read with the projectId, source and any teamId from context, and fromSeq set to {kept}.' in hint
+
+    # Finished traces come oldest first, so the hint asks for exactly the newest ones left out.
+    fake_engine.log_traces_result = {'open': [], 'closed': [{'beginSeq': i, 'doc': 'd' * 40} for i in range(50)]}
+    result = await logs._log_traces(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'n': 50})
+    newest = 50 - len(result['traces'])
+    assert 0 < newest < 50 and result['truncated']['hint'].endswith(f'again with n set to {newest}.')

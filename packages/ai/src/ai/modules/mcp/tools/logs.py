@@ -34,14 +34,6 @@ LOG_TRACES_MIN_N = 1
 LOG_TRACES_MAX_N = 50
 LOG_TRACES_DEFAULT_N = 20
 
-# Sent in `truncated` when a trace list is cut to fit the result size limit.
-_TRACE_HINT = (
-    'Only the first events of this trace fit in one reply, and calling log_trace again returns the same events. '
-    'To read on, call log_read with fromSeq set to beginSeq and the keys in context. log_read returns every '
-    "object's events from that point, not only this trace's."
-)
-# The engine lists traces oldest first, so the newest are the ones left out.
-_TRACES_HINT = 'Only the older traces fit in one reply. To see the newest ones, call log_traces again with a smaller n.'
 # The longest event name a stub keeps, so a stub page always fits the smallest limit.
 _STUB_EVENT_CHARS = 60
 
@@ -229,8 +221,36 @@ async def _log_traces(client, tasks, args: Dict[str, Any]) -> dict:
             'no traces recorded — the run may have been submitted with '
             "pipelineTraceLevel 'none' (MCP run tools default to 'summary')"
         )
-    result_size.fit(payload, (result_size.rows('traces'), result_size.rows('open')), hint=_TRACES_HINT)
+    result_size.fit(payload, (result_size.rows('traces', note=_traces_note), result_size.rows('open', note=_open_note)))
     return payload
+
+
+def _traces_note(payload: dict, notes: Dict[str, Any], kept: int, traces: list) -> None:
+    # The engine lists finished traces oldest first, so the newest are the ones left out.
+    newest = len(traces) - kept
+    notes['traces'] = {'returned': kept, 'total': len(traces)}
+    notes['hint'] = (
+        f'Only the oldest {kept} of {len(traces)} finished traces fit in one reply. To see the {newest} newest, call '
+        f'log_traces again with n set to {newest}.'
+    )
+
+
+def _open_note(payload: dict, notes: Dict[str, Any], kept: int, open_traces: list) -> None:
+    notes['open'] = {'returned': kept, 'total': len(open_traces)}
+    notes['hint'] = (
+        f'Only {kept:,} of the {len(open_traces):,} objects still in flight fit in one reply. When the run ends, call '
+        'log_traces again to see them as finished traces.'
+    )
+
+
+def _trace_note(payload: dict, notes: Dict[str, Any], kept: int, events: list) -> None:
+    notes['events'] = {'returned': kept, 'total': len(events)}
+    notes['hint'] = (
+        f'Only the first {kept:,} of {len(events):,} events of this trace fit in one reply, and calling log_trace '
+        'again returns the same events. To read on, call log_read with the projectId, source and any teamId from '
+        f"context, and fromSeq set to {_log_seq(events[kept])}. log_read returns every object's events from that "
+        "point, not only this trace's."
+    )
 
 
 async def _log_trace(client, tasks, args: Dict[str, Any]) -> dict:
@@ -267,7 +287,7 @@ async def _log_trace(client, tasks, args: Dict[str, Any]) -> dict:
         'events': result.get('events') or [],
         'context': _context(project_id, source, team_id),
     }
-    result_size.fit(payload, (result_size.rows('events'),), hint=_TRACE_HINT)
+    result_size.fit(payload, (result_size.rows('events', note=_trace_note),))
     return payload
 
 
