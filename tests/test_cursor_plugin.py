@@ -13,7 +13,7 @@ import pytest
 ROOT = Path(__file__).parents[1]
 PLUGIN = ROOT / 'docs' / 'cursor' / 'plugin'
 SERVER = {'type': 'http', 'url': 'https://api.rocketride.ai/mcp'}
-BASE = 'Build, check and run RocketRide data and AI pipelines'
+BASE = "Build, check and run RocketRide data and AI pipelines, and read each run's logs and traces."
 FIELDS = 'name displayName version description author.name homepage repository license logo keywords category'.split()
 NAME = re.compile(r'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$')
 SEMVER = re.compile(r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$')
@@ -69,7 +69,7 @@ def edit_manifest(root, key, value):
         (lambda root: (root / 'assets' / 'logo.png').unlink(), "logo 'assets/logo.png' must be a relative path"),
         (lambda root: (root / '.mcp.json').write_text('{}\n'), '.mcp.json must have the same bytes as mcp.json'),
         (lambda root: edit_manifest(root, 'description', 'The best way to run pipelines.'), 'description must start'),
-        (lambda root: edit_manifest(root, 'description', f'{BASE}, the official way.'), "description uses 'official'"),
+        (lambda root: edit_manifest(root, 'description', f'{BASE} The official way.'), "description uses 'official'"),
     ],
 )
 def test_a_broken_plugin_fails_with_a_clear_message(tmp_path, change, message):
