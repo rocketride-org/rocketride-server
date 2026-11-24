@@ -2581,6 +2581,66 @@ def _ending_task(process_exit_code, *, was_running=True):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    'reported, stop_at, status, exit_code, outcome, reason',
+    [
+        # The stop came first: the -11 is its kill, and a run window that ran out is a success
+        (None, 'exit-wait', 'Stopped', 0, 'ok', 'ttl'),
+        # The crash was read first: teardown holds no lock, so the stop still lands
+        (None, 'cleanup', 'Stopped unexpectedly', -11, 'error', None),
+        # A reported end is read when it arrives, before the wait for the exit code
+        (_SEGV, 'exit-wait', 'Stopped unexpectedly', 1, 'error', None),
+        ({'exitCode': 0, 'message': ''}, 'exit-wait', 'Completed', 0, 'ok', None),
+        # What the engine reports while it stops is part of the stop
+        (_SEGV, 'report', 'Stopped', 0, 'ok', 'ttl'),
+    ],
+    ids=[
+        'before-the-end-is-read',
+        'during-the-cleanup',
+        'after-a-reported-crash',
+        'after-a-reported-end',
+        'before-the-report',
+    ],
+)
+async def test_a_ttl_stop_counts_only_if_it_came_before_the_end_was_read(
+    reported, stop_at, status, exit_code, outcome, reason
+):
+    t = _ending_task(-11)
+    t._termination_lock = asyncio.Lock()
+    t._stop_count = 0
+    t._final_events_sent = False
+    t._server = MagicMock(broadcast_server_event=AsyncMock())
+    t._launch = MagicMock(lost=None, returncode=-11, cleanup=AsyncMock())
+    run_log = AsyncMock()
+    t._run_logs = {'dev.user-1.acme.proj-test.src-id': run_log}
+    stops = []
+
+    async def ttl_stop(result=None):
+        stops.append(asyncio.ensure_future(TaskEngine.stop_task(t, reason='ttl')))
+        await asyncio.sleep(0)
+        return result
+
+    if stop_at == 'report':
+        await ttl_stop()
+    if reported:
+        await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(reported)})
+    if stop_at == 'exit-wait':
+        t._process_exit_code = lambda: ttl_stop(-11)
+    elif stop_at == 'cleanup':
+        t._launch.cleanup = ttl_stop
+    await TaskEngine._terminated(t)
+    await asyncio.wait_for(stops[0], timeout=5)
+
+    assert t._stop_reason == 'ttl'
+    assert (t._status.status, t._status.exitCode) == (status, exit_code)
+    assert run_log.end_run.await_args.args[0] == outcome
+    end = [
+        call.args[1]['body'] for call in t._forward_task_event.await_args_list if call.args[1]['event'] == 'apaevt_task'
+    ]
+    assert (end[0].get('reason'), run_log.end_run.await_args.kwargs['reason']) == (reason, reason)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     'stop_reason, status, exit_code, exit_message, outcome',
     [
         (None, 'Stopped unexpectedly', 1, 'Stopped unexpectedly', 'error'),
@@ -2612,6 +2672,63 @@ async def test_a_crash_after_running_leaves_the_holders_dormant():
     assert t.state is EngineState.STOPPED
     assert t.dormant_reason == 'crash'
     t._server.engine_crashed.assert_called_once_with(t)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'stop_at, dormant',
+    [
+        (None, True),
+        # The stop lands before the teardown starts, or while it cleans up
+        ('teardown', False),
+        ('cleanup', False),
+    ],
+    ids=['no-stop', 'stop-before-the-teardown', 'stop-during-the-cleanup'],
+)
+async def test_a_stop_after_a_crash_was_read_stops_the_engine(stop_at, dormant):
+    """A stop after the crash was read keeps the crash as the end, but the engine ends stopped: not dormant, not restarted."""
+    t = _ending_task(-6)
+    t._termination_lock = asyncio.Lock()
+    t._stop_count = 0
+    t._launch = MagicMock(lost=None, returncode=-6, cleanup=AsyncMock())
+    stops = []
+
+    async def user_stop():
+        stops.append(asyncio.ensure_future(TaskEngine.stop_task(t, reason='user')))
+        await asyncio.sleep(0)
+
+    await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
+    if stop_at == 'teardown':
+        await user_stop()
+    elif stop_at == 'cleanup':
+        t._launch.cleanup = user_stop
+    await TaskEngine._terminated(t)
+    for stop in stops:
+        await asyncio.wait_for(stop, timeout=5)
+
+    assert (t._status.status, t._status.exitCode) == ('Stopped unexpectedly', 1)
+    assert t.state is EngineState.STOPPED
+    assert t.dormant_reason == ('crash' if dormant else None)
+    assert t._server.engine_crashed.call_count == (1 if dormant else 0)
+
+
+@pytest.mark.asyncio
+async def test_a_ttl_stop_after_a_crash_was_read_keeps_its_holders_dormant_on_ttl():
+    """The inactivity stop after a crash was read keeps dormant_reason 'ttl' and reports no crash."""
+    t = _ending_task(-6)
+    t._termination_lock = asyncio.Lock()
+    t._stop_count = 0
+    t._launch = MagicMock(lost=None, returncode=-6, cleanup=AsyncMock())
+    t.dormant_reason = 'ttl'  # the server's inactivity step sets it before the stop
+
+    await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
+    stop = asyncio.ensure_future(TaskEngine.stop_task(t, reason='ttl'))
+    await asyncio.sleep(0)
+    await TaskEngine._terminated(t)
+    await asyncio.wait_for(stop, timeout=5)
+
+    assert t.state is EngineState.STOPPED and t.dormant_reason == 'ttl'
+    t._server.engine_crashed.assert_not_called()
 
 
 @pytest.mark.asyncio

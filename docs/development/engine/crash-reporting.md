@@ -123,7 +123,13 @@ the task then reads `Stopped unexpectedly`, as above.
 
 A stop by the server reads `Stopped` with exit code 0 and an empty exit message
 on every platform, also after a restart, whatever the engine reports while it
-stops.
+stops. A stop that arrives once the task's end has been read, from its `>EXIT`
+or, without one, from its exit code, does not change that end: a crash still
+reads `Stopped unexpectedly` and records `error`, and a clean end reads
+`Completed`. The engine still ends as a stopped one: a crash read before the
+stop does not leave its holders dormant as a crash does, nor restart a listener
+engine; an engine stopped for inactivity leaves its holders dormant, as every
+such stop does.
 
 ## Getting a dump by hand
 

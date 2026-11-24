@@ -1231,6 +1231,8 @@ class TaskEngine(DAPBase):
         # Whether the task sent its own >EXIT event this run. Without one,
         # _terminated() falls back to the process exit code.
         self._exit_event_seen = False
+        # Why a stop was requested when that event was read; None when none was
+        self._exit_event_stop: Optional[str] = None
 
         # This run's crash, as the console shows it, and whether the server killed the process
         self._crash: Optional[str] = None
@@ -2279,6 +2281,9 @@ class TaskEngine(DAPBase):
 
         reported = self._crash
         self._apply_process_exit_code(exit_code)
+        # How the run ended is read once, from its >EXIT event or else here: a
+        # stop that arrives later (a TTL pass, a user) does not turn that end into a stop
+        stop_reason = self._exit_event_stop if self._exit_event_seen else self._stop_reason
 
         # The engine reported nothing: the console still shows the crash. It is
         # engine-level output, so it reaches the holders of a private engine
@@ -2392,11 +2397,11 @@ class TaskEngine(DAPBase):
             self.debug_message(f'Error cleaning up update task: {e}')
 
         # Set final state
-        if self._stop_reason is not None:
+        if stop_reason is not None:
             self._status.status = 'Stopped'
             self._status.state = TASK_STATE.CANCELLED.value
             self.state = EngineState.STOPPED
-            self.debug_task_message('stopped', reason=self._stop_reason)
+            self.debug_task_message('stopped', reason=stop_reason)
         elif self._status.exitCode == 0 and not self._crash:
             self._status.status = 'Completed'
             self._status.state = TASK_STATE.COMPLETED.value
@@ -2418,9 +2423,12 @@ class TaskEngine(DAPBase):
             # again under the same key (plan 7.2). Set in the same step as the
             # terminal state, so no request sees a finished engine that is not
             # yet dormant. A run that never confirmed running FAILED and is
-            # not retried.
-            self.state = EngineState.STOPPED if was_running else EngineState.FAILED
-            if was_running:
+            # not retried. A stop requested since the end was read still ends
+            # the engine as a stop does: stopped, and the crash leaves no holder
+            # dormant and restarts no listener.
+            stopped = self._stop_reason is not None
+            self.state = EngineState.STOPPED if was_running or stopped else EngineState.FAILED
+            if was_running and not stopped:
                 self.dormant_reason = 'crash'
                 try:
                     self._server.engine_crashed(self)
@@ -2489,7 +2497,7 @@ class TaskEngine(DAPBase):
                     'name': self._status.name,
                     'projectId': self.project_id,
                     'source': self.source,
-                    **({'reason': self._stop_reason} if self._stop_reason else {}),
+                    **({'reason': stop_reason} if stop_reason else {}),
                 },
                 id=self.id,
             )
@@ -2529,10 +2537,10 @@ class TaskEngine(DAPBase):
             # A ttl-window expiry is SUCCESS: the run stayed up exactly as
             # configured, then shut down. Only a real stop (or abnormal exit)
             # reads as cancelled; a crash is an error.
-            if self._crash and self._stop_reason is None:
+            if self._crash and stop_reason is None:
                 outcome = 'error'
             elif self._status.state == TASK_STATE.CANCELLED.value:
-                outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
+                outcome = 'ok' if stop_reason == 'ttl' else 'cancelled'
             elif self._status.exitCode == 0:
                 outcome = 'ok'
             else:
@@ -2545,7 +2553,7 @@ class TaskEngine(DAPBase):
                     continue
                 ended.add(id(writer))
                 try:
-                    await writer.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
+                    await writer.end_run(outcome, self._status.exitMessage or '', reason=stop_reason)
                 except Exception as e:
                     self.debug_message(f'Run-log close failed for {key}: {e}')
             self._run_logs.clear()
@@ -3287,6 +3295,8 @@ class TaskEngine(DAPBase):
             if self._stop_reason is None:
                 self._status.exitCode = exit_code
                 self._status.exitMessage = exit_message
+            # The run's end is read here: a stop that arrives later does not count
+            self._exit_event_stop = self._stop_reason
             self._exit_event_seen = True
 
             # The engine's handlers caught a crash: its >EXIT code is Crash
@@ -3784,6 +3794,7 @@ class TaskEngine(DAPBase):
             self._terminated_called = False
             self._teardown_done = asyncio.Event()
             self._exit_event_seen = False
+            self._exit_event_stop = None
             # A crash, and a kill by the server, belong to the run they
             # happened in: a relaunch that exits cleanly must read Completed,
             # and one that crashes must be classified on its own exit
@@ -4036,7 +4047,9 @@ class TaskEngine(DAPBase):
         Args:
             reason: WHY the stop happens — 'user' (explicit request) or
                 'ttl' (the run window elapsed). Drives the recorded run
-                outcome: a ttl expiry is a successful run, not a cancel.
+                outcome: a ttl expiry is a successful run, not a cancel. A
+                stop that arrives after the run's end was read does not
+                change that end; the engine still ends stopped, not crashed.
         """
         try:
             # Prevent race conditions
