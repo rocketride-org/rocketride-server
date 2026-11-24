@@ -647,6 +647,13 @@ class Resolution(NamedTuple):
     artifact: Optional[Dict[str, Any]] = None
 
 
+# How long one identity push (``apaext_account``) may take to reach its
+# client. The refreshes of a connection run in turn, so a client that stopped
+# reading its socket would otherwise hold back every later refresh of that
+# connection, a revocation included.
+IDENTITY_PUSH_SEND_TIMEOUT = 1.0
+
+
 class TaskServer(DAPBase):
     """
     Central task management server orchestrating computational task lifecycles.
@@ -2561,7 +2568,9 @@ class TaskServer(DAPBase):
         older could install last, or the newer one could be refused because
         the identity had just been replaced by the other. In turn, each
         rebuilds from the identity the one before it installed, so the last
-        read of the store is the one that stands.
+        read of the store is the one that stands. The send to the client is
+        bounded (``IDENTITY_PUSH_SEND_TIMEOUT``), so a client that stopped
+        reading cannot hold the next refresh back.
 
         Args:
             account: The account facade (its ``_service`` rebuilds identities).
@@ -2601,9 +2610,13 @@ class TaskServer(DAPBase):
             # Never install over a deauth or a newer auth that landed during the rebuild
             if conn._account_info is not info:
                 return False
+            # Installed BEFORE the send: permission checks read it from here on,
+            # whatever the client does with the event
             conn._account_info = fresh
             try:
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
+                await asyncio.wait_for(
+                    conn.send_event('apaext_account', body=fresh.to_push_result()), IDENTITY_PUSH_SEND_TIMEOUT
+                )
             except Exception as e:
                 self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
                 return False

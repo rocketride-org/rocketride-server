@@ -263,6 +263,30 @@ async def test_two_pushes_for_one_user_at_once_end_on_the_last_read_of_the_store
 
 
 @pytest.mark.asyncio
+async def test_a_client_that_stopped_reading_does_not_hold_back_the_next_refresh(monkeypatch):
+    """The send is bounded: the identity is installed at once, and the next refresh runs after the limit."""
+    import asyncio
+
+    from ai.modules.task import task_server as ts_mod
+
+    monkeypatch.setattr(ts_mod, 'IDENTITY_PUSH_SEND_TIMEOUT', 0.05)
+    first, second = _identity(), _identity()
+    server, service, _store = _server_with(monkeypatch, None)
+    service.get_authentication_result = AsyncMock(side_effect=[first, second])
+    conn = _connected(server, _identity())
+
+    async def never_returns(message):
+        await asyncio.Event().wait()
+
+    conn._transport.send = AsyncMock(side_effect=never_returns)
+
+    await asyncio.wait_for(asyncio.gather(server.push_account_update('u1'), server.push_account_update('u1')), 2)
+
+    assert service.get_authentication_result.await_count == 2
+    assert conn._account_info is second
+
+
+@pytest.mark.asyncio
 async def test_a_refresh_that_waited_its_turn_leaves_a_connection_that_changed_user(monkeypatch):
     """The refresh was decided for one user: a login as another user that landed while it waited is not rebuilt."""
     fresh = _identity()
