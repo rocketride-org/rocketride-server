@@ -813,7 +813,16 @@ class TestIInstanceLifecycle:
             ('{"body": "SSN 123-45-6789"', True),  # arguments the provider could not parse
             ({'body': 'Records:\n123-45-6789'}, True),  # JSON writes the line break as backslash-n
             ('{"body": "Card:\\n4111 1111 1111 1111"', True),
+            # Any control character before the value: JSON would write a form feed as
+            # backslash-f and a backspace as backslash-b, which would sit against the digits
+            ({'body': 'SSN:\f123-45-6789'}, True),
+            ({'body': 'SSN:\b123-45-6789'}, True),
+            ('{"body": "SSN:\\f123-45-6789"', True),
+            ('{"body": "SSN:\\u000c123-45-6789"', True),
+            # A value nested in a list of objects
+            ({'records': [{'note': 'ok'}, {'ssn': '123-45-6789'}]}, True),
             ({'query': 'weather in Paris'}, False),
+            ({'filters': [{'city': 'Paris'}, {'days': 3}], 'units': None}, False),
         ],
     )
     def test_a_turn_answer_is_checked_on_its_tool_call_arguments(self, args, blocked):

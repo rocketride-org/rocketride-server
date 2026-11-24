@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-import json
+import re
 
 from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Question, Answer
@@ -43,6 +43,31 @@ def _turn_input(question: Question) -> list:
     return [block.text if block.type == 'text' else block.content for block in content]
 
 
+# A JSON escape for a character that is not text: a control character (the named ones
+# and the \u00XX form) or a line or paragraph separator
+_JSON_BREAK = re.compile(r'\\(?:[nrtfb]|u00[01][0-9a-fA-F]|u007[fF]|u202[89])')
+
+
+def _argument_text(value) -> list:
+    """Return every piece of text in a tool call's parsed arguments: keys, strings and scalar values.
+
+    The values are read as they are, not as their JSON text: JSON writes a control
+    character as an escape (a form feed as backslash-f), which would sit against the
+    next character and hide the word boundary the patterns need.
+    """
+    if isinstance(value, dict):
+        parts = []
+        for key, item in value.items():
+            parts.append(str(key))
+            parts.extend(_argument_text(item))
+        return parts
+    if isinstance(value, (list, tuple)):
+        return [part for item in value for part in _argument_text(item)]
+    if value is None:
+        return []
+    return [value if isinstance(value, str) else str(value)]
+
+
 def _turn_output(answer: Answer) -> str:
     """Return the arguments of a turn's tool calls as one text, or '' when it made none.
 
@@ -50,11 +75,15 @@ def _turn_output(answer: Answer) -> str:
     call a tool usually has no text, so the text check alone never sees them.
     """
     calls = answer.toolCalls() if answer is not None else []
-    text = '\n'.join(
-        call.args if isinstance(call.args, str) else json.dumps(call.args, ensure_ascii=False) for call in calls
-    )
-    # JSON writes a line break as backslash-n, which hides the word boundary the patterns need
-    return text.replace('\\n', ' ').replace('\\r', ' ').replace('\\t', ' ')
+    parts = []
+    for call in calls:
+        if isinstance(call.args, str):
+            # Arguments the provider could not parse are still JSON text: an escaped
+            # control character becomes a space, as the character itself would read
+            parts.append(_JSON_BREAK.sub(' ', call.args))
+        else:
+            parts.extend(_argument_text(call.args))
+    return '\n'.join(parts)
 
 
 class IInstance(IInstanceBase):
