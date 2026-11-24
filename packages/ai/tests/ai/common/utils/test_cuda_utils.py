@@ -101,8 +101,17 @@ class _Device:
 
 @pytest.fixture
 def cuda_check(monkeypatch):
-    """Replace the CUDA check: ``works`` says which ordinals run, ``checked`` lists the ones asked about."""
-    state = types.SimpleNamespace(works={}, checked=[])
+    """Replace the CUDA check: ``works`` says which ordinals run, ``checked`` lists the ones asked about.
+
+    ``current`` is torch's current CUDA device, which an unindexed 'cuda' means.
+    """
+    state = types.SimpleNamespace(works={}, checked=[], current=0)
+    torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: True, current_device=lambda: state.current)
+    )
+    pkg = types.ModuleType('ai.common.torch')
+    pkg.torch = torch
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', pkg)
 
     def check(index):
         state.checked.append(index)
@@ -118,8 +127,10 @@ def cuda_check(monkeypatch):
         ('cpu', ('cpu', -1)),
         (-1, ('cpu', -1)),
         (_Device('cpu'), ('cpu', -1)),
+        (_Device('cpu:0'), ('cpu', -1)),
         ('mps', ('mps', -1)),
         (_Device('mps'), ('mps', -1)),
+        (_Device('mps:0'), ('mps', -1)),
         ('cuda', ('cuda:0', 0)),
         (0, ('cuda:0', 0)),
         (_Device('cuda'), ('cuda:0', 0)),
@@ -141,6 +152,23 @@ def test_select_torch_device_checks_only_cuda_devices(cuda_check):
 
     select_torch_device(_Device('cuda:1'))
     assert cuda_check.checked == [1]
+
+
+@pytest.mark.parametrize('device', ['cuda', _Device('cuda')])
+def test_an_unindexed_cuda_device_is_the_current_one(cuda_check, device):
+    """To torch, 'cuda' is the current device, which another loader may have set to GPU 1."""
+    cuda_check.current = 1
+
+    assert select_torch_device(device) == ('cuda:1', 1)
+    assert cuda_check.checked == [1]
+
+
+def test_the_auto_picked_device_is_not_the_current_one(monkeypatch, cuda_check):
+    """The automatic choice stays cuda:0, whatever the current device."""
+    monkeypatch.setattr(cuda_utils, 'pick_torch_device', lambda: 'cuda:0')
+    cuda_check.current = 1
+
+    assert select_torch_device() == ('cuda:0', 0)
 
 
 def test_select_torch_device_falls_back_to_cpu_when_cuda_cannot_run(cuda_check, caplog):

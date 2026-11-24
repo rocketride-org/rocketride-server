@@ -7,6 +7,7 @@ mis-mapped: a ``torch.device``, ``'mps'``, and a CUDA device that cannot run
 the model.
 """
 
+import contextlib
 import sys
 import types
 
@@ -47,7 +48,25 @@ class _Model:
 
 
 @pytest.fixture
-def cuda_works(monkeypatch):
+def fake_torch(monkeypatch):
+    """A torch whose current CUDA device is 0; records each device synchronized."""
+    synchronized = []
+    torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            current_device=lambda: 0,
+            synchronize=lambda device=None: synchronized.append(device),
+        ),
+        no_grad=contextlib.nullcontext,
+    )
+    pkg = types.ModuleType('ai.common.torch')
+    pkg.torch = torch
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', pkg)
+    return types.SimpleNamespace(torch=torch, synchronized=synchronized)
+
+
+@pytest.fixture
+def cuda_works(monkeypatch, fake_torch):
     """Which CUDA ordinals run; every ordinal not listed does."""
     works = {}
     monkeypatch.setattr(cuda_utils, '_cuda_kernels_run', lambda index: works.get(index, True))
@@ -82,7 +101,9 @@ def _load_pipeline(device):
     'device,pipeline_device,label,gpu_index',
     [
         ('mps', 'mps', 'mps', -1),
+        (_Device('mps:0'), 'mps', 'mps', -1),
         ('cpu', -1, 'cpu', -1),
+        (_Device('cpu:0'), -1, 'cpu', -1),
         ('cuda:1', 1, 'cuda:1', 1),
         (_Device('cuda:1'), 1, 'cuda:1', 1),
         (2, 2, 'cuda:2', 2),
@@ -105,6 +126,27 @@ def test_a_pipeline_moves_to_the_cpu_when_its_gpu_cannot_run_it(cuda_works, pipe
     assert pipeline == [-1]
     assert metadata['device'] == 'cpu'
     assert index == -1
+
+
+class _Encoded:
+    def to(self, device, non_blocking=False):
+        return self
+
+
+def _infer(device):
+    model = {'model': lambda **inputs: 'output'}
+    return TransformersLoader.inference(model, {'encoded': {'input_ids': _Encoded()}}, metadata={'device': device})
+
+
+def test_inference_on_the_cpu_does_not_touch_the_gpu(fake_torch):
+    """A model that fell back to the CPU must not synchronize the GPU it could not run on."""
+    assert _infer('cpu') == 'output'
+    assert fake_torch.synchronized == []
+
+
+def test_inference_on_a_gpu_waits_for_that_gpu(fake_torch):
+    assert _infer('cuda:1') == 'output'
+    assert fake_torch.synchronized == ['cuda:1']
 
 
 # -----------------------------------------------------------------------------

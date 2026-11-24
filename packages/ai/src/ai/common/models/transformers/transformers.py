@@ -340,8 +340,11 @@ class TransformersLoader(BaseLoader):
         with torch.no_grad():
             encoded_gpu = {k: v.to(device, non_blocking=True) for k, v in encoded.items()}
             output = actual_model(**encoded_gpu)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
+
+            # Only a model on a GPU has work to wait for. One that fell back to
+            # the CPU must not touch a GPU that could not run it.
+            if str(device).startswith('cuda'):
+                torch.cuda.synchronize(device)
 
         return output
 

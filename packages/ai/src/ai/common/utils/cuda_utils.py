@@ -141,11 +141,28 @@ def _canonical_device(device: Any) -> str:
             return 'cpu'
         return f'cuda:{device}'
 
-    # str() of a torch.device is 'cuda:N', 'cuda', 'mps' or 'cpu'
+    # str() of a torch.device is 'cuda:N', 'cuda', 'mps:N', 'mps', 'cpu:N' or 'cpu'
     name = str(device)
+
+    # There is one CPU and one MPS device, so an index adds nothing; kept, it
+    # would read as a CUDA index where a HF pipeline takes the device
+    for kind in ('cpu', 'mps'):
+        if name.startswith(f'{kind}:'):
+            return kind
+
+    # To torch, 'cuda' is the current device, which a loader may have set
     if name == 'cuda':
-        return 'cuda:0'
+        return f'cuda:{_current_cuda_index()}'
     return name
+
+
+def _current_cuda_index() -> int:
+    """Return torch's current CUDA device, or 0 when CUDA is not available."""
+    from ai.common.torch import torch
+
+    if not torch.cuda.is_available():
+        return 0
+    return torch.cuda.current_device()
 
 
 @functools.lru_cache(maxsize=None)
