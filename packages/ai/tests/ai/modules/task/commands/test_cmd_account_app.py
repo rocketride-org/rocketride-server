@@ -189,6 +189,20 @@ async def test_account_status_reads_the_org_that_owns_the_dev_team(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_account_status_ignores_a_dev_team_the_caller_cannot_run_on(monkeypatch):
+    """A stale devTeam in another org picks neither the org that is read nor a team layer."""
+    conn, reads = _status_conn(monkeypatch, can_run=False, devTeam='team-x')
+    conn.resolve_org_for_team = AsyncMock(return_value='org-9')
+
+    body = (await AccountCommands.on_rrext_account_status(conn, {'arguments': {}}))['body']
+
+    assert body['devTeam'] == {'selected': True, 'name': '', 'canRun': False}
+    conn.resolve_org_for_team.assert_not_awaited()
+    reads.check_spend.assert_awaited_once_with('org-1')
+    reads.get_merged_env.assert_awaited_once_with(user_id='user-1', org_id='org-1', team_id=None)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ('identity', 'credit_error', 'credits', 'env_keys'),
     [

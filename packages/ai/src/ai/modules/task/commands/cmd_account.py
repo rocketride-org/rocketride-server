@@ -131,8 +131,10 @@ class AccountCommands(DAPConn):
                 can_run = False
             # A run is billed to the org that owns the dev team, which execute
             # resolves the same way; for an identity whose dev team sits outside
-            # its own org (sys.admin), that is not the identity's org.
-            if not waitlisted:
+            # its own org (sys.admin), that is not the identity's org. Like
+            # execute, only after the permission check: a stale devTeam in
+            # another org must not pick which org's balance is read.
+            if can_run and not waitlisted:
                 try:
                     org_id = await self.resolve_org_for_team(team_id) or org_id
                 except PermissionError:
@@ -161,11 +163,15 @@ class AccountCommands(DAPConn):
                     credits['reason'] = 'readFailed'
                     self.debug_message(f'rrext_account_status: credit read failed ({type(exc).__name__})')
 
-        # Variable names the caller's runs would see, never their values.
+        # Variable names the caller's runs would see, never their values. The
+        # team layer only for a team the caller may run on: it is read by team
+        # id alone, so a stale devTeam would otherwise list another team's names.
         env_keys = None
         if not waitlisted:
             try:
-                merged = await account.get_merged_env(user_id=user_id, org_id=org_id, team_id=team_id or None)
+                merged = await account.get_merged_env(
+                    user_id=user_id, org_id=org_id, team_id=team_id if can_run else None
+                )
                 env_keys = sorted(merged)
             except Exception as exc:  # noqa: BLE001 - unknown, not "empty"
                 self.debug_message(f'rrext_account_status: variable read failed ({type(exc).__name__})')
