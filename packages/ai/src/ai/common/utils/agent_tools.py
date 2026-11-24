@@ -183,18 +183,24 @@ def _tool_args_schema(schema: Any) -> Any:
     """Return a JSON-Schema dict for a tool's ``args_schema``, or a string fallback.
 
     Pydantic v2 models expose ``model_json_schema()``; older models expose
-    ``schema()``. When neither works, falls back to ``str(schema)`` so the LLM
-    still sees *something* identifying the expected shape.
+    ``schema()``. When it does not work, falls back to ``str(schema)`` so the
+    LLM still sees *something* identifying the expected shape.
+
+    ``schema()`` is asked only of an object that has no ``model_json_schema``:
+    on a v2 model it is a deprecated alias of the same call, so asking it
+    after the first one failed can only fail the same way, with a
+    deprecation warning.
     """
     if schema is None:
         return ''
-    for attr in ('model_json_schema', 'schema'):
-        fn = getattr(schema, attr, None)
-        if callable(fn):
-            try:
-                result = fn()
-                if isinstance(result, dict):
-                    return result
-            except Exception:
-                continue
+    fn = getattr(schema, 'model_json_schema', None)
+    if not callable(fn):
+        fn = getattr(schema, 'schema', None)
+    if callable(fn):
+        try:
+            result = fn()
+            if isinstance(result, dict):
+                return result
+        except Exception:
+            pass
     return safe_str(schema)
