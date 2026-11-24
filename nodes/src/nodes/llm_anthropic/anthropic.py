@@ -68,6 +68,7 @@ class Chat(ChatBase):
     # Anthropic caches only up to an explicit marker, so the driver places one at the
     # end of the prompt's unchanging start (see apply_prompt_cache_breakpoint).
     SUPPORTS_PROMPT_CACHE_PREFIX = True
+    SUPPORTS_NATIVE_TOOLS = True
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -111,3 +112,14 @@ class Chat(ChatBase):
     def native_stream_key(self) -> str:
         """Stream through the native Messages API when this call thinks; otherwise the LangChain stream."""
         return 'anthropic' if self.thinking_kwargs() else ''
+
+    def turn_kwargs(self) -> Dict[str, Any]:
+        """
+        Return the request values of a turn: the call's, with its extended thinking.
+
+        A turn keeps the signed thinking blocks in its messages, so thinking
+        can stay on through a tool loop on any path, not only the native text
+        stream. The thinking values are this call's (``thinking_kwargs``) and
+        are bound onto the request, never onto the client.
+        """
+        return {**self.call_kwargs(), **self.thinking_kwargs()}

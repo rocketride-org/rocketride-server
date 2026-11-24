@@ -31,6 +31,18 @@ from langchain_openai import ChatOpenAI
 from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
 
 
+class _ResponsesChatOpenAI(ChatOpenAI):
+    """ChatOpenAI on the Responses API, for turns on reasoning models.
+
+    LangChain forwards a stream_usage kwarg into Responses.create, which rejects it; the
+    Responses stream reports usage on its own.
+    """
+
+    def _stream(self, *args, **kwargs):
+        kwargs.pop('stream_usage', None)
+        return super()._stream(*args, **kwargs)
+
+
 class Chat(ChatBase):
     """
     Create an OpenAI chat bot.
@@ -43,6 +55,7 @@ class Chat(ChatBase):
     # Reasoning-capable models route through the OpenAI Responses API so we can
     # stream the reasoning summary as well as the answer.
     SUPPORTS_REASONING_STREAMING = True
+    SUPPORTS_NATIVE_TOOLS = True
 
     _llm: ChatOpenAI
 
@@ -76,6 +89,33 @@ class Chat(ChatBase):
         if call.reasoning:
             return {'model': call.model, 'max_completion_tokens': call.output_tokens}
         return {'model': call.model, 'max_tokens': call.output_tokens, 'temperature': call.settings['temperature']}
+
+    def _turn_llm(self) -> ChatOpenAI:
+        """
+        Return the client a turn runs on: the Responses API for a reasoning model.
+
+        Reasoning models take turns on the Responses API, stateless
+        (store=False), so their encrypted reasoning rides back in the
+        conversation between tool calls. One client serves every reasoning
+        model: it is built from the key alone and kept in the keyed cache, and
+        the turn binds the call's model and output window (``call_kwargs``;
+        the Responses payload takes ``max_completion_tokens`` as its
+        ``max_output_tokens``).
+        """
+        if not self.call.reasoning:
+            return self._llm
+
+        def build() -> ChatOpenAI:
+            return _ResponsesChatOpenAI(
+                model=UNBOUND_MODEL,
+                api_key=self._llm.openai_api_key,
+                use_responses_api=True,
+                reasoning={'summary': 'auto'},
+                include=['reasoning.encrypted_content'],
+                store=False,
+            )
+
+        return self._keyed_handle('responses_turn', build)
 
     def is_retryable_error(self, error):
         """

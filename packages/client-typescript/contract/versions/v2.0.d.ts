@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 6ffa9eb820f56db61d8684c562250ac50ecc9628
+// Source commit: 8072094ba7b1dbdc2b61f601bb5f87689ffc7560
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -465,6 +465,162 @@ export declare class DocGroupHelper {
     static splitByChunkRange(group: DocGroup, chunkSize: number): DocGroup[];
 }
 /**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Response structures from RocketRide pipeline data processing operations.
+ *
+ * These interfaces represent the different types of responses returned when data
+ * is sent through pipelines, depending on the processing method and MIME type handling.
+ */
+/**
+ * Pipeline response structure with optional processing information.
+ *
+ * This is returned from all pipeline operations. When data is sent without
+ * MIME type specification, only basic fields are present. When MIME type
+ * is specified and processing occurs, additional result_types and dynamic
+ * fields are included.
+ */
+export interface PIPELINE_RESULT {
+    /** Unique identifier for this processing result (UUID format) */
+    name: string;
+    /** File path context (typically empty for direct data sends) */
+    path: string;
+    /** Unique object identifier for tracking processed items (UUID format) */
+    objectId: string;
+    /**
+     * Map of field names to their data type identifiers.
+     *
+     * The key is the name of a field that exists in this response object.
+     * The value indicates what type of data that field contains.
+     *
+     * Examples:
+     * - { "text": "text" } → look for response.text containing string array
+     * - { "my_text": "text", "my_answers": "answers" } → look for response.my_text and response.my_answers
+     * - { "answers": "answers" } → look for response.answers containing AI-generated responses
+     */
+    result_types?: Record<string, string>;
+    /**
+     * Dynamic fields containing processed data based on result_types mapping.
+     *
+     * Field names and types are determined by the result_types object:
+     * - Fields with type "text": string[] (array of text segments)
+     * - Fields with type "answers": string[] (AI-generated chat responses)
+     * - Other types: depends on pipeline configuration
+     *
+     * Common field names: "text", "output", "content", "data", "result", "answers"
+     */
+    [key: string]: any;
+}
+/**
+ * File upload result structure with processing outcome and metadata.
+ *
+ * This represents the complete result of a file upload operation, including
+ * upload statistics, processing results, and any error information.
+ */
+export interface UPLOAD_RESULT {
+    /** Upload completion status - 'complete' indicates successful upload and processing */
+    action: "open" | "write" | "close" | "complete" | "error";
+    /** Original filename as provided during upload */
+    filepath: string;
+    /** Number of bytes successfully transmitted to the server */
+    bytes_sent: number;
+    /** Total size of the uploaded file in bytes */
+    file_size: number;
+    /** Time taken for the upload operation in seconds */
+    upload_time: number;
+    /**
+     * Processing result from the pipeline after successful upload.
+     * Contains the same structure as PIPELINE_RESULT with processed content.
+     * Only present when action is 'complete' and processing succeeded.
+     */
+    result?: PIPELINE_RESULT;
+    /** Error message if upload or processing failed (when action is 'error') */
+    error?: string;
+}
+/**
+ * A tool the model may call in a turn-mode Question. `name` is yours and may contain
+ * dots; the engine maps it to a name the provider accepts and maps calls back.
+ */
+export interface Tool {
+    name: string;
+    description?: string;
+    /** JSON Schema with `type: 'object'` at the top. Defaults to an object with no properties. */
+    inputSchema?: Record<string, unknown>;
+}
+/** Plain text inside a message. */
+export interface TextBlock {
+    type: "text";
+    text: string;
+}
+/**
+ * A call the model asked for. Answer it with a ToolResultBlock carrying the same `id`.
+ * `args` is the raw string when the provider's arguments were not valid JSON.
+ */
+export interface ToolCallBlock {
+    type: "tool_call";
+    id: string;
+    name: string;
+    args: Record<string, unknown> | string;
+}
+/** The result of one tool call, sent back in the next user message. */
+export interface ToolResultBlock {
+    type: "tool_result";
+    callId: string;
+    content: string;
+    isError?: boolean;
+}
+/** Model reasoning the provider needs back. `text` is for display; keep `state` unchanged. */
+export interface ReasoningBlock {
+    type: "reasoning";
+    text?: string;
+    state?: unknown;
+}
+/** A user turn: text, and the results of the calls in the assistant turn before it. */
+export interface UserMessage {
+    role: "user";
+    content: string | Array<TextBlock | ToolResultBlock>;
+}
+/** A model turn: text, tool calls and reasoning. Append it to `Question.messages` as is. */
+export interface AssistantMessage {
+    role: "assistant";
+    content: string | Array<TextBlock | ToolCallBlock | ReasoningBlock>;
+}
+/** One turn of a turn-mode conversation. */
+export type Message = UserMessage | AssistantMessage;
+export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
+/**
+ * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
+ * before any provider call. `invalid_request` means two tool names become the same provider
+ * name, or a node changed the Question so it breaks a turn rule: fix it, do not retry.
+ * A Question sent with a broken turn rule is refused when the engine reads it.
+ * `provider_error` gives only the exception type; the full text is in the engine log.
+ */
+export interface AnswerError {
+    code: "tools_unsupported" | "invalid_request" | "provider_error";
+    message: string;
+}
+/**
  * Defines different types of questions and queries you can ask.
  */
 export declare const QuestionType: {
@@ -517,7 +673,22 @@ export interface QuestionText {
  * Handles AI responses from RocketRide chat operations.
  */
 export declare class Answer {
+    /** Set only for a turn-mode Question: the model's turn. */
+    message?: AssistantMessage;
+    /** Why the model stopped. `tool_use` means `toolCalls` are waiting for results. */
+    stopReason?: StopReason;
+    /** Set instead of `message` when the turn failed. */
+    error?: AnswerError;
+    /** Token usage of the turn. */
+    tokens?: Record<string, unknown>;
     constructor(expectJson?: boolean);
+    /**
+     * Read the answer a turn-mode `client.chat()` call returned (the last entry under `key`).
+     * A text entry, which an engine that predates turn mode returns, gives a text Answer.
+     */
+    static fromResult(result: PIPELINE_RESULT, key?: string): Answer;
+    /** The calls in this turn, in the order the model made them. Empty for a text answer. */
+    get toolCalls(): ToolCallBlock[];
     /**
      * Extract Python code from AI response.
      */
@@ -527,7 +698,7 @@ export declare class Answer {
      */
     setAnswer(value: string | object | unknown[]): void;
     /**
-     * Get the response as plain text.
+     * Get the response as plain text. For a turn, the text of `message`.
      */
     getText(): string;
     /**
@@ -560,6 +731,15 @@ export declare class Question {
     goals: string[];
     documents: Doc[];
     questions: QuestionText[];
+    /**
+     * The conversation, sent as real provider turns. Non-empty switches the Question to
+     * turn mode: the system prompt is role + instructions + examples, context, documents
+     * and goals are added to the last user message, and history, questions and
+     * expectJson are not allowed.
+     */
+    messages: Message[];
+    /** Tools the model may call. Turn mode only. */
+    tools: Tool[];
     constructor(options?: {
         type?: QuestionType;
         filter?: DocFilter;
@@ -591,6 +771,21 @@ export declare class Question {
      * Add a question to ask the AI.
      */
     addQuestion(question: string): void;
+    /**
+     * Append a message to the conversation, switching the Question to turn mode.
+     * Throws, leaving the Question as it was, if the Question uses a field turn mode does not allow.
+     */
+    addMessage(message: Message): void;
+    /**
+     * Check the turn-mode rules. `fromDict` runs this; call it after editing fields by hand.
+     * Throws an Error naming the broken rule.
+     */
+    checkTurn(): void;
+    /**
+     * Add the result of a tool call to the user message that answers it, opening that
+     * message after an assistant turn. Throws if no assistant turn before it made the call.
+     */
+    addToolResult(callId: string, content: string, isError?: boolean): void;
     /**
      * Add specific documents for the AI to reference.
      */
@@ -2772,100 +2967,6 @@ interface DashboardMonitorChanged extends DashboardEventBase {
 /** Discriminated union of all dashboard activity events. */
 export type DashboardEvent = DashboardConnectionAdded | DashboardConnectionRemoved | DashboardTaskStarted | DashboardTaskStopped | DashboardTaskRemoved | DashboardTaskError | DashboardAuthFailed | DashboardMonitorChanged;
 /**
- * MIT License
- *
- * Copyright (c) 2026 Aparavi Software AG
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-/**
- * Response structures from RocketRide pipeline data processing operations.
- *
- * These interfaces represent the different types of responses returned when data
- * is sent through pipelines, depending on the processing method and MIME type handling.
- */
-/**
- * Pipeline response structure with optional processing information.
- *
- * This is returned from all pipeline operations. When data is sent without
- * MIME type specification, only basic fields are present. When MIME type
- * is specified and processing occurs, additional result_types and dynamic
- * fields are included.
- */
-export interface PIPELINE_RESULT {
-    /** Unique identifier for this processing result (UUID format) */
-    name: string;
-    /** File path context (typically empty for direct data sends) */
-    path: string;
-    /** Unique object identifier for tracking processed items (UUID format) */
-    objectId: string;
-    /**
-     * Map of field names to their data type identifiers.
-     *
-     * The key is the name of a field that exists in this response object.
-     * The value indicates what type of data that field contains.
-     *
-     * Examples:
-     * - { "text": "text" } → look for response.text containing string array
-     * - { "my_text": "text", "my_answers": "answers" } → look for response.my_text and response.my_answers
-     * - { "answers": "answers" } → look for response.answers containing AI-generated responses
-     */
-    result_types?: Record<string, string>;
-    /**
-     * Dynamic fields containing processed data based on result_types mapping.
-     *
-     * Field names and types are determined by the result_types object:
-     * - Fields with type "text": string[] (array of text segments)
-     * - Fields with type "answers": string[] (AI-generated chat responses)
-     * - Other types: depends on pipeline configuration
-     *
-     * Common field names: "text", "output", "content", "data", "result", "answers"
-     */
-    [key: string]: any;
-}
-/**
- * File upload result structure with processing outcome and metadata.
- *
- * This represents the complete result of a file upload operation, including
- * upload statistics, processing results, and any error information.
- */
-export interface UPLOAD_RESULT {
-    /** Upload completion status - 'complete' indicates successful upload and processing */
-    action: "open" | "write" | "close" | "complete" | "error";
-    /** Original filename as provided during upload */
-    filepath: string;
-    /** Number of bytes successfully transmitted to the server */
-    bytes_sent: number;
-    /** Total size of the uploaded file in bytes */
-    file_size: number;
-    /** Time taken for the upload operation in seconds */
-    upload_time: number;
-    /**
-     * Processing result from the pipeline after successful upload.
-     * Contains the same structure as PIPELINE_RESULT with processed content.
-     * Only present when action is 'complete' and processing succeeded.
-     */
-    result?: PIPELINE_RESULT;
-    /** Error message if upload or processing failed (when action is 'error') */
-    error?: string;
-}
-/**
  * Event type enumeration for sophisticated client subscription and event routing.
  *
  * This enumeration defines event categories used for intelligent event filtering
@@ -4275,9 +4376,10 @@ declare class AccountApi {
      *
      * A name with a value is set, a name with `null` is deleted, and a name
      * whose value is the mask from `getEnv` keeps its stored value. Names not
-     * in `env` are left as they are. A name outside `ROCKETRIDE_*`, or with
-     * whitespace, `=`, `#`, a quote or NUL in it, rejects the whole write, and
-     * so does a server too old to merge.
+     * in `env` are left as they are. A name outside `ROCKETRIDE_*` rejects the
+     * whole write, and so does a name given a new value with whitespace, `=`,
+     * `#`, a quote or NUL in it; a stored name can always be kept or deleted.
+     * A server too old to merge rejects the write too.
      *
      * @param scope   - One of 'org', 'team', 'user'.
      * @param env     - Names to set, delete (`null`) or keep (mask).
@@ -6724,10 +6826,15 @@ export declare class RocketRideClient extends DAPClient {
      * every app id it owns. Readable on both editions (OSS answers the
      * fixed namespace its sessions carry; there is no Stripe Connect there).
      *
+     * @param options - Optional request settings.
+     * @param options.timeout - Per-request timeout in ms; on expiry the request
+     *   rejects and is dropped from the pending table, so a late reply is ignored.
      * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
      *   `developerId` is null until an org admin registers one
      */
-    developerStatus(): Promise<{
+    developerStatus(options?: {
+        timeout?: number;
+    }): Promise<{
         developerId: string | null;
         stripeAccountId: string | null;
         stripeAccountStatus: string;
@@ -6738,9 +6845,15 @@ export declare class RocketRideClient extends DAPClient {
      * publish beyond the workspace.
      *
      * @param developerId - The slug to claim (lowercase letters/underscores)
+     * @param options - Optional request settings.
+     * @param options.timeout - Per-request timeout in ms; on expiry the request
+     *   rejects and is dropped from the pending table (the claim may still land
+     *   on the server, so callers should re-check developerStatus()).
      * @returns The server's registration record
      */
-    registerDeveloper(developerId: string): Promise<Record<string, unknown>>;
+    registerDeveloper(developerId: string, options?: {
+        timeout?: number;
+    }): Promise<Record<string, unknown>>;
     /** Read a file as a UTF-8 string. */
     fsReadString(path: string): Promise<string>;
     /** Write a UTF-8 string to a file. */

@@ -36,15 +36,17 @@ reference is generated from the schema source and published at
 
 ```json
 {
+  "project_id": "minimal-example",
   "components": [
     { "id": "in", "provider": "webhook", "config": { "mode": "Source" } },
     {
       "id": "out",
-      "provider": "response",
-      "config": { "lanes": [{ "laneId": "questions", "laneName": "questions" }] },
+      "provider": "response_questions",
+      "config": { "laneName": "questions" },
       "input": [{ "lane": "questions", "from": "in" }]
     }
-  ]
+  ],
+  "source": "in"
 }
 ```
 

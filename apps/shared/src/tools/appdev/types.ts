@@ -488,6 +488,16 @@ export interface NewAppIdentity {
 	workspaceOpen: boolean;
 	/** Folder names already in the scaffold target — used for live collision validation. */
 	existingFolders: string[];
+	/** True when the org has no developer id yet and this host can claim one
+	 *  from the wizard (host.appdev.registerDeveloper). Omitted = no form. */
+	canRegisterDeveloper?: boolean;
+	/** The host could not confirm the org's developer id (the lookup failed);
+	 *  the wizard says so in the Developer ID row. Creating the app does not
+	 *  wait on it: the files carry the slug. */
+	lookupFailed?: boolean;
+	/** Increases with every identity the host builds; a wizard ignores an
+	 *  identity older than the one it shows. Hosts without revisions omit it. */
+	revision?: number;
 }
 
 // =============================================================================

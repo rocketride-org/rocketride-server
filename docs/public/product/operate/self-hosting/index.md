@@ -83,17 +83,25 @@ curl http://localhost:5565/version
 
 ## Connect a client
 
-Point any [SDK](/clients/typescript) or the [CLI](/connect/cli) at the engine. A local
-engine typically needs no auth token:
+Point any [SDK](/clients/typescript) or the [CLI](/connect/cli) at the engine. The
+client must send a key. Use the key the engine was started with; an engine started
+without `RR_APIKEY` accepts any non-empty value:
 
 ```bash
-ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_APIKEY=rr_local
 ```
+
+These two are the client's. If you later start the engine from the same shell
+it inherits `ROCKETRIDE_APIKEY`, and an engine that has it without its own
+`RR_APIKEY` refuses to start. Give the engine the same key
+(`export RR_APIKEY=rr_local`), or start it from a shell that does not have the
+client's variable.
 
 ```typescript
 import { RocketRideClient } from 'rocketride';
 
-const client = new RocketRideClient({ uri: 'ws://localhost:5565' });
+const client = new RocketRideClient({ uri: 'ws://localhost:5565', auth: 'rr_local' });
 await client.connect();
 ```
 
