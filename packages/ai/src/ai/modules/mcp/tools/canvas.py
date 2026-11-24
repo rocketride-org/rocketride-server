@@ -218,8 +218,9 @@ class _Cleaner:
         self.kept: List[Dict[str, Any]] = []
 
     def count(self, components: Any) -> None:
-        """Count every component, nested groups included at any depth.
+        """Count every component `_clean_one` keeps, nested groups included at any depth.
 
+        One with no id or no provider is never drawn and is not counted.
         Components past MAX_GROUP_DEPTH are not drawn, so counting them marks
         the result truncated. A loop rather than recursion: the file sets the
         depth.
@@ -228,7 +229,11 @@ class _Cleaner:
         while pending:
             level = pending.pop()
             for raw in level if isinstance(level, list) else []:
-                if not isinstance(raw, dict):
+                if (
+                    not isinstance(raw, dict)
+                    or not _text(raw.get('id'), MAX_ID_CHARS)
+                    or not _text(raw.get('provider'), MAX_ID_CHARS)
+                ):
                     continue
                 self.total += 1
                 if _node_type(raw) == _GROUP:

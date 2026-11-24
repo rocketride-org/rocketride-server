@@ -564,6 +564,22 @@ async def test_groups_keep_cleaned_children_to_a_depth_of_8_and_count_the_rest()
     assert CANARY_LITERAL not in json.dumps(result)
 
 
+async def test_a_component_with_no_id_or_provider_is_not_counted():
+    broken_group = {
+        'id': 'g',
+        'ui': {'nodeType': 'group'},
+        'config': {'pipeline': {'components': [{'id': 'inner', 'provider': 'webhook'}]}},
+    }
+    components = [*_simple_components(), {}, {'id': 'x'}, {'provider': 'webhook'}, broken_group]
+    engine = StoreEngine({'.projects/a.pipe': _pipe(components)})
+
+    result = await _call(engine, {'path': '.projects/a.pipe'})
+
+    assert [node['id'] for node in result['nodes']] == ['webhook_1', 'llm_1', 'db_1']
+    assert result['node_count'] == 3
+    assert result['truncated'] is False
+
+
 # -- secrets -----------------------------------------------------------------
 
 
