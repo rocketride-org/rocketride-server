@@ -171,8 +171,14 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
     names = [entry.filename.rstrip('/') for entry in entries]
     if any(part in ('', '.', '..') for name in names for part in name.split('/')):
         raise NodePackageInvalid('The package holds a path with an empty, "." or ".." segment')
+    # Windows drops a trailing dot or space when it unpacks, so "services.json." lands on "services.json"
+    if any(part != part.rstrip('. ') for name in names for part in name.split('/')):
+        raise NodePackageInvalid('The package holds a path whose name ends in "." or a space')
     if len({name.lower() for name in names}) != len(names):
         raise NodePackageInvalid('The package holds two entries with the same path')
+    # The engine's start-up scan also loads definitions from a folder named services.*json
+    if any(part.lower().startswith('services.') for name in names for part in name.split('/')[1:-1]):
+        raise NodePackageInvalid('The package holds a folder named services.*, which the engine reads definitions from')
     roots = {entry.filename.split('/')[0] for entry in entries}
     if len(roots) != 1:
         raise NodePackageInvalid('The package must hold one folder, the node')
@@ -211,7 +217,8 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
             _check_icon(f'{name}: icon {icon!r}', icons[icon])
 
     for name, entry in files.items():
-        if re.fullmatch(r'requirement[^/]*\.txt', name, re.IGNORECASE):
+        # A run solves the node's overrides.txt along with its requirements
+        if re.fullmatch(r'(requirement[^/]*|overrides)\.txt', name, re.IGNORECASE):
             for line in _text(archive, entry, name).splitlines():
                 if line.strip() and not line.lstrip().startswith('#') and _UNSAFE_REQUIREMENT.search(line):
                     raise NodePackageInvalid(f'{name}: {line.strip()!r} is not a package name')
