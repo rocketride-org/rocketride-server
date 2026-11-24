@@ -632,7 +632,7 @@ def _call_array(raw: str) -> Optional[Tuple[Dict[str, Any], int]]:
     try:
         entries, end = json.JSONDecoder().raw_decode(raw, start)
     except (ValueError, RecursionError):
-        if _without_fence(raw).startswith('[') and _attempted_kind(raw) in _TOOL_CALL_KINDS:
+        if _attempted_kind(raw[start:]) in _TOOL_CALL_KINDS:
             return {'type': 'tool_calls', 'calls': None}, len(raw)
         return None
     if not isinstance(entries, list):

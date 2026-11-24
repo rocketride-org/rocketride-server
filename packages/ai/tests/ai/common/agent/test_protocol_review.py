@@ -85,7 +85,9 @@ def test_invalid_batches_are_retried_atomically_with_the_bad_index(bad, array, i
 
 
 @pytest.mark.parametrize('raw', ['[' + json.dumps(CALLS[0]) + ',', ARRAY[:-1]])
-def test_a_truncated_array_never_dispatches_its_first_complete_call(raw):
+@pytest.mark.parametrize('wrapper', ['{}', 'Here are the calls: {}', '```json\n{}\n```'])
+def test_a_truncated_array_never_dispatches_its_first_complete_call(raw, wrapper):
+    raw = wrapper.format(raw)
     assert protocol.parse_reply(raw, allow_parallel=True) is None
     assert protocol.parse_reply(raw) is None
 
