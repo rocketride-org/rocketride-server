@@ -53,6 +53,8 @@ public page never becomes an error page because of its template. The
 template errors (``TemplateError``) are sections nested deeper than
 ``MAX_SECTION_DEPTH`` and a render past its budgets: more than
 ``MAX_RENDER_STEPS`` steps, or more than ``MAX_RENDER_CHARS`` characters out.
+The second is a ``RenderBudgetError``: what the context made of the template,
+so the same template may render with other data.
 """
 
 import html
@@ -88,6 +90,14 @@ MAX_RENDER_CHARS = 4 * 1024 * 1024
 
 class TemplateError(Exception):
     """A template the engine refuses to render."""
+
+
+class RenderBudgetError(TemplateError):
+    """A render stopped at ``MAX_RENDER_STEPS`` or ``MAX_RENDER_CHARS``.
+
+    Unlike its base, it is about one render, not the template alone: the
+    context's lists and values spend the budgets too.
+    """
 
 
 class Text(NamedTuple):
@@ -153,9 +163,10 @@ def render(
         The rendered text.
 
     Raises:
-        TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``, or
-            the render takes more than ``MAX_RENDER_STEPS`` steps or writes
-            more than ``MAX_RENDER_CHARS`` characters.
+        TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``.
+        RenderBudgetError: the render takes more than ``MAX_RENDER_STEPS``
+            steps or writes more than ``MAX_RENDER_CHARS`` characters (a
+            ``TemplateError`` too).
     """
     renderer = _Renderer(escape, on_issue)
     renderer.render_nodes(parse(template, on_issue), [context])
@@ -235,11 +246,11 @@ class _Renderer:
         """Append the rendering of ``nodes``: a step for the pass, and one per node.
 
         Raises:
-            TemplateError: the render takes more than ``MAX_RENDER_STEPS`` steps.
+            RenderBudgetError: the render takes more than ``MAX_RENDER_STEPS`` steps.
         """
         self.steps += 1 + len(nodes)
         if self.steps > MAX_RENDER_STEPS:
-            raise TemplateError(f'rendering takes more than {MAX_RENDER_STEPS} steps')
+            raise RenderBudgetError(f'rendering takes more than {MAX_RENDER_STEPS} steps')
         for node in nodes:
             if isinstance(node, Text):
                 self.write(node.text)
@@ -261,11 +272,11 @@ class _Renderer:
         """Append ``text`` to ``out``.
 
         Raises:
-            TemplateError: ``out`` would hold more than ``MAX_RENDER_CHARS`` characters.
+            RenderBudgetError: ``out`` would hold more than ``MAX_RENDER_CHARS`` characters.
         """
         self.chars += len(text)
         if self.chars > MAX_RENDER_CHARS:
-            raise TemplateError(f'the rendered text is longer than {MAX_RENDER_CHARS} characters')
+            raise RenderBudgetError(f'the rendered text is longer than {MAX_RENDER_CHARS} characters')
         self.out.append(text)
 
     def render_section(self, section: Section, contexts: List[Any]) -> None:

@@ -110,7 +110,7 @@ from .head import feed_links, inject_head, social_tags
 from .not_found_page import NOT_FOUND_HTML
 from .settings import app_url
 from .shell import CACHE_CONTROL, capture_candidate, shell_document_path, shell_static
-from .template import TemplateError, render
+from .template import RenderBudgetError, TemplateError, render
 
 _T = TypeVar('_T')
 
@@ -420,7 +420,8 @@ _snapshot_cache = _FifoCache(_SNAPSHOT_CACHE_MAX_BYTES)
 
 # Store paths of snapshots that can never render: over MAX_SNAPSHOT_BYTES, or a
 # template the engine refuses. A version's build output never changes, so each
-# is warned about once and never read again, across swaps too.
+# is warned about once and never read again, across swaps too. A render that
+# ran past its budget with bound data is not one of them: other data may fit.
 _UNUSABLE_SNAPSHOTS_MAX = 1024
 _unusable_snapshots = _FifoCache(_UNUSABLE_SNAPSHOTS_MAX, _UNUSABLE_SNAPSHOTS_MAX)
 
@@ -693,7 +694,12 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any], *, where: str =
     snapshot. A fallback is cacheable when it is final for the page's version: no
     snapshot, a malformed snapshot path or no production version, a snapshot
     over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
-    two are remembered by store path and warned about once). A storage
+    two are remembered by store path and warned about once). A render that
+    ran past its budget on a page that binds data is cacheable too, but not
+    remembered: the bound data spent the budget with the snapshot, so the
+    fallback lasts as long as any response bound to that data (its TTL, or
+    until a source is invalidated) and the snapshot is rendered again, and a
+    refusal warned about again, after that. A storage
     failure (a snapshot the store does not have yet, or no answer within
     ``_SNAPSHOT_READ_SECONDS``, included) falls back uncached, and is warned
     about at most once per store path per ``_STORAGE_WARNING_INTERVAL``; for
@@ -732,7 +738,10 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any], *, where: str =
         # The read remembered it as unusable and warned (_read_finished).
         return None, True
     except TemplateError as exc:
-        _unusable_snapshots.put(path, True, 1)
+        # Final for the version, except a budget the page's bound data helped
+        # spend: that refusal must not outlast the data.
+        if not (isinstance(exc, RenderBudgetError) and page.data):
+            _unusable_snapshots.put(path, True, 1)
         _warn_fallback(page, exc, where)
         return None, True
     except StorageError:

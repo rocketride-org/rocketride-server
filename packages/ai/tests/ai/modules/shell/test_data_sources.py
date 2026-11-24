@@ -49,6 +49,7 @@ import ai.modules.shell.data_sources as ds
 import ai.modules.shell.pages as pages
 import ai.modules.shell.public_pages as pp
 import ai.modules.shell.shell as shell_mod
+import ai.modules.shell.template as template_mod
 from ai.modules.shell.pages import FALLBACK_PATH, public_page
 from ai.modules.shell.public_pages import Aggregate, Page
 
@@ -557,6 +558,26 @@ def test_bound_renders_expire_after_the_source_ttl(acct, shell_root, monkeypatch
     # Responses bound to no source never expire.
     (about,) = [key for key in pages._render_cache.keys() if key[0] == '/about']
     assert math.isinf(pages._render_cache.get(about).expires)
+
+
+def test_a_render_budget_refusal_lasts_only_as_long_as_the_bound_data(acct, shell_root, warned, monkeypatch):
+    # The bound plans spend the budget together with the snapshot, so the
+    # refusal is not remembered for the version: the fallback is cached like
+    # any response bound to that data, and with other data the snapshot renders.
+    monkeypatch.setattr(template_mod, 'MAX_RENDER_CHARS', 2000)
+    acct.plans['acme.brandy'] = [{'name': f'Plan {n}', 'price': '1'} for n in range(100)]
+    _seed()
+    _serve(_page('/pricing', ['plans:acme.brandy']))
+    client = _client()
+    for _ in range(2):
+        assert 'SPA' in _crawl(client).text
+    # Refused once: the second crawl is answered from the render cache.
+    assert len(warned) == 1 and 'longer than 2000 characters' in warned[0]
+    acct.plans['acme.brandy'] = [{'name': 'Pro', 'price': '2'}]
+    ds.invalidate('plans')
+    body = _crawl(client).text
+    assert '<li>Pro: 2' in body and 'SPA' not in body
+    assert len(warned) == 1
 
 
 async def test_one_bind_reads_a_named_app_once(acct, monkeypatch):
