@@ -345,12 +345,12 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 					{/* Proration info -- explains what happens on upgrade vs downgrade */}
 					{isValidSelection && changeDirection === 'upgrade' && (
 						<div style={S.prorationNote}>
-							The new plan applies now. Stripe bills the prorated difference for the rest of your current billing period.
+							An upgrade usually applies now, and Stripe bills any prorated difference on your next invoice (or right away when the billing interval changes). The confirmation shows what was applied.
 						</div>
 					)}
 					{isValidSelection && changeDirection === 'downgrade' && (
 						<div style={S.prorationNote}>
-							Your current plan will remain active until the end of your billing period. The new plan takes effect at your next renewal.
+							A downgrade is usually scheduled for your next renewal, and your current plan stays active until then. The confirmation shows what was applied.
 						</div>
 					)}
 

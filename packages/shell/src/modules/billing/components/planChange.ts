@@ -29,10 +29,15 @@ export function parsePlanChangeOutcome(value: unknown): PlanChangeOutcome | null
 	return null;
 }
 
-/** Format a server date for the downgrade confirmation, or null if it is unreadable. */
+/**
+ * Format a server date for the downgrade confirmation, or null if it is
+ * unreadable. In UTC, so it shows the same day as Stripe's period end.
+ */
 function renewalDate(value: string): string | null {
 	const date = new Date(value);
-	return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+	return Number.isNaN(date.getTime())
+		? null
+		: date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
 }
 
 /** Describe what the server actually did after confirmation. */

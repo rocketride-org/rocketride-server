@@ -768,18 +768,19 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 			if (!isCurrentBillingScope()) throw new Error('The active organization or connection changed. Reopen billing and try again.');
 			await client.billing.cancelSubscription(orgId, appId);
 			if (!isCurrentBillingScope()) return;
-			let sequence: number | undefined;
+			// The cancel is done: a failed refresh must not read as a failed cancel.
+			const sequence = ++subscriptionLoadSequence.current;
 			try {
-				sequence = ++subscriptionLoadSequence.current;
 				const updated = await client.billing.getDetails(orgId);
 				if (sequence === subscriptionLoadSequence.current && isCurrentBillingScope()) {
 					setSubscriptionSnapshot({ client, orgId, userId, rows: updated, error: null });
 				}
-			} catch (error) {
-				if (isCurrentBillingScope() && (sequence === undefined || sequence === subscriptionLoadSequence.current)) throw error;
+			} catch {
+				// loadBilling keeps the rows on screen and reports its own error.
+				if (sequence === subscriptionLoadSequence.current) void loadBilling();
 			}
 		},
-		[client, orgId, userId, isCurrentBillingScope]
+		[client, orgId, userId, isCurrentBillingScope, loadBilling]
 	);
 
 	/** Opens the Stripe customer portal for payment method management.

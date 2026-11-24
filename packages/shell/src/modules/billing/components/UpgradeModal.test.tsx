@@ -75,7 +75,7 @@ test('labels the change from the plan amounts and reports the server outcome', a
 	assert.match(ui.text(), /Plan upgraded/);
 });
 
-test('a scheduled downgrade says so, whatever the label guessed', async (t) => {
+test('a cheaper plan is labelled Downgrade with the renewal note', async (t) => {
 	const ui = await renderModal(t, {
 		currentPriceId: pro.stripePriceId,
 		currentPlanName: 'Pro',
@@ -86,6 +86,19 @@ test('a scheduled downgrade says so, whatever the label guessed', async (t) => {
 	assert.match(ui.text(), /next renewal/);
 	await ui.click(/^Downgrade to Starter/);
 	assert.match(ui.text(), /Downgrade scheduled/);
+});
+
+test('the confirmation reports what the server did, even when the label guessed otherwise', async (t) => {
+	// The server decides direction by tier and interval as well as price, so a
+	// pricier plan can still be scheduled as a downgrade.
+	const ui = await renderModal(t, {
+		preselectedPriceId: pro.stripePriceId,
+		onUpgrade: async () => ({ status: 'downgrade_scheduled', effectiveDate: '2026-12-24T00:00:00Z' }),
+	});
+	await ui.click(/^Upgrade to Pro/);
+	assert.match(ui.text(), /Downgrade scheduled/);
+	assert.match(ui.text(), /December 24, 2026|24 December 2026/);
+	assert.doesNotMatch(ui.text(), /Plan upgraded/);
 });
 
 test('a refused change shows the server message and keeps the dialog open', async (t) => {
@@ -101,9 +114,9 @@ test('a refused change shows the server message and keeps the dialog open', asyn
 	assert.equal(closed, 0);
 });
 
-test('nothing is sent while the host cannot apply plan changes', async (t) => {
-	let calls = 0;
-	const ui = await renderModal(t, { available: false, preselectedPriceId: pro.stripePriceId, onUpgrade: async () => { calls += 1; } });
-	await ui.click(/^Plan changes unavailable/);
-	assert.equal(calls, 0);
+test('the confirm control is disabled while the host cannot apply plan changes', async (t) => {
+	const ui = await renderModal(t, { available: false, preselectedPriceId: pro.stripePriceId });
+	const confirm = ui.button(/^Plan changes unavailable/);
+	assert.ok(confirm);
+	assert.equal(confirm.disabled, true);
 });
