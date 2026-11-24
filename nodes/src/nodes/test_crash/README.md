@@ -21,19 +21,25 @@ ends:
 
 Any other text does nothing.
 
-## Where it can run
-
-Its capabilities are `internal`, `experimental` and `nosaas`:
-
-- `internal` keeps it out of the catalog. A pipeline that names it
-  (`"provider": "test_crash"`) still loads it.
-- `nosaas` refuses it on a hosted server. Ending a task process there would
-  end it for every caller of a shared engine.
-
 On your own server you can put it in a pipeline to see how your setup
 reports a dying task: the console lines, the final status, and the crash
 dump when the server runs with `--dumps`.
 
+## Lanes
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `text` | End the task process the way the text names; nothing is forwarded. |
+
 ## Configuration
 
 None.
+
+## Limitations
+
+- **Not on a hosted server.** The node is refused there (`nosaas`): ending a
+  task process would end it for every caller of a shared engine.
+- **Not in the catalog.** It is `internal`: the pipeline builder never offers
+  it. A pipeline that names it (`"provider": "test_crash"`) still loads it.
+- **It does what it says.** A pipeline that sends it one of the texts above
+  loses its task process, with everything that process held.
