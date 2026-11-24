@@ -105,6 +105,13 @@ filterwarnings = [
     # decision owned by the engine's dependency set, not something a test can
     # address. Until that upgrade lands, silence exactly this message.
     "ignore:Using `httpx` with `starlette\\.testclient` is deprecated",
+    # google-auth and google-api-core announce, at import, that they will
+    # require grpcio >= 1.83 from April 2027. The engine's one resolved set has
+    # grpcio 1.78: weaviate-client caps it at < 1.80 (through 4.24.1, its
+    # newest release), and nothing else holds it back. Not fixable here until
+    # weaviate-client lifts its cap; remove these two lines when it does.
+    "ignore:grpcio < 1\\.83\\.0 does not support Post-Quantum Cryptography:FutureWarning",
+    "ignore:Package google\\.api_core depends on grpcio:FutureWarning",
 ]
 asyncio_mode = "auto"
 

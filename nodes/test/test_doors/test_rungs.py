@@ -25,7 +25,7 @@
 """
 The doors probe on every rung of a live server: @spec, @me, @team, @org, @public.
 
-One pipeline (webhook -> doors_probe -> response) runs inline on @spec and is
+One pipeline (webhook -> test_doors -> response) runs inline on @spec and is
 deployed to the four published rungs, with three variants: one declaring the
 team's shared folder as a root, one the org's, and one whose config is a
 ``${ROCKETRIDE_*}`` placeholder. Every call carries a JSON script the probe
@@ -138,7 +138,7 @@ STRIPPED_DB_NAMES = frozenset(
 )
 
 #: Every test here shares the module's deployment: one worker, one event loop.
-pytestmark = [pytest.mark.asyncio(loop_scope='module'), pytest.mark.xdist_group('doors_probe')]
+pytestmark = [pytest.mark.asyncio(loop_scope='module'), pytest.mark.xdist_group('test_doors')]
 
 
 # ==== The pipeline ===============================================================
@@ -168,7 +168,7 @@ def _pipeline(project_id: str, *, label: str = 'doors', roots: Optional[List[str
             },
             {
                 'id': NODE_ID,
-                'provider': 'doors_probe',
+                'provider': 'test_doors',
                 'config': {'label': label},
                 'input': [{'lane': 'text', 'from': 'webhook_1'}],
             },
@@ -507,7 +507,7 @@ async def rig(tmp_path_factory):
         probe.build_pipes()
 
         # Step 4: one version per pipe, deployed to @me and pointed at by each rung it may reach
-        folder = tmp_path_factory.mktemp('doors_probe')
+        folder = tmp_path_factory.mktemp('test_doors')
         for pipe in Rig.DEPLOYED:
             pipe_path = folder / f'{pipe}.pipe'
             pipe_path.write_text(json.dumps(probe.pipes[pipe], indent=2), encoding='utf-8')
@@ -537,7 +537,7 @@ async def test_each_rung_answers_with_its_own_caller_and_identity(rig, rung):
 
     # config.node names this component of this control
     assert node['id'] == NODE_ID
-    assert node['provider'] == 'doors_probe'
+    assert node['provider'] == 'test_doors'
     assert node['controlId'] == caller['controlId']
 
 

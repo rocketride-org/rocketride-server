@@ -2749,7 +2749,7 @@ def test_the_readme_ddl_is_exactly_what_capture_runs():
 class TestServicesJson:
     """The three new fields have to be reachable in the UI and off by default."""
 
-    @pytest.fixture(scope='class')
+    @pytest.fixture
     def schema(self):
         # services.json is JSONC: its whole-line ``//`` comments are dropped first.
         with open(_SERVICES_JSON, 'r', encoding='utf-8') as f:

@@ -1054,7 +1054,7 @@ IDENTITY_PERSISTERS = {
 #: (or only mislabels) what this lint refuses at build time. An entry never
 #: shrinks by a fix; it changes only when the probe's attempts do.
 BOUNDARY_PROBES = {
-    'doors_probe': ['doors_probe/IInstance.py: caller-write', 'doors_probe/IInstance.py: caller-write'],
+    'test_doors': ['test_doors/IInstance.py: caller-write', 'test_doors/IInstance.py: caller-write'],
 }
 
 

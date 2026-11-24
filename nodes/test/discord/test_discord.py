@@ -1126,7 +1126,7 @@ class TestIsAimedAtSomeoneElse:
 class TestServicesJsonSchema:
     """Validate the shipped services.json contract."""
 
-    @pytest.fixture(scope='class')
+    @pytest.fixture
     def schema(self):
         return _load_services_json()
 

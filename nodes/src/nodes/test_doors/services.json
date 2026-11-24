@@ -3,12 +3,12 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Doors Probe",
+	"title": "Test Doors",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
 	//
-	"protocol": "doors_probe://",
+	"protocol": "test_doors://",
 	//
 	// Required:
 	//		Class type of the node - what it does
@@ -37,12 +37,12 @@
 	// Optional:
 	//		The path is the executable/script code
 	//
-	"path": "nodes.doors_probe",
+	"path": "nodes.test_doors",
 	//
 	// Required:
 	//		The prefix map when added/removed when converting URLs <=> paths
 	//
-	"prefix": "doors_probe",
+	"prefix": "test_doors",
 	//
 	// Optional:
 	//		Description of this driver
@@ -70,7 +70,7 @@
 	//		call that switches the mode re-resolves its settings.
 	//
 	"propertyDefinitions": {
-		"doors_probe.label": {
+		"test_doors.label": {
 			"type": "string",
 			"title": "Label",
 			"description": "A value of the control, read once by the IGlobal; the env test fills it from a ${ROCKETRIDE_*} path",
@@ -78,7 +78,7 @@
 			"minLength": 1,
 			"maxLength": 1024
 		},
-		"doors_probe.greeting": {
+		"test_doors.greeting": {
 			"type": "string",
 			"title": "Greeting",
 			"description": "A per-call value, served only by self.settings",
@@ -87,7 +87,7 @@
 			"maxLength": 64,
 			"param": true
 		},
-		"doors_probe.alphaValue": {
+		"test_doors.alphaValue": {
 			"type": "integer",
 			"title": "Alpha value",
 			"description": "The alpha mode's own per-call value",
@@ -96,7 +96,7 @@
 			"maximum": 1000,
 			"param": true
 		},
-		"doors_probe.betaValue": {
+		"test_doors.betaValue": {
 			"type": "string",
 			"title": "Beta value",
 			"description": "The beta mode's own per-call value",
@@ -111,8 +111,8 @@
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
 	"properties": [
-		"doors_probe.label",
-		"doors_probe.greeting",
+		"test_doors.label",
+		"test_doors.greeting",
 		{
 			"name": "mode",
 			"type": "string",
@@ -123,11 +123,11 @@
 			"enum": {
 				"alpha": {
 					"title": "Alpha",
-					"properties": ["doors_probe.alphaValue"]
+					"properties": ["test_doors.alphaValue"]
 				},
 				"beta": {
 					"title": "Beta",
-					"properties": ["doors_probe.betaValue"]
+					"properties": ["test_doors.betaValue"]
 				}
 			}
 		}

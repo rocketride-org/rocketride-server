@@ -65,6 +65,18 @@ def _shared_server_mock():
     return shared
 
 
+def _scheduled(coro, loop):
+    """Stand-in for ``asyncio.run_coroutine_threadsafe``: the lifespan hook is recorded, not run.
+
+    The endpoint hands over a coroutine object (``_startup()``, ``_shutdown()``).
+    A stub that only returned a future left it to be collected unawaited, which
+    Python reports as "coroutine ... was never awaited". Closing it says the
+    hook was deliberately not run.
+    """
+    coro.close()
+    return MagicMock(result=MagicMock(return_value=None))
+
+
 def _make_awaitable(value):
     """Wrap a plain value in an already-resolved awaitable.
 
@@ -96,7 +108,7 @@ def test_webhook_mode_registers_add_route_on_shared_server():
         patch('telegram.IEndpoint.threading.Event', return_value=pre_set_event),
         patch(
             'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-            return_value=MagicMock(result=MagicMock(return_value=None)),
+            side_effect=_scheduled,
         ),
     ):
         ep._run()
@@ -121,7 +133,7 @@ def test_webhook_mode_defaults_path_when_webhook_url_is_empty():
         patch('telegram.IEndpoint.threading.Event', return_value=pre_set_event),
         patch(
             'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-            return_value=MagicMock(result=MagicMock(return_value=None)),
+            side_effect=_scheduled,
         ),
     ):
         ep._run()
@@ -141,7 +153,7 @@ def test_webhook_mode_sets_target_on_shared_server():
         patch('telegram.IEndpoint.threading.Event', return_value=pre_set_event),
         patch(
             'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-            return_value=MagicMock(result=MagicMock(return_value=None)),
+            side_effect=_scheduled,
         ),
     ):
         ep._run()
@@ -166,7 +178,7 @@ def test_polling_mode_does_not_call_add_route():
         patch('telegram.IEndpoint.threading.Event', return_value=pre_set_event),
         patch(
             'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-            return_value=MagicMock(result=MagicMock(return_value=None)),
+            side_effect=_scheduled,
         ),
     ):
         ep._run()
@@ -186,7 +198,7 @@ def test_polling_mode_sets_target_on_shared_server():
         patch('telegram.IEndpoint.threading.Event', return_value=pre_set_event),
         patch(
             'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-            return_value=MagicMock(result=MagicMock(return_value=None)),
+            side_effect=_scheduled,
         ),
     ):
         ep._run()
@@ -212,7 +224,7 @@ def test_run_blocks_until_shutdown_event_in_polling_mode():
             patch('telegram.IEndpoint.threading.Event', return_value=real_event),
             patch(
                 'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-                return_value=MagicMock(result=MagicMock(return_value=None)),
+                side_effect=_scheduled,
             ),
         ):
             ep._run()
@@ -240,7 +252,7 @@ def test_run_drives_startup_and_shutdown_callbacks_in_shared_path():
         patch('telegram.IEndpoint.threading.Event', return_value=pre_set_event),
         patch(
             'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-            return_value=MagicMock(result=MagicMock(return_value=None)),
+            side_effect=_scheduled,
         ) as schedule_mock,
     ):
         ep._run()
