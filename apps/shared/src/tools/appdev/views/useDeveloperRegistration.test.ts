@@ -27,7 +27,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { developerRegistrationReducer as reduce, INITIAL_DEVELOPER_REGISTRATION as idle, runDeveloperRegistration } from './useDeveloperRegistration';
+import { developerRegistrationReducer as reduce, INITIAL_DEVELOPER_REGISTRATION as idle, runDeveloperRegistration, withClaimRecheck } from './useDeveloperRegistration';
 import type { DeveloperRegistrationAction, IDeveloperRegistrationState } from './useDeveloperRegistration';
 
 /** Runs one claim and folds its dispatched actions over `start`. */
@@ -68,4 +68,41 @@ test('registration: an empty or invalid id is skipped without calling the server
 	assert.deepEqual((await claim({ ...idle, slug: '   ' }, register)).actions, []);
 	assert.deepEqual((await claim({ ...idle, slug: 'Bad' }, register, (s) => /^[a-z][a-z_]*$/.test(s))).actions, []);
 	assert.equal(calls, 0);
+});
+
+// ── withClaimRecheck: a rejected claim re-reads the id (it may have landed) ──
+
+test('claim recheck: a claim that succeeds is returned without a re-read', async () => {
+	let reads = 0;
+	const seen: string[] = [];
+	const register = withClaimRecheck(async (id: string) => `claimed:${id}`, async () => { reads += 1; return 'acme'; }, (id) => seen.push(id));
+	assert.equal(await register('acme'), 'claimed:acme');
+	assert.equal(reads, 0);
+	assert.deepEqual(seen, []);
+});
+
+test('claim recheck: a rejected claim that landed reports the id, then rejects with the claim error', async () => {
+	const timeout = new Error('Request timed out after 30000ms');
+	const seen: string[] = [];
+	const register = withClaimRecheck(async () => { throw timeout; }, async () => 'acme', (id) => seen.push(id));
+	await assert.rejects(register('acme'), (err) => err === timeout);
+	assert.deepEqual(seen, ['acme'], 'the form learns the organization now holds an id');
+});
+
+test('claim recheck: a rejected claim that did not land reports nothing', async () => {
+	const refused = new Error('slug taken');
+	const seen: string[] = [];
+	const register = withClaimRecheck(async () => { throw refused; }, async () => '', (id) => seen.push(id));
+	await assert.rejects(register('acme'), (err) => err === refused);
+	assert.deepEqual(seen, []);
+});
+
+test('claim recheck: a failed or missing re-read keeps the claim error', async () => {
+	const refused = new Error('slug taken');
+	const seen: string[] = [];
+	const failing = withClaimRecheck(async () => { throw refused; }, async () => { throw new Error('status lookup failed'); }, (id) => seen.push(id));
+	await assert.rejects(failing('acme'), (err) => err === refused);
+	const unreadable = withClaimRecheck(async () => { throw refused; }, undefined, (id) => seen.push(id));
+	await assert.rejects(unreadable('acme'), (err) => err === refused);
+	assert.deepEqual(seen, []);
 });

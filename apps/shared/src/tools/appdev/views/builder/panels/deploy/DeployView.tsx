@@ -37,13 +37,13 @@
  * states instead of dead chrome.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, ConfirmDialog, EmptyState, InputField, Modal, StatusBadge } from 'shell';
 import { DeleteVersionMark, PublishToDialog, ServingStateWord, VersionCardActions, VersionStateBadge, newestSubmittableOf, storeTargetOf, versionCardActionsOf } from 'shared/components/deploy';
 import type { IPublishTarget } from 'shared/components/deploy';
 import type { AppSummary, AppVersionInfo, BuildStatusTick, IAppBuilderHost, RungPin } from '../../../../types';
 import { pinStatusOf, versionBadgeOf } from '../../../../servingStatus';
-import { useDeveloperRegistration } from '../../../useDeveloperRegistration';
+import { useDeveloperRegistration, withClaimRecheck } from '../../../useDeveloperRegistration';
 
 // =============================================================================
 // TYPES
@@ -449,7 +449,13 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	const [developerId, setDeveloperId] = useState<string | null>(null);
 	// The register form (shared with the New App wizard): claim the org's
 	// developer id slug (org.admin, self-service).
-	const registration = useDeveloperRegistration(host.registerDeveloper, undefined, setDeveloperId);
+	// A claim that timed out may still have landed, so a rejected claim re-reads
+	// the id: when the organization holds one now, the banner goes away.
+	const claimDeveloper = useMemo(() => {
+		const register = host.registerDeveloper;
+		return register ? withClaimRecheck(register, host.getDeveloperId, setDeveloperId) : undefined;
+	}, [host]);
+	const registration = useDeveloperRegistration(claimDeveloper, undefined, setDeveloperId);
 	// The server build ticker: registryVersion -> the current display word
 	// ('uploaded' → 'preparing' → 'installing' → …); '' from the server
 	// clears the entry (success — nothing left to say).

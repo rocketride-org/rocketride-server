@@ -95,6 +95,33 @@ export async function runDeveloperRegistration<T>(slug: string, register: (devel
 	}
 }
 
+/**
+ * Wrap a register function so that a rejected claim re-reads the id before the
+ * rejection is passed on. A claim that timed out may still have landed on the
+ * server: the organization then holds an id, a retry would be refused, and the
+ * form must stop offering to claim one.
+ *
+ * @param register - Claims the id.
+ * @param readCurrent - Reads the organization's id ('' when it has none); undefined when the host cannot read it.
+ * @param onCurrent - Receives the id the re-read found (called only for a non-empty id).
+ * @returns A register function with the same result and the same rejection.
+ */
+export function withClaimRecheck<T>(register: (developerId: string) => Promise<T>, readCurrent: (() => Promise<string>) | undefined, onCurrent: (developerId: string) => void): (developerId: string) => Promise<T> {
+	return async (developerId) => {
+		try {
+			return await register(developerId);
+		} catch (claimError) {
+			try {
+				const current = await readCurrent?.();
+				if (current) onCurrent(current);
+			} catch {
+				// The re-read is best effort: the claim's own failure is what the user is shown.
+			}
+			throw claimError;
+		}
+	};
+}
+
 /** What a register form renders from and calls. */
 export interface IDeveloperRegistration extends IDeveloperRegistrationState {
 	/** Updates the typed id (and clears a previous failure). */
