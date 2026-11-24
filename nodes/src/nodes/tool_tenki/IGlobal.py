@@ -122,21 +122,31 @@ def _may_be_paused(error: Exception) -> bool:
     )
 
 
-def _names(raw, field: str) -> list[str]:
-    """The distinct, non-empty entries of a list setting (the schema types it as an array of strings)."""
+def _numbered_names(raw, field: str) -> list[tuple[int, str]]:
+    """The distinct, non-empty entries of a list setting, each with its place in the list as configured.
+
+    The place counts every entry, the blank and the repeated ones too, so an error that names "entry 4"
+    points at the fourth line the operator wrote.
+    """
     # Any other shape is refused: an allowlist misread as empty would leave the sandbox's network open.
     if raw is None:
         return []
     if not isinstance(raw, (list, tuple)):
         raise ValueError(f'tenki.{field} must be a list of names, not a {type(raw).__name__}')
-    names = []
+    numbered, seen = [], set()
     for position, entry in enumerate(raw, 1):
         if not isinstance(entry, str):
             raise ValueError(f'tenki.{field}: entry {position} is a {type(entry).__name__}, not text')
         name = entry.strip()
-        if name and name not in names:
-            names.append(name)
-    return names
+        if name and name not in seen:
+            seen.add(name)
+            numbered.append((position, name))
+    return numbered
+
+
+def _names(raw, field: str) -> list[str]:
+    """The distinct, non-empty entries of a list setting (the schema types it as an array of strings)."""
+    return [name for _, name in _numbered_names(raw, field)]
 
 
 # Luxor's rule (measured 2026-10-09): RFC 1123 hostname labels, optionally after one leading "*.".
@@ -159,7 +169,7 @@ def _is_ip_address(host: str) -> bool:
 def _allowed_domains(raw) -> list[str]:
     """The outbound allowlist, lowercase and without a trailing dot as Luxor stores it; any refused entry raises."""
     domains, refused, positions, addresses, address_positions = [], [], [], [], []
-    for position, name in enumerate(_names(raw, 'allow_domains'), 1):
+    for position, name in _numbered_names(raw, 'allow_domains'):
         domain = name.lower().rstrip('.')
         # ASCII is checked before lowercasing could make it so (the Kelvin sign lowercases to "k").
         if not name.isascii() or len(domain) > _MAX_DOMAIN_CHARS or not _DOMAIN.match(domain):

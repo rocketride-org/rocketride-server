@@ -851,6 +851,17 @@ def test_one_address_beside_a_refused_entry_is_named_in_the_singular(monkeypatch
     )
 
 
+def test_a_refused_entry_is_named_by_its_place_in_the_list_as_configured(monkeypatch, logs):
+    """A blank or repeated entry before it still counts: the engine cuts the error before the entry's own text."""
+    allow = ['ok.org', '', 'ok.org', '*.10.0.0.1', ' ', '*.*.org']
+    glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': allow})
+    with pytest.raises(ValueError) as refused:
+        glb.beginGlobal()
+    shown = str(refused.value).split('*', 1)[0]
+    assert 'has an entry Luxor refuses (entry 6)' in shown
+    assert 'It also lists an IP address (entry 4)' in shown
+
+
 def test_a_hostname_that_only_looks_numeric_is_allowed(monkeypatch, logs):
     domains = ['1password.com', '0x.org', 'a1.b2.io', '*.0x.org']
     _, client = _used(monkeypatch, _Session(), cfg={'allow_domains': domains})
