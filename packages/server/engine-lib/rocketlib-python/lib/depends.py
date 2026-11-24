@@ -1065,14 +1065,15 @@ def _save_verdict(requirements_path: str, constraints_path: str):
 
 
 def _find_hook_files() -> list[str]:
-    """Every `_depends_hooks.py` matching HOOKS_GLOBS, same root as requirement files."""
+    """Every `_depends_hooks.py` matching HOOKS_GLOBS, same root as requirement files, but an unpacked node's."""
     executable_dir = _get_executable_dir()
     found = []
     for pattern in HOOKS_GLOBS:
         full_pattern = os.path.join(executable_dir, pattern)
         for path in glob(full_pattern, recursive=True):
             abs_path = os.path.abspath(path)
-            if os.path.isfile(abs_path) and abs_path not in found:
+            # An unpacked node's hook would change the installs of every run, not only its own
+            if os.path.isfile(abs_path) and abs_path not in found and not _unpacked(abs_path, executable_dir):
                 found.append(abs_path)
     return found
 

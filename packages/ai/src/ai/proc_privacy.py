@@ -37,6 +37,11 @@ CONST_PROC_PRIVATE_ENV = 'RR_PROC_PRIVATE'
 CONST_NODE_RAIL_ENV = 'RR_NODE_RAIL_ENABLED'
 
 
+def node_rail_enabled() -> bool:
+    """True with ``RR_NODE_RAIL_ENABLED=1``: the one reading of the switch, so the rail is never on while the server is not private."""
+    return os.environ.get(CONST_NODE_RAIL_ENV) == '1'
+
+
 def should_make_private() -> bool:
     """True when this process should hide its /proc entries. Always False off Linux.
 
@@ -49,7 +54,7 @@ def should_make_private() -> bool:
         return False
     if '--saas' in sys.argv or '--hosted' in sys.argv:
         return True
-    if os.environ.get(CONST_NODE_RAIL_ENV) == '1':
+    if node_rail_enabled():
         return True
     return os.environ.get(CONST_PROC_PRIVATE_ENV, '').strip() == '1'
 

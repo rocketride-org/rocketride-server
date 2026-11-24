@@ -54,6 +54,7 @@ from ai.common.node_packages import (
     providers_of,
 )
 from ai.constants import CONST_NODES_CONTRACT
+from ai import proc_privacy
 
 from .app_deploy import _ZIP_MAX_ZIPPED, _actor_of, _developer_id_of, _org_of, _resolve_target, _team_ids_of, _zip_guard
 from .app_rows import precedence_sorted, serving_block_of
@@ -127,7 +128,7 @@ _RAIL_OFF = 'Publishing nodes is off on this server (it runs without RR_NODE_RAI
 def rail_enabled() -> bool:
     """The rail (upload, publish, serving) is on only with RR_NODE_RAIL_ENABLED=1; otherwise only the release's nodes run."""
     # Off unless asked for: without a container per run, a published node runs on the EaaS host
-    return os.environ.get('RR_NODE_RAIL_ENABLED') == '1'
+    return proc_privacy.node_rail_enabled()
 
 
 # =============================================================================
@@ -164,9 +165,10 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
     entries = archive.infolist()
     if any(stat.S_ISLNK(entry.external_attr >> 16) for entry in entries):
         raise NodePackageInvalid('The package holds a symlink')
-    # A drive letter or backslash would reach outside the node on Windows
-    if any(':' in entry.filename or '\\' in entry.filename for entry in entries):
-        raise NodePackageInvalid('The package holds a path with ":" or "\\"')
+    # A drive letter or backslash would reach outside the node on Windows, which unpacks <>"|?* as "_",
+    # so "echo?.svg" would land on a checked "echo_.svg"
+    if any(char in entry.filename for entry in entries for char in '\\:<>"|?*'):
+        raise NodePackageInvalid('The package holds a path with one of \\ : < > " | ? *')
     # A "." or empty segment unpacks onto another entry's path, past the checks that read the first
     names = [entry.filename.rstrip('/') for entry in entries]
     if any(part in ('', '.', '..') for name in names for part in name.split('/')):
@@ -176,6 +178,9 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
         raise NodePackageInvalid('The package holds a path whose name ends in "." or a space')
     if len({name.lower() for name in names}) != len(names):
         raise NodePackageInvalid('The package holds two entries with the same path')
+    # depends imports every nodes/**/_depends_hooks.py it finds, also in runs this node is not published to
+    if any(name.rsplit('/', 1)[-1].lower() == '_depends_hooks.py' for name in names):
+        raise NodePackageInvalid('The package holds a _depends_hooks.py, which a node may not ship')
     # The engine's start-up scan also loads definitions from a folder named services.*json
     if any(part.lower().startswith('services.') for name in names for part in name.split('/')[1:-1]):
         raise NodePackageInvalid('The package holds a folder named services.*, which the engine reads definitions from')

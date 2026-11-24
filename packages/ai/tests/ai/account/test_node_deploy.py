@@ -23,6 +23,7 @@ import pytest
 
 from ai.account import account
 from ai.account import node_deploy
+from ai import proc_privacy
 from ai.account.store import Store
 from ai.common import node_packages
 from ai.common.node_packages import (
@@ -106,6 +107,16 @@ async def _published(version_target='@me', conn=None):
     conn = conn or _Conn()
     await _add(conn, _package())
     return await _deploy(conn, subcommand='publish', version=1, target=version_target)
+
+
+def test_the_rail_and_the_servers_privacy_read_one_switch(monkeypatch):
+    """The rail is never on while the server leaves its /proc entries readable."""
+    monkeypatch.delenv('RR_NODE_RAIL_ENABLED', raising=False)
+    monkeypatch.setattr(proc_privacy, 'node_rail_enabled', lambda: True)
+    monkeypatch.setattr(proc_privacy.sys, 'platform', 'linux')
+    monkeypatch.setattr(proc_privacy.sys, 'argv', ['eaas.py'])
+
+    assert node_deploy.rail_enabled() and proc_privacy.should_make_private()
 
 
 # =============================================================================
@@ -197,6 +208,11 @@ async def test_a_package_is_added_as_a_private_node_version_with_its_bytes_store
             lambda: _package(files={'echo.svg': '<svg><rect style="fill:u\\72l(https://evil.example/x)"/></svg>'}),
             'sets style',
         ),
+        (lambda: _package(files={'acme__echo/_depends_hooks.py': ''}), 'holds a _depends_hooks.py'),
+        (lambda: _package(files={'acme__echo/sub/_DEPENDS_HOOKS.PY': ''}), 'holds a _depends_hooks.py'),
+        (lambda: _package(files={'echo_.svg': '<svg/>', 'echo?.svg': '<svg/>'}), 'path with one of'),
+        (lambda: _package(files={'IGlobal*.py': ''}), 'path with one of'),
+        (lambda: _package(files={'a"b|c<d>.txt': ''}), 'path with one of'),
     ],
     ids=[
         'cpp',
@@ -242,6 +258,11 @@ async def test_a_package_is_added_as_a_private_node_version_with_its_bytes_store
         'icon-class',
         'icon-uppercase-url',
         'icon-css-escape',
+        'depends-hook',
+        'depends-hook-nested-uppercase',
+        'windows-question-mark',
+        'windows-asterisk',
+        'windows-reserved',
     ],
 )
 @pytest.mark.asyncio

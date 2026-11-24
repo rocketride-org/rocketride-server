@@ -28,6 +28,7 @@ Global Resources:
 """
 
 import os
+import re
 import asyncio
 import inspect
 import contextlib
@@ -355,6 +356,11 @@ CONST_SUBPROCESS_ENV_NEVER = frozenset(
 )
 
 
+# A name word that marks a credential (HF_TOKEN, UV_INDEX_<NAME>_PASSWORD), and the user:password@ of a URL
+CONST_CREDENTIAL_WORDS = frozenset({'TOKEN', 'KEY', 'SECRET', 'PASSWORD', 'PASSWD', 'CREDENTIALS'})
+_URL_CREDENTIALS = re.compile(r'(?i)\b([a-z][a-z0-9+.-]*://)[^/@\s]*@')
+
+
 def filter_subprocess_env(environ: Mapping[str, str], published: bool = False) -> Dict[str, str]:
     """Return the subset of ``environ`` a task subprocess may inherit.
 
@@ -365,7 +371,9 @@ def filter_subprocess_env(environ: Mapping[str, str], published: bool = False) -
     Args:
         environ: The engine's environment.
         published: The pipeline names a published node: only the process
-            runtime passes, no service credential and no operator opt-in.
+            runtime passes, no service credential and no operator opt-in. A
+            name with a credential word is dropped, and a URL loses its
+            ``user:password@``.
 
     Returns:
         Dict[str, str]: What the child inherits.
@@ -381,8 +389,11 @@ def filter_subprocess_env(environ: Mapping[str, str], published: bool = False) -
         key = name.upper()
         if key in CONST_SUBPROCESS_ENV_NEVER:
             continue
+        # A credential under an allowed prefix stays with the server; words, so TOKENIZERS_* still passes
+        if published and not CONST_CREDENTIAL_WORDS.isdisjoint(key.split('_')):
+            continue
         if key in names or key.startswith(prefixes):
-            allowed[name] = value
+            allowed[name] = _URL_CREDENTIALS.sub(r'\1', value) if published else value
     return allowed
 
 

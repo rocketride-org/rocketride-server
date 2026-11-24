@@ -149,15 +149,19 @@ node belongs to whoever uploaded its first version: only they can add a version,
 publish it or unpublish it. A node cannot be published to `@public` yet. An upload is refused with
 `NODE_PACKAGE_INVALID`, the message naming the rule, for a C++ node, an id
 outside your developer namespace or not in lowercase, a symlink, a path outside
-the zip or with a `.` or empty segment, a name that ends in `.` or a space, two
-entries with one path, a folder named `services.*` inside the node, an icon
+the zip or with a `.` or empty segment, a name that ends in `.` or a space or holds
+one of `\ : < > " | ? *`, two entries with one path, a `_depends_hooks.py`, a folder
+named `services.*` inside the node, an icon
 outside the node or one that carries anything but a drawing, or a line of
 `requirements*.txt` or `overrides.txt` with an index, a URL or a local path. Those rules check what a package
 declares; its code runs inside the runs of everyone it is published to, with
 their keys, so publish a node only to people who trust it. A run that uses a
 published node gets only the process runtime from the server's environment: not its
 object store, signing key, AWS identity, `ROCKETRIDE_*` variables or host API keys,
-so `tool_filesystem` and fetch URLs do not work in that run. Keys the pipeline names
+so `tool_filesystem` and fetch URLs do not work in that run. A variable whose name
+holds `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIALS` (`HF_TOKEN`)
+is left out too, and a URL such as `PIP_INDEX_URL` or a proxy loses its
+`user:password@`, so that run cannot use an index or proxy that needs one. Keys the pipeline names
 with `${ROCKETRIDE_*}` still resolve.
 
 A run gets, when it is launched, the version bound to the caller's own rung,
