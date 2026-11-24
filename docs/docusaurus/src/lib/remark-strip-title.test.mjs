@@ -130,6 +130,26 @@ describe('remarkStripTitle', () => {
 		}
 	});
 
+	it('ends a line comment at any JavaScript line end', () => {
+		// U+2028 and U+2029 end a line comment as a line feed does, so what follows them is content
+		for (const lineEnd of ['\n', '\r', String.fromCharCode(0x2028), String.fromCharCode(0x2029)]) {
+			const expr = { type: 'mdxFlowExpression', value: `// note${lineEnd}<p>x</p>` };
+			const out = run([expr, h(1, 'Troubleshooting'), p('x')], { frontMatter: { title: 'Guide' } });
+			assert.deepEqual(out, [expr, h(2, 'Troubleshooting'), p('x')], JSON.stringify(lineEnd));
+		}
+	});
+
+	it('reads a long run of slashes once', () => {
+		// Forty slashes are one line comment. A pattern that tries every way to split them takes many seconds.
+		const slashes = '/'.repeat(40);
+		const started = performance.now();
+		const content = { type: 'mdxFlowExpression', value: `${slashes}\n<p>x</p>` };
+		assert.deepEqual(run([content, h(1, 'Troubleshooting')], { frontMatter: { title: 'Guide' } }), [content, h(2, 'Troubleshooting')]);
+		const silent = { type: 'mdxFlowExpression', value: `${'/'.repeat(4000)}\n/* ${'*'.repeat(4000)} */` };
+		assert.deepEqual(run([silent, h(1, 'Title'), p('Body')], { frontMatter: { title: 'T' } }), [silent, p('Body')]);
+		assert.ok(performance.now() - started < 2000, 'the expression must be read in one pass');
+	});
+
 	it('does not need a value string to leave a page alone', () => {
 		const tree = [h(1, 'Title')];
 		const before = clone(tree);

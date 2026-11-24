@@ -81,18 +81,37 @@ function isSilent(node) {
 	);
 }
 
+/** The characters that end a line comment in JavaScript: line feed, carriage return, line separator, paragraph separator. */
+const LINE_ENDS = ['\n', '\r', String.fromCharCode(0x2028), String.fromCharCode(0x2029)];
+
 /**
  * True for an MDX expression that renders nothing: empty, or comments only, as in `{/* note *\/}`.
  * Any other expression can render elements (`{<p>Intro</p>}`), so it counts as content before the heading.
  *
- * A block comment's body is matched as "anything that is not its terminator", so one comment can
- * never stretch over content to the end of a later comment: `/* a *\/ <p>x</p> /* b *\/` is content.
- * A line comment runs to the end of its line.
+ * The text is read once, left to right, so the time grows with its length and nothing else (a
+ * pattern that tried every way to split a run of slashes into line comments took seconds on forty
+ * of them). A block comment ends at its first terminator, so one comment never stretches over
+ * content to the end of a later one: `/* a *\/ <p>x</p> /* b *\/` is content. A line comment runs
+ * to the end of its line.
  */
 function isCommentOnlyExpression(node) {
-	const blockComment = /\/\*(?:[^*]|\*(?!\/))*\*\//.source;
-	const lineComment = /\/\/[^\r\n]*/.source;
-	return new RegExp(`^\\s*(?:(?:${blockComment}|${lineComment})\\s*)*$`).test(node.value ?? '');
+	const text = node.value ?? '';
+	let at = 0;
+	while (at < text.length) {
+		if (/\s/.test(text[at])) {
+			at += 1;
+		} else if (text.startsWith('/*', at)) {
+			const close = text.indexOf('*/', at + 2);
+			if (close < 0) return false;
+			at = close + 2;
+		} else if (text.startsWith('//', at)) {
+			at += 2;
+			while (at < text.length && !LINE_ENDS.includes(text[at])) at += 1;
+		} else {
+			return false;
+		}
+	}
+	return true;
 }
 
 /** True when nothing but silent nodes come before the heading, at every level of the wrappers that hold it. */
