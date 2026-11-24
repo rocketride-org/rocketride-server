@@ -104,6 +104,7 @@ class ToolRegistry:
         """
         self._entries: Dict[str, _ToolEntry] = {}
         self._local_engine = local_engine
+        self._output_schemas: Dict[str, dict] = {}
 
     def _offered(self, entry: _ToolEntry) -> bool:
         return self._local_engine or not entry.local_engine_only
@@ -147,6 +148,10 @@ class ToolRegistry:
 
         return _decorator
 
+    def set_output_schemas(self, schemas: Dict[str, dict]) -> None:
+        """Use ``schemas[name]`` as the ``outputSchema`` of each tool listed under ``name``."""
+        self._output_schemas = dict(schemas)
+
     def tools(self) -> List[types.Tool]:
         """Return the registered tools as MCP ``types.Tool`` descriptors."""
         return [self._descriptor(name, entry) for name, entry in self._entries.items() if self._offered(entry)]
@@ -161,6 +166,7 @@ class ToolRegistry:
             name=name,
             description=entry.description,
             input_schema=entry.schema,
+            output_schema=self._output_schemas.get(name),
             annotations=entry.hints.to_annotations() if entry.hints else None,
             meta=meta or None,
         )

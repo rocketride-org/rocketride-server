@@ -15,6 +15,7 @@ from . import introspection
 from . import logs
 from . import scaffold
 from . import visibility
+from ._results import RESULT_SCHEMAS
 
 
 def register_all(registry: ToolRegistry) -> None:
@@ -42,3 +43,4 @@ def register_all(registry: ToolRegistry) -> None:
     logs.register(registry)
     scaffold.register(registry)
     integrations.register(registry)
+    registry.set_output_schemas(RESULT_SCHEMAS)

@@ -16,6 +16,8 @@ exist — never invent a tool.
 Every result is a JSON object with `ok`. `ok: false` carries `error_type`, `message`, and usually a `hint`;
 the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JSON.
 **Check `ok` — a successful tool *call* is not a successful *result*.**
+Every tool also declares an `outputSchema`: a `oneOf` of its success object and this envelope. The
+shapes below match those schemas. Engine records can carry keys this file does not list.
 
 ## Introspection
 

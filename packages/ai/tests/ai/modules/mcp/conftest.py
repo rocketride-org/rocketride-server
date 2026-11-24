@@ -1,5 +1,6 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 import copy
+import json
 import pathlib
 import sys
 
@@ -429,3 +430,47 @@ class FakeWebServer:
 @pytest.fixture
 def fake_web_server():
     return FakeWebServer()
+
+
+# Every tool handler result in every test must match the tool's outputSchema (tools/_results.py), sent the way
+# handlers.py sends it. A test opts out with @pytest.mark.no_result_schema and says why.
+
+
+def pytest_configure(config):
+    config.addinivalue_line('markers', 'no_result_schema: skip the outputSchema check of handler results')
+
+
+_RESULT_VALIDATORS = {}
+
+
+@pytest.fixture(autouse=True)
+def _handler_results_match_output_schema(request, monkeypatch):
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import best_match
+
+    from ai.modules.mcp.tooling import ToolRegistry
+    from ai.modules.mcp.tools._results import RESULT_SCHEMAS
+
+    mismatches = []
+    lookup = ToolRegistry.handler
+
+    def checked_handler(self, name):
+        handler = lookup(self, name)
+        if handler is None or name not in RESULT_SCHEMAS:
+            return handler
+
+        async def checked(*args, **kwargs):
+            result = await handler(*args, **kwargs)
+            if name not in _RESULT_VALIDATORS:
+                _RESULT_VALIDATORS[name] = Draft202012Validator(RESULT_SCHEMAS[name])
+            error = best_match(_RESULT_VALIDATORS[name].iter_errors(json.loads(json.dumps(result, default=str))))
+            if error is not None:
+                mismatches.append(f'{name} at {error.json_path}: {error.message}')
+            return result
+
+        return checked
+
+    if not request.node.get_closest_marker('no_result_schema'):
+        monkeypatch.setattr(ToolRegistry, 'handler', checked_handler)
+    yield
+    assert not mismatches, 'tool results that do not match their outputSchema:\n' + '\n'.join(mismatches)
