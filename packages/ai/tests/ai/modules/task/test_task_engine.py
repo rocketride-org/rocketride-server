@@ -1366,7 +1366,7 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
         return {'acme.echo': {'snapshot': {'module': 'acme__echo', 'sha256': 'v1'}}}
 
     monkeypatch.setattr(engine.node_store, 'place', place)
-    monkeypatch.setattr(engine.node_store, 'published_packages', published_packages)
+    monkeypatch.setattr(engine.node_deploy, 'published_packages', published_packages)
     monkeypatch.setattr(engine.node_deploy, 'resolve_pipeline_nodes', resolve)
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
     t.source = 'src'

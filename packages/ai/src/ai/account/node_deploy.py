@@ -36,7 +36,7 @@ import stat
 import time
 import zipfile
 from xml.etree import ElementTree
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import json5
 from rocketlib import debug, warning
@@ -51,6 +51,7 @@ from ai.common.node_packages import (
     module_of,
     node_files,
     node_of,
+    providers_of,
 )
 from ai.constants import CONST_NODES_CONTRACT
 
@@ -495,14 +496,10 @@ async def resolve_pipeline_nodes(reach: Optional[tuple], pipeline: Dict[str, Any
         reach: (org id, user id, team ids) the run resolves for; None resolves nothing.
         pipeline: The pipeline after ``${...}`` expansion, the one that runs.
     """
-    from ai.modules.task import node_store
-
     if not reach:
         return {}
     org_id, user_id, team_ids = reach
-    return await resolve_nodes(
-        org_id, user_id, team_ids, sorted(node_store._providers_of(pipeline.get('components', [])))
-    )
+    return await resolve_nodes(org_id, user_id, team_ids, sorted(providers_of(pipeline.get('components', []))))
 
 
 def _identity(conn: Any) -> tuple:
@@ -534,9 +531,7 @@ async def visible_nodes(conn: Any) -> Dict[str, Dict[str, Any]]:
 
 async def nodes_for(conn: Any, components: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """The published nodes a pipeline names, nested ones included, resolved for this caller; refuses one they cannot run."""
-    from ai.modules.task import node_store
-
-    names = sorted(node_store._providers_of(components))
+    names = sorted(providers_of(components))
     if not getattr(conn, '_account_info', None):
         return await resolve_nodes('local', '', [], names)
     return await resolve_nodes(*_identity(conn), names)
@@ -553,3 +548,13 @@ async def read_package(org_id: str, user_id: str, row: Dict[str, Any]) -> bytes:
         raise NodePackageInvalid(f'The stored package of {row["appId"]} does not match its digest')
     debug(f'[node_deploy] serving {row["appId"]} v{row["version"]}')
     return data
+
+
+async def published_packages(
+    org_id: str, user_id: str, published: Dict[str, Dict[str, Any]]
+) -> Dict[str, Tuple[str, bytes]]:
+    """Module -> (digest, package) of the versions resolved for a run ({node id: publish row}), for place()."""
+    return {
+        row['snapshot']['module']: (row['snapshot']['sha256'], await read_package(org_id, user_id, row))
+        for row in published.values()
+    }
