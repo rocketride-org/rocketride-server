@@ -215,3 +215,28 @@ def test_social_tags_replace_the_documents_own():
     for kind in kinds:
         assert out.count(f'"{kind}"') == 1, kind
     assert 'old.example' not in out and '2001-01' not in out and 'content="old"' not in out
+
+
+def test_a_viewport_tag_written_in_a_script_is_not_where_the_preloads_go():
+    """The preloads follow the document's own viewport tag, and a script's text stays as it was."""
+    script = '<script>const sample = \'<meta name="viewport" content="width=device-width">\';</script>'
+    viewport = '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    preload = '<link rel="preload" as="image" href="/hero.webp">'
+    doc = f'<html><head><meta charset="utf-8">{script}{viewport}</head><body>x</body></html>'
+
+    out = inject_head(doc, title='T', responsive_preloads=[preload])
+
+    assert script in out
+    assert out.count(preload) == 1
+    assert out.index(viewport) + len(viewport) == out.index(preload)
+
+
+def test_without_a_viewport_tag_of_its_own_the_preloads_follow_the_head_block():
+    script = '<script>const sample = \'<meta name="viewport" content="width=device-width">\';</script>'
+    preload = '<link rel="preload" as="image" href="/hero.webp">'
+    doc = f'<html><head><meta charset="utf-8">{script}</head><body>x</body></html>'
+
+    out = inject_head(doc, title='T', responsive_preloads=[preload])
+
+    assert script in out
+    assert out.index('<title>T</title>') < out.index(preload) < out.index(script)

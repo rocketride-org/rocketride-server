@@ -81,6 +81,13 @@ _REMOVED = re.compile(
 _HEAD_OPEN = re.compile(r'<head\b[^>]*>', re.IGNORECASE)
 _CHARSET = re.compile(r'<meta\b[^>]*?(?:\bcharset\s*=|\bhttp-equiv\s*=\s*["\']?content-type\b)[^>]*>', re.IGNORECASE)
 _VIEWPORT = _tag_with('meta', 'name', 'viewport')
+# The viewport tag, after a script or style element: as in _REMOVED, such an
+# element is matched whole first, so a viewport tag written in a script's
+# text is never taken for the document's own.
+_VIEWPORT_OR_RAW = re.compile(
+    rf'(?P<kept><(?P<raw>script|style)(?=[\s/>]){_ATTR_UNIT}*>.*?</(?P=raw)\s*>)|(?P<viewport>{_VIEWPORT.pattern})',
+    _FLAGS,
+)
 _HEAD_SPAN = re.compile(r'<head\b[^>]*>.*?</head\s*>', _FLAGS)
 _BODY_OPEN = re.compile(r'<body\b', re.IGNORECASE)
 _HTML_OPEN = re.compile(r'<html\b[^>]*>', re.IGNORECASE)
@@ -229,7 +236,9 @@ def inject_head(
     document = document[:at] + block + document[at:]
     preload_block = ''.join(responsive_preloads)
     if preload_block:
-        viewport = _VIEWPORT.search(document, start, start + len(region) + len(block))
+        # The first viewport tag that is markup, not text inside a script or style
+        found = _VIEWPORT_OR_RAW.finditer(document, start, start + len(region) + len(block))
+        viewport = next((m for m in found if m.group('viewport')), None)
         preload_at = viewport.end() if viewport else at + len(block)
         document = document[:preload_at] + preload_block + document[preload_at:]
     return document
