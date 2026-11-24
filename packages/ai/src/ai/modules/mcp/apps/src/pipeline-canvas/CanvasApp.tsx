@@ -800,8 +800,12 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 		if (!ready || !frameWidth || !frameHeight) return;
 		const state = mode.current;
 		if (active && !state.active) {
-			state.inlineView = getViewport();
-			state.inlineMoved = moved.current;
+			// With a restore still pending, the inline view on screen is not the
+			// person's yet: keep the one saved last time.
+			if (!state.restore) {
+				state.inlineView = getViewport();
+				state.inlineMoved = moved.current;
+			}
 			state.restore = false;
 			moved.current = false;
 		} else if (!active && state.active) {
@@ -964,7 +968,7 @@ function pipelineName(summary: ViewPipelineSummary): string {
 
 /** The two notes shown only when they apply: a cut-short drawing, and node types this engine lacks. */
 function Notes({ truncated, count, shown, missing }: { truncated: boolean; count: number; shown: number; missing: string[] }): ReactElement | null {
-	const notes = [truncated ? `Showing the first ${shown} of ${count} nodes. The builder shows all of it.` : '', missing.length === 1 ? `${missing[0]} isn't installed on this engine, so it is drawn with a plain icon.` : missing.length > 1 ? `${missing.join(', ')} aren't installed on this engine, so they are drawn with a plain icon.` : ''].filter(Boolean);
+	const notes = [truncated ? `Showing ${shown} of ${count} nodes. The builder shows all of it.` : '', missing.length === 1 ? `${missing[0]} isn't installed on this engine, so it is drawn with a plain icon.` : missing.length > 1 ? `${missing.join(', ')} aren't installed on this engine, so they are drawn with a plain icon.` : ''].filter(Boolean);
 	if (!notes.length) return null;
 	return (
 		<div className="rr-canvas-notes" role="status">
@@ -1065,7 +1069,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 	const tools = 1 + (host.canFullScreen ? 1 : 0) + (!coarse && (active || !host.canFullScreen) ? 2 : 0);
 	const count = model.summary.node_count ?? model.nodes.length;
 	const shown = model.summary.nodes?.length ?? model.nodes.length;
-	const described = [`Read-only diagram of ${name}, ${count} ${count === 1 ? 'node' : 'nodes'}${model.summary.truncated ? `, the first ${shown} drawn` : ''}.`, model.summary.description ? `${model.summary.description.replace(/[.\s]+$/, '')}.` : '', 'Arrow keys move it, plus and minus zoom.'].filter(Boolean).join(' ');
+	const described = [`Read-only diagram of ${name}, ${count} ${count === 1 ? 'node' : 'nodes'}${model.summary.truncated ? `, ${shown} drawn` : ''}.`, model.summary.description ? `${model.summary.description.replace(/[.\s]+$/, '')}.` : '', 'Arrow keys move it, plus and minus zoom.'].filter(Boolean).join(' ');
 
 	return (
 		<div className={`rr-canvas${active ? ' rr-canvas-full' : ''}${coarse ? ' rr-canvas-coarse' : ''}`}>
