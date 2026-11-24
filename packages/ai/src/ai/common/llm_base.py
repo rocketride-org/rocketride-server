@@ -8,6 +8,7 @@ from ai.common.schema import Question, Answer, AnswerError
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
 from ai.common.llm_tools import InvalidTurn, ToolsUnsupported, is_turn
+from ai.common.model_gateway import HostedModelError
 
 
 def _turn_error(e: Exception) -> AnswerError:
@@ -20,7 +21,15 @@ def _turn_error(e: Exception) -> AnswerError:
         return AnswerError(code='tools_unsupported', message=str(e))
     if isinstance(e, InvalidTurn):
         return AnswerError(code='invalid_request', message=str(e))
+    if isinstance(e, HostedModelError):
+        # Our own sentence for a refusal of hosted models; it holds no provider text
+        return AnswerError(code='provider_error', message=str(e))
     return AnswerError(code='provider_error', message=f'the model provider call failed ({type(e).__name__})')
+
+
+def _shown_error(e: Exception) -> str:
+    """The error as a text answer and the log show it: a hosted refusal is already a sentence."""
+    return str(e) if isinstance(e, HostedModelError) else f'{type(e).__name__}: {e}'
 
 
 class LLMBase(IInstanceBase):
@@ -110,11 +119,11 @@ class LLMBase(IInstanceBase):
                     on_reasoning_chunk=on_reasoning_chunk,
                 )
             except Exception as e:
-                warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
+                warning(f'writeQuestions: LLM call failed: {_shown_error(e)}')
                 if is_turn(question):
                     answer = Answer(error=_turn_error(e))
                 else:
-                    err_msg = f'**LLM error** — {type(e).__name__}: {e}'
+                    err_msg = f'**LLM error** — {_shown_error(e)}'
                     answer = Answer()
                     answer.setAnswer(err_msg)
                 # A turn that failed after burning tokens still spent them: the adapters

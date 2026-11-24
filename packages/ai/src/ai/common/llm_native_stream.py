@@ -402,6 +402,17 @@ def try_anthropic_native_chat_stream(
         return None
 
 
+def _raise_if_terminal(chat: Any, error: BaseException) -> None:
+    """Raise at once when the driver says ``error`` ends the call (ChatBase.terminal_error).
+
+    Returning None from a handler sends chat_string on to another request, so a
+    terminal error has to leave from here.
+    """
+    check = getattr(chat, '_raise_if_terminal', None)
+    if callable(check):
+        check(error)
+
+
 # --- OpenAI-compatible Chat Completions with reasoning_content ---
 # langchain-openai drops delta.reasoning_content, so we stream via the raw openai
 # SDK (DeepSeek, Qwen, xAI, GMI, Ollama, …). ChatBase auto-wires this in chat_string.
@@ -439,8 +450,18 @@ def try_openai_compat_reasoning_stream(
     emitted = 0
 
     def _drain(kw: Dict[str, Any]) -> None:
+        stream = client.chat.completions.create(**kw)
+        try:
+            _read(stream)
+        finally:
+            # A raise mid-stream (a callback, a bad chunk) still releases the connection
+            closer = getattr(stream, 'close', None)
+            if callable(closer):
+                closer()
+
+    def _read(stream: Any) -> None:
         nonlocal finish_reason, usage, emitted
-        for chunk in client.chat.completions.create(**kw):
+        for chunk in stream:
             # The final chunk carries usage with an empty choices list, so read it
             # before the choices guard skips that chunk.
             if getattr(chunk, 'usage', None) is not None:
@@ -463,6 +484,7 @@ def try_openai_compat_reasoning_stream(
     try:
         _drain(kwargs)
     except Exception as e:
+        _raise_if_terminal(chat, e)
         # Retry stop and/or include_usage only before any chunk has reached the UI.
         pending = e
         if emitted == 0 and stop and is_stop_rejection(e, True):
@@ -471,10 +493,12 @@ def try_openai_compat_reasoning_stream(
             try:
                 _drain(kwargs)
             except Exception as retry_err:
+                _raise_if_terminal(chat, retry_err)
                 pending = retry_err
             else:
                 pending = None
         if pending is not None:
+            _raise_if_terminal(chat, pending)
             # This handler is wired ONLY for custom base URLs (ChatBase returns early unless
             # openai_api_base is set), which is exactly where include_usage can be rejected. Retry
             # once without it ONLY on a flag rejection (a 400/422 client error) before any chunk:
@@ -492,6 +516,7 @@ def try_openai_compat_reasoning_stream(
                 try:
                     _drain(kwargs)
                 except Exception as e2:
+                    _raise_if_terminal(chat, e2)
                     warning(
                         f'llm_native_stream openai_compat_reasoning: stream failed ({type(e2).__name__}): {e2} '
                         '(falling back to non-streaming chat).'

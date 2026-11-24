@@ -150,7 +150,7 @@ For information on writing and running node-level tests, see
 ## Further Reading
 
 Contributor docs are grouped by subsystem. Everything under `docs/development/`
-is unpublished — it never reaches docs.rocketride.org.
+is unpublished — it never reaches docs.rocketride.ai.
 
 ### Build
 

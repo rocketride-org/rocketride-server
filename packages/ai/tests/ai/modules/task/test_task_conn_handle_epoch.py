@@ -38,7 +38,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import tempfile
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -83,10 +83,22 @@ def conn(store):
         _server=SimpleNamespace(authenticate_credential=authenticate_credential),
         broadcast_server_event=AsyncMock(),
         release_unauthed_slot=lambda ip: None,
+        acquire_unauthed_slot=lambda ip: None,
         _unauthed_by_ip={},
+        _task_control={},
         store=store,
     )
     return c
+
+
+def _push_server(conn):
+    """A server double that runs the real push path (``_push_rebuilt``) over ``conn``."""
+    server = SimpleNamespace(
+        _connections={1: conn}, debug_message=lambda m: None, _authz=None, count_authz=lambda kind: 0
+    )
+    server._push_rebuilt = MethodType(TaskServer._push_rebuilt, server)
+    server._push_rebuilt_locked = MethodType(TaskServer._push_rebuilt_locked, server)
+    return server
 
 
 async def _auth(conn, credential):
@@ -300,7 +312,7 @@ async def test_push_resolving_after_reauth_does_not_overwrite_the_new_identity(c
     monkeypatch.setattr(account, '_service', SimpleNamespace(get_authentication_result=get_auth), raising=False)
     conn._account_info.auth = 'rr_a'
     conn.send_event = AsyncMock()
-    server = SimpleNamespace(_connections={1: conn}, debug_message=lambda m: None)
+    server = _push_server(conn)
     if push == 'account':
         running = asyncio.ensure_future(TaskServer.push_account_update(server, 'user-a'))
     else:
@@ -332,7 +344,7 @@ async def test_push_without_identity_change_still_refreshes(conn, store, monkeyp
     conn._account_info.auth = 'rr_a'
     conn.send_event = AsyncMock()
     fresh.to_push_result = lambda: {}
-    server = SimpleNamespace(_connections={1: conn}, debug_message=lambda m: None)
+    server = _push_server(conn)
 
     await TaskServer.push_account_update(server, 'user-a')
 

@@ -59,6 +59,7 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -84,6 +85,7 @@ from ai.account.models import (
     resolve_team_permissions,
 )
 from ai.common.account import AccountPipelineValidation
+from rocketlib import debug, warning
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -157,6 +159,47 @@ def task_credential_commands(account_info: Any) -> Optional[frozenset]:
     return TASK_TOKEN_COMMANDS if auth.startswith('tk_') else TASK_KEY_COMMANDS
 
 
+# Bound on one identity notice (``apaext_account``) sent by revoke or by an
+# identity push (#972). A client that stops reading its socket can otherwise
+# hold the sender (a push, or the authority sweep) indefinitely.
+NOTICE_SEND_TIMEOUT = 1.0
+
+
+def authority_subject(account_info: Any) -> bool:
+    """Return True when an identity carries platform authority (#972).
+
+    A full-user identity (not ``pk_``/``tk_``) whose cached ``sysPermissions``
+    is non-empty. Any element counts, ``internal`` included: what the
+    connection holds is what gets re-checked, never a list of exemptions.
+    """
+    if not account_info:
+        return False
+    auth = getattr(account_info, 'auth', '') or ''
+    if isinstance(auth, str) and auth.startswith(TASK_CREDENTIAL_PREFIXES):
+        return False
+    return bool(getattr(account_info, 'sysPermissions', None))
+
+
+def authority_narrowed(cached: Any, fresh: Any) -> bool:
+    """Return True when ``fresh`` holds less platform authority than ``cached``.
+
+    Narrower means the user is now waitlisted (disabled), or any element of
+    the cached ``sysPermissions`` is missing from the fresh identity. Widening
+    is not narrowing.
+    """
+    if getattr(fresh, 'waitlisted', False):
+        return True
+    held = set(getattr(cached, 'sysPermissions', None) or [])
+    return bool(held - set(getattr(fresh, 'sysPermissions', None) or []))
+
+
+def _identity_key(info: Any) -> tuple:
+    """The identity a connection acts as: the user plus the credential kind (pk_, tk_ or a full session)."""
+    auth = getattr(info, 'auth', '') or ''
+    kind = next((p for p in TASK_CREDENTIAL_PREFIXES if isinstance(auth, str) and auth.startswith(p)), '')
+    return (getattr(info, 'userId', None), kind)
+
+
 class TaskConn(
     TaskCommands,
     DataCommands,
@@ -215,7 +258,20 @@ class TaskConn(
             identity that opened them.
     """
 
-    # Class default so __init__-bypassing test doubles read 0.
+    # Revocation state (#972). Class-level defaults so a connection built
+    # without __init__ reads them too. ``_revoked`` is set once, by revoke(),
+    # and makes any later auth on this socket fail; ``_revoked_user_id`` keeps
+    # the revoked user for the disconnect handler's dashboard event.
+    _revoked: bool = False
+    _revoked_user_id: Optional[str] = None
+    # When this connection's platform authority was last verified, on the
+    # live re-check's monotonic clock (``TaskServer._authz``); 0 = never.
+    _authz_verified_at: float = 0.0
+    # When the last ``[AUTHZ] denied`` warning for this connection was logged
+    _authz_denied_logged_at: float = float('-inf')
+    # Identity generation for file handles. Bumped whenever this socket's
+    # identity is dropped or replaced, so handles opened under an older
+    # identity are unusable at once. Class default for __init__-bypassing doubles.
     _auth_epoch: int = 0
 
     def __init__(
@@ -346,6 +402,14 @@ class TaskConn(
             self._transport.disconnect()
             return
 
+        # Platform authority not verified recently (live re-check, #972):
+        # refuse, keep the socket; the next good read resumes it.
+        authz = getattr(self._server, '_authz', None)
+        if authz is not None and not authz.gate_ok(self):
+            authz.gate_denied(self, cmd)
+            await self.send(self.build_error(message, 'Authorization temporarily unavailable'))
+            return
+
         # Task-capability sockets (pk_/tk_) may only send their allow-listed
         # commands. Checked on the same ``command`` string DAPConn turns into
         # ``on_<command>``, before any handler is looked up.
@@ -383,6 +447,11 @@ class TaskConn(
 
         credential = args.get('auth') or ''
 
+        # Verification stamp for the live re-check (#972), read BEFORE the
+        # await: the identity installed below is no newer than this.
+        authz = getattr(self._server, '_authz', None)
+        t0 = authz.clock() if authz is not None else 0.0
+
         result = await self._server._server.authenticate_credential(credential)
         if isinstance(result, tuple):
             error_code, error_message = result
@@ -408,11 +477,34 @@ class TaskConn(
             self._transport.disconnect()
             return
 
+        # A revoke that landed while authenticate_credential was awaited has
+        # already closed this socket's authority: install nothing (#972).
+        if self._revoked:
+            await self.send(self.build_error(request, 'Connection revoked'))
+            return
+
+        # Re-authenticating as a different identity on a live socket (another
+        # user, or another credential kind for the same user: pk_/tk_ carry the
+        # launching user's id): the previous identity's subscriptions and
+        # debugger attachments must not be inherited. Strip its authority
+        # BEFORE the detach await, as deauth does, so a concurrent command
+        # cannot register under it meanwhile. Same identity keeps both.
+        previous = self._account_info
+        if self._authenticated and previous is not None and _identity_key(previous) != _identity_key(result):
+            self._drop_authority()
+            await self._detach_debuggers()
+
+            # A revoke may have landed while detaching: install nothing.
+            if self._revoked:
+                await self.send(self.build_error(request, 'Connection revoked'))
+                return
+
         # Install the new identity and bump the generation in one synchronous
         # step: every handle opened under the previous identity is unusable
         # from this instant, then swept (closed at the backend) below.
         self._account_info = result
         self._authenticated = True
+        self._authz_verified_at = t0
         self._auth_epoch += 1
         self._server.release_unauthed_slot(self._client_ip)
         await self._close_stale_file_handles()
@@ -450,24 +542,23 @@ class TaskConn(
 
         Reverts the connection to unauthenticated mode so only
         ``rrext_public_*`` commands are accepted. The WebSocket stays
-        open — callers can re-authenticate later via ``auth``. File handles
-        opened under the dropped identity are closed and cannot be reused by
-        a later identity on the same socket.
+        open — callers can re-authenticate later via ``auth``. Event
+        subscriptions are dropped with the identity (#972): a deauthed
+        socket receives nothing. The connection is also detached as the
+        debugger of every task, so a later re-auth as another user does not
+        inherit the debugger stream. File handles opened under the dropped
+        identity are closed and cannot be reused by a later identity on the
+        same socket.
         """
         # Nothing to do if not authenticated
         if not self._authenticated:
             return self.build_response(request, body={})
 
-        # Re-acquire an unauthenticated slot for this IP
-        if self._client_ip:
-            self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
+        self._drop_authority()
 
-        # Clear authentication state
-        self._authenticated = False
-        self._account_info = None
-        # Drop authority and bump the generation synchronously, then close the
-        # handles the dropped identity opened (they are unusable already).
-        self._auth_epoch += 1
+        await self._detach_debuggers()
+        # _drop_authority bumped the generation; close the handles the dropped
+        # identity opened (they are unusable already).
         await self._close_stale_file_handles()
 
         return self.build_response(request, body={})
@@ -482,6 +573,105 @@ class TaskConn(
             await self._server.store.close_stale_handles(str(self._connection_id), self._auth_epoch)
         except Exception as e:
             self.debug_message(f'Error closing stale file handles for connection {self._connection_id}: {e}')
+
+    async def _detach_debuggers(self) -> None:
+        """Detach this connection as the debugger of every task."""
+        # detach_task is a no-op for a task this connection is not debugging
+        for control in list(self._server._task_control.values()):
+            await control.task.detach_task(self)
+
+    def _drop_authority(self) -> None:
+        """
+        Synchronously strip this connection's authority (deauth and revoke).
+
+        Re-acquires the unauthenticated slot the successful auth released (so
+        the disconnect handler's release balances), marks the connection
+        unauthenticated, drops every event subscription and installs the
+        signed-out identity ``AccountInfo()``. It has an empty ``userId`` and
+        no organization, so no user push, org push or org/user-scoped server
+        event can match or rebuild it. It bumps the file-handle generation, so
+        handles the dropped identity opened are unusable at once. It is not waitlisted: a signed-out
+        connection is not a waitlisted user.
+        """
+        self._server.acquire_unauthed_slot(self._client_ip)
+        self._authenticated = False
+        self._auth_epoch += 1
+        monitors = getattr(self, '_monitors', None)
+        if monitors is not None:
+            monitors.clear()
+        self._account_info = AccountInfo()
+
+    async def revoke(self, expected_info: AccountInfo, reason: str, pushed: Optional[AccountInfo] = None) -> None:
+        """
+        Revoke this connection's authority and close it (#972).
+
+        Does nothing unless this connection is still registered on its
+        server, still holds ``expected_info`` (a newer auth did not replace
+        it) and was not revoked already. Otherwise, with no await before the
+        effect: marks the connection revoked, records the user for the
+        disconnect handler, and drops its authority (``_drop_authority``).
+        Then sends ``pushed`` (when the caller rebuilt one) and disconnects
+        (``send_revoke_notice``). The disconnect cleanup commits open write
+        handles and ends tasks this connection launched, as for any disconnect.
+
+        Args:
+            expected_info: The identity the caller decided on.
+            reason: Why, for the log line.
+            pushed: The rebuilt (narrower) identity, if the caller has one.
+        """
+        if self.revoke_authority(expected_info, reason):
+            await self.send_revoke_notice(pushed)
+
+    def revoke_authority(self, expected_info: AccountInfo, reason: str) -> bool:
+        """
+        The synchronous part of ``revoke``: guard, mark, drop authority, log.
+
+        Callers that must not wait on a client (the authority sweep) run this
+        at the decision and send the notice separately (``send_revoke_notice``).
+
+        Returns:
+            bool: True when this call revoked the connection (send the notice).
+        """
+        server = self._server
+        if server._connections.get(self.get_connection_id()) is not self:
+            return False
+        if self._account_info is not expected_info or self._revoked:
+            return False
+
+        self._revoked = True
+        self._revoked_user_id = expected_info.userId
+        self._drop_authority()
+        revoked = server.count_authz('revoked')
+        warning(
+            f'[AUTHZ] revoked conn={self.get_connection_id()} user={expected_info.userId} '
+            f'reason={reason} revoked={revoked}'
+        )
+        return True
+
+    async def send_revoke_notice(self, pushed: Optional[AccountInfo] = None) -> None:
+        """
+        Tell a revoked client its new identity, if there is one, then disconnect it.
+
+        With ``pushed`` (an identity the account store rebuilt, waitlisted
+        when the user now is) the client receives it as ``apaext_account``.
+        Without one nothing is sent: no placeholder identity is pushed, so a
+        client never reads a signed-out connection as a waitlisted user. The
+        disconnect is the signed-out signal; the client's reconnect then
+        either authenticates its stored credential again or fails
+        authentication, which is how clients already show a signed-out user.
+
+        The send is bounded by NOTICE_SEND_TIMEOUT so a client that stopped
+        reading cannot hold the caller; the disconnect always happens.
+        """
+        try:
+            if pushed is not None:
+                await asyncio.wait_for(
+                    self.send_event('apaext_account', body=pushed.to_push_result()), NOTICE_SEND_TIMEOUT
+                )
+        except Exception as e:
+            debug(f'[AUTHZ] revoke notice failed for conn {self.get_connection_id()}: {e!r}')
+        finally:
+            self._transport.disconnect()
 
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the user holds the permission on ANY of their membership teams.
