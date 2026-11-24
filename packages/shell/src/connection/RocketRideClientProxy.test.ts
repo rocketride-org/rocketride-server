@@ -282,6 +282,11 @@ void test('the shell root opens external links itself, and only safe schemes', a
 		await assert.rejects(() => bus.request('host.openExternal', { url: 'javascript:alert(1)' }), /Blocked external URL scheme/);
 		assert.equal(opened.length, 1);
 
+		// What is opened is the absolute URL that was checked: window.open would
+		// resolve 'https:example.com/pay' against the shell's page, as a path of it.
+		await bus.request('host.openExternal', { url: 'https:example.com/pay' });
+		assert.deepEqual(opened[1], ['https://example.com/pay', '_blank']);
+
 		// A popup blocker must surface as an error, never a silent no-op.
 		blocked = true;
 		await assert.rejects(() => bus.request('host.openExternal', { url: 'https://billing.stripe.com/p/session/y' }), /blocked the new tab/);

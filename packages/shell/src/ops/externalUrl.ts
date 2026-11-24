@@ -22,18 +22,22 @@ export const EXTERNAL_URL_SCHEMES = ['https', 'http', 'mailto'] as const;
  * into opening file:/vscode:/javascript:/custom-app URIs.
  *
  * @param url - The URL as received off the bus.
- * @returns The validated URL (for fluent use).
+ * @returns The validated URL in its absolute form, so what is opened is
+ *          what was checked: an opener that resolves the original text
+ *          against its own page reads `https:example.com` as a path of
+ *          that page, while the check read it as `https://example.com/`.
  * @throws When the URL is unparseable or its scheme is not allowlisted.
  */
 export function assertExternalUrl(url: string): string {
-	let scheme = '';
+	let parsed: URL | null = null;
 	try {
-		scheme = new URL(url).protocol.replace(':', '').toLowerCase();
+		parsed = new URL(url);
 	} catch {
 		/* unparseable — rejected below */
 	}
-	if (!(EXTERNAL_URL_SCHEMES as readonly string[]).includes(scheme)) {
+	const scheme = parsed ? parsed.protocol.replace(':', '').toLowerCase() : '';
+	if (!parsed || !(EXTERNAL_URL_SCHEMES as readonly string[]).includes(scheme)) {
 		throw new Error(`Blocked external URL scheme: ${scheme || '(unparseable)'}`);
 	}
-	return url;
+	return parsed.href;
 }
