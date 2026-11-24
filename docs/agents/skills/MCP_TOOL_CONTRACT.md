@@ -68,7 +68,7 @@ chapters/console but **empty traces**.
 
 | Tool | Purpose |
 |---|---|
-| `store_read` | `{path}` → `{ok, path, content}`. Text only, inline and uncapped — prefer `store_stat` + `store_get_url` for big objects. |
+| `store_read` | `{path}` → `{ok, path, content}`. Text only, inline. A file whose result is over the size limit returns `ResultTooLarge`; use `store_stat` + `store_get_url` for big objects. |
 | `store_list` | `{path?}` (default `''` = root) → `{ok, path, listing}`. |
 | `store_stat` | `{path}` → `{ok, path, stat}` — exists, type (`file\|dir`), size, modified. |
 | `store_get_url` | `{path, expires_in?, download_name?}` → `{ok, path, url, expires_in}`. Signed URL — artifact-by-reference for large results. |
