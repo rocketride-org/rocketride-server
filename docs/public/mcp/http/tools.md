@@ -354,8 +354,9 @@ never edited or run.
   text and colours. Variable references, keys and encrypted
   `secureParameters` stay on the server, and nothing is validated, resolved
   or decrypted.
-- **Limits:** a file over 2,097,152 bytes is refused, and at most 200 nodes
-  are drawn (`truncated` is true and `node_count` gives the full count).
+- **Limits:** a file over 2,097,152 bytes is refused, and at most 200 nodes,
+  in groups nested up to 8 deep, are drawn (`truncated` is true and
+  `node_count` gives the full count).
 - **Errors:** every error also carries `path` and `workspace`.
   `InvalidPath` (not a pipeline file under `.projects/`, or a path with `..`,
   a backslash or a leading slash), `NotFound`, `AccessDenied`,

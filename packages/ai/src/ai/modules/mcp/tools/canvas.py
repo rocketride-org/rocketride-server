@@ -217,14 +217,22 @@ class _Cleaner:
         self.total = 0
         self.kept: List[Dict[str, Any]] = []
 
-    def count(self, components: Any, depth: int = 0) -> None:
-        """Count every component, nested groups included (to MAX_GROUP_DEPTH)."""
-        for raw in components if isinstance(components, list) else []:
-            if not isinstance(raw, dict):
-                continue
-            self.total += 1
-            if depth < MAX_GROUP_DEPTH and _node_type(raw) == _GROUP:
-                self.count(_children(raw), depth + 1)
+    def count(self, components: Any) -> None:
+        """Count every component, nested groups included at any depth.
+
+        Components past MAX_GROUP_DEPTH are not drawn, so counting them marks
+        the result truncated. A loop rather than recursion: the file sets the
+        depth.
+        """
+        pending = [components]
+        while pending:
+            level = pending.pop()
+            for raw in level if isinstance(level, list) else []:
+                if not isinstance(raw, dict):
+                    continue
+                self.total += 1
+                if _node_type(raw) == _GROUP:
+                    pending.append(_children(raw))
 
     def clean(self, components: Any, depth: int = 0) -> List[Dict[str, Any]]:
         """Clean ``components`` in file order until MAX_NODES are kept."""

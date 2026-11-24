@@ -533,7 +533,7 @@ async def test_ui_keeps_only_drawing_fields_with_numeric_points():
     assert drawn['ui'] == {'measured': {'width': 150, 'height': 40}, 'parentId': 'g'}
 
 
-async def test_groups_keep_cleaned_children_to_a_depth_of_8():
+async def test_groups_keep_cleaned_children_to_a_depth_of_8_and_count_the_rest():
     def nest(depth):
         child = {'id': f'leaf{depth}', 'provider': 'webhook', 'config': {'apikey': CANARY_LITERAL}}
         if depth == 0:
@@ -557,7 +557,10 @@ async def test_groups_keep_cleaned_children_to_a_depth_of_8():
         depth += 1
     assert depth == canvas.MAX_GROUP_DEPTH
     assert node['config'] == {}
-    assert result['node_count'] == 9
+    # Eleven nodes in the file: the two below the depth limit are counted, not drawn.
+    assert len(result['nodes']) == 9
+    assert result['node_count'] == 11
+    assert result['truncated'] is True
     assert CANARY_LITERAL not in json.dumps(result)
 
 
