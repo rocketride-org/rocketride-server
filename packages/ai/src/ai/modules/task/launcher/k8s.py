@@ -1297,10 +1297,38 @@ class K8sLauncher(Launcher):
 
     async def _sweep(self) -> None:
         """Delete the Jobs an earlier life of this engine instance left behind, and their pods with them."""
-        result = await self._cli.run(['delete', 'jobs', '-l', self._selector, '--ignore-not-found', '--wait=false'])
-        removed = sum(1 for line in result.stdout.splitlines() if ' deleted' in line)
-        if removed:
-            debug(f'[k8s] removed {removed} job(s) left by an earlier run of {self.config["instance"]}')
+        # One delete clears them all; only when it fails does the sweep go Job by Job
+        try:
+            result = await self._cli.run(
+                ['delete', 'jobs', '-l', self._selector, '--ignore-not-found', '--wait=false'], check=False
+            )
+        except (K8sError, OSError) as e:
+            result = CliResult(-1, '', str(e))
+        if result.returncode == 0:
+            removed = sum(1 for line in result.stdout.splitlines() if ' deleted' in line)
+            if removed:
+                debug(f'[k8s] removed {removed} job(s) left by an earlier run of {self.config["instance"]}')
+            return
+        # A cluster the engine cannot reach fails here, as before
+        names = (await self._cli.run(['get', 'jobs', '-l', self._selector, '-o', 'name'])).stdout.split()
+        kept = []
+        for i, name in enumerate(names):
+            try:
+                deleted = await self._cli.run(['delete', name, '--ignore-not-found', '--wait=false'], check=False)
+            except (K8sError, OSError) as e:
+                # No answer in time: each next delete would wait as long, and every start waits for the sweep
+                kept += [f'{name}: {e}'] + [f'{rest}: not tried' for rest in names[i + 1 :]]
+                break
+            if deleted.returncode != 0:
+                kept.append(f'{name}: {deleted.stderr.strip()}')
+        if kept:
+            # A Job the cluster keeps must not keep tasks from starting; the next start of the engine tries again
+            debug(
+                f'[k8s] could not delete {len(kept)} of {len(names)} job(s) left by an earlier run of '
+                f'{self.config["instance"]}: {"; ".join(kept)}'
+            )
+        elif names:
+            debug(f'[k8s] removed {len(names)} job(s) left by an earlier run of {self.config["instance"]}')
 
     async def remove(self, job: str) -> None:
         """
