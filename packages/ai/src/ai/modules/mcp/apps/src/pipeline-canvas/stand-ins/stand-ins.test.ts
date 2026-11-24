@@ -81,7 +81,9 @@ function isTypeOnly(file: string, name: string): boolean {
 	return new RegExp(`export\\s+(interface|type)\\s+${name}\\b`).test(readFileSync(file, 'utf8'));
 }
 
-describe('canvas stand-ins', () => {
+// These tests import the builder's modules on demand; a cold transform on a slow
+// runner (Windows CI) takes longer than vitest's 5 s default.
+describe('canvas stand-ins', { timeout: 30_000 }, () => {
 	it('lists only builder files that exist', () => {
 		for (const file of [...REUSED, ...Object.keys(STAND_INS)]) expect(existsSync(file), file).toBe(true);
 	});
