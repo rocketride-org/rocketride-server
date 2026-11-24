@@ -26,8 +26,11 @@ from ai.web.access_log import REDACTED, is_sensitive_param, redact_text
 # ``after`` are the characters around the match. When ``name=`` sits inside a
 # quote of the same kind as the value's, the value must end right before that
 # outer quote closes (``'password='x''``). Otherwise the quote after ``name=``
-# closes the outer quote, and what follows is prose, not a value.
-_QUOTED = re.compile(r'(?P<before>^|[^\w.-])(?P<name>[\w.-]+)=(?P<value>"[^"]*"|\'[^\']*\')(?=(?P<after>.?))')
+# closes the outer quote, and what follows is prose, not a value. A backslash
+# escapes the next character, so an escaped quote does not end the value.
+_QUOTED = re.compile(
+    r'(?P<before>^|[^\w.-])(?P<name>[\w.-]+)=(?P<value>"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\')(?=(?P<after>.?))'
+)
 _KEY = re.compile(r'\b(?:rr|rrr|rrmg)_[A-Za-z0-9_-]{20,}')
 _JWT = re.compile(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*')
 
