@@ -30,6 +30,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 import mcp.types as types
 from fastapi.responses import JSONResponse, Response
@@ -46,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 UI_MIME_TYPE = 'text/html;profile=mcp-app'
 UI_EXTENSION_ID = 'io.modelcontextprotocol/ui'
+# ChatGPT's alias for the widget domain (its docs: a compatibility alias for _meta.ui.domain).
+OPENAI_WIDGET_DOMAIN_KEY = 'openai/widgetDomain'
 
 PIPELINES_TABLE_URI = 'ui://rocketride/pipelines-table.html'
 DROPPER_URI = 'ui://rocketride/dropper.html'
@@ -92,24 +95,88 @@ def available_apps(apps_dir: Optional[Path] = None) -> List[AppSpec]:
     return [spec for spec in APPS if (base / spec.filename).is_file()]
 
 
-def list_ui_resources(
-    apps_dir: Optional[Path] = None, engine_origin: Optional[str] = None, mcp_origin: Optional[str] = None
-) -> List[types.Resource]:
-    """List the widget resources, stamping the dropper's CSP ``connectDomains``.
+def spec_for_uri(uri: str) -> Optional[AppSpec]:
+    """The registered spec for a ``ui://`` URI, or None."""
+    return next((spec for spec in APPS if spec.uri == uri), None)
 
-    The dropper uploads to ``/mcp/upload/{nonce}`` on THIS server
-    (``mcp_origin``); the engine origin stays listed (plan 3.7). The two are
-    one origin on an engine that mounts its own MCP module and differ when
-    ``rocketride_uri`` names another engine -- deduplicated, order kept.
+
+def origin_of(url: Optional[str]) -> Optional[str]:
+    """Return ``scheme://host[:port]`` for an http(s) URL, or None.
+
+    A CSP source must be a bare origin, and the engine URL can carry a path or
+    userinfo when ``RR_MCP_ENGINE_URI`` is set by hand. The host is lowercased,
+    userinfo, path, query and fragment are dropped, and a default port (80 for
+    http, 443 for https) is left out. Anything that is not an http or https URL
+    with a host, or has a bad port, gives None.
     """
-    out = []
-    for spec in available_apps(apps_dir):
-        meta = None
-        domains = [origin for origin in (engine_origin, mcp_origin) if origin]
-        if spec.needs_engine_origin and domains:
-            meta = {'ui': {'csp': {'connectDomains': list(dict.fromkeys(domains))}}}
-        out.append(types.Resource(uri=spec.uri, name=spec.title, mime_type=UI_MIME_TYPE, meta=meta))
-    return out
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or '').lower()
+    if scheme not in ('http', 'https') or not host:
+        return None
+    if ':' in host:
+        host = f'[{host}]'
+    if port is None or (scheme, port) in (('http', 80), ('https', 443)):
+        return f'{scheme}://{host}'
+    return f'{scheme}://{host}:{port}'
+
+
+def ui_meta(spec: AppSpec, engine_origin: Optional[str], mcp_origin: Optional[str], ui_domain: Optional[str]) -> dict:
+    """The ``_meta`` value for one widget resource.
+
+    The same value goes on the ``resources/list`` entry and on the
+    ``resources/read`` content item, so the two never differ. Hosts that follow
+    the MCP Apps spec, ChatGPT among them, read it from the read result.
+
+    Every widget declares a CSP. The bundles are single files with no outside
+    scripts, styles, fonts or frames, so ``resourceDomains`` is empty, and
+    ``frameDomains`` and ``baseUriDomains`` are left out so the host's default
+    of none applies. Only the dropper talks to the network: it uploads to
+    ``/mcp/upload/{nonce}`` on THIS server (``mcp_origin``), and the engine origin
+    stays listed (plan 3.7). The two are one origin on an engine that mounts its
+    own MCP module and differ when ``rocketride_uri`` names another engine, so
+    its ``connectDomains`` holds each of them once, in that order.
+
+    ``ui_domain`` (``MCP_UI_DOMAIN``) goes only under ChatGPT's own key,
+    ``openai/widgetDomain``, never as ``ui.domain``: each host has its own
+    domain format, and Claude shows an error instead of the app when
+    ``ui.domain`` is not its hash of the connector URL. Hosts other than
+    ChatGPT get no domain and use their default sandbox origin.
+    """
+    connect: List[str] = []
+    if spec.needs_engine_origin:
+        for url in (engine_origin, mcp_origin):
+            origin = origin_of(url)
+            if origin and origin not in connect:
+                connect.append(origin)
+    meta: dict = {'ui': {'csp': {'connectDomains': connect, 'resourceDomains': []}}}
+    if ui_domain:
+        meta[OPENAI_WIDGET_DOMAIN_KEY] = ui_domain
+    return meta
+
+
+def list_ui_resources(
+    apps_dir: Optional[Path] = None,
+    engine_origin: Optional[str] = None,
+    mcp_origin: Optional[str] = None,
+    ui_domain: Optional[str] = None,
+) -> List[types.Resource]:
+    """List the widget resources, each with the ``_meta`` its read result carries (``ui_meta``)."""
+    return [
+        types.Resource(
+            uri=spec.uri,
+            name=spec.title,
+            mime_type=UI_MIME_TYPE,
+            meta=ui_meta(spec, engine_origin, mcp_origin, ui_domain),
+        )
+        for spec in available_apps(apps_dir)
+    ]
 
 
 # Widget bundles are static after the build; cache reads per path with the

@@ -8,7 +8,7 @@
 	"path": "nodes.tool_exa_search",
 	"prefix": "exa",
 	"icon": "exa.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_exa_search",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_exa_search",
 	"description": ["Exposes Exa semantic web search as an agent tool.", "Performs real-time web searches via the Exa API and returns structured results with titles, URLs, text content, relevance scores, and dates."],
 	"tile": [],
 	"lanes": {},

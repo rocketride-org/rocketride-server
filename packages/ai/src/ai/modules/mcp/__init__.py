@@ -6,6 +6,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -18,6 +19,7 @@ from ai.web import oauth_resource, openai_apps_challenge
 from . import apps as apps_mod
 from . import auth
 from . import identity
+from .apps import origin_of
 from .engine import make_engine_client
 from .handlers import build_mcp_server
 from .registry import TaskRegistry
@@ -638,6 +640,89 @@ def _warn_defaulted_addresses(engine_uri: str, engine_uri_rule: str, mcp_origin:
         )
 
 
+ENV_UI_DOMAIN = 'MCP_UI_DOMAIN'
+
+
+_HOST_LABEL = re.compile(r'(?!-)[a-z0-9-]{1,63}(?<!-)')
+# A browser parses a host whose last label is a number as an IPv4 address (the URL
+# standard's "ends in a number" rule), so such a host must be a dotted-quad address.
+_NUMERIC_LABEL = re.compile(r'[0-9]+|0x[0-9a-f]*')
+
+
+def _valid_host(host: str) -> bool:
+    """Whether ``host`` (lowercase, no brackets) is a host a browser reads as written.
+
+    ``urlsplit`` does not validate the host, so a value such as
+    ``https://widgets example.test`` would otherwise pass as an origin. Accepted:
+    an IPv6 address without a scope ID, a dotted-quad IPv4 address, or an ASCII
+    DNS name whose last label is not a number. An internationalized name must be
+    given in its ``xn--`` form: Python's ``idna`` codec follows IDNA 2003, which
+    maps some names differently from browsers.
+    """
+    if ':' in host:
+        try:
+            return ipaddress.IPv6Address(host).scope_id is None
+        except ValueError:
+            return False
+    labels = host.split('.')
+    if _NUMERIC_LABEL.fullmatch(labels[-1]):
+        try:
+            ipaddress.IPv4Address(host)
+        except ValueError:
+            return False
+        return True
+    return len(host) <= 253 and all(_HOST_LABEL.fullmatch(label) for label in labels)
+
+
+def _widget_domain(value: str) -> Optional[str]:
+    """Return ``value`` as an origin, or None if it is not a usable widget domain.
+
+    It must be a bare https origin (http only on a loopback host, a local
+    engine) with a valid host: no path, query, fragment or user info.
+    """
+    try:
+        parts = urlsplit(value)
+        _ = parts.port  # raises ValueError for a bad port
+    except ValueError:
+        return None
+    if parts.path not in ('', '/') or parts.query or parts.fragment or '@' in parts.netloc:
+        return None
+    if not _valid_host(parts.hostname or ''):
+        return None
+    origin = origin_of(value)
+    if origin is None:
+        return None
+    if origin.startswith('http://') and not _targets_loopback_host(origin):
+        return None
+    return origin
+
+
+def _resolve_ui_domain() -> Optional[str]:
+    """Resolve the ChatGPT widget domain from ``MCP_UI_DOMAIN``, or None.
+
+    Each host has its own format for a widget domain, and Claude shows an error
+    instead of the app when the value is not the one it derives from the
+    connector URL. So the domain is only ever sent as ChatGPT's own key,
+    ``openai/widgetDomain`` (see ``apps.ui_meta``), and only when the operator
+    sets it. A value that is not an https origin (or http on loopback) is
+    ignored with one warning; it never stops the engine.
+    """
+    value = (os.environ.get(ENV_UI_DOMAIN) or '').strip()
+    if not value:
+        return None
+    domain = _widget_domain(value)
+    if domain is None:
+        # Name the variable, never the value: a malformed value can carry a credential
+        # where a parser would not find user info to strip.
+        logger.warning(
+            'Ignoring %s for the MCP widget domain: it must be an https origin (http only on loopback) whose host is '
+            'an IP address or an ASCII name (the xn-- form for an internationalized name), with no path, query or '
+            'user info. No widget domain is sent.',
+            ENV_UI_DOMAIN,
+        )
+    return domain
+
+
 def _log_bind_mode(bind_host: str, local_engine: bool, host_configured: bool) -> None:
     """Log the bind mode MCP resolved, and what that mode grants.
 
@@ -750,8 +835,15 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # EngineClient just to read a string. See handlers.py's docstring.
     # ------------------------------------------------------------------
     engine_origin = _base_url_from_uri(engine_uri)
+    ui_domain = _resolve_ui_domain()
+    logger.info('MCP widget domain for ChatGPT: %s', ui_domain or 'not set')
     mcp_server = build_mcp_server(
-        engine_factory, task_registry, engine_origin=engine_origin, mcp_origin=mcp_origin, local_engine=local_engine
+        engine_factory,
+        task_registry,
+        engine_origin=engine_origin,
+        mcp_origin=mcp_origin,
+        local_engine=local_engine,
+        ui_domain=ui_domain,
     )
 
     session_manager = StreamableHTTPSessionManager(

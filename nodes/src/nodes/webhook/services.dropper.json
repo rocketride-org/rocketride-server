@@ -60,7 +60,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "dropper.svg",
-	"documentation": "https://docs.rocketride.org/nodes/webhook/dropper",
+	"documentation": "https://docs.rocketride.ai/nodes/webhook/dropper",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes

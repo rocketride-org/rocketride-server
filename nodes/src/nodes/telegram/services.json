@@ -9,7 +9,7 @@
 	"prefix": "Telegram",
 	"description": ["A Telegram Bot source node that receives messages from users via the Telegram Bot API. ", "Supports text messages and media files (images, audio, voice, video, documents). ", "Each message type is routed to the appropriate pipeline lane. ", "Pipeline responses are automatically sent back as replies to the sender. ", "Supports both long polling (for local/private setups) and webhook (for production)."],
 	"icon": "telegram.svg",
-	"documentation": "https://docs.rocketride.org/nodes/telegram",
+	"documentation": "https://docs.rocketride.ai/nodes/telegram",
 	"tile": ["Mode: ${parameters.telegram.mode}"],
 	"lanes": {
 		"_source": ["text", "image", "audio", "video", "tags"]

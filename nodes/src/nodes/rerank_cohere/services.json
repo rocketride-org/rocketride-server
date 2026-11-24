@@ -57,7 +57,7 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://docs.rocketride.org/nodes/rerank_cohere",
+	"documentation": "https://docs.rocketride.ai/nodes/rerank_cohere",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of

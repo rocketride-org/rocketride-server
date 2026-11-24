@@ -13,6 +13,7 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 
 import { mountBrandHeader } from '../shared/brand';
+import { applyHostTheme } from '../shared/host-theme';
 import '../shared/theme.css';
 
 interface TaskRow {
@@ -22,6 +23,7 @@ interface TaskRow {
 }
 
 const app = new App({ name: 'RocketRide pipelines table', version: '0.1.0' });
+applyHostTheme(app);
 const root = document.getElementById('root') as HTMLElement;
 // Announce refresh/terminate re-renders to assistive technology.
 root.setAttribute('aria-live', 'polite');
@@ -37,7 +39,7 @@ function parseRows(result: unknown): TaskRow[] {
 	// Tool results arrive as [{ type: 'text', text: '<json>' }].
 	const text = (res.content ?? []).find((c) => c.type === 'text')?.text;
 	if (res.isError) {
-		throw new Error(text || 'tool call failed');
+		throw failure(text);
 	}
 	if (!text) throw new Error('malformed tool result (missing text content)');
 	let payload: { ok?: boolean; tasks?: TaskRow[]; message?: string };
@@ -54,12 +56,47 @@ function parseRows(result: unknown): TaskRow[] {
 	return payload.tasks;
 }
 
-/** Error state that keeps Refresh available — assigning root.textContent
- * would wipe every child including the button, dead-ending the widget. */
+/**
+ * A failed tool result as an Error whose message is the readable cause: the
+ * server's own `message` (for example a waitlist refusal or a timeout), or
+ * the plain text. The raw text rides along for the console.
+ */
+function failure(text: string | undefined): Error & { raw?: string } {
+	let cause = text || 'the tool call failed';
+	try {
+		const payload = JSON.parse(text ?? '') as { message?: unknown };
+		cause = typeof payload.message === 'string' && payload.message ? payload.message : 'the tool call failed';
+	} catch {
+		// Not JSON: the text itself is the cause.
+	}
+	return Object.assign(new Error(cause), { raw: text });
+}
+
+function causeOf(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+/** A one-sentence state with Refresh below it, so the widget can always
+ * recover. The sentence gets its own line; the button keeps full strength. */
+function showMessage(message: string, kind: 'empty' | 'error'): void {
+	root.classList.remove('empty');
+	const text = document.createElement('p');
+	text.className = kind === 'error' ? 'rr-message rr-message-error' : 'rr-message';
+	text.textContent = message;
+	root.replaceChildren(text, makeRefreshButton());
+}
+
 function showError(message: string): void {
-	root.classList.add('empty');
-	root.replaceChildren();
-	root.append(message, makeRefreshButton());
+	showMessage(message, 'error');
+}
+
+/** A failed row action: one sentence between the table and Refresh. */
+function showRowError(message: string): void {
+	root.querySelector('.rr-status')?.remove();
+	const text = document.createElement('p');
+	text.className = 'rr-message rr-message-error rr-status';
+	text.textContent = message;
+	root.insertBefore(text, root.lastElementChild);
 }
 
 function makeRefreshButton(): HTMLButtonElement {
@@ -74,14 +111,13 @@ function makeRefreshButton(): HTMLButtonElement {
 function render(rows: TaskRow[]): void {
 	root.classList.remove('empty');
 	if (rows.length === 0) {
-		root.classList.add('empty');
 		// Keep Refresh available in the empty state too, so the widget can
 		// recover once pipelines start.
-		root.replaceChildren();
-		root.append('No pipelines running.', makeRefreshButton());
+		showMessage('No pipelines are running.', 'empty');
 		return;
 	}
 	const table = document.createElement('table');
+	table.className = 'rr-table';
 	table.innerHTML = '<thead><tr><th>Name</th><th>Description</th><th>Token</th><th></th></tr></thead>';
 	const tbody = document.createElement('tbody');
 	for (const row of rows) {
@@ -98,20 +134,25 @@ function render(rows: TaskRow[]): void {
 		stop.textContent = 'Terminate';
 		stop.onclick = async () => {
 			stop.disabled = true;
+			stop.textContent = 'Stopping…';
 			try {
 				// terminate's schema takes the task address (see execution.py _TERMINATE_SCHEMA).
 				const result = await app.callServerTool({ name: 'terminate', arguments: { address: row.token } });
 				// callServerTool resolves with isError set on a server-side tool
 				// failure instead of rejecting — treat that as a failure too, or
 				// the row would stay visible with its button dead.
-				if ((result as { isError?: boolean }).isError) {
-					throw new Error('terminate reported an error');
+				const res = result as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+				if (res.isError) {
+					throw failure((res.content ?? []).find((c) => c.type === 'text')?.text);
 				}
 				await refresh();
 			} catch (err) {
 				stop.disabled = false;
-				stop.textContent = 'Terminate (failed — retry)';
-				console.error('terminate failed', err);
+				stop.textContent = 'Retry';
+				// The task may already be gone, so say why the stop failed, not that it still runs.
+				// A Refresh that finished first has replaced this row; leave the new list alone.
+				if (tr.isConnected) showRowError(`Could not stop "${row.name}": ${causeOf(err)}`);
+				console.error('terminate failed', err, (err as { raw?: string }).raw);
 			}
 		};
 		actions.appendChild(stop);
@@ -131,9 +172,8 @@ async function refresh(): Promise<void> {
 		const result = await app.callServerTool({ name: 'list_running_pipelines', arguments: {} });
 		render(parseRows(result));
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		showError(`Failed to refresh pipelines: ${msg}`);
-		console.error('refresh failed', err);
+		showError(`Could not refresh the list: ${causeOf(err)}`);
+		console.error('refresh failed', err, (err as { raw?: string }).raw);
 	}
 }
 
@@ -144,12 +184,11 @@ app.ontoolresult = (result) => {
 	try {
 		render(parseRows(result));
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		showError(`Failed to render pipelines: ${msg}`);
-		console.error('render failed', err);
+		showError(`Could not load the running pipelines: ${causeOf(err)}`);
+		console.error('render failed', err, (err as { raw?: string }).raw);
 	}
 };
 app.connect().catch((err) => {
-	const msg = err instanceof Error ? err.message : String(err);
-	showError(`Could not connect to the MCP host: ${msg}`);
+	showError('Could not connect to the MCP host.');
+	console.error('connect failed', err);
 });

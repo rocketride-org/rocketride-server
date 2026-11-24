@@ -53,7 +53,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "thumbnail.svg",
-	"documentation": "https://docs.rocketride.org/nodes/thumbnail",
+	"documentation": "https://docs.rocketride.ai/nodes/thumbnail",
 	//
 	//
 	//	Optional:

@@ -98,6 +98,7 @@ def build_mcp_server(
     engine_origin: Optional[str] = None,
     mcp_origin: Optional[str] = None,
     local_engine: bool = False,
+    ui_domain: Optional[str] = None,
 ) -> Server:
     """Build and return a low-level MCP Server wired with tools and resources.
 
@@ -128,7 +129,7 @@ def build_mcp_server(
             `apps/dist` directory when omitted.
         engine_origin: The engine's HTTP(S) origin, precomputed by the caller
             from its resolved engine URI (see `__init__._resolve_engine_uri`),
-            for widget CSP stamping in `_on_list_resources`. Reading the
+            for the dropper widget's CSP (see `apps.ui_meta`). Reading the
             configured URI directly here -- rather than calling
             `engine_factory().base_url` -- avoids building (and, on the
             per-caller path above, leaking into the request's close bucket) a
@@ -141,6 +142,10 @@ def build_mcp_server(
             in ``__init__.initModule``). Only then are ``local_engine_only``
             tools such as ``send_files`` listed and dispatched; the default is
             the deployed surface. Ignored when ``registry`` is passed.
+        ui_domain: ChatGPT's widget domain (an origin) from ``MCP_UI_DOMAIN``,
+            resolved once by ``__init__.initModule`` and sent on every widget
+            resource as ``openai/widgetDomain`` (see ``apps.ui_meta``). None
+            sends no domain, and every host uses its default.
 
     Returns:
         A configured mcp.server.lowlevel.Server ready to run.
@@ -209,7 +214,8 @@ def build_mcp_server(
 
     async def _on_list_resources(ctx, params: types.PaginatedRequestParams | None) -> types.ListResourcesResult:
         return types.ListResourcesResult(
-            resources=resources_mod.list_resources() + apps_mod.list_ui_resources(apps_dir, engine_origin, mcp_origin),
+            resources=resources_mod.list_resources()
+            + apps_mod.list_ui_resources(apps_dir, engine_origin, mcp_origin, ui_domain),
             ttl_ms=RESOURCES_LIST_TTL_MS,
             cache_scope=CACHE_SCOPE,
         )
@@ -218,8 +224,18 @@ def build_mcp_server(
         uri_str = str(params.uri)
         ui_html = apps_mod.read_ui_resource(uri_str, apps_dir)
         if ui_html is not None:
+            # Hosts read the widget's CSP and domain from this content item, not
+            # from the list entry, so the read carries the same _meta the list does.
+            meta = apps_mod.ui_meta(apps_mod.spec_for_uri(uri_str), engine_origin, mcp_origin, ui_domain)
             return types.ReadResourceResult(
-                contents=[types.TextResourceContents(uri=params.uri, mime_type=apps_mod.UI_MIME_TYPE, text=ui_html)],
+                contents=[
+                    types.TextResourceContents(
+                        uri=params.uri,
+                        mime_type=apps_mod.UI_MIME_TYPE,
+                        text=ui_html,
+                        meta=meta,
+                    )
+                ],
                 ttl_ms=UI_READ_TTL_MS,
                 cache_scope=CACHE_SCOPE,
             )

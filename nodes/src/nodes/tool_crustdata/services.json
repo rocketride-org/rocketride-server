@@ -8,7 +8,7 @@
 	"path": "nodes.tool_crustdata",
 	"prefix": "crustdata",
 	"icon": "crustdata.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_crustdata",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_crustdata",
 	"description": ["Exposes Crustdata's B2B company and people search as agent tools.", "Searches Crustdata's indexed company and people data by filter criteria (industry, headcount, funding, current company, title, and more) and returns structured records."],
 	"tile": [],
 	"lanes": {},

@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.tool_google_workspace.drive",
 	"icon": "drive.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_google_workspace/drive",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_google_workspace/drive",
 	"description": [
 		"Exposes Google Drive operations as agent tools.\n",
 		"List and search files, read metadata, download binary files and export native Docs/Sheets/Slides, ",

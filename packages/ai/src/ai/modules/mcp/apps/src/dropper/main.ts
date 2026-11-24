@@ -19,6 +19,7 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 
 import { mountBrandHeader } from '../shared/brand';
+import { applyHostTheme } from '../shared/host-theme';
 import '../shared/theme.css';
 
 interface DropperInfo {
@@ -47,6 +48,7 @@ const SPENT_MESSAGE =
 	'This upload link was already used or its task has ended. Ask the assistant to run run_dropper_pipe again.';
 
 const app = new App({ name: 'RocketRide dropper', version: '0.1.0' });
+applyHostTheme(app);
 const root = document.getElementById('root') as HTMLElement;
 let info: DropperInfo | null = null;
 
@@ -146,8 +148,9 @@ function renderBlock(block: Block): HTMLElement {
 	}
 	const values = Array.isArray(block.value) ? block.value : [block.value];
 	for (const value of values) {
+		// Trailing newlines from the pipeline would show as a blank tail in the box.
 		card.appendChild(el('pre', undefined,
-			typeof value === 'string' ? value : JSON.stringify(value, null, 2)));
+			typeof value === 'string' ? value.trimEnd() : JSON.stringify(value, null, 2)));
 	}
 	return card;
 }
@@ -172,13 +175,17 @@ function renderResults(data: DataResult): void {
 		el('p', undefined, `${data.objectsCompleted}/${data.objectsRequested} objects processed`),
 	);
 
-	// Failed objects carry a formatted exception instead of a pipe result.
+	// Failed objects carry a formatted exception ({status, error: {message, file, lineno}})
+	// instead of a pipe result: show its message, and keep the whole object in the console.
 	for (const [objectKey, objectValue] of Object.entries(data.objects ?? {})) {
-		const status = (objectValue as Record<string, unknown> | null)?.status;
-		if (status !== 'OK') {
+		const record = objectValue as Record<string, unknown> | null;
+		if (record?.status !== 'OK') {
+			const error = record?.error as Record<string, unknown> | undefined;
+			const detail = typeof error?.message === 'string' && error.message ? error.message : 'This file could not be processed.';
+			console.error('object failed', objectKey, objectValue);
 			const card = el('div', 'result-object error');
 			card.appendChild(el('h3', undefined, `${objectKey} — failed`));
-			card.appendChild(el('pre', undefined, JSON.stringify(objectValue, null, 2)));
+			card.appendChild(el('p', 'rr-message', detail));
 			wrap.appendChild(card);
 		}
 	}
@@ -220,7 +227,13 @@ function renderResults(data: DataResult): void {
 	wrap.appendChild(panel);
 	// Each link is one-time: a further drop needs the next one the server
 	// handed back; without it the task has ended.
-	root.replaceChildren(wrap, info?.upload_url ? buildDropzone('Drop more files') : el('p', 'empty', SPENT_MESSAGE));
+	if (info?.upload_url) {
+		const more = buildDropzone('Drop more files');
+		more.classList.add('compact');
+		root.replaceChildren(wrap, more);
+	} else {
+		root.replaceChildren(wrap, el('p', 'rr-message', SPENT_MESSAGE));
+	}
 }
 
 function upload(files: FileList | File[]): void {
@@ -230,7 +243,7 @@ function upload(files: FileList | File[]): void {
 	const bar = el('div', 'bar');
 	const fill = el('div', 'fill');
 	bar.appendChild(fill);
-	const label = el('p', undefined, 'Uploading…');
+	const label = el('p', 'rr-busy', 'Uploading…');
 	root.replaceChildren(label, bar);
 
 	// Once the server has answered, the link in hand is spent whatever the
@@ -243,7 +256,7 @@ function upload(files: FileList | File[]): void {
 		if (e.lengthComputable) fill.style.width = `${Math.round((e.loaded / e.total) * 100)}%`;
 	};
 	xhr.upload.onload = () => {
-		label.textContent = 'Processing… (the pipeline is running; this can take a while)';
+		label.textContent = 'Processing your file. This can take a minute.';
 	};
 	xhr.onload = () => {
 		let envelope: Envelope | null = null;
@@ -259,24 +272,29 @@ function upload(files: FileList | File[]): void {
 			return;
 		}
 		if (xhr.status === 404) {
-			root.replaceChildren(el('p', 'empty', SPENT_MESSAGE));
+			root.replaceChildren(el('p', 'rr-message', SPENT_MESSAGE));
 			return;
 		}
+		// The error envelope is { status: 'Error', error: { message, file, lineno } }:
+		// show its message, and keep the whole answer in the console.
+		const raw = envelope?.error?.message;
+		const detail = typeof raw === 'string' ? raw : '';
 		// 413: the server names its byte limit and hands back a link to retry
 		// with once the drop is split into smaller uploads.
 		const message = xhr.status === 413
 			? `Upload refused: ${String(envelope?.error?.error ?? 'the upload is too large')}`
 			: envelope?.status === 'Error'
-			? `Pipeline error: ${JSON.stringify(envelope.error ?? {})}`
-			: `Unexpected response (HTTP ${xhr.status})`;
+			? (detail ? `The pipeline returned an error: ${detail}` : 'The pipeline returned an error.')
+			: `The server sent an unexpected answer (HTTP ${xhr.status}).`;
+		console.error('upload failed', xhr.status, xhr.responseText);
 		root.replaceChildren(
-			el('p', 'empty', message),
-			info?.upload_url ? buildDropzone('Try again') : el('p', 'empty', SPENT_MESSAGE),
+			el('p', 'rr-message rr-message-error', message),
+			info?.upload_url ? buildDropzone('Try again') : el('p', 'rr-message', SPENT_MESSAGE),
 		);
 	};
 	xhr.onerror = () => {
 		root.replaceChildren(
-			el('p', 'empty', 'Upload failed — network/CSP error. Check the engine is reachable.'),
+			el('p', 'rr-message rr-message-error', 'The upload could not reach the pipeline. Check that the engine is running, then try again.'),
 			buildDropzone('Try again'),
 		);
 	};
@@ -285,7 +303,7 @@ function upload(files: FileList | File[]): void {
 	xhr.timeout = 30 * 60 * 1000;
 	xhr.ontimeout = () => {
 		root.replaceChildren(
-			el('p', 'empty', 'Upload timed out. The pipeline may still be running.'),
+			el('p', 'rr-message rr-message-error', 'The upload timed out. The pipeline may still be running.'),
 			buildDropzone('Try again'),
 		);
 	};
@@ -336,12 +354,12 @@ app.ontoolresult = (result) => {
 	info = parseInfo(result);
 	root.classList.remove('empty');
 	if (!info) {
-		root.textContent = 'run_dropper_pipe did not return an upload URL.';
+		root.replaceChildren(el('p', 'rr-message rr-message-error', 'The pipeline did not start, so there is nowhere to upload files yet.'));
 		return;
 	}
 	root.replaceChildren(buildDropzone('Drop files here, or click to choose'));
 };
 app.connect().catch(() => {
 	root.classList.remove('empty');
-	root.replaceChildren(el('p', 'empty', 'Could not connect to the MCP host.'));
+	root.replaceChildren(el('p', 'rr-message rr-message-error', 'Could not connect to the MCP host.'));
 });
