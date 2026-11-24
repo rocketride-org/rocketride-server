@@ -233,12 +233,21 @@ async def test_request_without_a_server_fails_at_once():
 def test_request_sync_gives_up_when_the_server_loop_never_runs_it(monkeypatch):
     monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.05)
     stalled = TaskChannel()
-    stalled.bind(asyncio.new_event_loop())
+    loop = asyncio.new_event_loop()
+    stalled.bind(loop)
 
-    started = time.monotonic()
-    with pytest.raises(ChannelError, match='timeout'):
-        stalled.request_sync('echo', timeout=0.05)
-    assert time.monotonic() - started < 1
+    try:
+        started = time.monotonic()
+        with pytest.raises(ChannelError, match='timeout'):
+            stalled.request_sync('echo', timeout=0.05)
+        assert time.monotonic() - started < 1
+    finally:
+        # The loop was handed the request and never ran it. Let it take the
+        # queued call now: it finds the request cancelled and drops it, so the
+        # request's coroutine is closed here instead of being collected
+        # unawaited during a later test.
+        loop.run_until_complete(asyncio.sleep(0.01))
+        loop.close()
 
 
 def test_request_sync_on_the_servers_own_loop_is_refused(task_side):
