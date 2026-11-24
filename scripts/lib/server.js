@@ -21,7 +21,7 @@ const fs = require('fs');
 const net = require('net');
 const { spawn } = require('child_process');
 const { exists } = require('./fs');
-const { DIST_ROOT } = require('./paths');
+const { BUILD_ROOT, DIST_ROOT } = require('./paths');
 
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const READY_MESSAGE = 'Application startup complete.';
@@ -35,6 +35,14 @@ const LOOPBACK_HOST = '127.0.0.1';
 // test_files/ and htmlcov/. Packaging takes an explicit file list, so the logs
 // never reach a release archive.
 const TEST_LOG_DIR = path.join(SERVER_DIR, 'test-logs');
+
+// Where a test server keeps its file store when nothing names one: a folder of
+// its own, emptied at every start. Without it the server falls back to the
+// developer's own store (~/.rocketlib/store), every run leaves its deployment
+// projects there for good, and each login reads all of them (the file backend's
+// publish_list reads every project's meta): 1100 leftovers made a connect take
+// eight seconds and pushed whole suites past their timeouts.
+const TEST_STORE_DIR = path.join(BUILD_ROOT, 'test-store');
 
 // The level a server writing a log file traces at when no --trace is given.
 const LOG_FILE_TRACE = ['debugOut'];
@@ -275,6 +283,18 @@ async function startServer(options) {
 		serverEnv.RR_APIKEY = serverEnv.ROCKETRIDE_APIKEY;
 	}
 
+	// A store of the test server's own, empty at start (see TEST_STORE_DIR),
+	// unless the caller or the environment names one. One folder per suite, so
+	// two suites' servers never share or empty each other's.
+	if (!serverEnv.RR_STORE_URL) {
+		const storeDir = path.join(TEST_STORE_DIR, logName || 'server');
+		await fs.promises.rm(storeDir, { recursive: true, force: true });
+		await fs.promises.mkdir(storeDir, { recursive: true });
+		serverEnv.RR_STORE_URL = `filesystem://${storeDir.replace(/\\/g, '/')}`;
+	}
+	// Returned with the result: a test that checks the disk must look where the server writes
+	const storeUrl = serverEnv.RR_STORE_URL;
+
 	return new Promise((resolve, reject) => {
 		const serverProcess = spawn(serverExe, serverArgs, {
 			cwd: SERVER_DIR,
@@ -377,13 +397,13 @@ async function startServer(options) {
 							);
 						}
 
-						resolve({ server: serverProcess, port: actualPort, uri, diagnostics });
+						resolve({ server: serverProcess, port: actualPort, uri, diagnostics, storeUrl });
 					})
 					.catch((err) => {
 						// The probe is diagnostics only: if it fails, report the server
 						// ready rather than leave startup waiting forever
 						diagnostics.reachability = { error: err.message };
-						resolve({ server: serverProcess, port: actualPort, uri, diagnostics });
+						resolve({ server: serverProcess, port: actualPort, uri, diagnostics, storeUrl });
 					});
 			}
 		};
