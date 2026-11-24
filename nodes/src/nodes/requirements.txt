@@ -3,7 +3,8 @@
 # modules, including nodes, ai module, etc
 
 # Make sure wheel is loaded so we can load all older dependencies
-certifi
+# GHSA-6q48-6c7w-9gw2: require the patched trust bundle for all nodes.
+certifi>=2026.10.19
 charset-normalizer
 # Transitive dep of requests/urllib3; pinned explicitly to cover
 # GHSA-r6ph-v2qm-q3c2 (SECT curve subgroup attack, fix 46.0.5),

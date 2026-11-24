@@ -1,0 +1,190 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Synthetic helpdesk demo",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 126
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_rocketride_1",
+      "provider": "agent_rocketride",
+      "name": "Sign-in helpdesk",
+      "config": {
+        "agent_description": "Investigates Auth0 sign-in problems using read-only evidence.",
+        "instructions": [
+          "Use only synthetic test accounts and synthetic sign-in issues. Ask for the test account email and issue if they are missing.",
+          "Use search_users with the email's original capitalization. If none or several match, explain and ask for clarification as needed.",
+          "For the selected account use get_user, get_user_blocks, and get_user_logs. Use get_log_event when more detail is needed.",
+          "Base the diagnosis on returned evidence and distinguish administrative blocks from brute-force protection. Explain missing data and errors rather than guessing.",
+          "Never make account changes. This pipeline is read-only."
+        ],
+        "max_waves": 10,
+        "require_tool_call": false,
+        "tool_timeout": 300,
+        "verify_args": "",
+        "verify_tool": "",
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 107
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "memory_internal_1",
+      "provider": "memory_internal",
+      "name": "Memory (Internal)",
+      "config": {
+        "type": "memory_internal"
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 430
+        },
+        "measured": {
+          "width": 150,
+          "height": 54
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "memory",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 68
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    },
+    {
+      "id": "tool_auth0_1",
+      "provider": "tool_auth0",
+      "name": "Auth0",
+      "config": {
+        "clientId": "${ROCKETRIDE_AUTH0_DEMO_CLIENT_ID}",
+        "clientSecret": "${ROCKETRIDE_AUTH0_DEMO_CLIENT_SECRET}",
+        "domain": "${ROCKETRIDE_AUTH0_DEMO_DOMAIN}",
+        "type": "tool_auth0",
+        "name": "Auth0"
+      },
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 370
+        },
+        "measured": {
+          "width": 150,
+          "height": 61
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_ollama_1",
+      "provider": "llm_ollama",
+      "name": "Ollama",
+      "config": {
+        "profile": "custom",
+        "custom": {
+          "serverbase": "",
+          "model": "",
+          "modelOutputTokens": 4096,
+          "modelTotalTokens": 32768
+        },
+        "name": "Ollama"
+      },
+      "ui": {
+        "position": {
+          "x": 80,
+          "y": 370
+        },
+        "measured": {
+          "width": 150,
+          "height": 79
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "31ce4969-a810-4c18-b112-68c0f5913572",
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 18
+}

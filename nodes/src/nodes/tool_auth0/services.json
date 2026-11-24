@@ -1,0 +1,71 @@
+{
+	"title": "Auth0",
+	"protocol": "tool_auth0://",
+	"classType": [
+		"tool"
+	],
+	"capabilities": [
+		"invoke",
+		"experimental"
+	],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_auth0",
+	"prefix": "auth0",
+	"icon": "auth0.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_auth0",
+	"description": [
+		"Investigate Auth0 sign-in failures with read-only agent tools.",
+		"Inspect user profiles, authentication events, and brute-force blocks."
+	],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Auth0",
+				"domain": "",
+				"clientId": "",
+				"clientSecret": ""
+			}
+		}
+	},
+	"fields": {
+		"auth0.domain": {
+			"type": "string",
+			"title": "Domain",
+			"description": "Auth0-managed tenant hostname.",
+			"default": ""
+		},
+		"auth0.clientId": {
+			"type": "string",
+			"title": "Client ID",
+			"description": "Read-only M2M application client ID.",
+			"default": ""
+		},
+		"auth0.clientSecret": {
+			"type": "string",
+			"title": "Client secret",
+			"description": "Enter a RocketRide variable reference such as ${ROCKETRIDE_AUTH0_CLIENT_SECRET} to keep the read-only M2M client secret out of the pipeline file.",
+			"default": "",
+			"pattern": "^\\$\\{ROCKETRIDE_[A-Z0-9_]+\\}$",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Auth0",
+			"properties": [
+				"type",
+				"auth0.domain",
+				"auth0.clientId",
+				"auth0.clientSecret"
+			]
+		}
+	]
+}
