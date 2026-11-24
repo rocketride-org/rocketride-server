@@ -163,7 +163,7 @@ test('billing details and dashboard remain workspace-scoped during an A to B to 
 		const waitingForADetails = readView();
 		assert.equal(waitingForADetails.authUser?.organization?.id, 'a');
 		assert.deepEqual(waitingForADetails.subscriptions, []);
-		assert.equal(waitingForADetails.onPreviewSubscriptionChange, undefined);
+		assert.equal(waitingForADetails.onUpgradeSubscription, undefined);
 
 		assert.deepEqual(waitingForBBalance.subscriptions, [bRow]);
 		assert.equal(waitingForBBalance.billingLoading, false);
