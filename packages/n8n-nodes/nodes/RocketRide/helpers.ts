@@ -159,8 +159,9 @@ export function buildChatBody(params: ChatParams): BuiltBody {
 	return { body: JSON.stringify(question), contentType: 'application/rocketride-question' };
 }
 
-// Per-object bookkeeping keys that are not pipeline lane output.
-const INTERNAL_OBJECT_KEYS = new Set(['status', 'result_types']);
+// Per-object bookkeeping keys that are not pipeline lane output. `tokens` is the sum of an
+// object's token counts, written by the response node; no lane may use that key.
+const INTERNAL_OBJECT_KEYS = new Set(['status', 'result_types', 'tokens']);
 
 /**
  * Normalize a RocketRide result envelope into an ergonomic, lane-key-agnostic shape.
@@ -168,8 +169,8 @@ const INTERNAL_OBJECT_KEYS = new Set(['status', 'result_types']);
  * RocketRide names output lanes dynamically (e.g. `chat_response`, not `answers`), so
  * this never hard-codes lane names — the documented KeyError pitfall. For the common
  * single-object response it lifts the lane values to the top level; for multi-object
- * responses it returns the `objects` map. Counts and `resultTypes` are preserved under
- * `_rocketride`.
+ * responses it returns the `objects` map. Counts, `resultTypes` and a single object's
+ * `tokens` are preserved under `_rocketride`.
  */
 export function normalizeRunResult(data: IDataObject): IDataObject {
 	const objects =
@@ -188,14 +189,20 @@ export function normalizeRunResult(data: IDataObject): IDataObject {
 	if (objectKeys.length === 1) {
 		const only = objects[objectKeys[0]];
 		const lanes: IDataObject = {};
+		const single: IDataObject = { ...meta, object: objectKeys[0] };
 		if (only && typeof only === 'object') {
 			for (const [key, value] of Object.entries(only as IDataObject)) {
 				if (!INTERNAL_OBJECT_KEYS.has(key)) {
 					lanes[key] = value;
 				}
 			}
+			// Kept beside the other bookkeeping, for a workflow that accounts for usage
+			const tokens = (only as IDataObject).tokens;
+			if (tokens !== undefined) {
+				single.tokens = tokens;
+			}
 		}
-		return { ...lanes, _rocketride: { ...meta, object: objectKeys[0] } };
+		return { ...lanes, _rocketride: single };
 	}
 
 	return { objects, _rocketride: meta };

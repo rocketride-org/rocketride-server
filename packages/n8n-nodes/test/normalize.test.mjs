@@ -20,6 +20,27 @@ describe('normalizeRunResult', () => {
 		expect(out._rocketride.resultTypes).toEqual({ chat_response: 'answers' });
 	});
 
+	it('keeps the token counts of a single object as bookkeeping, not as a lane', () => {
+		const tokens = { input: 107, output: 13, cache_read: 50, cache_creation: 20 };
+		const data = {
+			objectsRequested: 1,
+			objectsCompleted: 1,
+			resultTypes: { answers: 'answers' },
+			objects: {
+				body: { status: 'OK', answers: ['hello'], result_types: { answers: 'answers' }, tokens },
+			},
+		};
+		const out = normalizeRunResult(data);
+		expect(out.answers).toEqual(['hello']);
+		expect(out.tokens).toBeUndefined();
+		expect(out._rocketride.tokens).toEqual(tokens);
+	});
+
+	it('adds no token counts when the object reports none', () => {
+		const data = { objects: { body: { status: 'OK', answers: ['hello'] } } };
+		expect('tokens' in normalizeRunResult(data)._rocketride).toBe(false);
+	});
+
 	it('keeps the objects map for multi-object responses', () => {
 		const data = {
 			objectsRequested: 2,

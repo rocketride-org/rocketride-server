@@ -34,7 +34,7 @@ Calls a deployed RocketRide pipeline and returns its result. Set **Pipeline Addr
 | **Chat** | a question to a chat-enabled pipeline (toggle **Expect JSON**, optional role) |
 
 - **`usableAsTool`** — an n8n AI Agent can call this node directly.
-- **Normalized output** — a single pipeline result is lifted to the top level. RocketRide names output lanes dynamically (e.g. `chat_response`, not `answers`), so the node never hard-codes lane names; counts and result types are kept under `_rocketride`.
+- **Normalized output** — a single pipeline result is lifted to the top level. RocketRide names output lanes dynamically (e.g. `chat_response`, not `answers`), so the node never hard-codes lane names; counts, result types and a result's token counts (`tokens`) are kept under `_rocketride`.
 
 ### RocketRide Trigger — RocketRide → n8n
 

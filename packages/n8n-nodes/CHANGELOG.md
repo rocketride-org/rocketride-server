@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file.
 ### Changed
 
 - The credential test calls the authenticated `GET /status`, so it checks the Base URL and the key together.
+- A single result's token counts (`tokens`: `input`, `output`, `cache_read`, `cache_creation`, which the server adds for text and JSON answers) are under `_rocketride.tokens`. They are not lifted to the top level, where every other key is a pipeline lane.
 
 ## [0.1.0]
 
