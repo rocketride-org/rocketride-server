@@ -205,10 +205,33 @@ def test_allocate_keys_never_shadows_a_submitted_key():
 def test_dropper_csp_admits_the_mcp_origin_next_to_the_engine_origin(tmp_path):
     (tmp_path / 'dropper.html').write_text('<!doctype html>', encoding='utf-8')
     [two] = apps.list_ui_resources(tmp_path, 'https://engine.example', 'https://mcp.example')
-    assert two.meta == {'ui': {'csp': {'connectDomains': ['https://engine.example', 'https://mcp.example']}}}
-    # one engine mounting its own MCP module: one origin, listed once
-    [one] = apps.list_ui_resources(tmp_path, 'https://api.example', 'https://api.example')
-    assert one.meta == {'ui': {'csp': {'connectDomains': ['https://api.example']}}}
+    assert two.meta == _csp('https://engine.example', 'https://mcp.example')
+    # one engine mounting its own MCP module: one origin, listed once, however each is written
+    [one] = apps.list_ui_resources(tmp_path, 'https://api.example', 'https://API.example:443/')
+    assert one.meta == _csp('https://api.example')
+
+
+def _csp(*connect):
+    """The CSP every widget declares: where it may connect, and no outside resources."""
+    return {'ui': {'csp': {'connectDomains': list(connect), 'resourceDomains': []}}}
+
+
+@pytest.mark.asyncio
+async def test_the_read_result_names_both_origins_as_the_list_entry_does(tmp_path):
+    """Hosts read a widget's CSP from resources/read: the dropper's must admit this server's origin there too."""
+    from mcp.client import Client
+
+    from ai.modules.mcp.handlers import build_mcp_server
+
+    (tmp_path / 'dropper.html').write_text('<!doctype html>', encoding='utf-8')
+    server = build_mcp_server(
+        lambda: None, apps_dir=tmp_path, engine_origin='https://engine.example', mcp_origin='https://mcp.example'
+    )
+    async with Client(server) as client:
+        [listed] = [r for r in (await client.list_resources()).resources if str(r.uri) == apps.DROPPER_URI]
+        [content] = (await client.read_resource(apps.DROPPER_URI)).contents
+    assert content.meta == _csp('https://engine.example', 'https://mcp.example')
+    assert listed.meta == content.meta
 
 
 def test_registry_caps_live_nonces_per_task_oldest_first(monkeypatch):
