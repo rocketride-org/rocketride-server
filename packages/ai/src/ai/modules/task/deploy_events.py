@@ -157,6 +157,15 @@ async def broadcast_app_changed(server: Any, org_id: str, app_id: str, action: s
         action: What changed ('build', 'publish', 'disable', 'remove', a
             review state, ...) — advisory; receivers re-fetch either way.
     """
+    # Publish, unpublish or rung repoint of an app: rebuild the public-page
+    # aggregate (coalesced, in the background; never delays the broadcast).
+    # The serving-cache drop is broadcast_deploy_changed's, for every kind.
+    try:
+        from ai.modules.shell.public_pages import app_changed
+
+        app_changed(app_id)
+    except Exception as e:
+        error(f'[DEPLOY] {app_id}: public-page rebuild scheduling failed: {e}')
     await broadcast_deploy_changed(server, org_id, '', app_id, action)
 
 

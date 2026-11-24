@@ -740,6 +740,26 @@ def test_db_access_empty_without_db_nodes():
     assert db_access(pipeline) == ([], True)
 
 
+def test_db_access_resolves_a_db_node_only_eaas_serves(monkeypatch):
+    """A DB node the server does not carry is resolved with the schema the node store keeps for it."""
+    import ai.modules.task.task_engine as engine
+    from ai.common import node_config
+
+    served = node_config.node_schema('rocketride_sql')
+    assert served is not None
+    pipeline = {'components': [{'id': 'db', 'provider': 'rocketride_sql'}]}
+
+    # The engine no longer knows the node; EaaS serves it
+    monkeypatch.setattr(node_config, 'getServiceSchema', lambda provider: None)
+    monkeypatch.setattr(engine.node_store, '_schemas', {'rocketride_sql': served})
+    assert db_access(pipeline) == ([('org', '')], False)
+
+    # Neither knows it: the run cannot be authorized for a database it cannot read the target of
+    monkeypatch.setattr(engine.node_store, '_schemas', {})
+    with pytest.raises(Exception, match='was not found'):
+        db_access(pipeline)
+
+
 def test_db_access_tolerates_malformed_components():
     """Missing components / non-dict entries must not raise at task start."""
     assert db_access({}) == ([], False)
@@ -1275,6 +1295,52 @@ def test_hosted_refusal_asks_the_gate_for_the_shared_host_on_a_hosted_engine_onl
     monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']) or 'no')
     assert engine.hosted_refusal({'components': []}) == ('no' if saas else None)
     assert checked == ([True] if saas else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('available', [True, False])
+async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypatch, available):
+    """The nodes a pipeline names that the server lacks are unpacked before the
+    engine starts, so its start-up scan loads them; one that cannot be had
+    refuses the launch and nothing is spawned.
+    """
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    order = []
+
+    def place(pipeline):
+        order.append(('place', [c['provider'] for c in pipeline['components']]))
+        if not available:
+            raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
+
+    monkeypatch.setattr(engine.node_store, 'place', place)
+    t = _task(source='src', pipeline={'components': [{'id': 'src', 'provider': 'llm_x'}]})
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._server = MagicMock(_config={})
+    t._launch_args = {}
+    t._default_env = AsyncMock(return_value={})
+    t._is_debugging = lambda: False
+    t._shares_host = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._build_subprocess_env = AsyncMock(return_value={})
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    async def spawn(*args, **kwargs):
+        order.append(('spawn',))
+        raise Launched()
+
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    with pytest.raises(Launched if available else RuntimeError, match=None if available else "pipeline's nodes"):
+        await TaskEngine.start_task(t)
+
+    assert order == ([('place', ['llm_x']), ('spawn',)] if available else [('place', ['llm_x'])])
+    # A start that fails ends the run, whichever step refused it
+    t._terminated.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1849,6 +1915,8 @@ def _event_task(run_kind='dev'):
     t._update_status = MagicMock()
     t._forward_task_event = AsyncMock()
     t._send_status_update = AsyncMock()
+    # No stop was requested: an exit the engine reports is the run's own
+    t._stop_reason = None
     return t
 
 
@@ -2145,6 +2213,27 @@ def test_saas_gate_matches_the_node_not_the_provider_name(component):
     assert problem and 'stdio MCP transport' in problem
 
 
+def test_saas_gate_sees_a_nosaas_node_that_only_eaas_serves(monkeypatch):
+    """A node EaaS serves is not in the engine's registry; the hosted gate
+    still reads its capabilities and refuses it.
+    """
+    import rocketlib
+
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: None)
+    pipeline = {'components': [{'id': 'src', 'provider': 'text_output'}]}
+
+    # Unknown to both: nothing to refuse on (the engine's own validation names an unknown provider)
+    monkeypatch.setattr(engine.node_store, '_definitions', {})
+    assert engine.hosted_refusal(pipeline) is None
+
+    monkeypatch.setattr(engine.node_store, '_definitions', {'text_output': {'capabilities': ['nosaas']}})
+    refusal = engine.hosted_refusal(pipeline)
+    assert refusal and 'not available on RocketRide Cloud' in refusal
+
+
 def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():
     def violation(component):
         return saas_pipeline_violation({'components': [component]}, _get_service, _mcp_node_config, shared_host=False)
@@ -2205,6 +2294,17 @@ async def test_exit_event_marks_the_run_as_reported():
     await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 3, 'message': 'boom'}})
     assert t._exit_event_seen is True
     assert (t._status.exitCode, t._status.exitMessage) == (3, 'boom')
+
+
+def test_a_new_run_starts_from_exit_code_zero():
+    """A run started again after an error: a stop by the server, which keeps the code, must not read the old one."""
+    t = _analytics_task()
+    t._status_trace = []
+    t.info = {}
+    t._status.exitCode = 3
+    t._status.exitMessage = 'boom'
+    TaskEngine._reset_status(t)
+    assert (t._status.exitCode, t._status.exitMessage) == (0, '')
 
 
 class _ExitingProcess:
@@ -2295,14 +2395,14 @@ def _ending_task(process_exit_code, *, was_running=True):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'stop_reason, status, outcome',
+    'stop_reason, status, exit_code, exit_message, outcome',
     [
-        (None, 'Stopped unexpectedly', 'error'),
+        (None, 'Stopped unexpectedly', 1, 'Stopped unexpectedly', 'error'),
         # A crash during a requested stop is part of the stop
-        ('user', 'Stopped', 'cancelled'),
+        ('user', 'Stopped', 0, '', 'cancelled'),
     ],
 )
-async def test_a_reported_crash_ends_the_task(stop_reason, status, outcome):
+async def test_a_reported_crash_ends_the_task(stop_reason, status, exit_code, exit_message, outcome):
     t = _ending_task(-6)
     t._stop_reason = stop_reason
     run_log = AsyncMock()
@@ -2310,7 +2410,7 @@ async def test_a_reported_crash_ends_the_task(stop_reason, status, outcome):
     t._run_logs = {'dev.user-1.acme.proj-test.src-id': run_log, 'dev.user-2.acme.proj-test.src-id': run_log}
     await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
     await TaskEngine._terminated(t)
-    assert t._status.status == status
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (status, exit_code, exit_message)
     run_log.end_run.assert_awaited_once()
     assert run_log.end_run.await_args.args[0] == outcome
 

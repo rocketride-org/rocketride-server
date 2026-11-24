@@ -624,7 +624,7 @@ test('startOAuth raises auth:start once per page load, past its one-shot guard',
 		assert.equal(signIns, 1, 'the guard lets one redirect start per page load');
 		assert.deepEqual(
 			peekQueuedCaptures().map((c) => [c.event, c.props, c.options]),
-			[['auth:start', { register: true, app_id: 'rocketride.home', from_path: '/pricing', auto: false, app: 'shell' }, { transport: 'sendBeacon' }]],
+			[['auth:start', { register: true, is_authed: false, app_id: 'rocketride.home', from_path: '/pricing', auto: false, app: 'shell' }, { transport: 'sendBeacon' }]],
 			'one auth:start on the shell reporter, raised past the guard, asking for teardown-surviving delivery',
 		);
 		assert.deepEqual(manager.drainTelemetry(), [], 'the retired channel stays empty');
@@ -655,8 +655,8 @@ test("auth:start survives the redirect in the queue's hold, and the callback pag
 		assert.deepEqual(
 			peekQueuedCaptures().map((c) => [c.event, c.props]),
 			[
-				['auth:start', { register: true, app_id: 'rocketride.home', from_path: '/pricing', auto: false, app: 'shell' }],
-				['auth:complete', { is_new: null, waitlisted: false, source: 'shell', duration_ms: null, app: 'shell' }],
+				['auth:start', { register: true, is_authed: false, app_id: 'rocketride.home', from_path: '/pricing', auto: false, app: 'shell' }],
+				['auth:complete', { is_new: null, waitlisted: false, source: 'shell', duration_ms: null, is_authed: true, app: 'shell' }],
 			],
 			'the start (inherited from the hold), then the completion',
 		);
@@ -715,7 +715,7 @@ test('a callback that completes the sign-in raises auth:complete once, with is_n
 			assert.deepEqual(exchanged, [{ code: 'abc', verifier: 'verifier-1', redirectUri: 'https://shell.example.test' }]);
 			assert.deepEqual(
 				peekQueuedCaptures().map((c) => [c.event, c.props]),
-				[['auth:complete', { is_new: expected, waitlisted: false, source: 'shell', duration_ms: null, app: 'shell' }]],
+				[['auth:complete', { is_new: expected, waitlisted: false, source: 'shell', duration_ms: null, is_authed: true, app: 'shell' }]],
 				isNewUser === undefined ? 'unknown is reported as null, never as an existing user' : 'a known new account is reported as new',
 			);
 		});
@@ -733,6 +733,36 @@ test('auth:complete carries the round trip since startOAuth as duration_ms, and 
 		assert.equal(typeof duration, 'number');
 		assert.ok(Number(duration) >= 41_000 && Number(duration) < 51_000, `about 41 s, got ${String(duration)}`);
 		assert.equal(page.session.data.has(AUTH_START_STAMP), false, 'read once and removed, so a later completion cannot reuse it');
+	});
+});
+
+test('auth:complete pins is_authed true for a sign-in and for a waitlisted sign-up', async () => {
+	for (const waitlisted of [false, true]) {
+		const page = callbackPage();
+		await withGlobals(page.globals, async () => {
+			resetTelemetryHostForTests();
+			const result: ConnectResult = { ...authenticatedResult, isNewUser: waitlisted, ...(waitlisted ? { waitlisted: true } : {}) };
+			const { manager } = callbackManager(result);
+			const completed = await manager.bootstrap();
+			assert.equal(completed?.result, result, 'the identity resolved before the fact is raised');
+			const captures = peekQueuedCaptures().filter((c) => c.event === 'auth:complete');
+			assert.equal(captures.length, 1);
+			assert.equal(captures[0].props.is_authed, true, waitlisted ? 'a waitlisted sign-up still has an identity' : 'a sign-in has an identity');
+			assert.equal(captures[0].props.waitlisted, waitlisted);
+		});
+	}
+});
+
+test('auth:start pins is_authed false, so its replay on the callback page does not take the signed-in super property', async () => {
+	const session = recordingSession();
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		resetTelemetryHostForTests();
+		const { manager } = createTestManager();
+		manager.authProvider = { signIn: async () => {} };
+		await manager.startOAuth(false);
+		const [start] = peekQueuedCaptures();
+		assert.equal(start.event, 'auth:start');
+		assert.equal(start.props.is_authed, false);
 	});
 });
 
@@ -2202,8 +2232,8 @@ test('native auth facts contain no signup attribution in the queue, its hold, or
 		await manager.startOAuth(true, { signupProperties: signup });
 		await manager.bootstrap();
 		const expected = [
-			['auth:start', { register: true, from_path: '/', auto: false, app: 'shell' }],
-			['auth:complete', { is_new: true, waitlisted: false, source: 'shell', duration_ms: null, app: 'shell' }],
+			['auth:start', { register: true, is_authed: false, from_path: '/', auto: false, app: 'shell' }],
+			['auth:complete', { is_new: true, waitlisted: false, source: 'shell', duration_ms: null, is_authed: true, app: 'shell' }],
 		];
 		// The shell's own reporter carries both facts; neither holds attribution
 		// (experiment→signup joins are server-side via the PKCE credential).

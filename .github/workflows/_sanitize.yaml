@@ -1,0 +1,191 @@
+name: Sanitizers
+
+# Builds the engine, its C++ test programs and the C++ nodes with ASan and
+# UBSan (`--cmake-config=Sanitize`, Linux only) and runs server:test and
+# nodes:test against them. The build and test calls both carry
+# `--cmake-config=Sanitize --nodownload`: builder does not remember the build
+# type between calls, and `--nodownload` skips the lookup of published engines
+# (all Release) so no network error can fail the build.
+# Nothing is packaged or uploaded besides the report files, so this build
+# never reaches the engine cache.
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+
+jobs:
+  sanitize:
+    name: Ubuntu 22.04
+    # About 3x the 59 min of a local Sanitize build + tests (32 cores); a compiling Release run takes 42 min here (4 cores).
+    timeout-minutes: 180
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VCPKG_NUGET_USER: ${{ github.repository_owner }}
+      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+      # The vcpkg dependencies do not depend on the engine's build type, so the
+      # binary cache that the regular build fills serves this job too. Read only.
+      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,read
+      # The engine runs each task in its own engine process and passes it only an
+      # allowlist of variables; these prefixes keep the sanitizer options there.
+      RR_SUBPROCESS_ENV: 'ASAN_* UBSAN_*'
+    steps:
+      # The sanitized engine already runs during the build (pip setup, test
+      # dependencies), so the options are in place before any builder call.
+      # halt_on_error=0 keeps a program running after a report, so one run shows
+      # every error. Leaks are not checked yet (detect_leaks=0): the embedded
+      # CPython and the JVM leave memory allocated at exit by design.
+      # ASan and UBSan share one runtime and one log_path, taken from the
+      # options read last (UBSAN_OPTIONS), so both options name the same path.
+      # Each process that reports writes all its reports to <log_path>.<pid>.
+      - name: Set sanitizer options
+        run: |
+          report_dir="$RUNNER_TEMP/sanitizer-reports"
+          mkdir -p "$report_dir"
+          {
+            echo "SANITIZER_REPORT_DIR=$report_dir"
+            echo "ASAN_OPTIONS=halt_on_error=0:detect_leaks=0:log_path=$report_dir/report"
+            echo "UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$report_dir/report"
+          } >> "$GITHUB_ENV"
+
+      # No git credentials are kept: every later git call reads a public repository.
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Test the sanitizer report script
+        run: node --test scripts/ci/sanitizer-report.test.mjs
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10.33.0
+      - name: Set up vcpkg
+        run: ./builder vcpkg:submodule-build
+      # Reading the feed needs the credentials too. No API key: nothing is pushed.
+      - name: Set up vcpkg nuget
+        env:
+          NUGET_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
+          mono $NUGET_EXE sources add \
+            -Source "$NUGET_FEED_URL" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "$VCPKG_NUGET_USER" \
+            -Password "$NUGET_PASSWORD" || true
+
+      # The clang-18 that the regular Linux build installs (so the vcpkg binary
+      # cache matches), plus llvm-symbolizer for file and line in the reports and
+      # the sanitizer runtime. The test program proves that clang links a
+      # sanitized program and that it runs on this runner.
+      - name: Install the toolchain
+        run: |
+          set -euo pipefail
+          bash scripts/compiler-unix.sh --autoinstall --system-compiler
+          sudo apt-get update -o Acquire::Retries=5
+          sudo apt-get install -y -o Acquire::Retries=5 llvm-18 libclang-rt-18-dev
+          clang++ --version | head -n1
+          symbolizer=/usr/lib/llvm-18/bin/llvm-symbolizer
+          if [ ! -x "$symbolizer" ]; then
+            echo "::error::$symbolizer is missing after installing llvm-18"
+            exit 1
+          fi
+          smoke="$RUNNER_TEMP/sanitizer-smoke"
+          printf 'int main() { return 0; }\n' > "$smoke.cpp"
+          if ! clang++ -fsanitize=address,undefined "$smoke.cpp" -o "$smoke"; then
+            echo "::error::clang++ cannot link a program with -fsanitize=address,undefined (sanitizer runtime missing?)"
+            exit 1
+          fi
+          "$smoke"
+          echo "ASAN_SYMBOLIZER_PATH=$symbolizer" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: ./builder server:build nodes:build --cmake-config=Sanitize --nodownload --verbose --autoinstall --system-compiler
+
+      # A build without the sanitizer flags would pass with no reports, so the
+      # engine and every C++ node library are checked (the script says how; in
+      # a program the UBSan handlers come with the ASan runtime, so only the
+      # libraries prove UBSan). A C++ node is a node directory with a
+      # CMakeLists.txt, and nodes:build stages its one library as
+      # dist/server/nodes/<node>/lib<library>.so.
+      - name: Check that the binaries are instrumented
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          failed=0
+          nodes=0
+          for cmakelists in nodes/src/nodes/*/CMakeLists.txt; do
+            node=$(basename "$(dirname "$cmakelists")")
+            nodes=$((nodes + 1))
+            found=(dist/server/nodes/"$node"/lib*.so)
+            if [ "${#found[@]}" -ne 1 ]; then
+              echo "::error::the C++ node $node has ${#found[@]} libraries in dist/server/nodes/$node, not 1"
+              failed=1
+            fi
+          done
+          if [ "$nodes" -eq 0 ]; then
+            echo "::error::no C++ node (nodes/src/nodes/*/CMakeLists.txt) found"
+            failed=1
+          fi
+          libs=(dist/server/nodes/*/lib*.so)
+          if [ "${#libs[@]}" -ne "$nodes" ]; then
+            echo "::error::dist/server/nodes holds ${#libs[@]} node libraries, the C++ nodes build $nodes"
+            failed=1
+          fi
+          bash scripts/ci/check-sanitizer-symbols.sh dist/server/engine dist/server/libengine.so "${libs[@]}" || failed=1
+          exit "$failed"
+
+      # The keys as in the Test step of _build.yaml: the test servers require
+      # RR_APIKEY, the test client sends ROCKETRIDE_APIKEY, and a server holding
+      # only ROCKETRIDE_APIKEY refuses to start.
+      # No database, S3 or Azure services: those suites skip without them.
+      - name: Test
+        env:
+          RR_APIKEY: MYAPIKEY
+          ROCKETRIDE_APIKEY: MYAPIKEY
+        run: ./builder server:test nodes:test --cmake-config=Sanitize --nodownload --verbose ${{ vars.CI_TEST_SEQUENTIAL == 'true' && '--sequential' || '' }} --autoinstall --system-compiler
+
+      # The test servers' side of a build or test failure, as in _build.yaml.
+      # Workflow commands are stopped around each file so log lines stay inert.
+      - name: Show test server logs
+        if: failure()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          stop="stop-$(date +%s%N)-$$"
+          for log in dist/server/test-logs/*.log; do
+            echo "::group::$log"
+            echo "::stop-commands::$stop"
+            cat "$log"
+            echo
+            echo "::$stop::"
+            echo "::endgroup::"
+          done
+
+      # server:test builds the three test programs it runs and copies them into
+      # dist/server, so they are checked after it, the same way as the engine.
+      - name: Check that the test programs are instrumented
+        run: bash scripts/ci/check-sanitizer-symbols.sh dist/server/aptest dist/server/engtest dist/server/nodetest
+
+      # Under halt_on_error=0 the programs exit 0 after a report, so this step is
+      # what fails the job: it exits 1 when any report was written.
+      - name: Fail on sanitizer reports
+        if: always() && env.SANITIZER_REPORT_DIR != ''
+        run: node scripts/ci/sanitizer-report.mjs "$SANITIZER_REPORT_DIR"
+
+      # storage-cleanup.yml deletes artifacts older than 3 days; the job summary
+      # keeps the grouped reports for as long as the run.
+      - name: Upload sanitizer reports
+        if: always() && env.SANITIZER_REPORT_DIR != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sanitizer-reports
+          path: ${{ env.SANITIZER_REPORT_DIR }}
+          if-no-files-found: ignore
+          retention-days: 3

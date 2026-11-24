@@ -222,7 +222,8 @@ export const ConsentBanner: React.FC<Props> = ({ signedOut, theme = 'light' }) =
 	useEffect(() => {
 		return subscribeConsent((s, origin) => {
 			setState(s);
-			setIsPrompting(s === 'undecided' && origin === 'external');
+			// Under a privacy signal the banner is only ever a reopen: it never turns into the prompt.
+			setIsPrompting(!isPrivacySignalOn && s === 'undecided' && origin === 'external');
 		});
 	}, []);
 	useEffect(() => {
@@ -345,9 +346,13 @@ export const ConsentBanner: React.FC<Props> = ({ signedOut, theme = 'light' }) =
 		setIsPrompting(false);
 	}, []);
 	const accept = useCallback((): void => {
+		// The disabled Opt in already ignores clicks; a privacy signal is never overridden by an opt-in either way.
+		if (isPrivacySignalOn) {
+			return;
+		}
 		decideConsent('accepted');
 		close();
-	}, [close]);
+	}, [close, isPrivacySignalOn]);
 	// A plain decline, or from accepted a withdrawal (the consented instance is torn down, PostHog's storage is cleared, the
 	// decline is kept).
 	const decline = useCallback((): void => {

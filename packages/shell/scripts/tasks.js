@@ -241,6 +241,24 @@ function makeTestRunAction() {
 	};
 }
 
+/**
+ * Run the freeze script's own tests (scripts/freeze-shell-api.test.js): what
+ * the body comparison counts as a change between two bundles. Built-in runner,
+ * plain JavaScript, so it needs no loader.
+ *
+ * @returns {object} Action with run function.
+ */
+function makeContractTestAction() {
+	return {
+		run: async (ctx, task) => {
+			await execCommand('node', ['--test', path.join(__dirname, 'freeze-shell-api.test.js')], {
+				task,
+				cwd: APP_ROOT,
+			});
+		},
+	};
+}
+
 // =============================================================================
 // MODULE DEFINITION
 // =============================================================================
@@ -255,16 +273,18 @@ const shellModule = {
 	actions: [
 		// Internal actions (no description — not shown in builder --help)
 		{ name: 'shell:test-run', action: makeTestRunAction },
+		{ name: 'shell:contract-test', action: makeContractTestAction },
 		{ name: 'shell:bundle', action: makeBundleAction },
 		{ name: 'shell:copy', action: makeCopyAction },
 
 		{
 			// Standalone test entry: compile the TS client SDK first so the
-			// tests' `rocketride` imports resolve to fresh dist/types.
+			// tests' `rocketride` imports resolve to fresh dist/types. The
+			// freeze script's own tests ride along.
 			name: 'shell:test',
 			action: () => ({
 				description: 'Testing the shell',
-				steps: ['client-typescript:build', 'shell:test-run'],
+				steps: ['client-typescript:build', 'shell:test-run', 'shell:contract-test'],
 			}),
 		},
 

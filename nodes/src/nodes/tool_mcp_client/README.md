@@ -60,7 +60,9 @@ not collide.
 
 ### STDIO transport
 
-Launches a local subprocess as the MCP server and speaks JSON-RPC over its stdin/stdout. The subprocess inherits the engine's environment (with `PYTHONUNBUFFERED=1` set).
+Launches a local subprocess as the MCP server and speaks JSON-RPC over its stdin/stdout. The subprocess inherits the engine's environment (with `PYTHONUNBUFFERED=1` set), plus the variables set in **Environment variables**.
+
+Most published MCP servers start from a package runner and read their credentials from the environment. For example, the GitHub server takes the command line `npx -y @modelcontextprotocol/server-github` and the environment variable `GITHUB_PERSONAL_ACCESS_TOKEN`. A variable set here overrides the engine's variable of the same name. The STDIO transport is not available on RocketRide Cloud; use an HTTP transport there.
 
 Older configs that used separate `command` + `args` fields are still accepted for backwards compatibility.
 
@@ -74,13 +76,19 @@ Connects to an older two-channel MCP server: a long-lived SSE `GET` stream for r
 
 Configuration is validated at save time: `commandLine` is required for `stdio`, `endpoint` for `streamable-http`, and `sse_endpoint` for `sse`.
 
+### Allowed tools
+
+Lists the server's tools the agent may see, by the name the server gives them (`search_issues`, not `mcp.search_issues`). Leave it empty to expose every tool. Use it to keep write or delete tools away from an agent that only needs to read, or to shorten a long catalog. Tools outside the list are left out of the agent's catalog and a call to one is refused as unknown without reaching the server. A listed name the server does not offer is reported in a warning when the agent discovers the server's tools, together with the names it does offer.
+
+The list is a per-call setting: a pipeline can expose it as a parameter, so each call can narrow the server's tools differently. An agent cannot set it.
+
 ---
 
 ## Authentication
 
 For the HTTP transports (`streamable-http` and `sse`), set `bearer` to send an `Authorization: Bearer <token>` header on every request. The token is stored encrypted and masked in the UI. Arbitrary additional headers (e.g. API-key headers) can be supplied via `headers`; a `bearer` value overrides any `Authorization` key in `headers`.
 
-The STDIO transport has no authentication fields: the subprocess runs locally with the engine's environment.
+The STDIO transport has no authentication fields. Pass a server's API key as an environment variable under **Environment variables**. Unlike the bearer token, environment variables and headers are not masked in the configuration panel.
 
 ---
 
@@ -131,12 +139,15 @@ Some MCP tools take no arguments (their input schema is empty). Strict reasoning
 
 | Field | Type | Description | Default |
 |---|---|---|---|
+| `mcp_client.allowedTools` | `array` | **Allowed tools**<br/>Expose only these tools from the server to the agent. Leave empty to expose every tool. |  |
 | `mcp_client.bearer` | `string` | **Bearer token**<br/>Optional Authorization bearer token | `""` |
 | `mcp_client.commandLine` | `string` | **Command line**<br/>Command line to launch MCP server (stdio transport). Example: python -m rocketride_mcp | `"python -m rocketride_mcp"` |
 | `mcp_client.endpoint` | `string` | **Endpoint**<br/>MCP Streamable HTTP endpoint URL. Example: http(s)://host:port/mcp | `""` |
+| `mcp_client.env` | `object` | **Environment variables**<br/>Environment variables for the server process, such as the API key a server reads at startup. Example: GITHUB_PERSONAL_ACCESS_TOKEN | `{}` |
 | `mcp_client.headers` | `object` | **Headers**<br/>Extra HTTP headers for streamable-http/sse transports | `{}` |
 | `mcp_client.serverName` | `string` | **Server name**<br/>Namespace prefix for tools: <serverName>.<toolName> (example: local.echo) | `"mcp"` |
 | `mcp_client.sse_endpoint` | `string` | **SSE endpoint (legacy)**<br/>Legacy MCP SSE URL (old transport). Example: http://127.0.0.1:8000/sse | `""` |
+| `mcp_client.toolName` | `string` | **Tool name**<br/>Name of the tool as the server lists it, without the server name prefix | `""` |
 | `mcp_client.transport` | `string` | **Transport**<br/>How to connect to the MCP server | `"streamable-http"` |
 
 ## Source

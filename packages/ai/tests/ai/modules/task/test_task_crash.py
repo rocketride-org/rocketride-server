@@ -1,7 +1,7 @@
-"""A real eaas.py runs a pipeline whose Python node crashes its task process.
+"""A real eaas.py runs a pipeline whose Python node ends its task process, or that eaas.py stops on request.
 
-Each server writes the node, under a name of its own, where the engine looks
-for nodes, and removes it when it stops. The name starts with `_`, which the
+Each server writes the node, under a name of its own, where the builder puts a
+real node, and removes it when it stops. The name starts with `_`, which the
 node contract tests skip.
 """
 
@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -22,6 +23,7 @@ from ai.constants import CONST_TASK_DATA_PATH
 from rocketride import TASK_STATE, RocketRideClient
 
 _SERVER_DIR = Path(sys.executable).resolve().parent
+_SOURCE_NODES = Path(__file__).resolve().parents[6] / 'nodes' / 'src' / 'nodes'
 _APIKEY = 'MYAPIKEY'
 
 pytestmark = pytest.mark.skipif(
@@ -50,7 +52,8 @@ class IGlobal(IGlobalBase):
 
 # A plain read of address 0: ctypes.string_at(0) would only raise OSError on
 # Windows, where ctypes guards its foreign calls. A fast fail and SIGKILL skip
-# every handler in the process; exit(-1) is no crash.
+# every handler in the process; exit(-1) is no crash; a SIGTERM is a cancel
+# the server did not ask for.
 _IINSTANCE = """import ctypes
 import os
 import signal
@@ -62,12 +65,16 @@ class IInstance(IInstanceBase):
     def writeText(self, text: str):
         if text == 'segv':
             ctypes.c_int.from_address(0).value
+        elif text == 'abort':
+            os.abort()
         elif text == 'failfast':
             ctypes.windll.kernel32.RaiseFailFastException(None, None, 0)
         elif text == 'sigkill':
             os.kill(os.getpid(), signal.SIGKILL)
         elif text == 'exit':
             os._exit(-1)
+        elif text == 'sigterm':
+            os.kill(os.getpid(), signal.SIGTERM)
 """
 
 
@@ -90,23 +97,6 @@ def _pipeline(provider: str) -> dict:
         'source': 'webhook_1',
         'project_id': '6f1c2b9e-3d4a-4c8e-9b7f-2a5d8e1f0c43',
     }
-
-
-def _nodes_dirs() -> list[Path]:
-    """Where the engine reads a node's services.json (services.cpp) and where its Python imports the node (python/init.cpp).
-
-    Both are the source tree's when the engine runs from <repo>/dist/server. When <repo> holds this repo as its
-    rocketride-server submodule, services.cpp still reads dist/server/nodes, but Python imports the submodule's.
-    """
-    if _SERVER_DIR.parts[-2:] == ('dist', 'server'):
-        repo = _SERVER_DIR.parents[1]
-        source = repo / 'nodes' / 'src' / 'nodes'
-        if source.is_dir():
-            return [source]
-        submodule = repo / 'rocketride-server' / 'nodes' / 'src' / 'nodes'
-        if submodule.is_dir():
-            return [_SERVER_DIR / 'nodes', submodule]
-    return [_SERVER_DIR / 'nodes']
 
 
 def _write_node(node: Path, provider: str) -> None:
@@ -138,7 +128,8 @@ def server(request, tmp_path_factory):
     workspace = tmp_path_factory.mktemp('crash-node')
     # Its own name: xdist may run both servers at once, in two processes
     provider = f'crash_probe_{os.getpid()}_{int(dumps)}'
-    nodes = [d / f'_{provider}' for d in _nodes_dirs()]
+    # Where the builder keeps a real node: its source, and the copy nodes:sync makes in dist/server/nodes
+    nodes = [d / f'_{provider}' for d in (_SOURCE_NODES, _SERVER_DIR / 'nodes')]
     try:
         for node in nodes:
             _write_node(node, provider)
@@ -192,25 +183,57 @@ async def _connect(uri: str, on_event) -> RocketRideClient:
             await asyncio.sleep(1)
 
 
-async def _run(server, text: str):
-    """Send the text to the crash node; return the final status and the console lines."""
+async def _until_running(client, token):
+    deadline = time.monotonic() + 120
+    while (status := await client.get_task_status(token))['state'] != TASK_STATE.RUNNING.value:
+        assert time.monotonic() < deadline, f'the task did not start: {status}'
+        await asyncio.sleep(0.5)
+
+
+async def _run(server, text: Optional[str], restart: bool = False):
+    """Send the text to the crash node (none: stop the running task); return the final status and the console lines."""
     lines = []
+    statuses = []
 
     async def on_event(message):
         if message.get('event') == 'output':
             lines.append(message.get('body', {}).get('output', ''))
+        elif message.get('event') == 'apaevt_status_update':
+            statuses.append(message.get('body') or {})
 
     client = await _connect(server['uri'], on_event)
     try:
         token = (await client.use(pipeline=_pipeline(server['provider'])))['token']
         await client.add_monitor({'token': token}, ['output'])
+        ended = [TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value]
+        deadline = time.monotonic() + 120
+
+        if text is None:
+            await _until_running(client, token)
+            if restart:
+                pipeline = _pipeline(server['provider'])
+                await client.restart(
+                    project_id=pipeline['project_id'], source=pipeline['source'], pipeline=pipeline, token=token
+                )
+                # A restart mints a new control id: the one held before is dead, and so are its monitors
+                token = await client.get_task_token(pipeline['project_id'], pipeline['source'])
+                assert token, 'the restart left no running control'
+                await client.add_monitor({'token': token}, ['output'])
+                await _until_running(client, token)
+            # A terminated control is removed at once and its id is dead, so the run's last status
+            # cannot be asked for afterwards: it is read from the summary events the run sends as it stops
+            await client.add_monitor({'token': token}, ['output', 'summary'])
+            del statuses[:]
+            await client.terminate(token)
+            while not (statuses and statuses[-1].get('state') in ended):
+                assert time.monotonic() < deadline, f'the task did not end: {statuses[-1:]}'
+                await asyncio.sleep(0.5)
+            return token, statuses[-1], lines
 
         # The task dies while it handles the text, so the send itself may fail
         with contextlib.suppress(Exception):
             await asyncio.wait_for(client.send(token, text, {}, 'text/plain'), 60)
 
-        ended = [TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value]
-        deadline = time.monotonic() + 120
         while (status := await client.get_task_status(token))['state'] not in ended:
             assert time.monotonic() < deadline, f'the task did not end: {status}'
             await asyncio.sleep(0.5)
@@ -234,19 +257,34 @@ def _dump_lines(lines):
 
 
 @pytest.mark.asyncio
-async def test_a_node_that_crashes_stops_its_task_unexpectedly(server):
-    token, status, lines = await _run(server, 'segv')
+@pytest.mark.parametrize(
+    'text, windows, elsewhere',
+    [
+        (
+            'segv',
+            ['Application caught unhandled SEH exception: 0xc0000005'],
+            ['Application received system signal: SIGSEGV: Invalid access to storage (11)'],
+        ),
+        # abort: on Windows the engine's abort handler reports it itself. Elsewhere abort() raises SIGABRT
+        # again once the handler returns, racing the engine's signal listener thread that writes >EXIT:
+        # Linux raises it at once, so the server reads the signal; macOS waits 10 ms, so the engine mostly wins
+        (
+            'abort',
+            ['Application received system signal: SIGABRT: Abnormal termination triggered by abort call (22)'],
+            ['Application received system signal: SIGABRT: Abnormal termination (6)', 'SIGABRT (code 6)'],
+        ),
+    ],
+    ids=['segv', 'abort'],
+)
+async def test_a_node_that_crashes_stops_its_task_unexpectedly(server, text, windows, elsewhere):
+    token, status, lines = await _run(server, text)
     dumps = _dumps_of(lines)
     try:
         assert status['status'] == 'Stopped unexpectedly', server['log'].read_text(errors='replace')
         assert status['exitMessage'] == 'Stopped unexpectedly'
 
-        expected = (
-            'Application caught unhandled SEH exception: 0xc0000005'
-            if os.name == 'nt'
-            else 'Application received system signal: SIGSEGV: Invalid access to storage (11)'
-        )
-        assert _crash_lines(lines) == [f'Unexpected termination: {expected}'], lines
+        expected = windows if os.name == 'nt' else elsewhere
+        assert _crash_lines(lines) in [[f'Unexpected termination: {e}'] for e in expected], lines
         if server['dumps']:
             assert len(dumps) == 1
             assert _dump_lines(lines) == [f'Crash dump: {dumps[0].name}'], lines
@@ -278,5 +316,37 @@ async def test_a_node_that_exits_stops_its_task(server):
     """exit(-1) is no crash, although on Windows its code 0xffffffff looks like an exception's."""
     token, status, lines = await _run(server, 'exit')
     assert status['status'] == 'Stopped', server['log'].read_text(errors='replace')
+    assert _crash_lines(lines) == []
+    assert _dumps_of(lines) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('restart', [False, True], ids=['first-run', 'after-restart'])
+async def test_a_stop_by_the_server_is_no_error(server, restart):
+    """A stop the server asked for keeps exit code 0 whatever the engine reports.
+
+    On Linux and macOS the engine reports its cancel, which the server does not read for such a stop; on
+    Windows it is ended and reports nothing. What the engine reports is checked by the cancel from outside.
+
+    A restart before the stop starts the run again from exit code 0, as a new task does.
+    """
+    token, status, lines = await _run(server, None, restart)
+    log = server['log'].read_text(errors='replace')
+    assert (status['status'], status['exitCode'], status['exitMessage']) == ('Stopped', 0, ''), log
+    assert _crash_lines(lines) == []
+    assert _dumps_of(lines) == []
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_from_outside_the_server_stops_its_task(server):
+    """A SIGTERM the server did not send.
+
+    On Linux and macOS the engine reports its cancel with no text, so the message is empty, not the
+    place in the code; on Windows os.kill is TerminateProcess, which tells the engine nothing.
+    """
+    token, status, lines = await _run(server, 'sigterm')
+    log = server['log'].read_text(errors='replace')
+    expected = ('Stopped', 15, 'Stopped') if os.name == 'nt' else ('Stopped', 1, '')
+    assert (status['status'], status['exitCode'], status['exitMessage']) == expected, log
     assert _crash_lines(lines) == []
     assert _dumps_of(lines) == []

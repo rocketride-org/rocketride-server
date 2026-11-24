@@ -1,0 +1,447 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""
+Publish-gate tests: privilege, reserved prefixes, cross-app collisions derived
+from published manifests, data entries, snapshot files, and the build-emitted
+manifest as the gated source. Every problem is reported at once, with an
+actionable message; storage failures fail closed.
+"""
+
+from __future__ import annotations
+
+import copy
+
+import pytest
+
+import ai.modules.shell.public_pages as pp
+
+from ai.modules.shell.contract import MAX_SNAPSHOT_BYTES
+
+# Bound at import, before conftest swaps the module attribute for the FILES double.
+from ai.modules.shell.public_pages import artifact_file_info, gate_errors
+
+from .hostile_fixtures import FILES, HOME_MANIFEST, hostile_account
+
+DIST = 'orgs/p/files/.deployments/rocketride.other/v000001-abc/dist'
+
+
+@pytest.fixture(autouse=True)
+def _roots(monkeypatch):
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home,rocketride.other,rocketride.secret')
+
+
+async def test_manifest_without_the_sections_costs_nothing():
+    acct = hostile_account()
+    assert await gate_errors('acme.brandy', {'name': 'Brandy'}, DIST, acct) == []
+    assert acct.publish_list_calls == 0
+
+
+async def test_third_party_rejected():
+    errors = await gate_errors('acme.brandy', {'publicPages': [{'path': '/x', 'title': 'X'}]}, DIST, hostile_account())
+    assert len(errors) == 1 and 'platform capability' in errors[0]
+
+
+async def test_third_party_site_alone_passes():
+    acct = hostile_account()
+    assert await gate_errors('acme.brandy', {'name': 'Brandy', 'site': {'title': 'Brandy'}}, DIST, acct) == []
+    assert acct.publish_list_calls == 0
+
+
+async def test_a_manifest_without_a_valid_page_never_loads_the_platform_claims():
+    acct = hostile_account()
+    acct.fail = True  # platform storage is down
+    third_party = {'publicPages': [{'path': '/x', 'title': 'X'}]}
+    errors = await gate_errors('acme.brandy', third_party, 'orgs/a/files/.deployments/acme.brandy/v1/dist', acct)
+    assert len(errors) == 1 and 'platform capability' in errors[0]
+    assert acct.publish_list_calls == 0
+
+
+async def test_cross_app_collision_with_a_published_manifest_is_rejected():
+    manifest = {'publicPages': [{'path': '/pricing', 'title': 'Mine'}, {'path': '/fresh', 'title': 'F'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+    assert errors == [
+        "publicPages path '/pricing' is already claimed by the published app rocketride.home "
+        '(first claim wins; the claim is released when that app unpublishes); choose another path'
+    ]
+
+
+async def test_republishing_your_own_paths_is_not_a_collision():
+    assert await gate_errors('rocketride.home', HOME_MANIFEST, DIST, hostile_account()) == []
+
+
+async def test_the_installed_live_route_check_reaches_the_gate_and_the_rebuild():
+    pp.set_live_conflict({'/health': 'GET /health'}.get)
+    manifest = {'publicPages': [{'path': '/health', 'title': 'Health'}, {'path': '/fine', 'title': 'Fine'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+    assert len(errors) == 1 and 'live server route GET /health' in errors[0]
+    # A manifest that reached the store anyway (a seeded row) loses the page at build time.
+    acct = hostile_account()
+    acct.add('00000000-platform', 'rocketride.other', manifest)
+    assert await pp.rebuild(acct)
+    assert '/health' not in pp.current().exact and '/fine' in pp.current().exact
+
+
+async def test_an_unpublished_apps_claims_are_released():
+    # rocketride.secret claims /leaksecret, but its public row is disabled.
+    manifest = {'publicPages': [{'path': '/leaksecret', 'title': 'Now mine'}]}
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+
+
+async def test_missing_snapshot_rejected_present_snapshot_allowed():
+    manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+    assert len(errors) == 1 and "snapshot 'pages/fresh.html' is not in the built version" in errors[0]
+    FILES[f'{DIST}/pages/fresh.html'] = b'<html></html>'
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+
+
+async def test_a_page_at_a_feed_path_the_root_owner_declares_is_refused():
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['site']['feeds'] = [{'path': '/blog/feed.xml', 'title': 'Blog', 'prefix': '/blog/'}]
+    acct = hostile_account(home)
+    manifest = {'publicPages': [{'path': '/blog/feed.xml', 'title': 'F'}, {'path': '/fine', 'title': 'Fine'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, acct)
+    assert len(errors) == 1
+    assert "publicPages path '/blog/feed.xml' is a feed of the published app rocketride.home" in errors[0]
+
+
+async def test_a_page_at_a_redirect_the_root_owner_declares_is_refused():
+    # home owns '/' and redirects /plans and /old/: a page at either, or at a
+    # slash twin of either, would silently drop that redirect at the next build.
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['site']['redirects'].append({'from': '/old/', 'to': '/pricing'})
+    manifest = {
+        'publicPages': [
+            {'path': '/plans', 'title': 'P'},
+            {'path': '/old', 'title': 'O'},
+            {'path': '/fine', 'title': 'F'},
+        ]
+    }
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account(home))
+    assert errors == [
+        "publicPages path '/plans': is a redirect of the published app rocketride.home; "
+        'a URL is a page or a redirect, not both: choose another path',
+        "publicPages path '/old': its slash twin '/old/' is a redirect of the published app rocketride.home; "
+        'a URL is a page or a redirect, not both: choose another path',
+    ]
+
+
+async def test_only_the_root_owners_kept_redirects_hold_their_paths(monkeypatch):
+    # rocketride.third declares '/' and redirects too, but home's earlier claim
+    # owns '/', so third's redirects never take effect: their paths stay free.
+    # home's own redirect from /taken loses to third's page there, so /taken is
+    # third's page (one refusal), not a redirect too.
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home,rocketride.other,rocketride.third')
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['site']['redirects'].append({'from': '/taken', 'to': '/pricing'})
+    acct = hostile_account(home)
+    third = {
+        'publicPages': [{'path': '/', 'title': 'T'}, {'path': '/taken', 'title': 'T'}],
+        'site': {'redirects': [{'from': '/gone', 'to': '/taken'}]},
+    }
+    acct.add('00000000-platform', 'rocketride.third', third, published_at=1_700_000_200.0)
+    manifest = {'publicPages': [{'path': '/gone', 'title': 'G'}, {'path': '/taken', 'title': 'T'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, acct)
+    assert errors == [
+        "publicPages path '/taken' is already claimed by the published app rocketride.third "
+        '(first claim wins; the claim is released when that app unpublishes); choose another path'
+    ]
+
+
+async def test_a_relative_image_must_exist_in_the_build_output():
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'H', 'image': 'og/home.png'}],
+        'site': {'title': 'R', 'image': 'og/site.png'},
+    }
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    assert len(errors) == 2
+    assert "publicPages path '/': image 'og/home.png' is not in the built version" in errors[0]
+    assert "site.image 'og/site.png' is not in the built version" in errors[1]
+    FILES[f'{DIST}/og/home.png'] = b'png'
+    FILES[f'{DIST}/og/site.png'] = b'png'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+
+
+async def test_https_and_root_path_images_are_not_checked_against_the_build():
+    manifest = {
+        'publicPages': [
+            {'path': '/a', 'title': 'A', 'image': 'https://cdn.example.com/a.png'},
+            {'path': '/b', 'title': 'B', 'image': '/static/b.png'},
+        ]
+    }
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+
+
+async def test_a_snapshot_over_the_size_cap_is_refused_by_its_stat():
+    manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
+    FILES[f'{DIST}/pages/fresh.html'] = b'x' * MAX_SNAPSHOT_BYTES
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+    FILES[f'{DIST}/pages/fresh.html'] = b'x' * (MAX_SNAPSHOT_BYTES + 1)
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+    size = MAX_SNAPSHOT_BYTES + 1
+    assert len(errors) == 1
+    assert f"snapshot 'pages/fresh.html' is {size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit" in errors[0]
+
+
+async def test_a_not_found_snapshot_missing_from_the_build_is_rejected():
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    assert errors == [
+        "site.notFound 'pages/404.html' is not in the built version; emit it into the build output or drop the field"
+    ]
+    FILES[f'{DIST}/pages/404.html'] = b'<html></html>'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+
+
+async def test_a_not_found_snapshot_over_the_size_cap_is_refused_by_its_stat():
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    FILES[f'{DIST}/pages/404.html'] = b'x' * MAX_SNAPSHOT_BYTES
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+    FILES[f'{DIST}/pages/404.html'] = b'x' * (MAX_SNAPSHOT_BYTES + 1)
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    size = MAX_SNAPSHOT_BYTES + 1
+    assert errors == [
+        f"site.notFound 'pages/404.html' is {size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit; move images, "
+        'styles and scripts into the build output and reference them through {{assets}}'
+    ]
+
+
+async def test_a_not_found_stat_failure_other_than_not_found_fails_closed(monkeypatch):
+    from .hostile_fixtures import file_info
+
+    async def flaky(path):
+        if path.endswith('/pages/404.html'):
+            raise OSError('store down')
+        return await file_info(path)
+
+    monkeypatch.setattr(pp, 'artifact_file_info', flaky)
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    with pytest.raises(OSError):
+        await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+
+
+async def test_every_problem_is_reported_at_once():
+    manifest = {
+        'publicPages': [
+            {'path': '/Bad', 'title': 'x'},
+            {'path': '/api/x', 'title': 'x'},
+            {'path': '/d', 'title': 'x', 'data': ['nope']},
+            {'path': '/w/*', 'title': 'x'},
+            {'path': '/pricing', 'title': 'x'},
+            {'path': '/s', 'title': 'x', 'snapshot': 'pages/s.html'},
+        ]
+    }
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+    assert len(errors) == 6
+    needles = ('lowercase', 'reserved', "unknown data source 'nope'", 'wildcard pages', 'already claimed', 'snapshot')
+    for needle in needles:
+        assert any(needle in e for e in errors), needle
+
+
+async def test_a_snapshot_stat_failure_other_than_not_found_fails_closed(monkeypatch):
+    from .hostile_fixtures import file_info
+
+    async def flaky(path):
+        if path.endswith('/pages/fresh.html'):
+            raise OSError('store down')
+        return await file_info(path)
+
+    monkeypatch.setattr(pp, 'artifact_file_info', flaky)
+    manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
+    with pytest.raises(OSError):
+        await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+
+
+async def test_the_gate_never_reads_a_snapshot_body(monkeypatch):
+    from .hostile_fixtures import read_file
+
+    async def no_snapshot_reads(path):
+        assert not path.endswith('.html'), f'the gate read {path}'
+        return await read_file(path)
+
+    monkeypatch.setattr(pp, 'read_artifact_file', no_snapshot_reads)
+    FILES[f'{DIST}/pages/fresh.html'] = b'<html></html>'
+    manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+    # Nor the site.notFound snapshot.
+    FILES[f'{DIST}/pages/404.html'] = b'<html></html>'
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+
+
+class _RawStore:
+    """A raw store whose bodies must never be read: only ``get_file_info`` answers."""
+
+    def __init__(self, files):
+        self.files = files
+        self.stats = []
+
+    async def get_file_info(self, path):
+        from ai.account.store import StorageNotFoundError
+
+        self.stats.append(path)
+        if path not in self.files:
+            raise StorageNotFoundError(f'File not found: {path}')
+        return {'size': len(self.files[path]), 'modified': 1.0}
+
+    async def read_bytes(self, path):
+        raise AssertionError(f'read the body of {path}')
+
+
+async def test_artifact_file_info_stats_through_the_raw_store(monkeypatch):
+    from types import SimpleNamespace
+
+    from ai.account.store import Store, StorageNotFoundError
+
+    raw = _RawStore({'a/dist/pages/x.html': b'12345'})
+    monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: SimpleNamespace(raw_store=lambda: raw)))
+    assert await artifact_file_info('a/dist/pages/x.html') == {'size': 5, 'modified': 1.0}
+    with pytest.raises(StorageNotFoundError):
+        await artifact_file_info('a/dist/pages/missing.html')
+    assert raw.stats == ['a/dist/pages/x.html', 'a/dist/pages/missing.html']
+
+
+async def test_storage_failure_fails_closed():
+    acct = hostile_account()
+    acct.fail = True
+    with pytest.raises(RuntimeError):
+        await gate_errors('rocketride.other', {'publicPages': [{'path': '/x', 'title': 'X'}]}, DIST, acct)
+
+
+async def test_an_unreadable_root_app_fails_closed_naming_it():
+    acct = hostile_account()
+    del acct.artifacts[('00000000-platform', 'rocketride.home', 1)]
+    with pytest.raises(RuntimeError, match='rocketride.home'):
+        await gate_errors('rocketride.other', {'publicPages': [{'path': '/x', 'title': 'X'}]}, DIST, acct)
+
+
+async def test_a_root_app_with_an_unreadable_current_version_can_publish_a_fix():
+    acct = hostile_account()
+    del acct.artifacts[('00000000-platform', 'rocketride.home', 1)]
+    assert await gate_errors('rocketride.home', HOME_MANIFEST, DIST, acct) == []
+
+
+async def test_an_unreadable_non_root_platform_app_never_blocks_a_publish():
+    # rocketride.tool cannot claim root pages, so it holds no claim to check against.
+    acct = hostile_account()
+    acct.add('00000000-platform', 'rocketride.tool', {'name': 'Tool'})
+    del acct.artifacts[('00000000-platform', 'rocketride.tool', 1)]
+    assert await gate_errors('rocketride.home', HOME_MANIFEST, DIST, acct) == []
+
+
+async def test_a_non_root_platform_apps_provider_error_never_blocks_a_publish():
+    # Its storage is never read: an error the store does not wrap as a StorageError cannot refuse home's publish.
+    acct = hostile_account()
+    acct.add('00000000-platform', 'rocketride.tool', {'name': 'Tool'})
+    artifact = acct.deployments_artifact
+
+    async def provider_down(org_id, app_id, version):
+        if app_id == 'rocketride.tool':
+            raise OSError('provider down')
+        return await artifact(org_id, app_id, version)
+
+    acct.deployments_artifact = provider_down
+    assert await gate_errors('rocketride.home', HOME_MANIFEST, DIST, acct) == []
+
+
+async def test_a_platform_version_without_an_artifact_path_fails_closed():
+    with pytest.raises(ValueError, match='no artifact path'):
+        await gate_errors('rocketride.other', {'name': 'Other'}, '', hostile_account())
+    # A third party's build output is never read: nothing to locate.
+    assert await gate_errors('acme.brandy', {'name': 'B'}, '', hostile_account()) == []
+
+
+async def test_platform_build_output_manifest_is_the_gated_source():
+    # The saas build ships publicPages in dist/app-manifest.json, not in
+    # metadata.manifest: the gate validates the emitted file.
+    FILES[f'{DIST}/app-manifest.json'] = b'{"publicPages": [{"path": "/Bad", "title": "x"}], "futureSection": {"x": 1}}'
+    errors = await gate_errors('rocketride.other', {'name': 'Other'}, DIST, hostile_account())
+    assert len(errors) == 1 and 'lowercase' in errors[0]
+
+
+async def test_malformed_build_output_manifest_is_refused():
+    FILES[f'{DIST}/app-manifest.json'] = b'[1, 2]'
+    errors = await gate_errors('rocketride.other', {'name': 'Other'}, DIST, hostile_account())
+    assert 'app-manifest.json in the build output is not a JSON object' in errors[0]
+
+
+async def test_third_party_build_output_is_never_read(monkeypatch):
+    async def boom(path):
+        raise AssertionError('no read for a third party')
+
+    monkeypatch.setattr(pp, 'read_artifact_file', boom)
+    assert await gate_errors('acme.brandy', {'name': 'B'}, DIST, hostile_account()) == []
+
+
+async def test_redirect_sources_claimed_by_another_published_app_are_rejected():
+    # home (published) serves /store and /marketplace.
+    manifest = {
+        # '/' (taken by home too) because only the app owning '/' may declare site.
+        'publicPages': [{'path': '/', 'title': 'R'}, {'path': '/fresh', 'title': 'F'}],
+        'site': {
+            'redirects': [
+                {'from': '/store', 'to': '/fresh'},
+                {'from': '/marketplace', 'to': '/fresh'},
+                {'from': '/free', 'to': '/fresh'},
+            ]
+        },
+    }
+    errors = [e for e in await gate_errors('rocketride.other', manifest, DIST, hostile_account()) if 'redirect' in e]
+    assert len(errors) == 2
+    assert all('rocketride.home' in e for e in errors)
+    assert "'/store'" in errors[0] and "'/marketplace'" in errors[1]
+
+
+async def test_a_redirect_source_whose_slash_twin_is_another_apps_page_is_rejected():
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'R'}, {'path': '/fresh', 'title': 'F'}],
+        'site': {
+            'redirects': [
+                {'from': '/store/', 'to': '/fresh'},
+                {'from': '/free/', 'to': '/fresh'},
+            ]
+        },
+    }
+    errors = [e for e in await gate_errors('rocketride.other', manifest, DIST, hostile_account()) if 'redirect' in e]
+    assert errors == [
+        "site.redirects from '/store/': its slash twin '/store' is a page of the published app rocketride.home; "
+        'a URL is a page or a redirect, not both: drop the entry'
+    ]
+
+
+async def test_feed_paths_claimed_by_another_published_app_are_rejected():
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['publicPages'].append({'path': '/news.xml', 'title': 'News'})
+    feed = {'prefix': '/', 'title': 'All'}
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'R'}],
+        'site': {'feeds': [{'path': '/news.xml', **feed}, {'path': '/feed.xml', **feed}]},
+    }
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account(home=home))
+    assert [e for e in errors if 'feeds' in e] == [
+        "site.feeds path '/news.xml' is a page of the published app rocketride.home; choose another path"
+    ]

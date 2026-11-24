@@ -226,15 +226,22 @@ class _Plan:
 
 
 def default_schema_lookup(provider: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    """The engine's resolved schema and raw definition for ``provider`` (None, None when unknown)."""
+    """The engine's resolved schema and raw definition for ``provider`` (None, None when unknown).
+
+    A node EaaS serves and has not unpacked answers from the node store: its
+    schema through ``node_schema``, its definition (with the ``legacy`` block
+    a saved pipeline is converted by) from ``node_store.served``.
+    """
     from rocketlib import IJson, getServiceDefinition
 
     from ai.common.node_config import node_schema
 
+    from . import node_store
+
     schema = node_schema(provider)
     if schema is None:
         return None, None
-    raw = getServiceDefinition(provider)
+    raw = getServiceDefinition(provider) or node_store.served(provider)
     return schema, IJson.toDict(raw) if raw is not None else {}
 
 

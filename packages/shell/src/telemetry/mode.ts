@@ -67,7 +67,7 @@ export type ModeDeps = {
 	createConsented: () => SdkLike | null;
 	/** Removes PostHog's own storage (localStorage keys and cookies) after a withdrawal. */
 	clearSdkStorage: () => void;
-	/** Super properties every instance must carry (app, rr_traffic, rr_test, is_authed...). */
+	/** Super properties every instance must carry (rr_traffic, rr_test, is_authed...). Never `app`: the reporter stamps that per event. */
 	superProperties: () => Record<string, unknown>;
 	/** Runs a function later (setTimeout); the storage clear is repeated because the SDK re-persists after a reset. */
 	later?: (fn: () => void, ms: number) => void;
@@ -312,6 +312,30 @@ export function clearPostHogStorage(doc: { cookie: string } | null, local: KeySt
 	if (doc) {
 		clearPostHogCookies(doc, hostname);
 	}
+}
+
+/**
+ * Remove PostHog's own storage on this site: its localStorage and
+ * sessionStorage keys and its ph_ cookies, on this host and its parent
+ * domain. Each storage accessor can throw (blocked site data), so each is
+ * read guarded and an unreadable one is skipped; never throws.
+ */
+export function clearSiteStorage(): void {
+	quietly(() => {
+		const read = <T>(get: () => T): T | null => {
+			try {
+				return get() ?? null;
+			} catch {
+				return null;
+			}
+		};
+		clearPostHogStorage(
+			read(() => (typeof document === 'undefined' ? null : document)),
+			read(() => window.localStorage),
+			read(() => window.sessionStorage),
+			read(() => window.location.hostname) ?? '',
+		);
+	});
 }
 
 /**

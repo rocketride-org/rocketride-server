@@ -1,0 +1,72 @@
+{
+	"title": "Skills",
+	"protocol": "tool_skills://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_skills",
+	"prefix": "skills",
+	"icon": "skills.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_skills",
+	"description": ["Gives agents custom skills: instructions for one kind of task, in the SKILL.md format.", "Enter skills in the node, or point it at a folder of skills in your RocketRide files.", "The agent sees each skill's name and description, and loads the full instructions only for the skill it needs."],
+	"lanes": {},
+	//
+	// Optional:
+	//		Local property definitions. The skills and the folder are per-call
+	//		parameters an agent cannot set: the node builds its catalog on each
+	//		call, reading the folder through that call's file store.
+	//
+	"propertyDefinitions": {
+		"tool_skills.folder": {
+			"type": "string",
+			"title": "Skills folder",
+			"description": "Folder in your RocketRide files that holds skills: one subfolder per skill, each with a SKILL.md. Example: skills. Leave empty to use only the skills entered below.",
+			"param": true,
+			"tool": false,
+			"default": ""
+		},
+		"tool_skills.skillName": {
+			"type": "string",
+			"title": "Name",
+			"description": "Lowercase letters, numbers and hyphens, for example release-notes. Leave empty to use the name in the SKILL.md frontmatter.",
+			"default": ""
+		},
+		"tool_skills.skillDescription": {
+			"type": "string",
+			"title": "Description",
+			"description": "What the skill does and when to use it. The agent reads this to decide whether to load the skill. Leave empty to use the description in the SKILL.md frontmatter.",
+			"default": ""
+		},
+		"tool_skills.skillInstructions": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Instructions",
+			"description": "The skill's instructions in markdown, or a whole SKILL.md including its frontmatter.",
+			"default": ""
+		},
+		"tool_skills.skills": {
+			"type": "array",
+			"title": "Skills",
+			"description": "Skills to give the agent. Paste a whole SKILL.md into Instructions, or fill in the name and description and write the instructions.",
+			"param": true,
+			"tool": false,
+			"minItems": 0,
+			"item": {
+				"name": "entry",
+				"properties": ["tool_skills.skillName", "tool_skills.skillDescription", "tool_skills.skillInstructions"]
+			}
+		}
+	},
+	"properties": ["type", "tool_skills.skills", "tool_skills.folder"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		},
+		"dropped": []
+	}
+}
