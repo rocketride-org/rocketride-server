@@ -3467,9 +3467,16 @@ class TaskServer(DAPBase):
             placeholders in place, so a control submitted with another
             environment is the same spec and can still name other databases
             than this call resolved. Covered means the same spec AND the same
-            databases, approved for the same owners.
+            databases, approved for the same owners, IN THE SAME ORGANIZATION:
+            a user scope resolves per org, so one user's control started
+            under another org holds another database under the same key and
+            owner (``_require_engine_db`` reads an engine's the same way).
             """
-            return _same_spec(existing) and existing.db_approved == control.db_approved
+            return (
+                _same_spec(existing)
+                and str(existing.orgId or '') == str(control.orgId or '')
+                and existing.db_approved == control.db_approved
+            )
 
         # The caller's controls under the same index key (rung, owner,
         # address): on @spec the one with the same configuration ON THE

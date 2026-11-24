@@ -135,6 +135,7 @@ async def _start_as(
     pipeline: Dict[str, Any],
     auth: Any = SESSION,
     caller_env: Optional[Dict[str, str]] = None,
+    org_id: str = 'org-1',
     **arguments,
 ):
     """Start (or attach to) a control as user-a over a connection that presents ``auth``, with the call's own env."""
@@ -145,7 +146,7 @@ async def _start_as(
         client_id='user-a',
         user_id='user-a',
         team_id='team-1',
-        org_id='org-1',
+        org_id=org_id,
         developer_id='acme',
         caller_env=caller_env,
     )
@@ -412,6 +413,28 @@ async def test_a_key_denied_the_running_controls_database_cannot_reach_it_throug
     assert message.startswith(f'Cannot reuse the running task "{running.id}"')
     assert 'this key may not reach that team database' in message
     assert list(ts._task_control.values()) == [running]
+
+
+@pytest.mark.asyncio
+async def test_the_same_spec_started_under_another_org_is_asked_about_on_its_own(catalog, engines, db_account):
+    """A user scope resolves per org: the same key and owner under another org is another database.
+
+    The user's control started under org-1 holds org-1's copy. The answer
+    given for the same spec submitted under org-2 does not cover it.
+    """
+    ts = _server()
+    running = await _start_as(ts, _db_pipeline(scope='user'), SESSION)
+    assert running.db_approved == {'user': 'user-a'}
+    del db_account[:]
+
+    again = await _start_as(ts, _db_pipeline(scope='user'), SESSION, org_id='org-2')
+
+    assert again is running, 'the same owner and spec: the caller gets the control it already has'
+    # What this call resolved under org-2 (the same key and owner), then what the running control holds, as org-1's run
+    assert [(q['task_id'], q['identity']['org_id'], q['credential']) for q in db_account] == [
+        (running.id, 'org-2', SESSION),
+        (running.id, 'org-1', SESSION),
+    ]
 
 
 # =============================================================================
