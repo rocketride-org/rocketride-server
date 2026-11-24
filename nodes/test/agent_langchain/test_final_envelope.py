@@ -16,7 +16,7 @@ a reply is read, retried and, when nothing can be delivered, failed.
 Each case runs the real ``LangChainDriver`` through ``AgentBase.run_agent`` and the real
 ``langchain.agents.create_agent``. Only the host LLM is scripted, so what is checked is what a caller
 gets: the answer payload, its ``stop_reason`` and the text written to the answers lane. The parser
-and the retry loop have their own tests in ``test_reply_parser.py``.
+and the retry loop have their own tests in ``packages/ai/tests/ai/common/agent/test_protocol.py``.
 """
 
 from __future__ import annotations

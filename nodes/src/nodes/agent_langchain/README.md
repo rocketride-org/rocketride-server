@@ -100,9 +100,10 @@ JSON object: `{"type":"tool_call","name":"server.tool","args":{...}}` or
 argument schemas from their declared input schemas, with a generic `input`
 field as the fallback.
 
-The node reads a reply with its own code. Two things follow `agent_deepagent`,
-the `FINAL>>>` form and the recovery of a broken `final` envelope, and the rest
-is this node's own. The parallel `tool_calls` form is not taken:
+The node and `agent_deepagent` share reply parsing, answer recovery and the
+three-attempt retry loop in `ai.common.agent._internal.protocol`. This node
+keeps its JSON-envelope prompt and accepts one tool call per reply; DeepAgent
+also enables parallel `tool_calls`. The shared reply handling works as follows:
 
 - A `final` envelope whose content was not escaped correctly (an inner `"`, a
   literal line break) is recovered when the envelope opens the reply and the
