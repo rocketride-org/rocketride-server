@@ -74,7 +74,7 @@ The collection is the destination for stored chunks and is created with no vecto
 
 The runtime accepts `cosine`, `dot`, `l2-squared`, `hamming`, or `manhattan` as the similarity setting, defaulting to `cosine`; another value stops initialization. It passes the selected value to the HNSW index when it creates a collection, so make the choice match the embedding space before the first ingest. Changing the setting does not recreate an existing collection's index.
 
-The retrieval score defaults to `0.5`, while the conversion code also drops results below a hard `0.20` before returning them. Raise the configured threshold if weak documents crowd the context; lower it when expected material is omitted, remembering that nothing below `0.20` can be returned. Cosine scores are converted as `(distance + 1) / 2`; the other supported metrics use a sigmoid conversion, so threshold values are not directly comparable after a metric change.
+The retrieval score defaults to `0.7`, while the conversion code also drops results below a hard `0.20` before returning them. Raise the configured threshold if weak documents crowd the context; lower it when expected material is omitted, remembering that nothing below `0.20` can be returned. Cosine scores are converted from Weaviate's cosine distance as `1 - distance / 2`, so an identical vector scores `1.0`, an unrelated one `0.5` and an opposite one `0.0`; the other supported metrics use a sigmoid conversion, so threshold values are not directly comparable after a metric change.
 
 ### Connection timeouts
 

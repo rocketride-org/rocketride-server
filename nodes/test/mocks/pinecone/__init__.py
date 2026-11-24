@@ -63,6 +63,16 @@ class PodSpec:
     pod_type: str = 'p1.x1'
 
 
+@dataclass
+class IndexModel:
+    """What ``describe_index`` answers: attributes and no ``.get()``, as the real client's model from v7."""
+
+    name: str
+    dimension: int
+    metric: str
+    spec: Any = None
+
+
 # =============================================================================
 # Mock Index
 # =============================================================================
@@ -267,6 +277,14 @@ class MockPinecone:
         MockPinecone._indexes[name] = {'dimension': dimension, 'metric': metric, 'spec': spec}
         MockIndex._dimensions[name] = dimension
         MockIndex._all_storage[name] = {}
+
+    def describe_index(self, name: str) -> IndexModel:
+        """Describe an index: the dimension, metric and spec it was created with."""
+        if name not in MockPinecone._indexes:
+            # The real client answers a 404 for an index that does not exist
+            raise KeyError(f'Index {name} not found')
+        created = MockPinecone._indexes[name]
+        return IndexModel(name=name, dimension=created['dimension'], metric=created['metric'], spec=created['spec'])
 
     def Index(self, name: str) -> MockIndex:
         """Get an index by name."""
