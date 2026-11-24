@@ -116,7 +116,7 @@ def _profiles_note(section: str):
         notes[name] = {'returned': kept, 'total': len(full)}
         notes['hint'] = (
             f'{section}.schema has the settings of only {_profile_count(full[:kept]):,} of '
-            f'{_profile_count(full):,} profiles, in {kept:,} of its {len(full):,} profile branches. Calling '
+            f'{_profile_count(full):,} profiles. It kept {kept:,} of its {len(full):,} profile branches. Calling '
             'describe_component again returns the same result. Every profile name is still in '
             f'{section}.schema.properties.profile.enum. To see what one profile resolves to, call resolve_config with '
             'this component as provider and config {"profile": "<name>"}.'

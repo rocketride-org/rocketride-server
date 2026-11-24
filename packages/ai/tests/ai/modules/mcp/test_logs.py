@@ -363,3 +363,9 @@ async def test_log_trace_and_log_traces_shorten_their_lists_over_the_size_limit(
     result = await logs._log_traces(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'n': 50})
     newest = 50 - len(result['traces'])
     assert 0 < newest < 50 and result['truncated']['hint'].endswith(f'again with n set to {newest}.')
+
+    # When objects still in flight leave no room for any finished trace, the hint does not repeat the same call.
+    closed = [{'beginSeq': i, 'doc': 'd' * 400} for i in range(50)]
+    fake_engine.log_traces_result = {'open': [{'beginSeq': i} for i in range(20)], 'closed': closed}
+    result = await logs._log_traces(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'n': 50})
+    assert (result['traces'], len(result['open'])) == ([], 20) and 'call log_read' in result['truncated']['hint']

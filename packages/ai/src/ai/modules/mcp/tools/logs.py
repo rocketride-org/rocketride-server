@@ -225,6 +225,13 @@ async def _log_traces(client, tasks, args: Dict[str, Any]) -> dict:
     return payload
 
 
+# The next step when objects still in flight leave no room for finished traces.
+_AFTER_RUN = (
+    f'When the run ends, call log_traces again to see the newest finished traces, up to {LOG_TRACES_MAX_N}. To read '
+    "the run's events now, call log_read with the projectId, source and any teamId from this reply's context."
+)
+
+
 def _traces_note(payload: dict, notes: Dict[str, Any], kept: int, traces: list) -> None:
     # The engine lists finished traces oldest first, so the newest are the ones left out.
     newest = len(traces) - kept
@@ -233,6 +240,8 @@ def _traces_note(payload: dict, notes: Dict[str, Any], kept: int, traces: list) 
         f'Only the oldest {kept} of {len(traces)} finished traces fit in one reply. To see the {newest} newest, call '
         f'log_traces again with n set to {newest}.'
     )
+    if kept == 0:
+        notes['hint'] = f'None of the {len(traces):,} finished traces fit in one reply. {_AFTER_RUN}'
 
 
 def _open_note(payload: dict, notes: Dict[str, Any], kept: int, open_traces: list) -> None:
@@ -245,9 +254,7 @@ def _open_note(payload: dict, notes: Dict[str, Any], kept: int, open_traces: lis
             f'None of the {finished:,} finished traces and only {kept:,} of the {len(open_traces):,} objects still in '
             'flight fit in one reply.'
         )
-    notes['hint'] = (
-        f'{cut} When the run ends, call log_traces again to see the newest finished traces, up to {LOG_TRACES_MAX_N}.'
-    )
+    notes['hint'] = f'{cut} {_AFTER_RUN}'
 
 
 def _trace_note(payload: dict, notes: Dict[str, Any], kept: int, events: list) -> None:
