@@ -104,8 +104,10 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 				if (!cm.isConnected() || !scope || scope.orgId !== orgId || !checkoutScope || !matchesCheckoutScope(scope, checkoutScope)) return;
 				const entry = app as AppManifestEntry;
 				const current = activeCheckout.current;
-				// A second opening signal cannot replace an unresolved purchase.
-				if (current && sameCheckoutScope(scope, current.scope)) return;
+				// A second opening signal cannot replace an unresolved purchase. A
+				// checkout that never rendered (no matching key yet) has nothing in
+				// flight, so a new signal replaces it instead of being swallowed.
+				if (current && sameCheckoutScope(scope, current.scope) && lastStripeKey.current?.checkoutId === current.id) return;
 				const next = { id: ++checkoutSequence.current, scope: checkoutScope, app: entry, plan, promo };
 				activeCheckout.current = next;
 				setLiveReplaySupported(scope.replaySupported);
@@ -185,20 +187,27 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 				return needClient().billing.redeemPromoCode(orgId, code, attemptId) as Promise<never>;
 			}}
 			onConfirmPending={async (subscriptionId: string, priceId: string) => {
+				// Sent only after payment succeeded: it needs the same identity, not
+				// replay support, and the webhook settles the payment if it fails.
 				// No SDK method exists for confirm_pending (the old direct-client
 				// path called a phantom `dapRequest`); wrap the public call()
 				// exactly as BillingApi wraps its other verbs.
-				await needClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: checkoutApp.id, subscriptionId, priceId });
+				await needReadClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: checkoutApp.id, subscriptionId, priceId });
 			}}
 			onSuccess={() => {
-				if (!isCheckoutCurrent()) return;
+				// The purchase is final: a dropped connection or a withdrawn replay
+				// capability must not strand it. Only a different account is refused.
+				if (activeCheckout.current !== checkout) return;
+				const scope = getCheckoutScope(cm.getClient());
+				if (scope && !sameCheckoutScope(scope, checkout.scope)) return;
 				activeCheckout.current = null;
-				// Payment can complete before the account shows an active subscription.
 				const appId = checkoutApp.id;
 				const appName = checkoutApp.name;
 				setCheckout((current) => current === checkout ? null : current);
-				const status = cm.getClient()?.getAccountInfo()?.apps?.find((app) => app.id === appId)?.appStatus;
-				if (status === 'subscribed' || status === 'trialing') cm.emit('shell:switchApp', { appId });
+				// Drop the user into what they just bought. The account can lag the
+				// payment (confirm_pending writes 'incomplete' until the webhook), so
+				// the switch does not wait on a cached subscribed status.
+				cm.emit('shell:switchApp', { appId });
 				cm.emit('shell:statusMessage', { message: `Checkout completed for ${appName}.` });
 				// Auto-clear so the confirmation doesn't linger in the status bar.
 				// Tracked in a ref so it's cancelled if we unmount before it fires.

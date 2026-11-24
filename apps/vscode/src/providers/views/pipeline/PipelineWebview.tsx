@@ -285,9 +285,10 @@ const PipelineWebview: React.FC = () => {
 
 	const handleConfirmPending = useCallback(async (subscriptionId: string, priceId: string): Promise<void> => {
 		// No SDK method exists for confirm_pending; wrap the public call()
-		// exactly as BillingApi wraps its other verbs.
-		await needBillingClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: PIPE_BUILDER_APP_ID, subscriptionId, priceId });
-	}, [needBillingClient]);
+		// exactly as BillingApi wraps its other verbs. Sent only after payment
+		// succeeded, so the same identity is enough (no replay support needed).
+		await needBillingReadClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: PIPE_BUILDER_APP_ID, subscriptionId, priceId });
+	}, [needBillingReadClient]);
 
 	// --- Wait for initial state from host before rendering --------------------
 

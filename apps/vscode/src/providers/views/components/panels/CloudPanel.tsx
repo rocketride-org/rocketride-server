@@ -22,7 +22,7 @@ import { useCheckoutSession } from '../../hooks/useCheckoutSession';
 import { CheckoutUnavailableNotice } from '../CheckoutUnavailableNotice';
 import { Banner, CheckoutModal, ConnectionManager } from 'shell';
 import { RocketRideClient } from 'rocketride';
-import { getCheckoutScope } from 'shell/src/connection/checkoutScope';
+import { getCheckoutScope, sameCheckoutScope } from 'shell/src/connection/checkoutScope';
 import { checkoutNotDispatched } from 'shell/src/modules/checkout/checkoutDispatch';
 import type { CheckoutPlan } from 'shell';
 import type { CheckoutModalProps } from 'shell/src/modules/checkout/types';
@@ -328,12 +328,14 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 						return onCreateCheckout(...args);
 					}}
 					onConfirmPending={async (...args) => {
-						if (!isCurrent(checkout) || !targetIsCurrent()) return;
+						// Sent after payment succeeded: same identity is enough.
+						if (!isSessionCurrent(checkout) || !targetIsCurrent()) return;
 						await onConfirmPending(...args);
 					}}
 					onSuccess={async () => {
-						if (!isCurrent(checkout) || !targetIsCurrent()) return;
-						await onCheckoutSuccess?.();
+						// The result is final; only a different account skips the host hook.
+						const scope = getCheckoutScope(cm.getClient());
+						if (!scope || sameCheckoutScope(scope, checkout.scope)) await onCheckoutSuccess?.();
 						closeCheckout(checkout);
 					}}
 					onClose={() => closeCheckout(checkout)}

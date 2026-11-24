@@ -30,7 +30,7 @@ import test from 'node:test';
 import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, type ConnectResult, type PkceCredential, type SignupProperties } from 'rocketride';
 import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionStatus } from '../types/connection';
-import { ConnectionManager } from './connection';
+import { ConnectionManager, getAccountTransition } from './connection';
 import { RocketRideClientProxy } from './RocketRideClientProxy';
 import { ConnectionFailure, withTimeout } from './errors';
 import { RemoteManager } from './remote-manager';
@@ -2014,6 +2014,31 @@ test('a mirrored workspace-change edge reaches checkout before the next account 
 
 	assert.deepEqual(changes, ['org-b']);
 	assert.equal(cm.getClient()?.getOrgId(), 'org-a');
+});
+
+test('a mirrored org switch ends its workspace transition when the root reconnects', async () => {
+	// Only the cloud Shell emits shell:workspaceChanged. A VS Code webview sees
+	// apaext_org_changed, then the root drop and reconnect: the reconnect must
+	// end the transition, or billing in that realm stays fenced off for good.
+	const cm = createMirroredManager();
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });
+	cm.publish('shell:account', { ...authenticatedResult, organization: { id: 'org-a' } });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.deepEqual({ ...getAccountTransition(cm) }, { changingWorkspace: false, disconnecting: false });
+
+	await cm.ops().request(CLIENT_EVENT_OP, {
+		message: { type: 'event', seq: 1, event: 'apaext_org_changed', body: { orgId: 'org-b' } },
+	});
+	assert.equal(getAccountTransition(cm).changingWorkspace, true);
+
+	cm.publish('shell:status', { connected: false, status: { state: 'connecting', hasCredentials: true } });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.equal(getAccountTransition(cm).disconnecting, true);
+
+	cm.publish('shell:account', { ...authenticatedResult, organization: { id: 'org-b' } });
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.deepEqual({ ...getAccountTransition(cm) }, { changingWorkspace: false, disconnecting: false });
 });
 
 test('a root disconnect moves the realm client with it', async () => {

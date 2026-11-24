@@ -19,7 +19,7 @@ import type { PaymentWalletsOption } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
 import { PlanPicker, planAmount } from './PlanPicker';
-import { isCheckoutNotDispatched } from './checkoutDispatch';
+import { isCheckoutNotDispatched, isServerRejection } from './checkoutDispatch';
 import { grantSuccessLabel } from './successLabel';
 import type { CheckoutModalProps, CheckoutPlan, PromoValidation } from './types';
 
@@ -522,23 +522,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		mounted.current = false;
 		onClose();
 	};
+	// After a completed payment or redemption only this modal's own mount gates
+	// success: the result is final, so a dropped connection or a withdrawn replay
+	// capability must not strand the Continue button. Hosts check their scope.
 	const notifySuccess = useCallback(async () => {
-		if (!isCurrent() || notifyingSuccess.current) return;
+		if (!mounted.current || notifyingSuccess.current) return;
 		notifyingSuccess.current = true;
 		try {
 			await onSuccess();
 		} catch {
-			if (isCurrent()) setError('Checkout completed. Try opening the app again.');
+			if (mounted.current) setError('Checkout completed. Try opening the app again.');
 		} finally {
 			notifyingSuccess.current = false;
 		}
-	}, [isCurrent, onSuccess]);
+	}, [onSuccess]);
 	const finishCheckout = useCallback((result: 'complete' | 'pending', acknowledge?: () => Promise<void>) => {
 		if (!mounted.current || settled.current) return;
 		settled.current = true;
 		setError(null);
 		setOutcome(result);
-		if (result !== 'complete' || !isCurrent()) return;
+		if (result !== 'complete') return;
 		if (acknowledge) {
 			void (async () => {
 				try {
@@ -549,7 +552,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			})();
 		}
 		void notifySuccess();
-	}, [isCurrent, notifySuccess]);
+	}, [notifySuccess]);
 
 	// ── Promo code state ─────────────────────────────────────────────────
 	const promoEnabled = Boolean(onValidatePromoCode);
@@ -561,7 +564,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	const [grantResult, setGrantResult] = useState<{
 		code: string;
 		credits: Record<string, number>;
-		mode: 'subscribed' | 'credits_only';
+		mode: 'subscribed' | 'credits_only' | 'already_redeemed';
+		/** The org now holds the app, so the success button opens it. */
+		subscribed: boolean;
 	} | null>(null);
 
 	// ── Fetch plans on mount ─────────────────────────────────────────────
@@ -655,6 +660,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 					// ends up with plans or a retry control. Needs no replay support.
 					if (!retryCheckout) setPlanFetchRetry((count) => count + 1);
 				}
+			} else if (isServerRejection(err)) {
+				// The server refused this attempt, so nothing is pending: show its
+				// message and let the next Continue send a fresh attempt ID (reusing
+				// the ID would replay the same refusal from Stripe's idempotency cache).
+				if (attempt) {
+					checkoutAttempts.current.delete(JSON.stringify([attempt.priceId, attempt.promotionCode]));
+				}
+				if (mounted.current) {
+					setRetryCheckout(null);
+					setError(err.message || 'Failed to start checkout. Please try again.');
+					// A catalog read that raced this checkout was discarded.
+					if (plans.length === 0) setPlanFetchRetry((count) => count + 1);
+				}
 			} else if (attempt && !canReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
@@ -665,7 +683,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			checkoutInFlight.current = false;
 			setLoadingSecret(false);
 		}
-	}, [selectedPlan, appliedPromo, retryCheckout, isCurrent, canReplay, selectionAvailable, requireCheckoutStatus, onCreateCheckout, onConfirmPending, finishCheckout]);
+	}, [selectedPlan, appliedPromo, retryCheckout, isCurrent, canReplay, selectionAvailable, requireCheckoutStatus, plans.length, onCreateCheckout, onConfirmPending, finishCheckout]);
 
 	/** Resets back to the plan picker. */
 	const handleBack = useCallback(() => {
@@ -718,13 +736,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				redeeming = true;
 				const redemption = await onRedeemPromoCode(attempt.input, attempt.id);
 				if (!mounted.current) return;
-				if (redemption?.redeemed === false && canReplay) {
-					unresolvedGrant.current = codeKey;
-					setPromoError('The server did not confirm redemption. Please try again.');
+				if (redemption?.redeemed === false) {
+					if (canReplay) {
+						unresolvedGrant.current = codeKey;
+						setPromoError('The server did not confirm redemption. Please try again.');
+					} else {
+						// An explicit refusal from a server without replay: nothing is pending.
+						promoAttempts.current.delete(codeKey);
+						unresolvedGrant.current = null;
+						setPromoError('This code could not be redeemed.');
+					}
 					return;
 				}
-				const { redeemed, mode, appId, credits } = redemption ?? {};
-				if (redeemed !== true || (mode !== 'subscribed' && mode !== 'credits_only') ||
+				const { redeemed, appId, status } = redemption ?? {};
+				// The server answers 'already_redeemed' for a repeat of the same org and
+				// code (a lost response or a second click): a no-op success with no new
+				// credits. The SDK's frozen PromoRedemption type predates that mode.
+				const mode = (redemption as { mode?: unknown } | undefined)?.mode;
+				const credits = redemption?.credits ?? (mode === 'already_redeemed' ? {} : undefined);
+				if (redeemed !== true || (mode !== 'subscribed' && mode !== 'credits_only' && mode !== 'already_redeemed') ||
 					typeof appId !== 'string' || !appId || !credits || typeof credits !== 'object' ||
 					Array.isArray(credits) || Object.values(credits).some((amount) => !Number.isFinite(amount) || amount < 0)) {
 					finishCheckout('pending');
@@ -732,13 +762,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				}
 				unresolvedGrant.current = null;
 				settled.current = true;
-				setGrantResult({ code: attempt.displayCode, credits, mode });
+				setGrantResult({
+					code: attempt.displayCode,
+					credits,
+					mode,
+					subscribed: mode === 'subscribed' || (mode === 'already_redeemed' && (status === 'active' || status === 'trialing')),
+				});
 			}
 		} catch (err: unknown) {
 			if (isCheckoutNotDispatched(err)) {
 				if (mounted.current) {
 					setPromoError(unresolvedGrant.current ? 'Redemption recovery is unavailable. Check your credits before starting again.' : err.message);
 				}
+			} else if (redeeming && isServerRejection(err)) {
+				// The server refused the redemption: show why and allow a fresh attempt.
+				promoAttempts.current.delete(codeKey);
+				unresolvedGrant.current = null;
+				if (mounted.current) setPromoError(err.message || 'Could not apply this code. Please try again.');
 			} else if (redeeming && !canReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
@@ -845,9 +885,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 						<div style={S.successBlock}>
 							<div style={S.successMark}>{'✓'}</div>
 							<h3 style={S.successTitle}>
-								{grantResult.mode === 'subscribed'
-									? 'Code redeemed. No payment was required.'
-									: 'Code redeemed.'}
+								{grantResult.mode === 'already_redeemed'
+									? 'This code was already redeemed for your organization.'
+									: grantResult.mode === 'subscribed'
+										? 'Code redeemed. No payment was required.'
+										: 'Code redeemed.'}
 							</h3>
 							<p style={S.successText}>
 								{Object.keys(grantResult.credits).length > 0 && (
@@ -858,7 +900,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 								)}
 								Code <b>{grantResult.code}</b>
 							</p>
-							{grantResult.mode === 'subscribed'
+							{grantResult.subscribed
 								? <button style={S.submitBtn(false)} onClick={() => void notifySuccess()}>{grantSuccessLabel(appName, appId)}</button>
 								: <button style={S.submitBtn(false)} onClick={closeCheckout}>Done</button>}
 						</div>

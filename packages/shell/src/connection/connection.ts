@@ -2012,8 +2012,15 @@ export class ConnectionManager implements IConnectionManager {
 		if (event === 'shell:workspaceWillChange') advanceAccountTransition(this, { changingWorkspace: true });
 		else if (event === 'shell:workspaceChanged') advanceAccountTransition(this, { changingWorkspace: false });
 		else if (event === 'shell:disconnected' || event === 'shell:logout') advanceAccountTransition(this, { disconnecting: true });
-		else if (event === 'shell:connected' && getAccountTransition(this).disconnecting) {
-			advanceAccountTransition(this, { disconnecting: false });
+		else if (event === 'shell:connected') {
+			// A new session ends any transition. Only the cloud Shell emits
+			// shell:workspaceChanged; a mirrored realm (VS Code webviews) learns of
+			// an org switch from apaext_org_changed and then sees only the root
+			// reconnect, so this is where its workspace change finishes too.
+			const transition = getAccountTransition(this);
+			if (transition.disconnecting || transition.changingWorkspace) {
+				advanceAccountTransition(this, { disconnecting: false, changingWorkspace: false });
+			}
 		} else if (event === 'shell:orgChanged') {
 			advanceAccountTransition(this);
 		}

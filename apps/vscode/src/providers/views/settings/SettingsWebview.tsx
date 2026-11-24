@@ -27,6 +27,7 @@ import { SHELL_PARTITION } from 'shell/src/workspace/workspaceStore';
 import { CheckoutUnavailableNotice } from '../components/CheckoutUnavailableNotice';
 import { isAppSubscribed } from 'shared/utils/subscriptionGate';
 import { useStripeKey } from '../hooks/useStripeKey';
+import { getCheckoutScope } from 'shell/src/connection/checkoutScope';
 import type { ConnectResult } from 'rocketride';
 import { ConnectionSettings } from './ConnectionSettings';
 import { DeploySettings } from './DeploySettings';
@@ -417,7 +418,9 @@ export const Settings: React.FC = () => {
 	// Subscribe entry point: hand off to CheckoutFlow, or explain why not.
 	const [showUnavailable, setShowUnavailable] = useState(false);
 	const handleAccountSubscribe = useCallback(() => {
-		if (!stripe?.key) {
+		// CheckoutFlow renders only a key fetched from the connected server, so a
+		// key for another endpoint is as unavailable as no key at all.
+		if (!stripe?.key || (stripe.server && stripe.server !== getCheckoutScope(cm.getClient())?.server)) {
 			setShowUnavailable(true);
 			return;
 		}

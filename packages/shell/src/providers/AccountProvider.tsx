@@ -450,6 +450,20 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		loadBilling();
 	}, [client, orgId, userId, embeddedSection]);
 
+	// loadBilling refuses to start while the connection or workspace is in
+	// transition, and the effect above does not re-run when a mirrored realm
+	// reconnects with the same client and org. Retry once the transition ends,
+	// or a pane mounted mid-reconnect would keep its loading state.
+	useEffect(() => {
+		if (!client || embeddedSection === 'profile' || embeddedSection === 'api-keys') return;
+		const manager = ConnectionManager.getInstance();
+		const off = [
+			manager.on('shell:connected', () => { void loadBilling(); }),
+			manager.on('shell:workspaceChanged', () => { void loadBilling(); }),
+		];
+		return () => off.forEach((unsubscribe) => unsubscribe());
+	}, [client, embeddedSection, loadBilling]);
+
 	// ── Subscribe to billing events when billing tab is active ──────────────
 	useEffect(() => {
 		if (!client || section !== 'billing') return;
