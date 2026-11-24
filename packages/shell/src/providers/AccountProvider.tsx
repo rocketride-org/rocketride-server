@@ -38,7 +38,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
-import { parsePlanChangeOutcome, parsePlanChangePreview } from '../modules/billing/components/planChange';
+import { parsePlanChangeOutcome } from '../modules/billing/components/planChange';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
 import { useShellConnection } from '../connection/ConnectionContext';
@@ -365,56 +365,13 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		return client;
 	}, [client, orgId, isCurrentBillingScope]);
 
-	const handlePreviewSubscriptionChange = useCallback(
-		async (appId: string, newPriceId: string, expectedPriceId: string) => {
-			const billingClient = requirePlanChangeClient();
-			try {
-				const preview = await billingClient.call<unknown>('rrext_account_billing', {
-					subcommand: 'preview_upgrade', orgId, appId, newPriceId, expectedPriceId,
-				});
-				requirePlanChangeClient();
-				return parsePlanChangePreview(preview);
-			} catch (error) {
-				requirePlanChangeClient();
-				// Older servers can still apply plan changes. Only the explicit
-				// unsupported-command response can fall back to a neutral dialog.
-				if (error instanceof Error && error.message === "Unknown billing subcommand: 'preview_upgrade'") return null;
-				throw error;
-			}
-		},
-		[requirePlanChangeClient, orgId]
-	);
-
 	const handleUpgradeSubscription = useCallback(
-		async (appId: string, newPriceId: string, attemptId?: string, expectedPriceId?: string) => {
-			const manager = ConnectionManager.getInstance();
-			const transition = getAccountTransition(manager);
-			const response = await requirePlanChangeClient().call<unknown>('rrext_account_billing', {
-				subcommand: 'upgrade',
-				orgId,
-				appId,
-				newPriceId,
-				...(attemptId ? { attemptId } : {}),
-				...(expectedPriceId ? { expectedPriceId } : {}),
-			});
-			requirePlanChangeClient();
-			const result = parsePlanChangeOutcome(response);
-			if (result.status === 'requires_action') {
-				return {
-					...result,
-					assertPaymentScope: () => {
-						requirePlanChangeClient();
-						if (transition !== getAccountTransition(manager)) {
-							throw new Error('The billing connection changed. Try the plan change again.');
-						}
-					},
-				};
-			}
-			if (result.status === 'upgraded' || result.status === 'applied' || result.status === 'scheduled' ||
-				result.status === 'downgrade_scheduled' || result.status === 'unchanged') {
-				loadBilling();
-			}
-			return result;
+		async (appId: string, newPriceId: string) => {
+			const response = await requirePlanChangeClient().billing.upgradeSubscription(orgId, appId, newPriceId);
+			// The server answered success, so the change may already be applied:
+			// refresh before reading the result (loadBilling skips a stale scope).
+			void loadBilling();
+			return parsePlanChangeOutcome(response) ?? undefined;
 		},
 		[requirePlanChangeClient, orgId, loadBilling]
 	);
@@ -806,21 +763,24 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	 */
 	const handleCancelSubscription = useCallback(
 		async (appId: string) => {
-			if (!client || !orgId || !isCurrentBillingScope()) return;
-			let sequence: number | undefined;
+			if (!client || !orgId) throw new Error('Not connected');
+			// Tell the user instead of silently doing nothing mid-switch.
+			if (!isCurrentBillingScope()) throw new Error('The active organization or connection changed. Reopen billing and try again.');
+			await client.billing.cancelSubscription(orgId, appId);
+			if (!isCurrentBillingScope()) return;
+			// The cancel is done: a failed refresh must not read as a failed cancel.
+			const sequence = ++subscriptionLoadSequence.current;
 			try {
-				await client.billing.cancelSubscription(orgId, appId);
-				if (!isCurrentBillingScope()) return;
-				sequence = ++subscriptionLoadSequence.current;
 				const updated = await client.billing.getDetails(orgId);
 				if (sequence === subscriptionLoadSequence.current && isCurrentBillingScope()) {
 					setSubscriptionSnapshot({ client, orgId, userId, rows: updated, error: null });
 				}
-			} catch (error) {
-				if (isCurrentBillingScope() && (sequence === undefined || sequence === subscriptionLoadSequence.current)) throw error;
+			} catch {
+				// loadBilling keeps the rows on screen and reports its own error.
+				if (sequence === subscriptionLoadSequence.current) void loadBilling();
 			}
 		},
-		[client, orgId, userId, isCurrentBillingScope]
+		[client, orgId, userId, isCurrentBillingScope, loadBilling]
 	);
 
 	/** Opens the Stripe customer portal for payment method management.
@@ -863,7 +823,6 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				allPlans={allPlans}
 				onPurchaseTopup={handlePurchaseTopup}
 				onUpgradeSubscription={subscriptions ? handleUpgradeSubscription : undefined}
-				onPreviewSubscriptionChange={subscriptions ? handlePreviewSubscriptionChange : undefined}
 				dashboardLoading={Boolean(client && orgId && !dashboard)}
 				onTransactionPage={handleTransactionPage}
 				fetchTransactions={fetchTransactions}
