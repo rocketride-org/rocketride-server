@@ -146,9 +146,10 @@ node belongs to whoever uploaded its first version: only they can add a version,
 publish it or unpublish it. A node cannot be published to `@public` yet. An upload is refused with
 `NODE_PACKAGE_INVALID`, the message naming the rule, for a C++ node, an id
 outside your developer namespace or not in lowercase, a symlink, a path outside
-the zip or with a `.` or empty segment, two entries with one path, an icon
-outside the node or one that carries anything but a drawing, or a requirement
-line with an index, a URL or a local path. Those rules check what a package
+the zip or with a `.` or empty segment, a name that ends in `.` or a space, two
+entries with one path, a folder named `services.*` inside the node, an icon
+outside the node or one that carries anything but a drawing, or a line of
+`requirements*.txt` or `overrides.txt` with an index, a URL or a local path. Those rules check what a package
 declares; its code runs inside the runs of everyone it is published to, with
 their keys, so publish a node only to people who trust it. A run that uses a
 published node gets only the process runtime from the server's environment: not its
