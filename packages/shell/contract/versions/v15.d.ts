@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV15 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-24T18:22:40.294Z
-// Source commit: 5e11acdc8d0135101382185dca4cf5c1da701707
+// Generated:     2026-11-24T18:54:42.510Z
+// Source commit: f81fc4ea87cd7969adf751c6afbeb030c4aa94ad
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -9906,12 +9906,14 @@ export interface IWorkspaceContext {
     /** Update the opaque app-owned state via a functional updater. */
     updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
     /**
-     * Writes the workspace's pending debounced state to disk NOW.
+     * Starts a best-effort save of the workspace's pending debounced state
+     * NOW: the timers are cleared and the writes are sent, not awaited, and
+     * a write the socket drops is not sent again.
      *
-     * Hand this to Documents as `WorkspaceBinding.flushNow` so a teardown
-     * the page outlives (an app switch, a view that unmounts) cannot strand
-     * the last change in a timer that never fires. For a live page only:
-     * never call it from `pagehide`/`beforeunload` (see that binding's doc).
+     * Hand this to Documents as `WorkspaceBinding.flushNow` so a view that
+     * unmounts while its app stays active cannot strand the last change in
+     * a timer that never fires. For a live page only: never call it from
+     * `pagehide`/`beforeunload` (see that binding's doc).
      */
     flushWorkspaceNow: () => void;
     /** ID of the currently active app. */
@@ -9940,11 +9942,13 @@ export interface IWorkspaceContext {
     /**
      * Set when a switch-to-app failed to load while another app stayed on
      * screen — surfaced by the shell as a modal over the current app.
-     * Null when no failure is pending.
+     * Null when no failure is pending. `params` are the launch parameters of
+     * the switch that failed, so a retry opens what was asked for.
      */
     loadFailure: {
         appId: string;
         name: string;
+        params?: Record<string, string>;
     } | null;
     /** Dismisses the pending load-failure modal. */
     dismissLoadFailure: () => void;
