@@ -34,14 +34,18 @@ server at the hosted URL in two identical files, a square PNG logo, the
    the two files whose names start with a dot.
 2. In the copy, change `repository` in `.cursor-plugin/plugin.json` to the new
    repository's URL.
-3. From then on, the new repository is the source of truth. Delete this folder
-   and `tests/test_cursor_plugin.py` from this repository in one small PR.
+3. Copy `tests/test_cursor_plugin.py` to `tests/` in the new repository and set
+   `PLUGIN = ROOT` in it, so the check keeps running there.
+4. From then on, the new repository is the source of truth. In one small PR,
+   delete this folder, `tests/test_cursor_plugin.py`, and the file's entry in
+   the `docs:validate` test list in `docs/docusaurus/scripts/tasks.js`.
 
 ## Before each submission or update
 
 1. Raise `version` in `.cursor-plugin/plugin.json` and add a `CHANGELOG.md`
    entry. Cursor reviews every update to a Marketplace plugin.
-2. Run the check: `python3 -m pytest tests/test_cursor_plugin.py`.
+2. Run the check: `python3 -m pytest tests/test_cursor_plugin.py`, here or in
+   the new repository.
 3. Load the folder in Cursor from `~/.cursor/plugins/local/rocketride`, reload
    the window, sign in, and run one tool.
 4. Open every link in the manifest and the README.
