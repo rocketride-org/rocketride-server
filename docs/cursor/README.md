@@ -35,7 +35,8 @@ server at the hosted URL in two identical files, a square PNG logo, the
 2. In the copy, change `repository` in `.cursor-plugin/plugin.json` to the new
    repository's URL.
 3. Copy `tests/test_cursor_plugin.py` to `tests/` in the new repository and set
-   `PLUGIN = ROOT` in it, so the check keeps running there.
+   `PLUGIN = ROOT` in it, so the check keeps running there. Copy the checklist
+   below into the new repository's `CONTRIBUTING.md`.
 4. From then on, the new repository is the source of truth. In one small PR,
    delete this folder, `tests/test_cursor_plugin.py`, and the file's entry in
    the `docs:validate` test list in `docs/docusaurus/scripts/tasks.js`.
