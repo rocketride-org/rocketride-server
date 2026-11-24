@@ -117,7 +117,7 @@ HOME_MANIFEST = {
     'site': {
         'title': 'RocketRide',
         'blurb': 'The blurb.',
-        'docsUrl': 'https://docs.rocketride.org/llms.txt',
+        'docsUrl': 'https://docs.rocketride.ai/llms.txt',
         'redirects': [{'from': '/plans', 'to': '/pricing'}],
         'organization': {
             'name': 'RocketRide',

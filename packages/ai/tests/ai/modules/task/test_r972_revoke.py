@@ -169,6 +169,134 @@ async def test_deauth_detaches_debugger_before_reauth_as_other_user(monkeypatch)
     assert task._debugger is None
 
 
+def _debugged_task(server, conn):
+    """A task whose debugger is ``conn``, registered on ``server``."""
+    from unittest.mock import MagicMock
+
+    from ai.modules.task.task_engine import Task
+
+    task = Task.__new__(Task)
+    task.id = 'run-1'
+    task._run_log = None
+    task._debugger = conn
+    task._status = MagicMock()
+    task.stamp_log_event = MagicMock()
+    task.debug_message = MagicMock()
+    server._task_control['run-1'] = MagicMock(task=task)
+    return task
+
+
+_STOPPED = {'event': 'stopped', 'body': {'project_id': 'p', 'runKind': 'dev'}}
+
+
+@pytest.mark.asyncio
+async def test_reauth_as_other_user_without_deauth_detaches_debugger(monkeypatch):
+    """Re-authenticating as another user on a live socket drops the old debugger."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('user-a'))
+    task = _debugged_task(server, conn)
+
+    server._server.authenticate_credential = AsyncMock(return_value=identity('user-b'))
+    await conn.on_auth(_request('auth', auth='rr_session'))
+    assert conn._account_info.userId == 'user-b'
+
+    conn.sent.clear()
+    await task._forward_task_event(EVENT_TYPE.DEBUGGER, _STOPPED)
+
+    assert task._debugger is None
+    assert events(conn, 'stopped') == []
+
+
+@pytest.mark.asyncio
+async def test_reauth_as_same_user_keeps_debugger(monkeypatch):
+    """Refreshing the same identity does not detach the debugger."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('user-a'))
+    task = _debugged_task(server, conn)
+
+    server._server.authenticate_credential = AsyncMock(return_value=identity('user-a'))
+    await conn.on_auth(_request('auth', auth='rr_session'))
+
+    conn.sent.clear()
+    await task._forward_task_event(EVENT_TYPE.DEBUGGER, _STOPPED)
+
+    assert task._debugger is conn
+    assert events(conn, 'stopped')
+
+
+@pytest.mark.asyncio
+async def test_reauth_as_other_user_clears_monitors(monkeypatch):
+    """The previous identity's event subscriptions do not survive a user switch."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('user-a'), monitors=WILDCARD_ALL)
+    assert conn._monitors
+
+    server._server.authenticate_credential = AsyncMock(return_value=identity('user-b'))
+    await conn.on_auth(_request('auth', auth='rr_session'))
+
+    assert conn._account_info.userId == 'user-b'
+    assert not conn._monitors
+
+
+@pytest.mark.asyncio
+async def test_reauth_switch_closes_old_identity_before_detaching(monkeypatch):
+    """While the old debugger is being detached, the old identity can no longer act."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('user-a'), monitors=WILDCARD_ALL)
+    seen = {}
+    real = conn._detach_debuggers
+
+    async def detach_and_probe():
+        await asyncio.sleep(0)
+        seen['authenticated'] = conn._authenticated
+        seen['monitors'] = dict(conn._monitors)
+        conn.sent.clear()
+        await conn.on_receive({'type': 'request', 'seq': 9, 'command': 'rrext_process', 'arguments': {}})
+        seen['replies'] = list(conn.sent)
+        await real()
+
+    conn._detach_debuggers = detach_and_probe
+    server._server.authenticate_credential = AsyncMock(return_value=identity('user-b'))
+    slots = dict(server._unauthed_by_ip)
+    await conn.on_auth(_request('auth', auth='rr_session'))
+
+    assert seen['authenticated'] is False
+    assert seen['monitors'] == {}
+    assert seen['replies'] and all(m.get('success') is False for m in seen['replies'])
+    assert conn._authenticated and conn._account_info.userId == 'user-b'
+    assert server._unauthed_by_ip == slots
+
+
+@pytest.mark.asyncio
+async def test_reauth_same_user_other_credential_kind_detaches_debugger(monkeypatch):
+    """A tk_ credential carries the launcher's userId: switching kind is a switch."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('user-a'), monitors=WILDCARD_ALL)
+    task = _debugged_task(server, conn)
+
+    server._server.authenticate_credential = AsyncMock(return_value=identity('user-a', auth='tk_' + 'x' * 32))
+    await conn.on_auth(_request('auth', auth='tk_' + 'x' * 32))
+
+    conn.sent.clear()
+    await task._forward_task_event(EVENT_TYPE.DEBUGGER, _STOPPED)
+    assert task._debugger is None
+    assert events(conn, 'stopped') == []
+    assert not conn._monitors
+
+
+@pytest.mark.asyncio
+async def test_reauth_same_user_same_credential_kind_keeps_debugger(monkeypatch):
+    """Two different full-user sessions of one user are the same identity."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('user-a'))
+    task = _debugged_task(server, conn)
+
+    server._server.authenticate_credential = AsyncMock(return_value=identity('user-a', auth='rr_other'))
+    await conn.on_auth(_request('auth', auth='rr_other'))
+
+    assert task._debugger is conn
+
+
 @pytest.mark.asyncio
 async def test_r972_1a_self_demotion_revokes_caller_and_scopes_removal(monkeypatch):
     """E8: a SaaS-shaped push after self-demotion revokes the caller's socket;

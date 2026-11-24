@@ -85,6 +85,7 @@ class FakeEngineClient:
         fs_get_url_result='https://signed.example/f?sig=abc',
         env_keys=None,
         auth=None,
+        capabilities=None,
     ):
         self._tasks = (
             tasks
@@ -117,6 +118,7 @@ class FakeEngineClient:
             'get': dict(FAKE_DEPLOYMENT),
             'versions': {'rows': [dict(FAKE_ARTIFACT), {'version': 2}], 'total': 2, 'page': 1, 'pageSize': 50},
             'deploy': dict(FAKE_DEPLOYMENT),
+            'artifact': {'components': []},
             'set_schedule': dict(FAKE_DEPLOYMENT),
             'enable': dict(FAKE_DEPLOYMENT),
             'disable': {**FAKE_DEPLOYMENT, 'state': 'disabled'},
@@ -181,6 +183,9 @@ class FakeEngineClient:
         self.auth = auth
         self._env_keys = env_keys if env_keys is not None else []
         self.get_environment_keys_calls = 0
+        # The capability tags of the engine's sign-in result (or an exception to raise)
+        self._capabilities = capabilities if capabilities is not None else []
+        self.get_capabilities_calls = 0
         self.closed = False
         self.close_calls = 0
 
@@ -278,6 +283,9 @@ class FakeEngineClient:
 
     async def deploy_deploy(self, project_id, version, team_id):
         return self._deploy('deploy', project_id=project_id, version=version, team_id=team_id)
+
+    async def deploy_artifact(self, project_id, version):
+        return self._deploy('artifact', project_id=project_id, version=version)
 
     async def deploy_set_schedule(self, project_id, source_id, schedule, team_id, *, ttl=None):
         return self._deploy(
@@ -378,6 +386,12 @@ class FakeEngineClient:
         if isinstance(self._env_keys, Exception):
             raise self._env_keys
         return list(self._env_keys)
+
+    async def get_capabilities(self):
+        self.get_capabilities_calls += 1
+        if isinstance(self._capabilities, Exception):
+            raise self._capabilities
+        return list(self._capabilities)
 
     async def close(self):
         self.close_calls += 1

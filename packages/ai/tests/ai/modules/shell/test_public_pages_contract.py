@@ -163,7 +163,7 @@ def test_valid_manifest_yields_pages_and_site():
             _page('/pricing', description='Plans', data=['plans'], snapshot='pages/pricing.html'),
             _page('/store', listed=False),
         ],
-        'site': {'title': 'RocketRide', 'blurb': 'B', 'docsUrl': 'https://docs.rocketride.org/llms.txt'},
+        'site': {'title': 'RocketRide', 'blurb': 'B', 'docsUrl': 'https://docs.rocketride.ai/llms.txt'},
     }
     pages, site, errors = check_manifest(ROOT_APP, manifest)
     assert errors == []
@@ -174,7 +174,7 @@ def test_valid_manifest_yields_pages_and_site():
     assert pages[0].data == ('app:rocketride.pipeBuilder',)
     assert pages[2].listed is False
     assert all(dict(p.extra) == {} for p in pages)
-    assert site == {'title': 'RocketRide', 'blurb': 'B', 'docsUrl': 'https://docs.rocketride.org/llms.txt'}
+    assert site == {'title': 'RocketRide', 'blurb': 'B', 'docsUrl': 'https://docs.rocketride.ai/llms.txt'}
 
 
 def test_named_data_entries_validate():
@@ -415,7 +415,9 @@ def test_duplicate_paths_in_one_manifest_rejected():
 @pytest.mark.parametrize(
     'path',
     [p for prefix in RESERVED_PREFIXES for p in (prefix, f'{prefix}/x')]
-    + ['/status', '/.well-known/openai-apps-challenge', '/auth/callback', '/webhook/abc'],
+    + ['/status', '/.well-known/openai-apps-challenge', '/auth/callback', '/webhook/abc']
+    # The SaaS extension's root routes, which the OSS route table never shows.
+    + ['/db/dsn', '/internal/google/oauth/tokens', '/marketplace/apps', '/oauth/token'],
 )
 def test_reserved_prefixes_rejected(path):
     pages, _, errors = check_manifest(ROOT_APP, {'publicPages': [_page(path)]})
@@ -423,11 +425,12 @@ def test_reserved_prefixes_rejected(path):
 
 
 def test_reserved_prefix_is_segment_aware():
-    # '/apis', '/tasks' and '/mcp-server' are NOT under '/api', '/task' and '/mcp'.
+    # '/apis', '/tasks' and '/mcp-server' are NOT under '/api', '/task' and '/mcp';
+    # '/marketplace' (the home app's own page) is NOT under '/marketplace/apps'.
     pages, _, errors = check_manifest(
-        ROOT_APP, {'publicPages': [_page('/apis'), _page('/tasks'), _page('/mcp-server')]}
+        ROOT_APP, {'publicPages': [_page('/apis'), _page('/tasks'), _page('/mcp-server'), _page('/marketplace')]}
     )
-    assert errors == [] and len(pages) == 3
+    assert errors == [] and len(pages) == 4
 
 
 def test_live_route_conflicts_rejected():

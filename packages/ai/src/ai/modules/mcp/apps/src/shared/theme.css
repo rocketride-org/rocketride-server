@@ -20,11 +20,24 @@
 	--rr-inset: color-mix(in srgb, currentcolor 7%, transparent);
 	--rr-accent-tint: color-mix(in srgb, var(--rr-accent) 16%, transparent);
 	--rr-flame-tint: color-mix(in srgb, var(--rr-flame) 12%, transparent);
+	/* Text shades of the two brand colors: the brand values stay on borders
+	   and tints, these meet WCAG AA as text on each theme's surfaces. */
+	--rr-accent-text: #0b6f9c;
+	--rr-flame-text: #c42b12;
+	/* Hover adds a tint behind the text, so the text steps one shade further. */
+	--rr-accent-text-hover: #095f86;
+	--rr-flame-text-hover: #a3220e;
+}
+:root[data-theme='dark'] {
+	--rr-accent-text: #41b6e6;
+	--rr-flame-text: #ff6b55;
+	--rr-accent-text-hover: #6cc8ee;
+	--rr-flame-text-hover: #ff8a78;
 }
 
 body {
 	font:
-		13px/1.5 system-ui,
+		14px/1.5 system-ui,
 		sans-serif;
 	margin: 12px;
 }
@@ -42,7 +55,7 @@ body {
 	flex: none;
 }
 .rr-header .rr-title {
-	font-size: 13px;
+	font-size: 14px;
 	font-weight: 650;
 	letter-spacing: 0.02em;
 }
@@ -59,7 +72,7 @@ body {
 .result-object h3 {
 	margin: 0 0 6px;
 	font:
-		11px/1.4 ui-monospace,
+		12px/1.4 ui-monospace,
 		monospace;
 	font-weight: 600;
 	letter-spacing: 0.03em;
@@ -71,14 +84,11 @@ body {
 	word-break: normal;
 	overflow-wrap: break-word;
 	margin: 6px 0 0;
-	padding: 8px 10px;
 	max-height: 320px;
 	overflow: auto;
 	font:
 		12px/1.5 ui-monospace,
 		monospace;
-	background: var(--rr-inset);
-	border-radius: 6px;
 }
 .result-object.error {
 	border-left: 3px solid var(--rr-flame);
@@ -104,7 +114,8 @@ body {
 	background: none;
 	border: 1px solid var(--rr-line-strong);
 	border-radius: 999px;
-	padding: 3px 12px;
+	min-height: 32px;
+	padding: 4px 14px;
 	cursor: pointer;
 	opacity: 0.75;
 }
@@ -122,18 +133,21 @@ body {
 	margin-left: 6px;
 	padding: 0 6px;
 	border-radius: 8px;
-	font-size: 11px;
+	font-size: 12px;
 	background: var(--rr-accent-tint);
 }
 
 /* --- Buttons ----------------------------------------------------------- */
+/* 32 px minimum: a comfortable touch target in a phone-width chat column. */
 .rr-btn {
 	font: inherit;
 	color: inherit;
 	background: none;
 	border: 1px solid var(--rr-line-strong);
-	border-radius: 6px;
-	padding: 3px 12px;
+	border-radius: 8px;
+	min-height: 32px;
+	padding: 4px 14px;
+	white-space: nowrap;
 	cursor: pointer;
 }
 .rr-btn:disabled {
@@ -141,18 +155,20 @@ body {
 	cursor: default;
 }
 .rr-btn-ghost {
-	color: var(--rr-accent);
-	border-color: color-mix(in srgb, var(--rr-accent) 45%, transparent);
+	color: var(--rr-accent-text);
+	border-color: color-mix(in srgb, var(--rr-accent-text) 60%, transparent);
 }
 .rr-btn-ghost:hover:not(:disabled) {
+	color: var(--rr-accent-text-hover);
 	background: var(--rr-accent-tint);
 	border-color: var(--rr-accent);
 }
 .rr-btn-danger {
-	color: var(--rr-flame);
-	border-color: color-mix(in srgb, var(--rr-flame) 40%, transparent);
+	color: var(--rr-flame-text);
+	border-color: color-mix(in srgb, var(--rr-flame-text) 60%, transparent);
 }
 .rr-btn-danger:hover:not(:disabled) {
+	color: var(--rr-flame-text-hover);
 	background: var(--rr-flame-tint);
 	border-color: var(--rr-flame);
 }
@@ -174,12 +190,11 @@ body {
 
 /* --- Dropzone ---------------------------------------------------------- */
 .dropzone {
-	border: 2px dashed var(--rr-line-strong);
+	border: 2px dashed color-mix(in srgb, currentcolor 40%, transparent);
 	border-radius: 10px;
 	padding: 32px 12px;
 	text-align: center;
 	cursor: pointer;
-	opacity: 0.85;
 	transition:
 		border-color 0.15s ease,
 		background 0.15s ease;
@@ -188,6 +203,9 @@ body {
 	border-color: var(--rr-accent);
 	background: color-mix(in srgb, var(--rr-accent) 6%, transparent);
 	opacity: 1;
+}
+.dropzone.compact {
+	padding: 10px 12px;
 }
 .dropzone.drag {
 	border-color: var(--rr-flame);
@@ -207,7 +225,7 @@ td {
 	border-bottom: 1px solid var(--rr-line);
 }
 th {
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 650;
 	text-transform: uppercase;
 	letter-spacing: 0.06em;
@@ -216,15 +234,148 @@ th {
 tbody tr:hover td {
 	background: var(--rr-surface);
 }
+/* The pipelines table reads as a list at every width: the name and its
+   action on the first line, the description and token below, full width.
+   The header row stays for screen readers only. */
+.rr-table,
+.rr-table tbody,
+.rr-table td {
+	display: block;
+	width: 100%;
+}
+.rr-table thead {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+}
+.rr-table tbody tr {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	column-gap: 12px;
+	row-gap: 2px;
+	padding: 10px 0;
+	border-bottom: 1px solid var(--rr-line);
+}
+.rr-table tbody tr:first-child {
+	padding-top: 0;
+}
+.rr-table tbody tr:last-child {
+	padding-bottom: 0;
+	border-bottom: 0;
+}
+.rr-table td {
+	grid-column: 1 / -1;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+}
+.rr-table tbody tr:hover td {
+	background: none;
+}
+.rr-table td:first-child {
+	grid-column: 1;
+	grid-row: 1;
+	align-self: center;
+	font-weight: 600;
+}
+.rr-table td:last-child {
+	grid-column: 2;
+	grid-row: 1;
+	align-self: start;
+}
+.rr-table td:empty:not(:last-child) {
+	display: none;
+}
 td.rr-mono {
 	font:
 		12px/1.5 ui-monospace,
 		monospace;
-	opacity: 0.8;
+	color: color-mix(in srgb, currentcolor 80%, transparent);
+	overflow-wrap: anywhere;
+}
+/* Terminate, Stopping… and Retry swap in place without reflowing the row. */
+.rr-table .rr-btn {
+	min-width: 7.25em;
+}
+
+/* Narrow chat column (a phone). */
+@media (max-width: 640px) {
+	/* Trace list rows (the shared RequestRow, styled inline): the file name
+	   gets its own line instead of shrinking to an ellipsis, and the time,
+	   call count and duration wrap below it. */
+	.rr-trace-list > div {
+		flex-wrap: wrap !important;
+		row-gap: 2px;
+		padding-top: 8px !important;
+		padding-bottom: 8px !important;
+	}
+	.rr-trace-list > div > span:first-child {
+		flex: 1 0 100% !important;
+	}
+}
+/* Trace list rows: the time, call count and duration read as secondary
+   detail at 12 px regular weight, on the bold file name's baseline. */
+.rr-trace-list > div {
+	align-items: baseline !important;
+	padding-top: 7px !important;
+	padding-bottom: 7px !important;
+}
+.rr-trace-list > div > span:not(:first-child) {
+	font-family: inherit !important;
+	font-size: 12px !important;
+	font-weight: 400 !important;
+	font-variant-numeric: tabular-nums;
 }
 
 /* --- Misc -------------------------------------------------------------- */
 .empty {
 	opacity: 0.6;
-	padding: 8px 0;
+	padding: 0;
+}
+/* The waiting text before the host sends the tool result, with a small
+   spinner so a slow answer does not look stalled. */
+#root.empty::before,
+.rr-waiting::before,
+.rr-busy::before {
+	content: '';
+	box-sizing: border-box;
+	display: inline-block;
+	width: 12px;
+	height: 12px;
+	margin-right: 8px;
+	vertical-align: -1px;
+	border: 2px solid currentcolor;
+	border-right-color: transparent;
+	border-radius: 50%;
+	animation: rr-spin 0.8s linear infinite;
+}
+@keyframes rr-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	#root.empty::before,
+	.rr-waiting::before,
+	.rr-busy::before {
+		animation: none;
+	}
+}
+/* One-sentence states (empty, error, notice). Full-strength text, on its own
+   line above any action. */
+.rr-message {
+	margin: 0 0 10px;
+}
+.rr-message:last-child {
+	margin-bottom: 0;
+}
+.rr-message-error,
+.rr-notice {
+	border-left: 3px solid var(--rr-flame);
+	padding-left: 10px;
+}
+.rr-notice {
+	border-left-color: color-mix(in srgb, currentcolor 45%, transparent);
 }

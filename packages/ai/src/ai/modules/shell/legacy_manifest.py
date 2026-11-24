@@ -38,8 +38,8 @@ _LEGACY_ROUTES = [
     (
         '/',
         'Home',
-        'Build, run, and harness AI at rocket speed. From prototype to production. '
-        'Fully managed, predictable costs, true portability.',
+        'RocketRide is an AI meta-harness with an enterprise-grade runtime built on C++, '
+        'for companies and pro-builders building durable AI at production scale.',
     ),
     (
         '/pricing',
@@ -222,10 +222,10 @@ def legacy_page_manifest() -> Dict[str, Any]:
         'site': {
             'title': _LEGACY_SITE_TITLE,
             'blurb': (
-                'Build, run, and harness AI at rocket speed. From prototype to production. '
-                'Fully managed, predictable costs, true portability.'
+                'RocketRide is an AI meta-harness with an enterprise-grade runtime built on C++, '
+                'for companies and pro-builders building durable AI at production scale.'
             ),
-            'docsUrl': 'https://docs.rocketride.org/llms.txt',
+            'docsUrl': 'https://docs.rocketride.ai/llms.txt',
             'redirects': [{'from': source, 'to': target} for source, target in _LEGACY_REDIRECTS],
         },
     }

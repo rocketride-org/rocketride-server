@@ -8,7 +8,7 @@
 	"path": "nodes.scraper_beautifulsoup",
 	"prefix": "scraper",
 	"icon": "scraper.svg",
-	"documentation": "https://docs.rocketride.org/nodes/scraper_beautifulsoup",
+	"documentation": "https://docs.rocketride.ai/nodes/scraper_beautifulsoup",
 	"description": ["Web scraping tools for agents, built on BeautifulSoup. No API key or paid service needed.", "fetch_page returns a public page as markdown, text, raw HTML or its links; extract pulls repeated items with CSS selectors; fetch_feed reads RSS/Atom; fetch_json calls public JSON APIs (GET or POST).", "Only public hosts are reachable: every request and redirect hop is re-validated, responses are size-capped, and requests to the same host are paced. An optional URL allow-list narrows it further."],
 	"tile": [],
 	"lanes": {},

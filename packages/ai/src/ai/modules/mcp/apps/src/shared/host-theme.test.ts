@@ -12,19 +12,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { App } from '@modelcontextprotocol/ext-apps';
 
+import darkTokens from '../../../../../../../../shell/public/themes/dark.json';
+import lightTokens from '../../../../../../../../shell/public/themes/light.json';
 import { applyHostTheme } from './host-theme';
 
 type Theme = 'light' | 'dark';
-type HostContext = { theme?: Theme } | undefined;
+type HostContext = { theme?: Theme; displayMode?: string } | undefined;
 
 function stubDom(osIsDark: boolean) {
 	const attrs: Record<string, string> = {};
+	const props = new Map<string, string>();
 	const documentElement = {
 		setAttribute: (name: string, value: string) => {
 			attrs[name] = value;
 		},
 		getAttribute: (name: string) => attrs[name],
-		style: {} as Record<string, string>,
+		style: {
+			setProperty: (name: string, value: string) => props.set(name, value),
+			removeProperty: (name: string) => props.delete(name),
+		} as Record<string, unknown>,
 	};
 
 	let matches = osIsDark;
@@ -42,6 +48,8 @@ function stubDom(osIsDark: boolean) {
 
 	return {
 		attrs,
+		props,
+		style: documentElement.style,
 		fireOsChange(next: boolean) {
 			matches = next;
 			for (const cb of listeners) cb();
@@ -49,8 +57,12 @@ function stubDom(osIsDark: boolean) {
 	};
 }
 
-/** Minimal fake of the `App` surface applyHostTheme actually touches. */
-function fakeApp(initialContext: HostContext) {
+/**
+ * Minimal fake of the `App` surface applyHostTheme touches. `connect()` stands
+ * in for the handshake: it stores the host context the `ui/initialize` reply
+ * carries, which fires no event.
+ */
+function fakeApp(initialContext: HostContext, contextFromInitialize?: HostContext) {
 	let context = initialContext;
 	const hostContextChangedHandlers: Array<(ctx: HostContext) => void> = [];
 	const app = {
@@ -58,12 +70,16 @@ function fakeApp(initialContext: HostContext) {
 		addEventListener: (event: string, handler: (ctx: HostContext) => void) => {
 			if (event === 'hostcontextchanged') hostContextChangedHandlers.push(handler);
 		},
+		connect: async () => {
+			context = contextFromInitialize;
+		},
 	};
 	return {
 		app: app as unknown as App,
-		fireHostContextChanged(next: HostContext) {
-			context = next;
-			for (const handler of hostContextChangedHandlers) handler(next);
+		/** Like the real App: merge the partial change, then notify. */
+		fireHostContextChanged(change: HostContext) {
+			context = { ...context, ...change };
+			for (const handler of hostContextChangedHandlers) handler(change);
 		},
 	};
 }
@@ -80,6 +96,7 @@ describe('applyHostTheme', () => {
 		applyHostTheme(app);
 
 		expect(dom.attrs['data-theme']).toBe('dark');
+		expect(dom.style.colorScheme).toBe('dark');
 	});
 
 	it('applies the host theme instead of the OS scheme when one is already available', () => {
@@ -89,6 +106,18 @@ describe('applyHostTheme', () => {
 		applyHostTheme(app);
 
 		expect(dom.attrs['data-theme']).toBe('dark');
+	});
+
+	it('applies the theme from the initialize reply once connect() resolves', async () => {
+		const dom = stubDom(false); // OS says light
+		const { app } = fakeApp(undefined, { theme: 'dark' });
+
+		applyHostTheme(app);
+		expect(dom.attrs['data-theme']).toBe('light'); // fallback before the handshake
+
+		await app.connect();
+		expect(dom.attrs['data-theme']).toBe('dark');
+		expect(dom.props.get('--rr-bg-default')).toBe(darkTokens['--rr-bg-default']);
 	});
 
 	it('applies the host theme on hostcontextchanged, overriding the OS fallback', () => {
@@ -112,4 +141,22 @@ describe('applyHostTheme', () => {
 		dom.fireOsChange(true);
 		expect(dom.attrs['data-theme']).toBe('dark');
 	});
+
+});
+
+describe('RocketRide token set', () => {
+	it('changes with the theme', () => {
+		const dom = stubDom(false);
+		const { app, fireHostContextChanged } = fakeApp({ theme: 'light' });
+
+		applyHostTheme(app);
+		expect(dom.props.get('--rr-bg-default')).toBe(lightTokens['--rr-bg-default']);
+		expect(dom.props.get('--rr-text-primary')).toBe(lightTokens['--rr-text-primary']);
+
+		fireHostContextChanged({ theme: 'dark' });
+		expect(dom.props.get('--rr-bg-default')).toBe(darkTokens['--rr-bg-default']);
+		expect(dom.props.get('--rr-text-primary')).toBe(darkTokens['--rr-text-primary']);
+		expect(dom.props.get('--rr-bg-default')).not.toBe(lightTokens['--rr-bg-default']);
+	});
+
 });

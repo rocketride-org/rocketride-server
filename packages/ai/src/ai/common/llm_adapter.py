@@ -16,6 +16,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
+from ai.common.model_gateway import HOSTED_REFUSAL_TYPE
 from ai.common.utils import flatten_content_blocks
 
 # Per-turn LLM usage collector. Every model call appends one entry to the open turn's
@@ -228,6 +229,32 @@ def flatten_content(content: Any) -> str:
     return flatten_content_parts(content)[0]
 
 
+def hosted_refusal_body(e: BaseException) -> Optional[dict]:
+    """Return the error object of a hosted backend's refusal, or None.
+
+    The openai SDK unwraps the outer ``error`` object before it builds the
+    exception, so ``body`` is usually ``{type, code, message}``; the wrapped
+    ``{error: {...}}`` shape is accepted too. An exception raised ``from`` a
+    refusal counts as that refusal.
+    """
+    seen = 0
+    while e is not None and seen < 4:
+        body = getattr(e, 'body', None)
+        if isinstance(body, dict):
+            nested = body.get('error')
+            err = nested if isinstance(nested, dict) else body
+            if err.get('type') == HOSTED_REFUSAL_TYPE:
+                return err
+        e = e.__cause__
+        seen += 1
+    return None
+
+
+def is_hosted_refusal(e: BaseException) -> bool:
+    """True when ``e`` is a hosted model backend's refusal (see HOSTED_REFUSAL_TYPE)."""
+    return hosted_refusal_body(e) is not None
+
+
 # Word-boundary match so "stopped" / "nonstop" / "stop_reason" do not trip the heuristic.
 # Anthropic names the parameter stop_sequences; `_` is a word char so `\bstop\b` misses it.
 _STOP_WORD_RE = re.compile(r'\bstop(?:_sequences)?\b', re.IGNORECASE)
@@ -250,6 +277,8 @@ def is_stop_rejection(e: Exception, stop_sent: bool) -> bool:
     stop sequence; agent-level truncation (``truncate_at_stop_words``) is the
     backstop.
     """
+    if is_hosted_refusal(e):
+        return False
     if not stop_sent:
         return False
 
@@ -303,8 +332,11 @@ def is_usage_flag_rejection(e: Exception) -> bool:
     (UnprocessableEntityError) is what a FastAPI-based server — vLLM's OpenAI-compatible
     server is one — answers request-validation failures with. Auth, timeout and rate-limit
     statuses say nothing about the flag, so they re-raise without a second round trip, and a
-    transient connection failure carries no ``status_code`` at all.
+    transient connection failure carries no ``status_code`` at all. A hosted backend's
+    refusal is never a flag rejection.
     """
+    if is_hosted_refusal(e):
+        return False
     status = getattr(e, 'status_code', None)
     return isinstance(status, int) and 400 <= status < 500 and status not in (401, 403, 408, 429)
 
@@ -517,7 +549,9 @@ class LangChainAdapter:
                     skw.pop('stream_usage', None)
                     dropped_usage = True
                 else:
-                    raise
+                    # The error in hand: after a retry it is the retry's own, which a
+                    # bare raise would replace with the first one
+                    raise e
                 try:
                     gen, piece = _open(skw)
                     break
@@ -528,7 +562,7 @@ class LangChainAdapter:
                     e = retry_err
 
         # try/finally so a mid-stream raise still records the usage the chunks already
-        # carried, matching the two native adapters.
+        # carried, matching the two native adapters, and closes the stream at once.
         try:
             while piece is not None:
                 um = getattr(piece, 'usage_metadata', None)
@@ -565,6 +599,8 @@ class LangChainAdapter:
                 parts.append(tail_text)
                 yield Event('text', tail_text)
         finally:
+            if gen is not None:
+                gen.close()
             report_llm_tokens(
                 max(0, total_in - cache_read - cache_creation),
                 out_toks,

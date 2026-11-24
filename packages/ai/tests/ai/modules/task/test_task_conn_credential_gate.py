@@ -303,6 +303,7 @@ def _wire_real_auth(conn):
         release_unauthed_slot=lambda ip: None,
         acquire_unauthed_slot=lambda ip: None,
         _unauthed_by_ip={},
+        _task_control={},
     )
 
 

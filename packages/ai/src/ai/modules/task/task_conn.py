@@ -193,6 +193,13 @@ def authority_narrowed(cached: Any, fresh: Any) -> bool:
     return bool(held - set(getattr(fresh, 'sysPermissions', None) or []))
 
 
+def _identity_key(info: Any) -> tuple:
+    """The identity a connection acts as: the user plus the credential kind (pk_, tk_ or a full session)."""
+    auth = getattr(info, 'auth', '') or ''
+    kind = next((p for p in TASK_CREDENTIAL_PREFIXES if isinstance(auth, str) and auth.startswith(p)), '')
+    return (getattr(info, 'userId', None), kind)
+
+
 class TaskConn(
     TaskCommands,
     DataCommands,
@@ -468,6 +475,22 @@ class TaskConn(
             await self.send(self.build_error(request, 'Connection revoked'))
             return
 
+        # Re-authenticating as a different identity on a live socket (another
+        # user, or another credential kind for the same user: pk_/tk_ carry the
+        # launching user's id): the previous identity's subscriptions and
+        # debugger attachments must not be inherited. Strip its authority
+        # BEFORE the detach await, as deauth does, so a concurrent command
+        # cannot register under it meanwhile. Same identity keeps both.
+        previous = self._account_info
+        if self._authenticated and previous is not None and _identity_key(previous) != _identity_key(result):
+            self._drop_authority()
+            await self._detach_debuggers()
+
+            # A revoke may have landed while detaching: install nothing.
+            if self._revoked:
+                await self.send(self.build_error(request, 'Connection revoked'))
+                return
+
         self._account_info = result
         self._authenticated = True
         self._deauthed_user_id = None
@@ -520,11 +543,15 @@ class TaskConn(
         self._deauthed_user_id = getattr(self._account_info, 'userId', None) or None
         self._drop_authority()
 
+        await self._detach_debuggers()
+
+        return self.build_response(request, body={})
+
+    async def _detach_debuggers(self) -> None:
+        """Detach this connection as the debugger of every task."""
         # detach_task is a no-op for a task this connection is not debugging
         for control in list(self._server._task_control.values()):
             await control.task.detach_task(self)
-
-        return self.build_response(request, body={})
 
     def _drop_authority(self) -> None:
         """
