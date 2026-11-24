@@ -767,8 +767,11 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 	const frameKey = active ? `${frameWidth}x${frameHeight}` : 'inline';
 	const placedFor = useRef(frameKey);
 	if (model.laidOut && placedFor.current !== frameKey) {
+		// A full-screen resize after the person has moved the view keeps the
+		// layout: wrapping again would leave their view on empty space.
+		const resizeOnly = placedFor.current !== 'inline' && frameKey !== 'inline';
+		if (!(resizeOnly && moved.current)) placed.current = false;
 		placedFor.current = frameKey;
-		placed.current = false;
 	}
 	useEffect(() => {
 		if (!initialized || placed.current || !frameWidth) return;
