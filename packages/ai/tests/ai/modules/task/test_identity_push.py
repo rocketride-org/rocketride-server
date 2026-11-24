@@ -227,6 +227,58 @@ async def test_a_rebuild_is_not_installed_over_a_login_that_landed_meanwhile(mon
 
 
 @pytest.mark.asyncio
+async def test_two_pushes_for_one_user_at_once_end_on_the_last_read_of_the_store(monkeypatch):
+    """Two account changes push for the same user together: the reads run in turn, and the newer one stands.
+
+    Side by side, the read that started first could finish last and install
+    its older answer, or the newer answer could be refused because the other
+    refresh had just replaced the identity.
+    """
+    import asyncio
+
+    server, service, _store = _server_with(monkeypatch, None)
+    held = _identity()
+    conn = _connected(server, held)
+    answers = [_identity(), _identity()]  # the store's state at the first read, then at the second
+    reading = 0
+    order = []
+
+    async def rebuild(user_id, auth):
+        nonlocal reading
+        mine = reading
+        reading += 1
+        order.append(f'read {mine} starts')
+        # The first read is the slow one: unserialized, the second would finish before it
+        await asyncio.sleep(0.05 if mine == 0 else 0)
+        order.append(f'read {mine} ends')
+        return answers[mine]
+
+    service.get_authentication_result = AsyncMock(side_effect=rebuild)
+
+    await asyncio.gather(server.push_account_update('u1'), server.push_account_update('u1'))
+
+    assert order == ['read 0 starts', 'read 0 ends', 'read 1 starts', 'read 1 ends']
+    assert conn._account_info is answers[1]
+    assert len(_pushed(conn)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_that_waited_its_turn_leaves_a_connection_that_changed_user(monkeypatch):
+    """The refresh was decided for one user: a login as another user that landed while it waited is not rebuilt."""
+    fresh = _identity()
+    server, service, _store = _server_with(monkeypatch, fresh)
+    held = _identity('u1')
+    conn = _connected(server, held)
+    other = _identity('u2')
+    conn._account_info = other
+
+    assert await server._refresh_identity(SimpleNamespace(_service=service), conn, held, 'push_account_update') is False
+
+    service.get_authentication_result.assert_not_awaited()
+    assert conn._account_info is other
+
+
+@pytest.mark.asyncio
 async def test_one_gone_user_does_not_stop_the_push_to_the_others(monkeypatch):
     """An org push walks every member: a deleted one is signed out, the rest are refreshed."""
     fresh = _identity('u2')

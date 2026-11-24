@@ -2555,6 +2555,14 @@ class TaskServer(DAPBase):
         while the rebuild was awaited is left alone: a fresh identity is never
         installed over a newer one.
 
+        Refreshes of one connection run one at a time (a lock the connection
+        carries). Two account changes can push for the same user at once; run
+        side by side, both would read the store, and the one whose read was
+        older could install last, or the newer one could be refused because
+        the identity had just been replaced by the other. In turn, each
+        rebuilds from the identity the one before it installed, so the last
+        read of the store is the one that stands.
+
         Args:
             account: The account facade (its ``_service`` rebuilds identities).
             conn: The connection to refresh.
@@ -2564,26 +2572,42 @@ class TaskServer(DAPBase):
         Returns:
             bool: True when a fresh identity was installed and pushed.
         """
-        try:
-            fresh = await account._service.get_authentication_result(info.userId, info.auth)
-        except ValueError as e:
-            if await conn.sign_out_identity(info):
-                warning(f'{label}: conn {conn.get_connection_id()} signed out, user {info.userId} is gone ({e})')
-            return False
-        except Exception as e:
-            self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
-            return False
+        state = vars(conn)
+        lock = state.get('_identity_refresh_lock')
+        if lock is None:
+            lock = state['_identity_refresh_lock'] = asyncio.Lock()
+        async with lock:
+            # An earlier refresh may have replaced the identity while this one
+            # waited its turn: rebuild from what the connection holds now, as
+            # long as it is still the same user's session
+            current = conn._account_info
+            if current is not info:
+                if current is None or not getattr(conn, '_authenticated', False):
+                    return False
+                if current.userId != info.userId:
+                    return False
+                info = current
 
-        # Never install over a deauth or a newer auth that landed during the rebuild
-        if conn._account_info is not info:
-            return False
-        conn._account_info = fresh
-        try:
-            await conn.send_event('apaext_account', body=fresh.to_push_result())
-        except Exception as e:
-            self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
-            return False
-        return True
+            try:
+                fresh = await account._service.get_authentication_result(info.userId, info.auth)
+            except ValueError as e:
+                if await conn.sign_out_identity(info):
+                    warning(f'{label}: conn {conn.get_connection_id()} signed out, user {info.userId} is gone ({e})')
+                return False
+            except Exception as e:
+                self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+                return False
+
+            # Never install over a deauth or a newer auth that landed during the rebuild
+            if conn._account_info is not info:
+                return False
+            conn._account_info = fresh
+            try:
+                await conn.send_event('apaext_account', body=fresh.to_push_result())
+            except Exception as e:
+                self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+                return False
+            return True
 
     async def push_org_changed(self, user_id: str, org_id: str) -> None:
         """

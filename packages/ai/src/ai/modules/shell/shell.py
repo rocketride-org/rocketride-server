@@ -321,8 +321,9 @@ async def _authenticated(token: str) -> Optional[Any]:
 
     Raises:
         _AuthUnavailable: Authentication raised, or answered something that is
-            neither an identity nor a denial. That is an outage, not a
-            verdict: the caller answers anonymously and caches nothing (#972).
+            neither an identity nor a denial (``None`` included). That is an
+            outage, not a verdict: the caller answers anonymously and caches
+            nothing (#972).
     """
     from ai.account import account
 
@@ -334,7 +335,8 @@ async def _authenticated(token: str) -> Optional[Any]:
         raise _AuthUnavailable(str(e)) from e
     if hasattr(info, 'userId'):
         return info
-    if info is not None and not _is_auth_denial(info):
+    # A token was presented, so no answer at all (None) is no verdict either
+    if not _is_auth_denial(info):
         raise _AuthUnavailable(f'authenticate returned {info!r}')
     return None
 

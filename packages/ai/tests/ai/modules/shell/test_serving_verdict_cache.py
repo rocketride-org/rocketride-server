@@ -133,6 +133,16 @@ def test_version_dirs_unavailable_error_tuple_is_not_cached(monkeypatch):
     assert account.authentications == 2
 
 
+def test_version_dirs_no_answer_is_not_cached(monkeypatch):
+    """A token was presented and authenticate answered nothing: neither an identity nor a denial, so no verdict."""
+    account = _Account(error_tuples=[None])
+    _setup(monkeypatch, account)
+
+    assert _dirs() == {}
+    assert _dirs() == SERVED
+    assert account.authentications == 2
+
+
 def test_version_dirs_denial_error_tuple_is_cached(monkeypatch):
     """A 401 error tuple is a definite denial: the anonymous answer is cached."""
     account = _Account(error_tuples=[(401, 'invalid')])
