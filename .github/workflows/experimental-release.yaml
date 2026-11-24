@@ -145,6 +145,10 @@ jobs:
       - name: List artifacts
         run: find release-assets -type f | sort
 
+      - name: Check the node archive
+        if: matrix.type == 'server'
+        uses: ./.github/actions/check-node-archive
+
       # Tag push goes through a short-lived GitHub App installation token for
       # the same reason _release.yaml uses one: GITHUB_TOKEN is refused on
       # tags whose target commits touch files under .github/workflows/, and

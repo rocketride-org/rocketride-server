@@ -87,7 +87,7 @@ Create a Luxor workspace API key (`lx_...`) in the Luxor dashboard
 2027-01-01, when Luxor retires the Tenki names
 ([Luxor: migrate to Luxor](https://luxor.ai/docs/migrate-to-luxor)); the node warns about one until
 it is replaced. An **API URL** of `https://api.tenki.cloud` is read as `https://api.luxor.ai`, the
-same service, so a deployed pipeline keeps working past that date.
+same service, so a deployed pipeline keeps working past that date once its key is a Luxor key.
 Secret policies also need **Allow Secrets access**, chosen when the key is created
 ([Luxor: access permissions](https://luxor.ai/docs/secrets/manage-secrets#access-permissions)).
 That access can change every secret and policy in the workspace, so give the node its own key.
@@ -105,7 +105,8 @@ That access can change every secret and policy in the workspace, so give the nod
 > - A session paused and resumed from outside the node can leave it unreachable until the pipeline
 >   restarts.
 > - Secret injection needs an image with Luxor's managed HTTPS trust.
-> - IPv4 ranges in **Allowed outbound domains** are refused.
+> - IP addresses and ranges are refused in **Allowed outbound domains** and in the private
+>   repositories' URL prefix: the egress filter matches hostnames only.
 > - **Tool groups** are not a security boundary.
 
 ## Upstream docs

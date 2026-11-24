@@ -43,6 +43,45 @@ widget is a rendering hint, never a different payload.
 | File dropper | `run_dropper_pipe` | In-chat drag-and-drop upload into the running pipeline, with progress |
 | Trace viewer | `log_traces`, `log_trace` | Replay a run object-by-object: components entered, lane data, narration |
 
+Widgets follow the host's light or dark theme, and use the system setting
+when a host sends none.
+
+### Widget security metadata
+
+Every widget resource carries the same `_meta` on its `resources/list`
+entry and on its `resources/read` content item. Hosts that follow the MCP Apps
+spec, ChatGPT among them, read it from the `resources/read` result.
+
+- `csp`: what the widget may load and contact. The bundles are single files
+  with no outside scripts, styles, fonts or frames, so `resourceDomains` is
+  empty for all three. Only the file dropper connects out: its
+  `connectDomains` holds the engine's origin, where it uploads files. The
+  pipelines table and the trace viewer call tools through the host and
+  declare no origins.
+- `openai/widgetDomain` (next to `ui`, not inside it): ChatGPT's widget
+  domain, from `MCP_UI_DOMAIN` (see [Self-hosting](/connect/mcp/http/self-hosting)).
+  It is left out when that is unset. The server never sends `ui.domain`:
+  each host has its own format for it, so other hosts get no domain and use
+  their default sandbox origin.
+
+```json
+{
+  "uri": "ui://rocketride/dropper.html",
+  "mimeType": "text/html;profile=mcp-app",
+  "text": "<!doctype html>...",
+  "_meta": {
+    "ui": {
+      "csp": { "connectDomains": ["https://engine.example.com"], "resourceDomains": [] }
+    },
+    "openai/widgetDomain": "https://widgets.example.com"
+  }
+}
+```
+
+The dropper's upload is also a cross-origin request from the host's widget
+sandbox, so the engine's `RR_CORS_ORIGINS` allowlist must include that
+sandbox origin.
+
 **Self-hosters:** the widget bundles are built with `./builder
 mcp-widgets:build`; until they exist on disk the server simply advertises no
 MCP Apps capability and every host gets the JSON results.

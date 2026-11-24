@@ -239,7 +239,10 @@ def test_a_run_that_raises_before_any_status_still_reports_why_it_stopped():
     assert payload['meta']['stop_reason'] == 'error'
     assert 'is not a connected tool' in payload['content']
     assert ii.instance.sse, 'the run sent no status at all'
-    assert ii.instance.sse[-1] == ('thinking', {'message': 'The run failed.', 'stop_reason': 'error'})
+    assert ii.instance.sse[-1] == (
+        'thinking',
+        {'message': 'The run failed.', 'stop_reason': 'error', 'run_id': payload['meta']['run_id']},
+    )
 
 
 def test_a_run_that_fails_before_its_context_is_built_still_reports_why_it_stopped():
@@ -256,7 +259,69 @@ def test_a_run_that_fails_before_its_context_is_built_still_reports_why_it_stopp
     payload = driver.run_agent(ii, _BrokenQuestion(), emit_answers_lane=True)
 
     assert payload['meta']['stop_reason'] == 'error'
-    assert ii.instance.sse[-1] == ('thinking', {'message': 'The run failed.', 'stop_reason': 'error'})
+    assert ii.instance.sse[-1] == (
+        'thinking',
+        {'message': 'The run failed.', 'stop_reason': 'error', 'run_id': payload['meta']['run_id']},
+    )
+
+
+def test_the_error_stop_status_carries_the_run_id():
+    """The run id exists before the context does, so an early failure can still be attributed."""
+
+    class _BrokenQuestion(_FakeQuestion):
+        def addInstruction(self, *args: Any, **kwargs: Any) -> None:
+            raise ValueError('instruction rejected')
+
+    ii = _FakeIInstance()
+    driver = _make_driver(_call_one_tool, require_tool_call=False)
+    driver._instructions = ['be brief']
+
+    payload = driver.run_agent(ii, _BrokenQuestion(), emit_answers_lane=True)
+
+    assert ii.instance.sse[-1][1]['run_id'] == payload['meta']['run_id']
+
+
+def test_status_events_carry_the_run_id():
+    """The id is added to what the driver sent, which stays as it was."""
+
+    def report(driver, context, _question):
+        driver.sendSSE(context, 'thinking', message='Calling search...', tool='search')
+        return 'answer', None
+
+    ii = _FakeIInstance()
+    payload = _make_driver(report, require_tool_call=False).run_agent(ii, _FakeQuestion())
+
+    assert ii.instance.sse == [
+        ('thinking', {'message': 'Calling search...', 'tool': 'search', 'run_id': payload['meta']['run_id']})
+    ]
+
+
+def test_parent_and_worker_events_have_different_run_ids():
+    """A worker called as a tool shares its parent's instance and pipe, but is its own run."""
+    ii = _FakeIInstance()
+    worker_payloads: List[Dict[str, Any]] = []
+
+    def work(driver, context, _question):
+        driver.sendSSE(context, 'thinking', message='worker', stop_reason='max_waves')
+        return 'partial', None
+
+    worker = _make_driver(work, require_tool_call=False)
+
+    def lead(driver, context, question):
+        driver.sendSSE(context, 'thinking', message='before')
+        worker_payloads.append(worker.run_agent(ii, question, emit_answers_lane=False))
+        driver.sendSSE(context, 'thinking', message='after', stop_reason='done')
+        return 'answer', None
+
+    parent = _make_driver(lead, require_tool_call=False).run_agent(ii, _FakeQuestion(), emit_answers_lane=False)
+
+    parent_id, worker_id = parent['meta']['run_id'], worker_payloads[0]['meta']['run_id']
+    assert parent_id != worker_id
+    assert [(kw['message'], kw['run_id']) for _, kw in ii.instance.sse] == [
+        ('before', parent_id),
+        ('worker', worker_id),
+        ('after', parent_id),
+    ]
 
 
 def test_a_refused_answer_overrides_the_done_status():

@@ -29,6 +29,7 @@ from ai.common.validation import (
 )
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
+from ai.common.model_gateway import HostedModelError, friendly_gateway_error, stream_lost_error
 from ai.common.llm_tools import (
     InvalidTurn,
     ToolNames,
@@ -109,6 +110,10 @@ class ChatBase:
     _native_stream_provider: str = ''
     # Raw openai SDK client for the generic reasoning handler; built lazily by ChatBase.
     _raw_openai_client = None
+    # True when the driver's clients run on the run's hosted models pass (see model_gateway).
+    _hosted_models = False
+    # The pass's output limit, when it lowered the node's own; None otherwise.
+    _hosted_output_cap: Optional[int] = None
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -189,7 +194,12 @@ class ChatBase:
         try:
             from openai import OpenAI
 
-            self._raw_openai_client = OpenAI(api_key=api_key, base_url=str(base_url))
+            # Same HTTP client as the model it mirrors (None builds the default). On hosted
+            # models the SDK sends a call once: the backend charges each request it takes.
+            retries = {'max_retries': 0} if self._hosted_models else {}
+            self._raw_openai_client = OpenAI(
+                api_key=api_key, base_url=str(base_url), http_client=getattr(llm, 'http_client', None), **retries
+            )
             self._native_stream_provider = 'openai_compat_reasoning'
         except Exception as e:  # openai SDK missing / bad client → fall back to generic stream
             debug(f'    Native reasoning stream unavailable: {type(e).__name__}: {e}')
@@ -281,6 +291,61 @@ class ChatBase:
             Exception: A mapped exception with a clearer message, or the original error
         """
         return error
+
+    def terminal_error(self, error: Exception) -> Optional[Exception]:
+        """Return the error to raise at once for ``error``, or None to handle it as usual.
+
+        A terminal error ends the call where it is caught: no engine retry, no
+        fallback request through another path, no empty answer in its place.
+        On hosted models, a refusal from the backend is one: its sentence.
+
+        Args:
+            error (Exception): The error a model call raised.
+        Returns:
+            Optional[Exception]: The error to raise instead, or None.
+        """
+        if not self._hosted_models:
+            return None
+        sentence = friendly_gateway_error(error, self._model)
+        return HostedModelError(sentence) if sentence else None
+
+    def _raise_if_terminal(self, error: Exception) -> None:
+        """Raise ``terminal_error(error)`` when it is not None. Called first in every handler that retries or falls back."""
+        terminal = self.terminal_error(error)
+        if terminal is None:
+            return
+        # The user reads the terminal error; the log keeps what the provider sent (its code included)
+        debug(f'Model call ended for model={self._model} ({type(error).__name__}): {error}')
+        if terminal is error:
+            raise error
+        raise terminal from error
+
+    def _output_budget_error(self) -> EmptyResponseError:
+        """The error for a model that wrote no text because its output budget ran out."""
+        if self._hosted_output_cap is not None:
+            # Raising the node's limit cannot help: the pass already lowered it
+            return EmptyResponseError(
+                f'model returned no text; it most likely used its whole output budget ({self._hosted_output_cap} '
+                'tokens, the most RocketRide-hosted models allow) before replying. Disable reasoning for this call, '
+                'or add your own OpenAI key in the node settings'
+            )
+        return EmptyResponseError(
+            'model returned no text; it most likely used its whole output budget before '
+            f'replying. Raise modelOutputTokens (now {self._modelOutputTokens}), or disable '
+            'reasoning for this call'
+        )
+
+    def _no_second_hosted_request(self, error: Optional[Exception]) -> None:
+        """On hosted models, end the call instead of a fallback request after a failed stream.
+
+        The backend may already have charged the stream, and a second request is
+        charged again. Called after ``_raise_if_terminal`` wherever a failed or
+        empty stream would fall back to another request.
+        """
+        if not self._hosted_models:
+            return
+        debug(f'Hosted stream for model={self._model} ended without a reply ({type(error).__name__}): {error}')
+        raise stream_lost_error() from error
 
     def is_retryable_error(self, error: Exception) -> bool:
         """
@@ -420,6 +485,8 @@ class ChatBase:
                 return call()
 
             except Exception as e:
+                self._raise_if_terminal(e)
+
                 # Determine if this is a retryable error
                 is_retryable = self.is_retryable_error(e)
 
@@ -462,13 +529,20 @@ class ChatBase:
         try:
             adapter = NativeOpenAIResponsesAdapter(self)
             text, _items = drive_adapter(adapter, prompt, on_chunk, on_reasoning_chunk)
-            if not text and adapter.finish_reason in _OUTPUT_LIMIT_REASONS and _EXPECT_JSON_VAR.get():
+            if (
+                not text
+                and adapter.finish_reason in _OUTPUT_LIMIT_REASONS
+                and (_EXPECT_JSON_VAR.get() or self._hosted_models)
+            ):
                 # The model spent its whole output budget (usually on reasoning) before
                 # writing anything. The fallback below would send the same request with
                 # the same budget and fail the same way, at the price of a second call.
-                # For a JSON call, chat() turns this empty reply into EmptyResponseError.
+                # For a JSON call, chat() turns this empty reply into EmptyResponseError;
+                # a hosted call raises it here, since it is not sent again.
                 if on_finish is not None:
                     on_finish(adapter.finish_reason)
+                if not _EXPECT_JSON_VAR.get():
+                    raise self._output_budget_error()
                 return ''
             if not text:
                 # No text (e.g. response.failed) → route to the fallback below, like the Anthropic path.
@@ -476,13 +550,23 @@ class ChatBase:
             if on_finish is not None:
                 on_finish(adapter.finish_reason)
             return text
+        except EmptyResponseError:
+            raise
         except Exception as e:
+            self._raise_if_terminal(e)
             warning(f'Reasoning streaming disabled for model={self._model} ({type(e).__name__}): {e}.')
+            # On hosted models the call ends here, with or without partial text
+            self._no_second_hosted_request(e)
             # Only retry non-streaming if nothing reached the UI; otherwise the full
             # fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
                 adapter = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs())
-                content_text, _items = adapter.collect(prompt)
+                try:
+                    content_text, _items = adapter.collect(prompt)
+                except Exception as e2:
+                    # The fallback is a request of its own, and can be the one refused
+                    self._raise_if_terminal(e2)
+                    raise
                 # Reasoning reaches its own lane; it must never land in the visible text.
                 if adapter.reasoning and on_reasoning_chunk is not None:
                     on_reasoning_chunk(adapter.reasoning)
@@ -562,6 +646,8 @@ class ChatBase:
                 return native_text
             # Native handler returned None after emitting chunks: don't restart
             # the request through a different path, just close with an error.
+            if self._native_stream_provider:
+                self._no_second_hosted_request(None)
             if emitted['any']:
                 if on_finish is not None:
                     on_finish('error')
@@ -584,6 +670,8 @@ class ChatBase:
                     if on_finish is not None:
                         on_finish(adapter.finish_reason)
             except Exception as e:
+                self._raise_if_terminal(e)
+                self._no_second_hosted_request(e)
                 warning(
                     f'Streaming disabled for model={self._model} '
                     f'({type(e).__name__}): {e}. Falling back to non-streaming response.'
@@ -596,6 +684,9 @@ class ChatBase:
                     on_finish('error')
                 result = ''
             else:
+                if on_chunk_w is not None:
+                    # A stream ran above and gave no answer
+                    self._no_second_hosted_request(None)
                 result = self._chat_with_retries(prompt)
 
         # Count tokens in the response to check for potential truncation
@@ -658,8 +749,10 @@ class ChatBase:
                 drive_adapter(adapter, None, on_text, on_reasoning_chunk)
                 message = adapter.message
             except Exception as e:
+                self._raise_if_terminal(e)
                 if emitted:
                     raise
+                self._no_second_hosted_request(e)
                 warning(
                     f'Streaming disabled for model={self._model} '
                     f'({type(e).__name__}): {e}. Falling back to non-streaming response.'
@@ -743,11 +836,7 @@ class ChatBase:
                     # Nothing to repair: the model wrote no text at all. A reasoning
                     # model does this when its output budget runs out mid-thought, and
                     # resending the same prompt cannot fit a budget that overflowed.
-                    raise EmptyResponseError(
-                        'model returned no text; it most likely used its whole output budget before '
-                        f'replying. Raise modelOutputTokens (now {self._modelOutputTokens}), or disable '
-                        'reasoning for this call'
-                    )
+                    raise self._output_budget_error()
                 try:
                     # Parse (and strip any markdown fences) — reuse the result below
                     parsed_response = parseJson(response)

@@ -34,7 +34,15 @@ import json
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, NamedTuple, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from .models import AccountInfo
+
+# Version of the live-authority contract below (#972): ``supports_live_authority``,
+# ``live_authority`` and ``rebuild_account_info``. An edition that relies on the
+# engine re-checking platform authority requires at least this version.
+LIVE_AUTHORITY_API = 1
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -178,6 +186,18 @@ class AccountBase(ABC):
     # the safe, gated behavior.
     review_ladder: bool = True
 
+    # Whether ``live_authority`` reads the account store (#972). When True the
+    # task server re-checks every connection holding ``sysPermissions`` against
+    # it (``AuthzRecheck``) and refuses requests and events on a connection it
+    # could not verify recently. False (OSS): no re-check, no gate.
+    supports_live_authority: bool = False
+
+    # Model providers this engine can run through a hosted backend: a node of
+    # that provider with no key of its own uses the per-run pass from
+    # issue_model_pass. A hosted backend reads this to decide whether it
+    # offers hosted models at all.
+    hosted_model_providers: tuple = ('openai',)
+
     # =========================================================================
     # ABSTRACT — must be implemented by both OSS and SaaS
     # =========================================================================
@@ -199,6 +219,47 @@ class AccountBase(ABC):
     # =========================================================================
     # CONCRETE SHARED — both editions use these; override if needed
     # =========================================================================
+
+    async def live_authority(self, user_ids: Sequence[str]) -> Optional[Dict[str, Tuple[bool, FrozenSet[str]]]]:
+        """
+        Read the current platform authority of users, in one batch (#972).
+
+        Only called when ``supports_live_authority`` is True.
+
+        Args:
+            user_ids: Exact stored user ids (case-sensitive).
+
+        Returns:
+            ``{user_id: (enabled, frozenset(sys_permissions))}`` for the users
+            whose row exists; an id missing from the result has no row. None
+            (or an exception) means the read failed: nothing is decided on it.
+        """
+        return None
+
+    async def rebuild_account_info(self, info: 'AccountInfo') -> 'Optional[AccountInfo]':
+        """
+        Rebuild a connection's identity from the account store (#972).
+
+        Used by the identity pushes (``TaskServer.push_account_update`` and
+        ``push_org_update``). The default calls the edition's
+        ``_service.get_authentication_result(userId, auth)`` when it has one,
+        and returns None (nothing to rebuild; the push skips the connection)
+        when it does not. An edition overrides this to pass more context.
+
+        Args:
+            info: The identity the connection holds now.
+
+        Returns:
+            The rebuilt AccountInfo, or None when this edition cannot rebuild.
+
+        Raises:
+            ValueError: The user no longer exists.
+            Exception: Anything the rebuild raises; the caller decides.
+        """
+        service = getattr(self, '_service', None)
+        if service is None:
+            return None
+        return await service.get_authentication_result(info.userId, info.auth)
 
     def generate_token(self, content: dict, prefix: str = '') -> str:
         """
@@ -737,6 +798,44 @@ class AccountBase(ABC):
             return dsn
         separator = '&' if parsed.query else '?'
         return f'{dsn}{separator}sslmode=require'
+
+    # =========================================================================
+    # HOSTED MODELS — a per-run pass for a node that has no model key
+    # =========================================================================
+
+    async def issue_model_pass(self, identity: dict) -> dict | None:
+        """Give one run a pass for hosted models, or None when this engine has none.
+
+        The task engine calls this at task start, only on a hosted engine and
+        only when the pipeline has an OpenAI node with no key, and hands the
+        result to the task as ``ROCKETRIDE_MODEL_GATEWAY``.
+
+        Args:
+            identity: ``{org_id, user_id, team_id, run_id, task_id}``, all
+                strings. ``run_id`` is new at every task start.
+
+        Returns:
+            None; or a pass, ``{provider, base_url, token, expires_at}``: an
+            OpenAI-style root on ``127.0.0.1`` that ends in ``/v1``, an opaque
+            bearer token, and the pass's end as a Unix time, plus the run's
+            limits ``max_concurrent_calls`` and ``max_output_tokens``; or a
+            refusal, ``{error: {type, code, message}}``, such as the code
+            ``team_deployment_not_supported`` for a run with no user. The
+            engine renews a pass every 6 hours while the run lasts
+            (``renew_model_pass``) and revokes it when the run ends.
+        """
+        return None
+
+    async def revoke_model_pass(self, run_id: str) -> None:
+        """End a run's pass. Safe to call for an unknown run."""
+        return None
+
+    async def renew_model_pass(self, run_id: str) -> dict | None:
+        """Extend a running run's pass: ``{expires_at}``, or None when the run has no live pass.
+
+        A revoked or expired pass is never brought back. Safe to call for an unknown run.
+        """
+        return None
 
     # =========================================================================
     # DEPLOYMENTS — the teams-as-environments interface.

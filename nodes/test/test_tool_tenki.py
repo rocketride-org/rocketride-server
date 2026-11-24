@@ -585,7 +585,8 @@ def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(mon
     assert not any('2027-01-01' in line for line in logs)
     # Unparseable: the real SDK's client refuses it, so no retired-name check stands in the way.
     _, built = _started(monkeypatch, {'base_url': 'https://[api.tenki.cloud'})
-    assert built[0]['base_url'] == 'https://[api.tenki.cloud' and not any('2027-01-01' in line for line in logs)
+    assert built[0]['base_url'] == 'https://[api.tenki.cloud'
+    assert not any('2027-01-01' in line for line in logs)
 
 
 @pytest.mark.parametrize(
@@ -593,6 +594,7 @@ def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(mon
     [
         ({'apikey': 'tk_mock-tenki-placeholder-for-tests'}, 'Tenki key (tk_)'),
         ({'base_url': 'https://eu.tenki.cloud'}, 'points at eu.tenki.cloud'),
+        ({'base_url': 'https://tenki.cloud'}, 'points at tenki.cloud,'),
     ],
 )
 def test_a_tenki_key_or_host_still_works_and_is_warned_about_before_luxor_retires_it(monkeypatch, logs, cfg, retired):
@@ -755,6 +757,51 @@ def test_an_allowlist_entry_tenki_refuses_stops_startup_naming_the_rule_first(mo
     assert str(refused.value).startswith('tenki.allow_domains has an entry Luxor refuses (entry 2). Use bare hostnames')
 
 
+@pytest.mark.parametrize(
+    'entry',
+    ['1.1.1.1', '127.1', '0x7f000001', '127.0.0.0x1', '*.10.0.0.1', '*.127.0.0.0x1', '*.0x7f000001', '1.2.3.4.5'],
+)
+def test_an_ip_address_in_the_allowlist_stops_startup_saying_the_filter_matches_hostnames(monkeypatch, logs, entry):
+    # Dylan's review of #2950: hex and short forms are addresses too, and the API takes them, so the node says why.
+    glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['ok.org', entry]})
+    with pytest.raises(ValueError) as refused:
+        glb.beginGlobal()
+    assert str(refused.value) == (
+        "tenki.allow_domains lists an IP address (entry 2), which the sandbox's egress filter never matches: it "
+        f'matches hostnames only, so list the hostname instead. Refused: {entry.lower()}'
+    )
+
+
+def test_an_allowlist_with_an_address_and_a_refused_entry_names_both_in_one_error(monkeypatch, logs):
+    # Joshua's review of #2950: an operator with both kinds fixes the config in one pass.
+    glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['ok.org', '*.10.0.0.1', '*.*.org', '127.1']})
+    with pytest.raises(ValueError) as refused:
+        glb.beginGlobal()
+    assert str(refused.value) == (
+        'tenki.allow_domains has an entry Luxor refuses (entry 3). Use bare hostnames such as pypi.org, '
+        'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port. '
+        "It also lists IP addresses (entries 2, 4), which the sandbox's egress filter never matches: it matches "
+        'hostnames only, so list the hostname instead. Refused: *.*.org; IP addresses: *.10.0.0.1, 127.1'
+    )
+    # The engine shows a startup error only up to its first asterisk, so the positions must come before it.
+    assert '(entries 2, 4)' in str(refused.value).split('*', 1)[0]
+
+
+def test_one_address_beside_a_refused_entry_is_named_in_the_singular(monkeypatch, logs):
+    glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['*.*.org', '127.1']})
+    with pytest.raises(ValueError) as refused:
+        glb.beginGlobal()
+    assert str(refused.value).endswith(
+        "It also lists an IP address (entry 2), which the sandbox's egress filter never matches: it matches "
+        'hostnames only, so list the hostname instead. Refused: *.*.org; IP address: 127.1'
+    )
+
+
+def test_a_hostname_that_only_looks_numeric_is_allowed(monkeypatch, logs):
+    _, client = _used(monkeypatch, _Session(), cfg={'allow_domains': '1password.com, 0x.org, a1.b2.io, *.0x.org'})
+    assert client.created[0]['allow_domains'] == ['1password.com', '0x.org', 'a1.b2.io', '*.0x.org']
+
+
 def test_an_allowlist_entry_that_may_carry_a_credential_is_not_repeated(monkeypatch, logs):
     glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['https://user:hunter2@host.org']})
     with pytest.raises(ValueError) as refused:
@@ -830,6 +877,7 @@ def test_the_private_prefix_is_kept_in_the_form_git_matches(monkeypatch, logs, u
         ({'git_auth_url': 'https://u:p@github.com/'}, 'not shown'),
         ({'git_auth_url': 'https://github.com:8443/'}, 'must be an https URL'),
         ({'git_auth_url': 'http://github.com/'}, 'must be an https URL'),
+        ({'git_auth_url': 'https://10.0.0.5/acme/'}, 'is on 10.0.0.5, an IP address'),
         ({'git_auth_url': 'https://github.com/a/../b'}, 'must be an https URL'),
         ({'git_auth_url': 7}, 'must be a URL'),
         ({'git_auth_secret': '9lives'}, 'must be the name of a Luxor secret'),

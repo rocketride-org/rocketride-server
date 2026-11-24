@@ -8,7 +8,7 @@
 	"path": "nodes.tool_masky",
 	"prefix": "masky",
 	"icon": "masky.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_masky",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_masky",
 	"description": ["Masky AI avatars that speak, plus scene video, images and live conversations.", "Use it as an agent tool covering the Masky API, or as a pipeline step that turns text into a talking head, a scene clip, an image or a live-conversation turn.", "Requires a Masky API key from https://masky.ai/developer"],
 	"tile": ["Masky: ${parameters.tool_masky.action}"],
 	//

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from .pinned_http import resolve_public_addresses
+from .pinned_http import is_public_address, resolve_public_addresses
+
+__all__ = ['is_public_address', 'validate_public_url']
 
 
 def validate_public_url(raw_url: str) -> str:
