@@ -589,7 +589,6 @@ def test_duplicate_redirect_sources_rejected():
 
 
 def test_redirect_sources_on_live_routes_rejected():
-
     def live_conflict(candidate):
         if candidate == '/health':
             return 'GET /health'

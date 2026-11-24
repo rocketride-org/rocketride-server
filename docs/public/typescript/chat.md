@@ -73,6 +73,30 @@ Semantics worth knowing:
 
 A complete chat program is [example 6](/clients/typescript/examples#6-chat-question-with-instructions-and-examples-parse-json-answer).
 
+## Agent answers
+
+When an agent answered, `response.stop_reason` says why its run stopped. Only `done` is a
+finished answer:
+
+- `max_steps`: the agent ran out of steps (`max_waves` on the Wave agent) and answered
+  with a best effort from the work so far. The LlamaIndex agent's answer only says that
+  it stopped.
+- `empty_plan`: the Wave agent's model stopped planning without finishing, and the answer
+  is a best effort too.
+- `error`: the run failed or its answer was refused. The answer is the error message,
+  or a best effort from the work so far when the Wave agent's planning failed after it
+  had done some work.
+- `unknown`: the agent did not say how its run ended.
+
+```typescript
+if (response.stop_reason && response.stop_reason !== 'done') {
+	console.warn(`Not a finished answer (${response.stop_reason})`);
+}
+```
+
+The field is absent when no agent answered. When several agents answered, it is the first
+reason other than `done`, and it does not say which answer that reason belongs to.
+
 ## Native tool calling
 
 Put the conversation in `messages` to send it as real model turns, with tools

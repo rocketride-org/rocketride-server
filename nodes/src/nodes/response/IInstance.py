@@ -218,6 +218,12 @@ class IInstance(IInstanceBase):
         if key not in self.instance.currentObject.response:
             self.instance.currentObject.response[key] = []
 
+        # An agent's answer says why its run stopped. With several, the first reason
+        # other than done stands, so the result is done only when every run finished.
+        response = self.instance.currentObject.response
+        if answer.agentStopReason is not None and response.get('stop_reason', 'done') == 'done':
+            response['stop_reason'] = answer.agentStopReason
+
         # A turn is written as one object under the same key, as a JSON answer already is;
         # Answer.fromResult reads it back.
         if answer.message is not None or answer.error is not None:

@@ -30,11 +30,21 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 TOKENS_RESULT_KEY = 'tokens'
 
 # Keys the result object holds for something other than a lane: the node writes
-# result_types, name, path, metadata and tokens; the data channel adds objectId, and
-# error when the object failed; the webhook adds status. A lane's results are a
-# list under its key, so a lane mapped to one of these would crash on append or
-# be overwritten (#2438).
-RESERVED_RESULT_KEYS = ('result_types', 'name', 'path', 'metadata', 'objectId', 'error', 'status', TOKENS_RESULT_KEY)
+# result_types, name, path, metadata, tokens and an agent's stop_reason; the data
+# channel adds objectId, and error when the object failed; the webhook adds status.
+# A lane's results are a list under its key, so a lane mapped to one of these would
+# crash on append or be overwritten (#2438).
+RESERVED_RESULT_KEYS = (
+    'result_types',
+    'name',
+    'path',
+    'metadata',
+    'stop_reason',
+    'objectId',
+    'error',
+    'status',
+    TOKENS_RESULT_KEY,
+)
 
 
 def _configured_keys(config: Dict[str, Any]) -> tuple[str | None, Dict[str, str]]:

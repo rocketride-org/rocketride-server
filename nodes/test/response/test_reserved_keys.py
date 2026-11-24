@@ -79,7 +79,17 @@ def _instance(glb):
 
 
 # Listed here, not read from RESERVED_RESULT_KEYS, so that dropping a key from the node fails this test
-_KEYS_THE_RESULT_ALREADY_HOLDS = ('result_types', 'name', 'path', 'metadata', 'objectId', 'error', 'status', 'tokens')
+_KEYS_THE_RESULT_ALREADY_HOLDS = (
+    'result_types',
+    'name',
+    'path',
+    'metadata',
+    'stop_reason',
+    'objectId',
+    'error',
+    'status',
+    'tokens',
+)
 
 
 @pytest.mark.parametrize('key', _KEYS_THE_RESULT_ALREADY_HOLDS)

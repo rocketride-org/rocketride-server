@@ -92,6 +92,20 @@ def test_answer_from_a_text_result_is_a_text_answer():
     assert answer.message is None and answer.toolCalls() == []
 
 
+def test_answer_from_an_agent_result_says_why_the_run_stopped():
+    answer = Answer.fromResult({'answers': ['C = 42'], 'stop_reason': 'max_steps'})
+
+    assert answer.getText() == 'C = 42'
+    assert answer.agentStopReason == 'max_steps'
+
+
+@pytest.mark.parametrize('stop_reason, expected', [(None, None), (['ready'], 'unknown'), ('max_tokens', 'unknown')])
+def test_answer_from_a_result_calls_a_stop_reason_it_does_not_know_unknown(stop_reason, expected):
+    answer = Answer.fromResult({'answers': ['C = 42'], 'stop_reason': stop_reason})
+
+    assert answer.agentStopReason == expected
+
+
 @pytest.mark.parametrize(
     'update, rule',
     [

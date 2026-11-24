@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import type { AgentStopReason } from '../schema/Question.js';
+
 /**
  * Response structures from RocketRide pipeline data processing operations.
  * 
@@ -60,7 +62,13 @@ export interface PIPELINE_RESULT {
 	 */
 	result_types?: Record<string, string>;
 
-	/** 
+	/**
+	 * Why the agent run that answered stopped. Only `done` is a finished answer; when
+	 * several agents answered, the first reason other than `done`. Absent when no agent answered.
+	 */
+	stop_reason?: AgentStopReason;
+
+	/**
 	 * Dynamic fields containing processed data based on result_types mapping.
 	 * 
 	 * Field names and types are determined by the result_types object:

@@ -149,4 +149,4 @@ class CrewAgent(CrewBase):
             or safe_str(getattr(getattr(result, 'result', None), 'raw', None))
             or safe_str(result)
         )
-        return final_text, result
+        return final_text, self._crew_trace(result, [llm])

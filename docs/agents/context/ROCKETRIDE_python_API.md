@@ -1120,7 +1120,7 @@ pipeline = {
 
 ### Pipeline Result
 
-`{'answers': list, 'name': str, 'result_types': dict, ...}` — answer values (chat responses) plus dynamic fields based on `result_types`.
+`{'answers': list, 'name': str, 'result_types': dict, 'stop_reason': str, ...}` — answer values (chat responses) plus dynamic fields based on `result_types`. `stop_reason` is present when an agent answered: only `'done'` is a finished answer; `'max_steps'` and `'empty_plan'` are a best effort (the LlamaIndex agent's `'max_steps'` answer only says that it stopped), `'error'` means the run failed (the answer is the error message, or a best effort), and `'unknown'` means the agent did not say how its run ended. With several agents it is the first reason other than `'done'`.
 
 ### Task Status
 

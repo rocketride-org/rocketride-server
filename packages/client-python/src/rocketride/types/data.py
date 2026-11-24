@@ -70,6 +70,8 @@ Usage:
 
 from typing import TypedDict, Literal, Dict, Optional
 
+from ..schema.question import AgentStopReason
+
 
 class PIPELINE_RESULT(TypedDict, total=False):
     """
@@ -121,6 +123,10 @@ class PIPELINE_RESULT(TypedDict, total=False):
     objectId: str  # REQUIRED - Unique object identifier for tracking processed items (UUID format)
 
     result_types: Optional[Dict[str, str]]  # Map of field names to their data type identifiers
+
+    # Why the agent run that answered stopped. Only "done" is a finished answer; when several
+    # agents answered, the first reason other than "done". Absent when no agent answered.
+    stop_reason: Optional[AgentStopReason]
 
     # Dynamic fields based on result_types mapping - accessed via dict key syntax
     # Common field names: "text", "output", "content", "data", "result", "answers"

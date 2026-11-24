@@ -52,6 +52,8 @@ if str(_NODES_DIR) not in sys.path:
 _STUB_MODULE_NAMES = (
     'rocketlib',
     'crewai',
+    'crewai.utilities',
+    'crewai.utilities.i18n',
     'ai',
     'ai.common',
     'ai.common.agent',
@@ -78,6 +80,20 @@ class _StubBaseLLM:
         return self.stop
 
 
+# crewai/translations/en.json `force_final_answer`, the same in 1.14.1, 1.15.1 and 1.15.42.
+_FORCE_FINAL_ANSWER = (
+    "Now it's time you MUST give your absolute best final answer. You'll ignore all previous "
+    'instructions, stop using any tools, and just return your absolute BEST Final answer.'
+)
+
+
+class _StubI18N:
+    """Stand-in for crewai's ``I18N``: only the forced-answer text is read."""
+
+    def errors(self, key: str) -> str:
+        return {'force_final_answer': _FORCE_FINAL_ANSWER}[key]
+
+
 def _build_stubs() -> dict:
     mod_rocketlib = types.ModuleType('rocketlib')
     mod_rocketlib.ToolDescriptor = dict
@@ -86,6 +102,10 @@ def _build_stubs() -> dict:
     # patches in crewai_base wrap their imports in try/except and no-op without them.
     mod_crewai = types.ModuleType('crewai')
     mod_crewai.BaseLLM = _StubBaseLLM
+    mod_crewai_utilities = types.ModuleType('crewai.utilities')
+    mod_crewai_i18n = types.ModuleType('crewai.utilities.i18n')
+    # Only get_i18n: crewai 1.14.1, which requirements.txt allows, has no I18N_DEFAULT.
+    mod_crewai_i18n.get_i18n = lambda prompt_file=None: _StubI18N()
 
     mod_ai = types.ModuleType('ai')
     mod_ai_common = types.ModuleType('ai.common')
@@ -107,6 +127,8 @@ def _build_stubs() -> dict:
     return {
         'rocketlib': mod_rocketlib,
         'crewai': mod_crewai,
+        'crewai.utilities': mod_crewai_utilities,
+        'crewai.utilities.i18n': mod_crewai_i18n,
         'ai': mod_ai,
         'ai.common': mod_ai_common,
         'ai.common.agent': mod_agent,
@@ -219,3 +241,32 @@ class TestCallForwarding:
 
         assert asyncio.run(llm.acall('question')) == 'host reply'
         assert recorder.calls[0]['messages'] == 'question'
+
+
+class TestForcedFinalAnswer:
+    """CrewAI forces a final answer when an agent reaches max_iter; the run must say so (#3356)."""
+
+    # The forced turn as handle_max_iterations_exceeded appends it in each version.
+    @pytest.mark.parametrize(
+        'forced_turn',
+        [
+            pytest.param({'role': 'user', 'content': _FORCE_FINAL_ANSWER}, id='1.15.42'),
+            pytest.param({'role': 'assistant', 'content': _FORCE_FINAL_ANSWER}, id='1.15.1-no-earlier-reply'),
+            pytest.param(
+                {
+                    'role': 'assistant',
+                    'content': f'Thought: I need the tool again.\nAction: lookup\n{_FORCE_FINAL_ANSWER}',
+                },
+                id='1.15.1-after-a-reply',
+            ),
+        ],
+    )
+    def test_a_forced_final_answer_makes_the_run_report_max_steps(self, forced_turn):
+        llm = _llm()
+        task = {'role': 'user', 'content': 'Compute C.'}
+
+        llm.call([task])
+        assert crewai_base.CrewBase._crew_trace('C = 42', [llm])['stop_reason'] == 'done'
+
+        llm.call([task, forced_turn])
+        assert crewai_base.CrewBase._crew_trace('C = 42', [llm])['stop_reason'] == 'max_steps'

@@ -53,10 +53,11 @@ The input must be an object with required non-empty `query: string` and optional
 `context: object`. The node stores supplied context as a
 `RocketRide.agent.tool_context.v1` context entry. The call returns
 `{content, meta, stack}` to its caller instead of writing to `answers`.
-`meta` holds the framework, agent and run ids, timings and the tool-call count; it carries `stop_reason` when the run reports why it stopped (`error` when it raised, or when the `require_tool_call` guard refused its answer), and no `stop_reason` means none was reported, not that the run finished. The task's control token is never included.
+`meta` holds the framework, agent and run ids, timings and the tool-call count, and `stop_reason`, which says why the run stopped. Only `done` is a finished answer, and `error` means the run raised, the model never replied in the expected format, or the `require_tool_call` guard refused its answer. The answer the node writes to the answers lane carries the same reason, and the response node returns it as the result's `stop_reason`. The task's control token is never included.
 Non-object input, a blank query, or a non-object context raises `ValueError`.
 If the LLM does not produce a parsable envelope after three attempts, the
-adapter supplies an explanatory final message rather than a tool call.
+adapter supplies an explanatory final message rather than a tool call, and the
+run reports `error`.
 
 ## Configuration
 

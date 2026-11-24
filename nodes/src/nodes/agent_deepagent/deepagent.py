@@ -405,6 +405,9 @@ class DeepAgentDriver(AgentBase):
         except Exception:
             final_text = safe_str(state)
 
+        # LangGraph raises at its recursion limit, so a graph that returned finished on its own.
+        if isinstance(state, dict):
+            state = {**state, 'stop_reason': 'done'}
         return safe_str(final_text), state
 
     def _collect_subagents(self, context: AgentContext) -> List[Any]:

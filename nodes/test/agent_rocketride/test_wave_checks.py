@@ -399,7 +399,7 @@ def _worker_entry(wave, result):
     return entries[0]
 
 
-@pytest.mark.parametrize('reason', ['max_waves', 'empty_plan', 'max_iterations', 'max_tokens', 'a_future_reason'])
+@pytest.mark.parametrize('reason', ['max_steps', 'empty_plan', 'max_iterations', 'max_tokens', 'a_future_reason'])
 def test_a_worker_that_did_not_finish_is_marked_failed(wave, reason):
     """Its best-effort text reads like an answer, so only the stop reason says the work is incomplete."""
     entry = _worker_entry(wave, _agent_result(stop_reason=reason))
@@ -419,7 +419,7 @@ def _run_parent(wave, monkeypatch, replies, **config):
     planned = iter(replies)
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: dict(next(planned), remove=[]))
     driver = _driver(wave, **config)
-    results = {WORKER: _agent_result(stop_reason='max_waves')}
+    results = {WORKER: _agent_result(stop_reason='max_steps')}
     driver.call_tool = lambda context, tool, args: results.get(tool, {'ok': True})
     driver._max_waves = len(replies)
     driver.sendSSE = lambda *a, **kw: None
@@ -456,7 +456,7 @@ def test_a_done_reply_is_sent_back_when_its_worker_did_not_finish(wave, monkeypa
 
     assert trace['waves'][0]['results'][0]['failed'] is True
     assert answer == 'synthesized'
-    assert trace['stop_reason'] == 'max_waves'
+    assert trace['stop_reason'] == 'max_steps'
 
 
 def test_the_fallback_answer_is_told_the_worker_did_not_finish(wave):
@@ -466,7 +466,7 @@ def test_the_fallback_answer_is_told_the_worker_did_not_finish(wave):
     driver.call_llm = lambda context, prompt: prompts.append(prompt.getPrompt()) or 'fallback answer'
     question = wave.rocketride_agent.Question()
     question.addQuestion('Write the brief.')
-    entry = _worker_entry(wave, _agent_result(stop_reason='max_waves'))
+    entry = _worker_entry(wave, _agent_result(stop_reason='max_steps'))
 
     driver._synthesize(question=question, waves=[{'results': [entry]}], context=SimpleNamespace())
 
