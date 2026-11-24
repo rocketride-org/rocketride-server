@@ -8,7 +8,7 @@
 	"path": "nodes.tool_tenki",
 	"prefix": "tenki",
 	"icon": "luxor.svg",
-	"documentation": "https://docs.rocketride.org/nodes/tool_tenki",
+	"documentation": "https://docs.rocketride.ai/nodes/tool_tenki",
 	"description": ["Gives agents a disposable Luxor Sandbox Linux VM for running code and shell commands, editing files and working with git repositories.", "One session, created on first use, is shared by every caller of a running pipeline: its files and installed packages are visible to all of them, so use one pipeline per user or trust boundary."],
 	"tile": [],
 	"lanes": {},

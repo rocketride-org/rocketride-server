@@ -145,7 +145,7 @@ After the sub-pipeline completes, the node reads the response value named by
 
 ## Upstream docs
 
-- [RocketRide documentation](https://docs.rocketride.org)
+- [RocketRide documentation](https://docs.rocketride.ai)
 
 ---
 

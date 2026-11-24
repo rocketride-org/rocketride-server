@@ -49,7 +49,7 @@ _SERVICES_JSON = """{{
 \t"path": "nodes.{name}",
 \t"prefix": "{name}",
 \t"description": ["TODO: describe what this node does."],
-\t"documentation": "https://docs.rocketride.org",
+\t"documentation": "https://docs.rocketride.ai",
 \t"lanes": {{
 \t\t"{lane_in}": ["{lane_out}"]
 \t}},
