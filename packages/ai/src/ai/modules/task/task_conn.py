@@ -193,6 +193,13 @@ def authority_narrowed(cached: Any, fresh: Any) -> bool:
     return bool(held - set(getattr(fresh, 'sysPermissions', None) or []))
 
 
+def _identity_key(info: Any) -> tuple:
+    """The identity a connection acts as: the user plus the credential kind (pk_, tk_ or a full session)."""
+    auth = getattr(info, 'auth', '') or ''
+    kind = next((p for p in TASK_CREDENTIAL_PREFIXES if isinstance(auth, str) and auth.startswith(p)), '')
+    return (getattr(info, 'userId', None), kind)
+
+
 class TaskConn(
     TaskCommands,
     DataCommands,
@@ -464,13 +471,15 @@ class TaskConn(
             await self.send(self.build_error(request, 'Connection revoked'))
             return
 
-        # Re-authenticating as a different user on a live socket: the previous
-        # identity's event subscriptions and debugger attachments must not be
-        # inherited (a deauth would have dropped them). Same user keeps both.
-        if self._authenticated and self._account_info is not None and self._account_info.userId != result.userId:
-            monitors = getattr(self, '_monitors', None)
-            if monitors is not None:
-                monitors.clear()
+        # Re-authenticating as a different identity on a live socket (another
+        # user, or another credential kind for the same user: pk_/tk_ carry the
+        # launching user's id): the previous identity's subscriptions and
+        # debugger attachments must not be inherited. Strip its authority
+        # BEFORE the detach await, as deauth does, so a concurrent command
+        # cannot register under it meanwhile. Same identity keeps both.
+        previous = self._account_info
+        if self._authenticated and previous is not None and _identity_key(previous) != _identity_key(result):
+            self._drop_authority()
             await self._detach_debuggers()
 
             # A revoke may have landed while detaching: install nothing.
