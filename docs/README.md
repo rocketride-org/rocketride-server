@@ -1,8 +1,9 @@
 # docs/
 
-Four folders, split by **audience**: `public/` is for people outside the repo,
+Five folders, split by **audience**: `public/` is for people outside the repo,
 `docusaurus/` is the docs site itself plus the pages that only exist for it,
-`development/` is for contributors, `agents/` is for AI assistants.
+`development/` is for contributors, `agents/` is for AI assistants, and
+`chatgpt/` is the app package for OpenAI's plugin directory.
 
 ## `public/` — humans outside the repo
 
@@ -82,6 +83,13 @@ outside-the-repo page that stays out of the site: they live in `apps/<app>/`
 - **`skills/`** — hand-curated pipeline-building skills. Not in the bundle.
 
 See `agents/README.md`.
+
+## `chatgpt/`
+
+The RocketRide app for ChatGPT: the plugin folder that is zipped and uploaded
+to OpenAI's plugin directory. It holds `plugin.json` (listing text and review
+test cases), `mcp.json` (the hosted server's URL) and `assets/` (icons). It is
+not published to the site and not part of any bundle. See `chatgpt/README.md`.
 
 ## Rules
 
