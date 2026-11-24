@@ -559,17 +559,18 @@ class TaskConn(
 
         Re-acquires the unauthenticated slot the successful auth released (so
         the disconnect handler's release balances), marks the connection
-        unauthenticated, drops every event subscription and installs the bare
-        identity ``AccountInfo(waitlisted=True)``. The bare identity has an
-        empty ``userId`` and no organization, so no user push, org push or
-        org/user-scoped server event can match or rebuild it.
+        unauthenticated, drops every event subscription and installs the
+        signed-out identity ``AccountInfo()``. It has an empty ``userId`` and
+        no organization, so no user push, org push or org/user-scoped server
+        event can match or rebuild it. It is not waitlisted: a signed-out
+        connection is not a waitlisted user.
         """
         self._server.acquire_unauthed_slot(self._client_ip)
         self._authenticated = False
         monitors = getattr(self, '_monitors', None)
         if monitors is not None:
             monitors.clear()
-        self._account_info = AccountInfo(waitlisted=True)
+        self._account_info = AccountInfo()
 
     async def revoke(self, expected_info: AccountInfo, reason: str, pushed: Optional[AccountInfo] = None) -> None:
         """
@@ -580,10 +581,9 @@ class TaskConn(
         it) and was not revoked already. Otherwise, with no await before the
         effect: marks the connection revoked, records the user for the
         disconnect handler, and drops its authority (``_drop_authority``).
-        Then tells the client its new identity (``pushed`` when the caller
-        rebuilt one, else the bare identity) and disconnects. The disconnect
-        cleanup commits open write handles and ends tasks this connection
-        launched, as for any disconnect.
+        Then sends ``pushed`` (when the caller rebuilt one) and disconnects
+        (``send_revoke_notice``). The disconnect cleanup commits open write
+        handles and ends tasks this connection launched, as for any disconnect.
 
         Args:
             expected_info: The identity the caller decided on.
@@ -621,14 +621,24 @@ class TaskConn(
 
     async def send_revoke_notice(self, pushed: Optional[AccountInfo] = None) -> None:
         """
-        Tell a revoked client its new identity, then disconnect it.
+        Tell a revoked client its new identity, if there is one, then disconnect it.
+
+        With ``pushed`` (an identity the account store rebuilt, waitlisted
+        when the user now is) the client receives it as ``apaext_account``.
+        Without one nothing is sent: no placeholder identity is pushed, so a
+        client never reads a signed-out connection as a waitlisted user. The
+        disconnect is the signed-out signal; the client's reconnect then
+        either authenticates its stored credential again or fails
+        authentication, which is how clients already show a signed-out user.
 
         The send is bounded by NOTICE_SEND_TIMEOUT so a client that stopped
         reading cannot hold the caller; the disconnect always happens.
         """
         try:
-            body = (pushed if pushed is not None else self._account_info).to_push_result()
-            await asyncio.wait_for(self.send_event('apaext_account', body=body), NOTICE_SEND_TIMEOUT)
+            if pushed is not None:
+                await asyncio.wait_for(
+                    self.send_event('apaext_account', body=pushed.to_push_result()), NOTICE_SEND_TIMEOUT
+                )
         except Exception as e:
             debug(f'[AUTHZ] revoke notice failed for conn {self.get_connection_id()}: {e!r}')
         finally:

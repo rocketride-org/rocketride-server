@@ -343,11 +343,12 @@ async def test_gate_follows_the_connection_through_reauth_and_deauth():
     assert spies['rrext_deploy_app'].await_count == 1
 
     # 3. Deauth drops identity entirely (nothing dispatches, socket is closed on the next request);
-    #    the connection holds the bare identity, which matches no user, org or credential class...
+    #    the connection holds the signed-out identity, which matches no user, org or credential
+    #    class and is not waitlisted...
     await _dispatch(conn, 'deauth')
     assert conn._authenticated is False
     assert conn._account_info.userId == '' and conn._account_info.auth == ''
-    assert conn._account_info.waitlisted is True
+    assert conn._account_info.waitlisted is False
 
     # 4. ...and re-auth as the full user regains the full command set.
     await TaskConn.on_receive(

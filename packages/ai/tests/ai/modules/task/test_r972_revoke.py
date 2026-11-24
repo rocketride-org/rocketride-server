@@ -564,3 +564,81 @@ async def test_r972_reauth_after_deauth_scopes_disconnect_event_to_new_user(monk
     await server._dapbase_on_disconnected(conn)
 
     assert server.broadcast_server_event.call_args.kwargs['user_id'] == 'bob'
+
+
+# ---------------------------------------------------------------------------
+# Signed out is not waitlisted
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reason', ['credential expired', 'credential revoked'])
+async def test_revoke_without_rebuilt_identity_signs_out_not_waitlisted(monkeypatch, reason):
+    """A revoke with no rebuilt identity (an expired or revoked credential) pushes
+    no identity, so the client is never told it is waitlisted; it is disconnected,
+    and its reconnect with the dead credential fails authentication (signed out).
+    """
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('u'))
+
+    await conn.revoke(conn._account_info, reason)
+
+    conn._transport.disconnect.assert_called_once()
+    assert events(conn, 'apaext_account') == []
+    assert conn._authenticated is False
+    assert conn._account_info.userId == ''
+    assert conn._account_info.waitlisted is False
+
+    # The client reconnects on a new socket with the same credential: refused.
+    server._server.authenticate_credential = AsyncMock(return_value=(401, 'Invalid API key'))
+    server.broadcast_server_event = AsyncMock()
+    retry = make_conn(server, None, connection_id=2)
+    response = await retry.on_auth(_request('auth', auth='rr_expired'))
+
+    assert response is None
+    assert retry._authenticated is False
+    assert [m.get('message') for m in retry.sent] == ['Invalid API key']
+    retry._transport.disconnect.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_deauth_is_signed_out_not_waitlisted(monkeypatch):
+    """Deauth leaves the signed-out identity, not a waitlisted one, and sends no identity."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('u'))
+
+    response = await conn.on_deauth(_request('deauth'))
+
+    assert response == {'type': 'response', 'body': {}}
+    assert events(conn, 'apaext_account') == []
+    assert conn._authenticated is False
+    assert conn._account_info.userId == ''
+    assert conn._account_info.waitlisted is False
+    with pytest.raises(PermissionError, match='Not authenticated'):
+        conn.require_zitadel_auth()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('perms', [frozenset(), ADMIN], ids=['user', 'admin'])
+async def test_waitlisted_user_still_gets_waitlisted_identity(monkeypatch, perms):
+    """A user the account store now reports disabled still receives the waitlisted
+    identity (with their own userId), on the push and on the next auth.
+    """
+    account = FakeAccount({'u': (False, perms)})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('u', perms))
+
+    await server.push_account_update('u')
+
+    pushed = events(conn, 'apaext_account')
+    assert pushed and pushed[-1]['body']['waitlisted'] is True
+    assert pushed[-1]['body']['userId'] == 'u'
+
+    # Signing in again lands on the waitlist too.
+    server._server.authenticate_credential = AsyncMock(return_value=identity('u', waitlisted=True))
+    server.broadcast_server_event = AsyncMock()
+    fresh = make_conn(server, None, connection_id=2)
+    response = await fresh.on_auth(_request('auth', auth='rr_session'))
+
+    assert response['body']['waitlisted'] is True
+    assert response['body']['userId'] == 'u'
