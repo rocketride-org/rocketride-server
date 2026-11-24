@@ -70,6 +70,14 @@ _REPLACED = (
     _tag_with('meta', 'property', 'article:published_time'),
     _tag_with('meta', 'property', 'article:modified_time'),
 )
+# The replaced tags, after a script or style element: tried first at each
+# position, such an element is matched whole and kept, so its text (a
+# '<title>' string in a script) is never taken for a tag.
+_REMOVED = re.compile(
+    rf'(?P<kept><(?P<raw>script|style)(?=[\s/>]){_ATTR_UNIT}*>.*?</(?P=raw)\s*>)|'
+    + '|'.join(p.pattern for p in _REPLACED),
+    _FLAGS,
+)
 _HEAD_OPEN = re.compile(r'<head\b[^>]*>', re.IGNORECASE)
 _CHARSET = re.compile(r'<meta\b[^>]*?(?:\bcharset\s*=|\bhttp-equiv\s*=\s*["\']?content-type\b)[^>]*>', re.IGNORECASE)
 _HEAD_SPAN = re.compile(r'<head\b[^>]*>.*?</head\s*>', _FLAGS)
@@ -186,8 +194,8 @@ def inject_head(
         The document with the new block in its head.
     """
     # Only the head's tags are replaced: an inline SVG <title> in the body,
-    # or a '<title>' string in a script, is content. Without a <head>, the
-    # region before <body> stands in for it.
+    # or a '<title>' string in a script (in the head too), is content.
+    # Without a <head>, the region before <body> stands in for it.
     span = _HEAD_SPAN.search(document)
     if span:
         start, end = span.span()
@@ -196,9 +204,7 @@ def inject_head(
         body = _BODY_OPEN.search(document)
         if body:
             end = body.start()
-    region = document[start:end]
-    for pattern in _REPLACED:
-        region = pattern.sub('', region)
+    region = _REMOVED.sub(lambda m: m.group('kept') or '', document[start:end])
     document = document[:start] + region + document[end:]
     parts = [
         f'<title>{html.escape(title, quote=False)}</title>',

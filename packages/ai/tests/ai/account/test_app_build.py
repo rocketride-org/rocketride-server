@@ -137,11 +137,22 @@ def test_canonical_config_keeps_rsbuild_public_dir_copy(tmp_path):
     config ever sets ``publicDir`` / ``copy`` or relocates the dist root, those
     snapshots silently stop reaching the store and the pages vanish.
     """
-    config_path = _emit_config(str(tmp_path / '.build'), str(tmp_path / 'app'), str(tmp_path / '.out'), 'acme_x')
+    out_dir = str(tmp_path / '.out')
+    config_path = _emit_config(str(tmp_path / '.build'), str(tmp_path / 'app'), out_dir, 'acme_x')
     text = open(config_path, encoding='utf-8').read()
-    # Blank the interpolated (json.dumps) path strings so only config KEYS are matched.
-    text = re.sub(r'"(?:[^"\\]|\\.)*"', '""', text)
-    assert not re.search(r'(?:^|[{,])\s*(?:publicDir|copy|copyOnBuild|server)\s*:', text, re.MULTILINE)
+    # The dist root is the harvest tree, exactly.
+    roots = re.findall(r'distPath:\s*\{\s*root:\s*("(?:[^"\\]|\\.)*")\s*\}', text)
+    assert [json.loads(root) for root in roots] == [out_dir]
+
+    def copy_keys(source):
+        # Blank the string VALUES (the interpolated json.dumps paths), so only
+        # config keys are matched, quoted or not.
+        source = re.sub(r'(:\s*)"(?:[^"\\]|\\.)*"', r'\1""', source)
+        return re.search(r'(?:^|[{,])\s*(["\']?)(?:publicDir|copy|copyOnBuild|server)\1\s*:', source, re.MULTILINE)
+
+    assert not copy_keys(text)
+    # A quoted key is a key too.
+    assert copy_keys('  "server": {"publicDir": false},') and copy_keys("  'copy': [],")
 
 
 # =============================================================================

@@ -184,7 +184,16 @@ async def _content(page: Page, last: Optional[_Content], reads: asyncio.Semaphor
 
 async def _contents(pages: List[Page], last: Dict[str, _Content]) -> Dict[str, _Content]:
     reads = asyncio.Semaphore(MAX_CONCURRENT_READS)
-    found = await asyncio.gather(*(_content(p, last.get(p.path), reads) for p in pages))
+    tasks = [asyncio.ensure_future(_content(p, last.get(p.path), reads)) for p in pages]
+    try:
+        found = await asyncio.gather(*tasks)
+    except Exception:
+        # gather leaves the other reads running when one fails; end them, so no
+        # read outlives READ_SECONDS or overlaps the next build's.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     return {p.path: c for p, c in zip(pages, found)}
 
 

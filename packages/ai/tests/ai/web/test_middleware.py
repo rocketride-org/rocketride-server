@@ -195,3 +195,13 @@ def test_the_router_serves_the_route_the_auth_check_was_asked_about():
         r = client.get(url)
         assert r.json() == {'ok': served}, url
         assert server.is_public_route.call_args.args[0] == ('/public' if served == 'public' else '/api/public')
+    # The verdict follows that path too: with only /public public, /api/public
+    # is served without authentication and /api/api/public is refused.
+    server.is_public_route.side_effect = lambda path: path == '/public'
+    server.authenticate_request = AsyncMock(return_value=JSONResponse({'error': 'unauthorized'}, status_code=401))
+    r = client.get('/api/public')
+    assert r.status_code == 200 and r.json() == {'ok': 'public'}
+    server.authenticate_request.assert_not_awaited()
+    r = client.get('/api/api/public')
+    assert r.status_code == 401 and r.json() == {'error': 'unauthorized'}
+    server.authenticate_request.assert_awaited_once()

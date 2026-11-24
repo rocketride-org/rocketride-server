@@ -71,7 +71,8 @@ Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; a crawler response bound to a data source is
 also dropped when that source is invalidated, and expires after
 ``data_sources.TTL_SECONDS``. Such a response is ``public`` with a
-``max-age`` of what is left of that time, so no cache keeps it longer than
+``max-age`` of what is left of that time when it is sent (whole seconds,
+rounded down), so no cache keeps it longer than
 this server would and the TTL bounds staleness end to end. A render overtaken
 by a swap or an invalidation is served ``private, no-cache``. Snapshot
 bytes, immutable per version, are cached by store path under their own byte
@@ -1031,7 +1032,8 @@ async def _render_page(request: Request, path: str, page: Page, aggregate: publi
     render that falls back uncacheably is served, not cached; one that a swap
     or a data-source invalidation overtook is served ``private, no-cache``,
     not cached. A crawler response bound to data is ``public``, with a
-    ``max-age`` of what is left of its TTL.
+    ``max-age`` of what is left of its TTL when the response is built, in
+    whole seconds rounded down.
 
     Returns:
         The page's response.
@@ -1054,11 +1056,13 @@ async def _render_page(request: Request, path: str, page: Page, aggregate: publi
             _render_cache.put(key, cached, len(cached.body))
     headers = dict(cached.headers)
     if cached.sources and headers['Cache-Control'] == _SNAPSHOT_CACHE_CONTROL:
-        # No cache may keep bound data longer than this server would. min()
-        # caps it at the TTL: (now + TTL) - now can come out a hair over it in
-        # floating point, and ceil would round that up a whole second.
-        max_age = math.ceil(min(cached.expires - now, data_sources.TTL_SECONDS))
-        headers['Cache-Control'] = f'public, max-age={max_age}'
+        # No cache may keep bound data longer than this server would: what is
+        # left of the entry's lifetime by the clock now (the render took
+        # time), in whole seconds rounded down, and none once a render
+        # outlasted the TTL. min() caps it at the TTL: (now + TTL) - now can
+        # come out a hair over it in floating point.
+        left = min(cached.expires - monotonic(), data_sources.TTL_SECONDS)
+        headers['Cache-Control'] = f'public, max-age={max(0, math.floor(left))}'
     return HTMLResponse(cached.body, headers=headers)
 
 

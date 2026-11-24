@@ -33,7 +33,8 @@ import time
 
 import pytest
 
-from ai.modules.shell.template import MAX_SECTION_DEPTH, TemplateError, render
+from ai.modules.shell.contract import MAX_SNAPSHOT_BYTES
+from ai.modules.shell.template import MAX_RENDER_CHARS, MAX_RENDER_STEPS, MAX_SECTION_DEPTH, TemplateError, render
 
 from .hostile_fixtures import HOSTILE_DESCRIPTION, HOSTILE_NAME
 
@@ -167,3 +168,28 @@ def test_sections_nest_up_to_the_cap():
 def test_deeper_nesting_is_a_template_error(depth):
     with pytest.raises(TemplateError, match='nest deeper than'):
         render('{{#a}}' * depth + 'x', {'a': True})
+
+
+def test_sections_that_multiply_their_list_are_stopped_by_the_step_budget():
+    # Within MAX_SECTION_DEPTH, each level repeats the levels below it once per
+    # item: 33**4 passes, with or without a node to write.
+    assert MAX_RENDER_STEPS == 1024 * 1024
+    for tpl in ('{{#a}}' * 4 + '{{n}}' + '{{/a}}' * 4, '{{#a}}' * 4 + '{{/a}}' * 4):
+        with pytest.raises(TemplateError, match='more than 1048576 steps'):
+            render(tpl, {'a': [{'n': 'x'}] * 33})
+    # Real pages stay well within it: a hundred plans in one section, and one
+    # pass over the densest snapshot the publish gate accepts.
+    plans = [{'name': f'P{i}', 'price': str(i)} for i in range(100)]
+    assert render('{{#plans}}<li>{{name}} {{price}}</li>{{/plans}}', {'plans': plans}).count('<li>') == 100
+    dense = '{{a}}x' * (MAX_SNAPSHOT_BYTES // 6)
+    assert render(dense, {'a': 'v'}) == 'vx' * (MAX_SNAPSHOT_BYTES // 6)
+
+
+def test_output_past_the_character_budget_is_a_template_error():
+    assert MAX_RENDER_CHARS == 4 * 1024 * 1024
+    with pytest.raises(TemplateError, match='longer than 4194304 characters'):
+        render('{{#a}}' + 'x' * (1024 * 1024) + '{{/a}}', {'a': [{}] * 5})
+    # Escaped values count as written: '&' is five characters out.
+    with pytest.raises(TemplateError, match='longer than 4194304 characters'):
+        render('{{v}}', {'v': '&' * (1024 * 1024)})
+    assert len(render('{{#a}}' + 'x' * (1024 * 1024) + '{{/a}}', {'a': [{}] * 4})) == MAX_RENDER_CHARS

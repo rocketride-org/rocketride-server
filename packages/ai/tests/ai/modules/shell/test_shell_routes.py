@@ -286,9 +286,8 @@ def test_sitemap_lists_exactly_the_listed_pages(app_url):
         assert f'<loc>{BASE}{route}</loc>' in resp.text
     for route in UNLISTED_PATHS:
         assert f'<loc>{BASE}{route}</loc>' not in resp.text
-    # Deterministic: sorted by path.
-    paths = [line.split(BASE, 1)[1].split('</loc>')[0] for line in resp.text.splitlines() if '<loc>' in line]
-    assert paths == sorted(paths)
+    # Exactly those, once each, sorted by path: no extra or repeated entry.
+    assert re.findall(r'<loc>([^<]*)</loc>', resp.text) == [BASE + route for route in sorted(LISTED_PATHS)]
 
 
 def test_sitemap_follows_the_listed_flag_of_published_pages(app_url):

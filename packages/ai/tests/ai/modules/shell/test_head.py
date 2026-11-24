@@ -103,6 +103,20 @@ def test_only_head_tags_are_replaced():
     assert '<svg><title>Chart label</title></svg>' in out and 'var s = "<title>x</title>";' in out
 
 
+def test_script_and_style_text_in_the_head_is_kept():
+    script = '<script>const a="<title>"; const b="</title>"; boot(a,b)</script>'
+    tags = '<meta name="description" content="x"><link rel="canonical" href="https://x/">'
+    style = f'<style>/* <title>{tags}</title> */</style>'
+    loader = f'<SCRIPT type="module" data-x="a>b">var t = \'{tags}\';</Script >'
+    doc = f'<html><head><title>old</title>{script}{style}{loader}</head><body></body></html>'
+    out = inject_head(doc, title='New', description='New.', canonical='https://rr.example/')
+    assert script in out and style in out and loader in out
+    assert '<title>old</title>' not in out and out.count('<title>New</title>') == 1
+    # A '<script>' in the title's text is title text: it goes with the title.
+    out = inject_head('<html><head><title>a <script>b</script> c</title></head></html>', title='New')
+    assert out == '<html><head><title>New</title><meta property="og:title" content="New"></head></html>'
+
+
 def test_headless_documents_only_lose_tags_before_body():
     out = inject_head('<title>old</title><body><svg><title>keep</title></svg></body>', title='New')
     assert out.count('<title>') == 2 and '<title>keep</title>' in out and 'old' not in out

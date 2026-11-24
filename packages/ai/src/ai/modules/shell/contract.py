@@ -76,7 +76,7 @@ PLATFORM_DEVELOPER_ID = 'rocketride'
 # fails when a registered root route is missing here. /ping, /use, /shutdown,
 # /remote and /pipe belong to other server configurations. /apps and /pipelines
 # are the two trees deployed artifacts serve from, and /artifacts mints their
-# cookie (the shell module's own routes, which that test does not list).
+# cookie (the shell module's own routes, which that test checks too).
 RESERVED_PREFIXES = (
     '/.well-known',
     '/api',

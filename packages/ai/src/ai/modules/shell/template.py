@@ -49,9 +49,10 @@ the server provides on every page (``ROOT_NAMES``) resolve from the root
 context only, so no record bound inside a section can shadow them.
 
 A tag naming an unknown field renders empty at that spot and is logged: a
-public page never becomes an error page because of its template. Sections
-nested deeper than ``MAX_SECTION_DEPTH`` are the one template error
-(``TemplateError``).
+public page never becomes an error page because of its template. The
+template errors (``TemplateError``) are sections nested deeper than
+``MAX_SECTION_DEPTH`` and a render past its budgets: more than
+``MAX_RENDER_STEPS`` steps, or more than ``MAX_RENDER_CHARS`` characters out.
 """
 
 import html
@@ -69,6 +70,20 @@ ROOT_NAMES = frozenset({'assets'})
 
 # How deeply sections may nest (rendering recurses once per level).
 MAX_SECTION_DEPTH = 16
+
+# What one render may spend. Depth alone does not bound it: a section repeats
+# its nodes once per list item, so ten nested sections over a ten-item list
+# visit 10**10 nodes within MAX_SECTION_DEPTH. A step is one node visited or
+# one pass over a section's nodes. One pass over the densest snapshot the
+# publish gate accepts (2 MiB of five-character tags, each after a one-
+# character text node) is 699,051 steps; a real page adds a pass of its
+# section per bound item (home-ui's pricing page: ten steps a plan, 1,008 in
+# all with a hundred plans). The step budget is that densest pass and half as
+# much again, about a second of rendering. Output is the snapshot with its
+# tags filled in (a few KB more on a real page): the character budget is the
+# largest snapshot twice over, an eighth of the render cache.
+MAX_RENDER_STEPS = 1024 * 1024
+MAX_RENDER_CHARS = 4 * 1024 * 1024
 
 
 class TemplateError(Exception):
@@ -138,7 +153,9 @@ def render(
         The rendered text.
 
     Raises:
-        TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``.
+        TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``, or
+            the render takes more than ``MAX_RENDER_STEPS`` steps or writes
+            more than ``MAX_RENDER_CHARS`` characters.
     """
     renderer = _Renderer(escape, on_issue)
     renderer.render_nodes(parse(template, on_issue), [context])
@@ -202,19 +219,30 @@ def parse(template: str, on_issue: Callable[[str], None] = _log) -> List[Node]:
 class _Renderer:
     """One render: appends to ``out``, escaping every substituted value with ``escape``.
 
-    Every method takes ``contexts``, the lookup stack, innermost last.
+    Every method takes ``contexts``, the lookup stack, innermost last. The
+    render counts its ``steps`` and the characters in ``out`` against
+    ``MAX_RENDER_STEPS`` and ``MAX_RENDER_CHARS``.
     """
 
     def __init__(self, escape: Callable[[str], str], on_issue: Callable[[str], None]) -> None:
         self.escape = escape
         self.on_issue = on_issue
         self.out: List[str] = []
+        self.steps = 0
+        self.chars = 0
 
     def render_nodes(self, nodes: List[Node], contexts: List[Any]) -> None:
-        """Append the rendering of ``nodes``."""
+        """Append the rendering of ``nodes``: a step for the pass, and one per node.
+
+        Raises:
+            TemplateError: the render takes more than ``MAX_RENDER_STEPS`` steps.
+        """
+        self.steps += 1 + len(nodes)
+        if self.steps > MAX_RENDER_STEPS:
+            raise TemplateError(f'rendering takes more than {MAX_RENDER_STEPS} steps')
         for node in nodes:
             if isinstance(node, Text):
-                self.out.append(node.text)
+                self.write(node.text)
             elif isinstance(node, Var):
                 self.render_var(node, contexts)
             else:
@@ -227,7 +255,18 @@ class _Renderer:
         if text is None:
             self.on_issue(f'{{{{{var.name}}}}} names an unknown or non-scalar field (rendered empty)')
             return
-        self.out.append(self.escape(text))
+        self.write(self.escape(text))
+
+    def write(self, text: str) -> None:
+        """Append ``text`` to ``out``.
+
+        Raises:
+            TemplateError: ``out`` would hold more than ``MAX_RENDER_CHARS`` characters.
+        """
+        self.chars += len(text)
+        if self.chars > MAX_RENDER_CHARS:
+            raise TemplateError(f'the rendered text is longer than {MAX_RENDER_CHARS} characters')
+        self.out.append(text)
 
     def render_section(self, section: Section, contexts: List[Any]) -> None:
         """Append the children once per list item, once inside a non-empty mapping, or once for any other truthy value.

@@ -176,7 +176,9 @@ async def _crawl_at_once(paths):
 # ---------------------------------------------------------------------------
 
 
-def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(shell_root):
+def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(shell_root, monkeypatch):
+    # The render's own time counts against a bound page's max-age: keep the clock still.
+    monkeypatch.setattr(pages, 'monotonic', lambda: 1000.0)
     _seed()
     _serve(_page())
     client = _client()
@@ -206,6 +208,29 @@ def test_head_on_a_snapshot_page_answers_like_get(shell_root, monkeypatch):
     assert head.status_code == 200 and head.content == b''
     assert head.headers['content-length'] == get.headers['content-length']
     assert head.headers['cache-control'] == get.headers['cache-control']
+
+
+def test_a_bound_max_age_is_what_is_left_when_the_response_is_built_rounded_down(shell_root, monkeypatch):
+    # No cache may keep bound data longer than this server does: the time a
+    # cold render takes is spent, and a part of a second left is not a second.
+    clock = [1000.0]
+    monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
+    read_seconds = {'pricing.html': 0.75, 'slow.html': 301.0}
+
+    async def slow_read(path):
+        clock[0] += read_seconds[path.rsplit('/', 1)[-1]]
+        return await read_file(path)
+
+    monkeypatch.setattr(pp, 'read_artifact_file', slow_read)
+    _seed()
+    _seed(name='pages/slow.html')
+    _serve(_page(), _page('/slow', 'pages/slow.html'))
+    client = _client()
+    assert _crawl(client).headers['cache-control'] == 'public, max-age=299'
+    clock[0] = 1299.75  # a quarter of a second left: still a hit (a new render would say 300)
+    assert _crawl(client).headers['cache-control'] == 'public, max-age=0'
+    # A render that outlasts the TTL is not advertised as fresh at all.
+    assert _crawl(client, '/slow').headers['cache-control'] == 'public, max-age=0'
 
 
 def test_an_unlisted_snapshot_page_stays_noindex(shell_root):
@@ -488,7 +513,8 @@ def test_a_shared_read_that_fails_after_its_waiters_left_is_logged_and_backs_off
     # One crawler gave up at its deadline, the other disconnected; the read then
     # fails. The read retrieves its own failure, logs the real store error and
     # starts the backoff: asyncio never sees an unretrieved task exception, and
-    # the next crawl within the backoff does not read.
+    # the next crawl within the backoff does not read. The read fails after the
+    # deadline's own backoff is over, so only the read's failure can hold it.
     _seed()
     _serve(_page())
     path = snapshot_path(_page())
@@ -515,6 +541,7 @@ def test_a_shared_read_that_fails_after_its_waiters_left_is_logged_and_backs_off
         gone.cancel()
         assert await late == (None, False)
         await asyncio.gather(gone, return_exceptions=True)
+        clock[0] += pages._STORAGE_BACKOFF_SECONDS
         release.set()
         await asyncio.wait([read])  # waits without retrieving its outcome
         del read
@@ -619,6 +646,18 @@ def test_a_snapshot_the_engine_refuses_falls_back_cacheably_and_warns_once(shell
     _serve(_page(title='Renamed'))
     assert '<title>Renamed</title>' in _crawl(client).text
     assert len(reads) == 1 and len(warned) == 1
+
+
+def test_a_snapshot_past_the_render_budget_falls_back_like_a_refused_one(shell_root, reads, warned):
+    # Under the size cap, but each 10-character tag writes the 24-character
+    # assets base: 4.3 MB out, past MAX_RENDER_CHARS.
+    _seed('{{assets}}' * 180_000)
+    _serve(_page())
+    client = _client()
+    for _ in range(2):
+        resp = _crawl(client)
+        assert resp.status_code == 200 and SHELL_BODY in resp.text
+    assert len(reads) == 1 and len(warned) == 1 and 'longer than 4194304 characters' in warned[0]
 
 
 def test_a_snapshot_over_the_size_cap_is_never_read_and_falls_back_cacheably(shell_root, reads, stats, warned):

@@ -245,6 +245,28 @@ async def test_an_unexpected_error_reading_a_snapshot_is_not_swallowed(monkeypat
         await indexnow._contents([_version(1)[1]], {})
 
 
+async def test_an_unexpected_read_error_ends_the_builds_other_reads(monkeypatch):
+    # gather alone would leave them running, past READ_SECONDS and into the next build's reads.
+    other = SimpleNamespace(started=asyncio.Event(), ended=False)
+
+    async def read(path):
+        if path.endswith('pages/pricing.html'):
+            await other.started.wait()
+            raise RuntimeError('a bug, not a storage failure')
+        other.started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            other.ended = True
+
+    monkeypatch.setattr(pp, 'read_artifact_file', read)
+    _snapshot('rocketride.home', 1, 'pages/about.html', '<h1>About</h1>')
+    pages = [_version(1)[1], _page('/about', 1, snapshot='pages/about.html')]
+    with pytest.raises(RuntimeError):
+        await indexnow._contents(pages, {})
+    assert other.ended
+
+
 async def test_a_build_with_an_unexpected_read_error_submits_nothing_and_logs_the_type(sent, warnings, monkeypatch):
     await _build(*_version(1))
 

@@ -419,7 +419,9 @@ def test_store_text_never_becomes_a_url(acct, shell_root):
 
 
 @pytest.mark.parametrize('entry', ['plans', 'plans:acme.brandy', 'app:acme.brandy'])
-def test_failed_binding_is_served_but_not_cached(acct, shell_root, warned, entry):
+def test_failed_binding_is_served_but_not_cached(acct, shell_root, warned, entry, monkeypatch):
+    # The render's own time counts against a bound page's max-age: keep the clock still.
+    monkeypatch.setattr(pages, 'monotonic', lambda: 1000.0)
     acct.plans['rocketride.home'] = acct.plans['acme.brandy'] = PLANS
     _seed()
     _serve(_page('/pricing', [entry]))
@@ -581,10 +583,10 @@ def test_caches_keep_a_bound_response_only_as_long_as_the_engine_would(acct, she
     _serve(_page('/pricing', ['plans:acme.brandy']), _page('/about', []))
     client = _client()
     assert _crawl(client).headers['cache-control'] == 'public, max-age=300'
-    # A hit carries what is left of the entry's lifetime, so the crawler's
-    # cache never holds the data past the TTL counted from the render.
+    # A hit carries what is left of the entry's lifetime, rounded down, so the
+    # crawler's cache never holds the data past the TTL counted from the render.
     clock[0] += 120.5
-    assert _crawl(client).headers['cache-control'] == 'public, max-age=180'
+    assert _crawl(client).headers['cache-control'] == 'public, max-age=179'
     clock[0] += 179.5
     assert _crawl(client).headers['cache-control'] == 'public, max-age=300'  # expired: rendered again
     # Data-free crawler responses and people's responses are unchanged.
