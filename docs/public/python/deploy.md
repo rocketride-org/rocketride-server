@@ -125,7 +125,10 @@ folder with a `.rrnode` marker holding `{"name", "contract"}`.
 A server takes, publishes and serves nodes only when it runs with
 `RR_NODE_RAIL_ENABLED=1`. Without it, uploading or publishing a node is refused,
 only the release's nodes run, and a pipeline that names a published node gets
-`NODE_NOT_FOUND`.
+`NODE_NOT_FOUND`. With the rail on, every developer who can upload runs code as
+the server's OS user, so turn it on only on a server where all of them are
+trusted; the server and its runs then hide their `/proc` entries, as with
+`RR_PROC_PRIVATE=1`. A hosted engine refuses a run that names a published node.
 
 ```python
 added = await client.deploy.add(kind='node', data=open('acme__echo.rrnode', 'rb').read())

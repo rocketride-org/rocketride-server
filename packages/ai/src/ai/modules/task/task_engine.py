@@ -69,6 +69,7 @@ from ai.constants import (
 )
 from ai.account import node_deploy
 from ai.account.base import OutOfCreditsError
+from ai.proc_privacy import CONST_PROC_PRIVATE_ENV
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
@@ -1246,6 +1247,9 @@ class Task(DAPBase):
         if self.node_versions:
             # Never the default local folder: a store the user cannot see
             subprocess_env['RR_STORE_URL'] = 'channel://'
+        if node_deploy.rail_enabled():
+            # A published node runs as the server's OS user: no task may read another's /proc
+            subprocess_env[CONST_PROC_PRIVATE_ENV] = '1'
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
@@ -1329,6 +1333,9 @@ class Task(DAPBase):
                 ),
                 shared_host=self._shares_host(),
             )
+            # A published node is one developer's code; a shared host would run it beside every other tenant
+            if not problem and self.node_versions and self._shares_host():
+                problem = 'Published nodes are not available on RocketRide Cloud yet.'
             if problem:
                 raise ValueError(problem)
 
