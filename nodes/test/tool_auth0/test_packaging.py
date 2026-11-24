@@ -9,14 +9,17 @@ import json
 import shutil
 import subprocess
 import sys
+import types
 import uuid
 import xml.etree.ElementTree as etree
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import test_configuration
 
 node = test_configuration.node
+pipeline = test_configuration.pipeline
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -57,6 +60,65 @@ def test_example_pipeline_wires_auth0_to_agent_without_writes():
     llm = llm_config['custom']
     assert llm['serverbase'] == '' and llm['model'] == ''
     assert 'Never make account changes' in ' '.join(agent['config']['instructions'])
+
+
+def test_example_config_with_synthetic_tenant_data(node, pipeline, monkeypatch):
+    """Exercise the example's configured tools against a synthetic HTTP transport."""
+    package, get_config, _, _ = node
+    example = json.loads((NODE / 'example.pipe').read_text(encoding='utf-8'))
+    env = {
+        'ROCKETRIDE_AUTH0_DEMO_DOMAIN': 'demo.auth0.com',
+        'ROCKETRIDE_AUTH0_DEMO_CLIENT_ID': 'demo-client',
+        'ROCKETRIDE_AUTH0_DEMO_CLIENT_SECRET': 'demo-secret',
+    }
+    resolved = pipeline.resolve_pipeline_env(example, env)
+    get_config.return_value = next(c['config'] for c in resolved['components'] if c['provider'] == 'tool_auth0')
+    calls = []
+    user_id = 'auth0|synthetic'
+    event = {'log_id': 'synthetic-log', 'type': 'limit_wc', 'ip': '192.0.2.1'}
+
+    def response(data):
+        """Return a successful JSON response from the synthetic tenant."""
+        return types.SimpleNamespace(status_code=200, headers={}, content=b'json', json=lambda: data)
+
+    def request(method, url, **kwargs):
+        """Serve only the five reads used by the example."""
+        calls.append((method, url, kwargs))
+        path = url.removeprefix('https://demo.auth0.com/api/v2')
+        data = {
+            '/users-by-email': [{'user_id': user_id, 'email': 'demo@example.com'}],
+            '/users/auth0%7Csynthetic': {'user_id': user_id},
+            '/users/auth0%7Csynthetic/logs': [event],
+            '/logs/synthetic-log': event,
+            '/user-blocks/auth0%7Csynthetic': {'blocked_for': []},
+        }
+        assert method == 'GET' and path in data
+        return response(data[path])
+
+    requests = types.ModuleType('requests')
+    requests.exceptions = types.SimpleNamespace(RequestException=Exception)
+    requests.post = Mock(return_value=response({'access_token': 'demo-token', 'expires_in': 3600}))
+    requests.request = request
+    monkeypatch.setitem(sys.modules, 'requests', requests)
+    global_node = package.IGlobal()
+    global_node.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='run'))
+    global_node.glb = types.SimpleNamespace(logicalType='tool_auth0', connConfig={})
+    global_node.beginGlobal()
+    tool = package.IInstance()
+    tool.IGlobal = global_node
+    search = tool.search_users({'email': 'demo@example.com'})
+    profile = tool.get_user({'user_id': user_id})
+    logs = tool.get_user_logs({'user_id': user_id})
+    detail = tool.get_log_event({'log_id': 'synthetic-log'})
+    blocks = tool.get_user_blocks({'user_id': user_id})
+    assert search['users'][0]['user_id'] == user_id
+    assert profile['blocked'] is False and logs['events'][0]['log_id'] == 'synthetic-log'
+    assert detail['diagnostics'] and blocks['has_blocks'] is False
+    assert len(calls) == 5 and requests.post.call_count == 1
+    assert all(call[2]['headers']['Authorization'] == 'Bearer demo-token' for call in calls)
+    assert all(call[2]['allow_redirects'] is False for call in calls)
+    assert '192.0.2.1' not in str([search, profile, logs, detail, blocks])
+    global_node.endGlobal()
 
 
 def test_example_edges_match_actual_service_definitions():
