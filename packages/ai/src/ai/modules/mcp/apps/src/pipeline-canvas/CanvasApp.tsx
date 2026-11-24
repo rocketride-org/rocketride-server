@@ -273,7 +273,9 @@ function useHostView(app?: App): HostView {
 	const [state, setState] = useState(read);
 	useEffect(() => {
 		if (!app) return;
-		const update = () => setState(read());
+		// The SDK's cached context never sees the mode a requestDisplayMode reply
+		// confirms, so a notification without a mode keeps the current one.
+		const update = (changed: { displayMode?: DisplayMode }) => setState((current) => ({ ...read(), mode: changed.displayMode ?? current.mode }));
 		app.addEventListener('hostcontextchanged', update);
 		return () => app.removeEventListener('hostcontextchanged', update);
 	}, [app, read]);
