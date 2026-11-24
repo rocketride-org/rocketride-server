@@ -63,4 +63,6 @@ TOOL_TITLES: Dict[str, str] = {
     # canvas and account
     'view_pipeline': 'Show a saved pipeline as a diagram',
     'account_status': 'Check if your account can run pipelines',
+    # component probe
+    'probe_component': "Test a component's settings",
 }
