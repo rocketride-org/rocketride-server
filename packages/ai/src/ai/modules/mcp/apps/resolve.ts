@@ -14,7 +14,7 @@
  * other builder file is used as is.
  */
 import { resolve } from 'path';
-import type { Alias, Plugin } from 'vite';
+import { normalizePath, type Alias, type Plugin } from 'vite';
 
 const APPS_ROOT = __dirname;
 const REPO_ROOT = resolve(APPS_ROOT, '../../../../../../..');
@@ -40,19 +40,28 @@ export const aliases: Alias[] = [
 ];
 
 /**
+ * An absolute path as a Vite module id. Vite gives `resolveId` ids with
+ * forward slashes on every platform, so the stand-in tables use the same form
+ * (Node's `resolve` gives backslashes on Windows).
+ */
+function viteId(...parts: string[]): string {
+	return normalizePath(resolve(...parts));
+}
+
+/**
  * Builder files the canvas replaces, keyed by the real file, valued by the
  * widget's stand-in. Each stand-in types itself against the real file with
  * `import type`, so tsc reports drift.
  */
 export const STAND_INS: Record<string, string> = {
-	[resolve(CANVAS, 'context/FlowGraphContext.tsx')]: resolve(STAND_INS_DIR, 'FlowGraphContext.tsx'),
-	[resolve(CANVAS, 'context/FlowProjectContext.tsx')]: resolve(STAND_INS_DIR, 'FlowProjectContext.tsx'),
-	[resolve(CANVAS, 'context/FlowPreferencesContext.tsx')]: resolve(STAND_INS_DIR, 'FlowPreferencesContext.tsx'),
-	[resolve(CANVAS, 'hooks/index.ts')]: resolve(STAND_INS_DIR, 'hooks.ts'),
-	[resolve(SHARED_SRC, 'components/node-config/index.tsx')]: resolve(STAND_INS_DIR, 'node-config.ts'),
-	[resolve(CANVAS, 'components/node/node-component/run-button/RunButton.tsx')]: resolve(STAND_INS_DIR, 'RenderNothing.tsx'),
-	[resolve(CANVAS, 'components/node/node-component/status/NodeStatus.tsx')]: resolve(STAND_INS_DIR, 'RenderNothing.tsx'),
-	[resolve(CANVAS, 'components/node/node-component/header/more-menu/MoreMenu.tsx')]: resolve(STAND_INS_DIR, 'RenderNothing.tsx'),
+	[viteId(CANVAS, 'context/FlowGraphContext.tsx')]: viteId(STAND_INS_DIR, 'FlowGraphContext.tsx'),
+	[viteId(CANVAS, 'context/FlowProjectContext.tsx')]: viteId(STAND_INS_DIR, 'FlowProjectContext.tsx'),
+	[viteId(CANVAS, 'context/FlowPreferencesContext.tsx')]: viteId(STAND_INS_DIR, 'FlowPreferencesContext.tsx'),
+	[viteId(CANVAS, 'hooks/index.ts')]: viteId(STAND_INS_DIR, 'hooks.ts'),
+	[viteId(SHARED_SRC, 'components/node-config/index.tsx')]: viteId(STAND_INS_DIR, 'node-config.ts'),
+	[viteId(CANVAS, 'components/node/node-component/run-button/RunButton.tsx')]: viteId(STAND_INS_DIR, 'RenderNothing.tsx'),
+	[viteId(CANVAS, 'components/node/node-component/status/NodeStatus.tsx')]: viteId(STAND_INS_DIR, 'RenderNothing.tsx'),
+	[viteId(CANVAS, 'components/node/node-component/header/more-menu/MoreMenu.tsx')]: viteId(STAND_INS_DIR, 'RenderNothing.tsx'),
 };
 
 /**
@@ -61,8 +70,8 @@ export const STAND_INS: Record<string, string> = {
  * is about 1 MB of grammars.
  */
 export const PACKAGE_STAND_INS: Record<string, string> = {
-	'react-syntax-highlighter': resolve(STAND_INS_DIR, 'syntax-highlighter.tsx'),
-	'react-syntax-highlighter/dist/esm/styles/prism': resolve(STAND_INS_DIR, 'syntax-highlighter.tsx'),
+	'react-syntax-highlighter': viteId(STAND_INS_DIR, 'syntax-highlighter.tsx'),
+	'react-syntax-highlighter/dist/esm/styles/prism': viteId(STAND_INS_DIR, 'syntax-highlighter.tsx'),
 };
 
 const STAND_IN_FILES = new Set([...Object.values(STAND_INS), ...Object.values(PACKAGE_STAND_INS)]);

@@ -10,9 +10,10 @@
  */
 import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
+import { normalizePath } from 'vite';
 import { describe, expect, it } from 'vitest';
 
-import { PACKAGE_STAND_INS, STAND_INS } from '../../../resolve';
+import { PACKAGE_STAND_INS, STAND_INS, canvasStandIns } from '../../../resolve';
 
 const REPO_ROOT = resolve(__dirname, '../../../../../../../../../..');
 const SHARED_SRC = resolve(REPO_ROOT, 'apps/shared/src');
@@ -91,7 +92,7 @@ describe('canvas stand-ins', () => {
 		for (const file of REUSED) {
 			for (const { specifier, names } of valueImports(file)) {
 				const real = resolveSpecifier(specifier, file) ?? '';
-				const replaced = PACKAGE_STAND_INS[specifier] ?? STAND_INS[real];
+				const replaced = PACKAGE_STAND_INS[specifier] ?? STAND_INS[normalizePath(real)];
 				if (!replaced) continue;
 				const module = (await import(/* @vite-ignore */ replaced)) as Record<string, unknown>;
 				for (const name of names) {
@@ -104,6 +105,21 @@ describe('canvas stand-ins', () => {
 		expect(missing).toEqual([]);
 		// Guard against a parser that silently finds nothing.
 		expect(checked).toBeGreaterThan(10);
+	});
+
+	it('swap a builder file for its stand-in by the id Vite resolves it to', async () => {
+		type ResolveId = (this: unknown, source: string, importer: string | undefined, options: object) => Promise<string | null>;
+		const resolveId = canvasStandIns().resolveId as ResolveId;
+		const real = resolve(CANVAS, 'components/node/node-component/run-button/RunButton.tsx');
+		const standIn = STAND_INS[normalizePath(real)];
+		// Vite resolves to a forward-slash id on every platform, with any query kept.
+		const vite = { resolve: async () => ({ id: `${normalizePath(real)}?v=1` }) };
+		const importer = normalizePath(resolve(CANVAS, 'components/node/node-component/run-button/index.tsx'));
+
+		expect(standIn).toBeTruthy();
+		expect(await resolveId.call(vite, './RunButton', importer, {})).toBe(standIn);
+		// A stand-in's own imports are left alone.
+		expect(await resolveId.call(vite, './RunButton', `${standIn}?v=1`, {})).toBeNull();
 	});
 
 	it('the read-only contexts lock the canvas and make edits do nothing', async () => {
