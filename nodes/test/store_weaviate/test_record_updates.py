@@ -7,88 +7,28 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 import time
-import types
-from collections.abc import Iterator
-from contextlib import contextmanager
-from pathlib import Path
 
 import pytest
 
-_STUB_MODULE_NAMES = ('numpy',)
+from nodes.store_weaviate import weaviate as weaviate_store
 
-
-def _install_stubs() -> None:
-    """Install lightweight stubs so weaviate.py can be imported in isolation."""
-    mod_numpy = types.ModuleType('numpy')
-    sys.modules['numpy'] = mod_numpy
-
-
-@contextmanager
-def _scoped_stubs() -> Iterator[None]:
-    """Temporarily install stubs, restoring original modules on exit."""
-    original_modules = {module_name: sys.modules.get(module_name) for module_name in _STUB_MODULE_NAMES}
-    _install_stubs()
-    try:
-        yield
-    finally:
-        for module_name, module in original_modules.items():
-            if module is None:
-                sys.modules.pop(module_name, None)
-            else:
-                sys.modules[module_name] = module
-
-
-def _load_store_class() -> type:
-    """Load Weaviate Store class from source with temporary stubs."""
-    with _scoped_stubs():
-        root = Path(__file__).resolve().parents[3]
-        mocks_path = root / 'nodes' / 'test' / 'mocks'
-        weaviate_file = root / 'nodes' / 'src' / 'nodes' / 'store_weaviate' / 'weaviate.py'
-        inserted = False
-        if str(mocks_path) not in sys.path:
-            sys.path.insert(0, str(mocks_path))
-            inserted = True
-
-        try:
-            spec = importlib.util.spec_from_file_location('test_weaviate_store_module', weaviate_file)
-            assert spec is not None
-            assert spec.loader is not None
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            return module.Store
-        finally:
-            if inserted and sys.path and sys.path[0] == str(mocks_path):
-                sys.path.pop(0)
+# The shared mock, imported as part of this test package: the real weaviate
+# package the driver imports is left in place. conftest.py points the driver at
+# the mock's query builders and errors for each test.
+from ..mocks import weaviate as weaviate_mock
 
 
 def _make_store(records: dict[str, dict]) -> tuple[object, object]:
     """Create a store instance with fake in-memory weaviate collection."""
-    store_class = _load_store_class()
+    collection = weaviate_mock.MockCollection('test-weaviate-record-updates')
+    collection._storage.clear()
+    collection._storage.update(records)
 
-    root = Path(__file__).resolve().parents[3]
-    mocks_path = root / 'nodes' / 'test' / 'mocks'
-    inserted = False
-    if str(mocks_path) not in sys.path:
-        sys.path.insert(0, str(mocks_path))
-        inserted = True
-
-    try:
-        import weaviate  # type: ignore
-
-        collection = weaviate.MockCollection('test-weaviate-record-updates')
-        collection._storage.clear()
-        collection._storage.update(records)
-
-        store = store_class.__new__(store_class)
-        store.collectionObj = collection
-        store.doesCollectionExist = lambda *_args, **_kwargs: True
-        return store, collection
-    finally:
-        if inserted and sys.path and sys.path[0] == str(mocks_path):
-            sys.path.pop(0)
+    store = weaviate_store.Store.__new__(weaviate_store.Store)
+    store.collectionObj = collection
+    store.doesCollectionExist = lambda *_args, **_kwargs: True
+    return store, collection
 
 
 def _make_obj_records(object_id: str, count: int, *, is_deleted: bool) -> dict[str, dict]:

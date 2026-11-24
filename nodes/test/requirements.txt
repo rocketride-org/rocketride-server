@@ -35,5 +35,6 @@ langchain-openai            # llm_openai_api: test_openai_api_temperature.py
 langchain-core              # agent_langchain, agent_deepagent: test_tool_builder.py; test_real_langchain.py
 astrapy                     # store_astra: test_active_paths.py
 pymilvus                    # store_milvus: test_store_milvus_live.py
+weaviate-client             # store_weaviate: test_render.py, test_record_updates.py, test_create_collection_index.py
 langchain-text-splitters    # summarization: test_summarization.py
 luxor-ai                    # tool_tenki: test_tool_tenki_sdk.py; the engine constraints pin it

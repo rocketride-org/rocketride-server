@@ -12,6 +12,7 @@ import tracemalloc
 
 import pytest
 
+from ..mocks.weaviate.exceptions import WeaviateQueryError
 from .test_record_updates import _make_obj_records, _make_store
 
 
@@ -211,7 +212,6 @@ def test_render_pages_under_a_server_with_a_lower_limit(monkeypatch):
 def test_render_raises_a_query_error_that_is_not_the_result_limit(monkeypatch):
     """Only the result-limit rejection is retried; any other query error reaches the caller."""
     store, collection = _make_store(_make_obj_records('doc', 2, is_deleted=False))
-    from weaviate.exceptions import WeaviateQueryError  # the mock the store was loaded with
 
     calls = []
 
