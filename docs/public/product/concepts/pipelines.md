@@ -1,6 +1,7 @@
 ---
 title: Pipelines
 sidebar_position: 1
+description: "A pipeline is the unit of work in RocketRide: a directed graph of components that move and transform data, authored as .pipe files (JSON) and run by the engine."
 ---
 
 # Pipelines

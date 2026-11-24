@@ -1306,6 +1306,10 @@ def _seed_running_task(ts):
         owner='=user/user-1',
         roots=(),
         pipeline=_launch_pipeline(),
+        # No database nodes: nothing was approved, as for the launch that reuses it,
+        # and the launch identity names no org
+        db_approved={},
+        orgId=None,
         task=task,
         dormant=False,
         restarting=False,

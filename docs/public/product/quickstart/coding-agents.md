@@ -10,7 +10,7 @@ This page is the shortest path for a coding agent (or the person driving one) to
 
 ## What RocketRide is
 
-RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++. Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage directly from an IDE with the VS Code extension, from the terminal with the CLI, from code with the Python or TypeScript SDK, or dynamically using the MCP server.
+RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage directly from an IDE with the VS Code extension, from the terminal with the CLI, from code with the Python or TypeScript SDK, or dynamically using the MCP server.
 
 Open source, MIT licensed. Nodes cover LLM providers, vector stores, OCR, NER, PII anonymization and more.
 
@@ -54,12 +54,12 @@ It answers 200 with `{"status":"OK","data":{"version":"..."}}` and needs no key.
 
 ## Use it from the CLI or SDK
 
-Install the Python package (Python 3.10 or newer) in a virtual environment. It installs the `rocketride` command while the environment is active. The first line stops with a clear message if `python3` is too old (the `python3` that ships with macOS is 3.9); if it stops, use a newer interpreter in both places, for example `python3.12`:
+Install the Python package (Python 3.10 or newer) in a virtual environment. It installs the `rocketride` command while the environment is active. The commands are joined with `&&`, so the block stops at the first line with a clear message if `python3` is too old (the `python3` that ships with macOS is 3.9); if it stops, use a newer interpreter in both places, for example `python3.12`:
 
 ```bash
-python3 -c "import sys; sys.exit(None if sys.version_info >= (3, 10) else 'RocketRide needs Python 3.10 or newer')"
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -c "import sys; sys.exit(None if sys.version_info >= (3, 10) else 'RocketRide needs Python 3.10 or newer')" &&
+python3 -m venv .venv &&
+source .venv/bin/activate &&
 pip install rocketride
 ```
 

@@ -77,7 +77,7 @@ export const HOLD_TTL_MS = 30 * 60 * 1000;
 /** sessionStorage key of the hold (per tab; survives the OAuth round trip). */
 export const HOLD_STORAGE_KEY = 'rr:shell:capture-hold';
 
-/** A capture waiting for this load's start; `id` is the uuid its mirrored entry carries too. */
+/** A capture waiting for the start; `id` is the uuid its mirrored twin (Held) carries. */
 type Pending = { event: string; props: Record<string, unknown>; options?: CaptureOptions; id: string };
 /** A mirrored capture: what a next page load needs to replay it truthfully. */
 type Held = { event: string; props: Record<string, unknown>; ts: number; id: string };
@@ -234,9 +234,11 @@ export class SdkQueue {
 			return;
 		}
 		const stamped = reduced.properties;
-		// One uuid for both representations: the replay below and a next load's drain of the mirror
-		// send the same event uuid, so PostHog dedupes a capture whose mirror was never cleared.
-		const id = newEventUuid();
+		// ONE uuid for the entry and its mirror: the delivery at the start and a next load's replay of
+		// the mirror (a page that stopped between the two) are then the same event to posthog-js. A
+		// caller's own uuid (its idempotency key, e.g. a deterministic exposure id) is that uuid when
+		// it has the shape posthog-js keeps, so a retry of the same event before the start dedupes too.
+		const id = isEventUuid(options?.uuid) ? options.uuid : newEventUuid();
 		this.pending.push({ event, props: stamped, options, id });
 		// Mirror AT ENQUEUE: a redirect or crash a moment later still finds the entry.
 		const ts = this.now();
@@ -298,16 +300,16 @@ export class SdkQueue {
 			}
 		}
 		for (const entry of this.pending.splice(0)) {
-			// The mirrored entry's uuid: a crash between this capture and clearMirror() is deduped at the next drain.
-			const options: CaptureOptions = { ...entry.options, uuid: entry.id };
+			// The mirrored twin's uuid rides along, so a replay of the mirror dedupes against this delivery.
+			let options: CaptureOptions = { ...entry.options, uuid: entry.id };
 			if (unloading) {
 				// One beacon per event: posthog-js has no public batched beacon, and the queue holds only what was
 				// captured before the first frame, a few small events, well under the in-flight beacon budget.
-				options.transport = 'sendBeacon';
+				options = { ...options, transport: 'sendBeacon' };
 			}
-			// Replayed at the start time, not the original time: posthog-js keys its page-view state (which web
-			// vitals and replay read) on the $pageview's timestamp, and an earlier explicit timestamp broke both. The
-			// queue spans one frame.
+			// Replayed at the start time, not the original time (no timestamp option): posthog-js keys its
+			// page-view state (which web vitals and replay read) on the $pageview's timestamp, and an earlier
+			// explicit timestamp broke both. The queue spans one frame.
 			try {
 				target.capture(entry.event, entry.props, options);
 			} catch {
@@ -334,9 +336,10 @@ export class SdkQueue {
 	}
 
 	/**
-	 * Drop the hold, this load's pending captures and the mirror without delivering. A sign-out calls
-	 * this: captures observed for one session must never be forwarded under the next account that
-	 * signs in on this tab, and a later start would otherwise replay the pending ones.
+	 * Drop the hold and its mirror without delivering. A sign-out calls this: captures observed for
+	 * one session must never be forwarded under the next account that signs in on this tab. This
+	 * load's own queue goes with it: a sign-out before the SDK starts would otherwise replay the
+	 * signed-out session's captures at the start, under whichever account is signed in by then.
 	 */
 	clearHold(): void {
 		this.inherited = [];

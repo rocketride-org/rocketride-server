@@ -1,6 +1,7 @@
 ---
 title: RAG Pipeline
 sidebar_position: 1
+description: "Retrieval-augmented generation (RAG) in RocketRide: embed documents into a vector store, then answer questions by retrieving chunks and feeding them to an LLM."
 ---
 
 # RAG Pipeline

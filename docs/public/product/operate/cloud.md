@@ -1,5 +1,6 @@
 ---
 title: Cloud
+description: "RocketRide Cloud is a managed engine: the same runtime you can self-host, operated for you. Point a client at the Cloud endpoint and start building."
 ---
 
 # Cloud

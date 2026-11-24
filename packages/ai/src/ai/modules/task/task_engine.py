@@ -53,6 +53,7 @@ Global Resources:
 import os
 import asyncio
 import contextlib
+import inspect
 import sys
 import copy
 import json
@@ -697,8 +698,49 @@ def db_owner(identity: Mapping[str, Any], scope: str, target: str) -> str:
     return str((identity.get('team_id') if scope == 'team' else identity.get('user_id')) or '')
 
 
+def presenting_credential(conn: Any) -> Optional[str]:
+    """
+    The ``AccountInfo.auth`` of the connection a request came in on.
+
+    Used only as an argument to the database authorization
+    (``authorize_db_targets``); callers must not keep it.
+
+    Args:
+        conn: The connection, or None for a request the server makes itself.
+
+    Returns:
+        The credential; ``''`` for the trusted in-process deploy dispatch,
+        which holds none; None when there is no connection or it carries no
+        account info to read.
+    """
+    info = getattr(conn, '_account_info', None)
+    if info is None:
+        return None
+    auth = getattr(info, 'auth', None)
+    return auth if isinstance(auth, str) else None
+
+
+def _accepts_credential(authorize: Callable[..., Any]) -> bool:
+    """True when ``authorize`` (an ``authorize_db_target``) takes ``credential=``.
+
+    Read from the signature rather than by calling and catching ``TypeError``:
+    a ``TypeError`` raised inside an implementation would otherwise be taken
+    for a missing keyword, retried without the credential and, on an
+    implementation that audits, recorded twice. A signature that cannot be
+    read counts as accepting, so a credential is never dropped on a guess.
+    """
+    try:
+        parameters = inspect.signature(authorize).parameters
+    except (TypeError, ValueError):
+        return True
+    named = parameters.get('credential')
+    if named is not None and named.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+
+
 async def authorize_db_targets(
-    identity: Mapping[str, Any], targets: List[Tuple[str, str]]
+    identity: Mapping[str, Any], targets: List[Tuple[str, str]], *, credential: Optional[str] = None
 ) -> List[Tuple[str, str, str]]:
     """
     Authorize every database a pipeline's DB nodes use, as the run ``identity`` (SDD 4.4).
@@ -710,6 +752,13 @@ async def authorize_db_targets(
     Args:
         identity: ``db_identity`` of the run asking.
         targets: From ``db_access`` on the resolved pipeline.
+        credential: The ``AccountInfo.auth`` of the connection the request
+            came in on, handed to ``authorize_db_target`` so the account layer
+            can narrow the decision to what that credential may reach. A call
+            argument only: never stored on a control or an engine, written to
+            a task file, logged, or put in the identity. ``''`` is the trusted
+            deploy dispatch; ``None`` means there was no connection to read
+            (an engine the server starts again by itself).
 
     Returns:
         ``(scope, target, owner)`` per distinct node ``(scope, target)``,
@@ -722,6 +771,17 @@ async def authorize_db_targets(
     from ai.account import account
 
     requested = [(scope, target, db_owner(identity, scope, target)) for scope, target in targets]
+    # An account implementation that predates the keyword (an older SaaS
+    # extension against this engine) gets the two-argument call it always
+    # had, instead of a TypeError that fails every DB-node start. Asked per
+    # call, not cached, so there is no module state; the warning names no
+    # credential
+    pass_credential = _accepts_credential(account.authorize_db_target)
+    if requested and not pass_credential:
+        warning(
+            'the account implementation predates credential-aware authorize_db_target; '
+            'authorizing the run databases without the presenting credential'
+        )
     approved: Dict[Tuple[str, str], str] = {}
     for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in requested):
         request: Dict[str, Any] = {'scope': scope}
@@ -729,7 +789,10 @@ async def authorize_db_targets(
             request['team_id'] = owner
         elif scope == 'user':
             request['user_id'] = owner
-        decision = await account.authorize_db_target(dict(identity), request)
+        if pass_credential:
+            decision = await account.authorize_db_target(dict(identity), request, credential=credential)
+        else:
+            decision = await account.authorize_db_target(dict(identity), request)
         if not decision.allowed:
             named = f' {owner!r}' if owner else ''
             raise PermissionError(
@@ -1342,15 +1405,16 @@ class TaskEngine(DAPBase):
         )
 
     async def _authorize_db_targets(
-        self, targets: List[Tuple[str, str]], public_endpoint: bool
+        self, targets: List[Tuple[str, str]], public_endpoint: bool, *, credential: Optional[str] = None
     ) -> List[Tuple[str, str, str]]:
         """Authorize every database the pipeline's DB nodes use, as this engine's run (``authorize_db_targets``).
 
         What was approved is kept as ``db_approved`` (``dsn_key`` -> owner):
         the databases this engine's process was handed, which a control that
         attaches later must match (``TaskServer._require_engine_db``).
+        ``credential`` is the presenting connection's, passed on and not kept.
         """
-        wanted = await authorize_db_targets(self._db_identity(public_endpoint), targets)
+        wanted = await authorize_db_targets(self._db_identity(public_endpoint), targets, credential=credential)
         self.db_approved = {dsn_key(scope, target): owner for scope, target, owner in wanted}
         return wanted
 
@@ -1387,11 +1451,16 @@ class TaskEngine(DAPBase):
                 raise RuntimeError(f'the {scope} database{named} failed to resolve: {str(e).strip() or repr(e)}') from e
         return {dsn_key(scope, target): dsns[(scope, owner)] for scope, target, owner in wanted}
 
-    async def _build_subprocess_env(self, db_access: Tuple[List[Tuple[str, str]], bool]) -> Dict[str, str]:
+    async def _build_subprocess_env(
+        self, db_access: Tuple[List[Tuple[str, str]], bool], *, credential: Optional[str] = None
+    ) -> Dict[str, str]:
         """Build the environment for the task subprocess.
 
         ``db_access`` is ``db_access`` of the resolved pipeline: the
         databases to authorize and resolve, and the public-endpoint flag.
+        ``credential`` is the presenting connection's ``AccountInfo.auth``,
+        passed straight to ``_authorize_db_targets`` and nowhere else: it never
+        reaches the child's environment or the task file.
 
         The child never gets a copy of the engine's environment: it runs user
         pipeline code, so it only inherits the allowlist in
@@ -1440,7 +1509,7 @@ class TaskEngine(DAPBase):
         # reason passed down.
         targets, public_endpoint = db_access
         if targets:
-            wanted = await self._authorize_db_targets(targets, public_endpoint)
+            wanted = await self._authorize_db_targets(targets, public_endpoint, credential=credential)
             try:
                 dsns = await self._resolve_db_dsns(wanted)
             except NotImplementedError:
@@ -3634,7 +3703,7 @@ class TaskEngine(DAPBase):
             'debit_remainder': not self.shared,
         }
 
-    async def start_task(self) -> None:
+    async def start_task(self, *, credential: Optional[str] = None) -> None:
         """
         Launch subprocess and initialize communication interfaces.
 
@@ -3642,6 +3711,12 @@ class TaskEngine(DAPBase):
         resource allocation, and interface initialization. Every start mints
         a new channel token for the child's ``/task/data``; the child gets
         only its SHA-256.
+
+        Args:
+            credential: The ``AccountInfo.auth`` of the connection whose
+                request starts this engine, used only to authorize the
+                engine's cloud databases (``authorize_db_targets``). Never
+                stored. None when the server starts it again by itself.
 
         Raises:
             RuntimeError: If already started or critical startup failure
@@ -3817,7 +3892,7 @@ class TaskEngine(DAPBase):
             # it rides each binding's server-set caller context.
             # _build_subprocess_env additionally scrubs the RocketRide DB
             # broker credentials and injects the resolved per-tenant DSN.
-            subprocess_env = await self._build_subprocess_env(access)
+            subprocess_env = await self._build_subprocess_env(access, credential=credential)
 
             # avoidMocks: strip RR_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):

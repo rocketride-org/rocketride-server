@@ -1,5 +1,7 @@
 ---
-title: Docker
+title: Run the Engine in Docker
+sidebar_label: Docker
+description: The RocketRide engine ships as a published container image, the same one the VS Code extension Docker mode pulls. Run it with Docker in one command.
 ---
 
 # Run the Engine in Docker
@@ -10,6 +12,11 @@ The engine ships as a published container image — the same one the
 ```text
 ghcr.io/rocketride-org/rocketride-engine
 ```
+
+> **Setting up from a coding agent?** The
+> [coding-agents start page](/quickstart/coding-agents) has a ready-to-run
+> `docker run` command plus the health check, the client key and the MCP
+> connection, in one place.
 
 ## Quickstart
 

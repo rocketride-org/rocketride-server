@@ -1,6 +1,6 @@
 // =============================================================================
 // The consent state, chunk-free: the ONE ConsentStore instance (the device's
-// rr:consent record), the storage watcher, and the read/decide API the
+// rr_consent_v1 record), the storage watcher, and the read/decide API the
 // banner, the Settings Privacy section and useConsent() work against.
 //
 // Deliberately free of posthog-js: consent must be readable and decidable
@@ -14,7 +14,7 @@
 import { ConsentStore, CONSENT_KEY, CONSENT_TTL_MS, parseConsent, type ConsentChoice, type ConsentOrigin, type ConsentState } from './consent';
 import { privacySignalOn } from 'rocketride/analytics';
 
-/** The device's consent record (rr:consent); it drives the banner, the settings toggle and the capture mode. */
+/** The device's consent record (rr_consent_v1); it drives the banner, the settings toggle and the capture mode. */
 export const consentStore = new ConsentStore();
 
 /** True while withdrawConsent records the decline, so consent:decision reports 'withdrawn'. */

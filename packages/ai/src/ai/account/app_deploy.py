@@ -287,6 +287,26 @@ async def _visible_rows_of(conn: Any, account: Any, org_id: str, app_id: Optiona
 _RUNG_RANK = {'public': 0, 'org': 1, 'team': 2, 'user': 3}
 
 
+def _rows_of_kind(entries: Any, kind: str) -> List[Dict[str, Any]]:
+    """The rows of a registry listing that are of ``kind``: the only evidence for that kind.
+
+    The rail is keyed by name, and a name has one kind per organization
+    (plan 2.3, B37), so a listing normally holds one kind. A row of another
+    kind under the name asked for (a row written before that rule, or by a
+    door that should not have) is never evidence that an org owns, builds or
+    may serve an artifact of ``kind`` (rocketride-ai/rocketride-saas#1011).
+    A row with no kind is a pipe, as the deployment backend reads it.
+
+    Args:
+        entries: ``deployments_versions`` of a name.
+        kind: ``'app'``, ``'pipe'`` or ``'node'``.
+
+    Returns:
+        The rows of that kind, in order.
+    """
+    return [e for e in entries or [] if isinstance(e, dict) and (e.get('kind') or 'pipe') == kind]
+
+
 async def _home_org_of(conn: Any, account: Any, org_id: str, app_id: str) -> 'tuple[str, bool]':
     """(home_org, developer) — which org's rail owns this app for the caller.
 
@@ -1775,7 +1795,7 @@ async def entitled_version_dirs(info: Optional[Any], artifact_id: str, kind: str
     # follows visibility parity.
     if user_id and org_id:
         try:
-            entries = await account.deployments_versions(org_id, artifact_id)
+            entries = _rows_of_kind(await account.deployments_versions(org_id, artifact_id), kind)
         except Exception:
             entries = []
         for entry in entries:
@@ -1799,7 +1819,7 @@ async def open_version_dirs(artifact_id: str, kind: str = 'app') -> Dict[int, st
 
     dirs: Dict[int, str] = {}
     try:
-        entries = await account.deployments_versions('local', artifact_id)
+        entries = _rows_of_kind(await account.deployments_versions('local', artifact_id), kind)
     except Exception:
         entries = []
     for entry in entries:

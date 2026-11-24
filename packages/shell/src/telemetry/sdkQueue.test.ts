@@ -15,16 +15,12 @@ function captures(calls: Call[]): CaptureCall[] {
 	});
 }
 
-/**
- * The calls with each replayed capture's uuid option removed (an options object left empty reads as
- * undefined), so a test can compare the rest exactly; the uuid itself is asserted where it matters.
- */
-function withoutUuid(calls: Call[]): Call[] {
-	return calls.map((c) => {
-		if (c.kind !== 'capture' || !c.options || typeof c.options !== 'object') return c;
-		const { uuid: _uuid, ...rest } = c.options as Record<string, unknown>;
-		return { ...c, options: Object.keys(rest).length ? rest : undefined };
-	});
+/** A call with the per-entry uuid removed from its options (a fresh v4 each time, asserted separately). */
+function withoutUuid<T extends Call>(call: T): T {
+	if (call.kind !== 'capture' || !call.options || typeof call.options !== 'object') return call;
+	const { uuid, ...rest } = call.options as { uuid?: string };
+	assert.match(uuid ?? '', POSTHOG_UUID, 'every replayed entry carries its mirror uuid');
+	return { ...call, options: Object.keys(rest).length ? rest : undefined };
 }
 
 /** A queue over a recording fake SDK; `initThrows` makes the init fail. */
@@ -82,7 +78,7 @@ test('a queued event carries the super properties of its own moment, and the sta
 	queue.register({ is_authed: false, rr_traffic_activated: true });
 	queue.capture('cta:click', { cta_id: 'hero' });
 	queue.start();
-	assert.deepEqual(withoutUuid(calls), [
+	assert.deepEqual(calls.map(withoutUuid), [
 		{ kind: 'init' },
 		{ kind: 'capture', event: '$pageview', props: { app: 'home-ui', rr_traffic: 'hidden', page: 'home' }, options: undefined },
 		{ kind: 'capture', event: 'cta:click', props: { app: 'home-ui', rr_traffic: 'hidden', is_authed: false, rr_traffic_activated: true, cta_id: 'hero' }, options: undefined },
@@ -95,7 +91,7 @@ test("an event's own property wins over a super property of the same name", () =
 	queue.register({ is_authed: true });
 	queue.capture('cta:click', { is_authed: false });
 	queue.start();
-	assert.deepEqual(withoutUuid(calls)[1], { kind: 'capture', event: 'cta:click', props: { is_authed: false }, options: undefined });
+	assert.deepEqual(withoutUuid(calls[1]), { kind: 'capture', event: 'cta:click', props: { is_authed: false }, options: undefined });
 });
 
 test('after the start, captures and registrations go straight to the SDK', () => {
@@ -126,7 +122,7 @@ test('a start while the page unloads replays the queue by sendBeacon, keeping ot
 	queue.capture('engagement', { secs: 3 });
 	queue.capture('cta:click', { cta_id: 'hero' }, { transport: 'sendBeacon' });
 	queue.start(true);
-	assert.deepEqual(captures(withoutUuid(calls)).map((c) => {
+	assert.deepEqual(captures(calls).map(withoutUuid).map((c) => {
 		return c.options;
 	}), [{ transport: 'sendBeacon' }, { transport: 'sendBeacon' }]);
 });
@@ -288,8 +284,26 @@ test('the next page load drains the inherited hold with original timestamps and 
 	assert.equal(options.timestamp?.getTime(), 1_000_000, 'original time, not the drain time');
 	assert.match(options.uuid ?? '', POSTHOG_UUID, 'the fact id rides as the event uuid in the shape posthog-js keeps, so a replay dedupes');
 	assert.equal(sent[1].event, '$pageview');
-	assert.equal((sent[1].options as { timestamp?: Date }).timestamp, undefined, 'this load\'s own replay keeps start-time semantics');
+	const own = sent[1].options as { timestamp?: Date; uuid?: string };
+	assert.equal(own.timestamp, undefined, "this load's own replay keeps start-time semantics");
+	assert.match(own.uuid ?? '', POSTHOG_UUID, 'but carries its uuid, the same one its mirror holds');
 	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null, 'cleared after the drain (capture first, clear after)');
+});
+
+test('a current-load delivery and the replay of its mirror share one uuid, so a page that stops between them dedupes', () => {
+	const storage = memoryStorage();
+	const first = heldHarness(storage, () => 1_000_000);
+	first.queue.capture('cta:click', { intent: 'register' });
+	const mirrored = (JSON.parse(storage.getItem(HOLD_STORAGE_KEY) as string) as Array<{ id: string }>)[0].id;
+	first.queue.start();
+	const delivered = captures(first.calls)[0].options as { uuid?: string };
+	assert.equal(delivered.uuid, mirrored, "the delivery at the start carries the mirrored entry's uuid");
+	// Suppose the page stopped before clearMirror(): a next load replays the mirror under the SAME uuid.
+	storage.setItem(HOLD_STORAGE_KEY, JSON.stringify([{ event: 'cta:click', props: { intent: 'register' }, ts: 1_000_000, id: mirrored }]));
+	const second = heldHarness(storage, () => 1_010_000);
+	second.queue.start();
+	const replayed = captures(second.calls)[0].options as { uuid?: string };
+	assert.equal(replayed.uuid, mirrored);
 });
 
 test('an inherited entry past the TTL is discarded at drain, not replayed', () => {
@@ -358,6 +372,17 @@ test('clearHold drops the hold and its mirror without delivering (sign-out)', ()
 	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null);
 });
 
+test("clearHold before the start also drops this load's pending captures: a sign-out never replays them at the start", () => {
+	const h = heldHarness(memoryStorage(), () => 1_000_000);
+	h.queue.capture('cta:click', {});
+	h.queue.capture('$pageview', {});
+	assert.equal(h.queue.peekPending().length, 2);
+	h.queue.clearHold();
+	assert.deepEqual(h.queue.peekPending(), []);
+	h.queue.start();
+	assert.deepEqual(captures(h.calls), []);
+});
+
 test('a failed init clears the mirror: a stale hold must not outlive a load with telemetry off', () => {
 	const storage = memoryStorage();
 	const first = heldHarness(storage, () => 1_000_000);
@@ -384,6 +409,21 @@ test('a legacy non-uuid id in the inherited hold is normalized once at hydrate: 
 	third.queue.start();
 	const sent = captures(third.calls).map((c) => (c.options as { uuid?: string }).uuid);
 	assert.deepEqual(sent, rewritten.map((e) => e.id));
+});
+
+test("a caller's uuid-shaped uuid before the start is the entry's and its mirror's uuid; any other caller value is replaced", () => {
+	const storage = memoryStorage();
+	const h = heldHarness(storage, () => 1_000_000);
+	const own = '123e4567-e89b-42d3-a456-426614174000';
+	h.queue.capture('homepage_roulette_viewed', {}, { uuid: own });
+	h.queue.capture('cta:click', {}, { uuid: 'not-a-uuid' });
+	const mirrored = JSON.parse(storage.getItem(HOLD_STORAGE_KEY) as string) as Array<{ id: string }>;
+	assert.equal(mirrored[0].id, own, 'the mirror carries the caller uuid');
+	assert.match(mirrored[1].id, POSTHOG_UUID, 'a non-uuid caller value is replaced by a minted one');
+	assert.notEqual(mirrored[1].id, 'not-a-uuid');
+	h.queue.start();
+	const sent = captures(h.calls).map((c) => (c.options as { uuid?: string }).uuid);
+	assert.deepEqual(sent, mirrored.map((e) => e.id), 'the delivery at the start uses the same uuids as the mirror');
 });
 
 test('a uuid-shaped inherited id is kept as is', () => {

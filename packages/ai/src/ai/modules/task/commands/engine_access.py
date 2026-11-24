@@ -62,8 +62,12 @@ async def engine_for(conn, control: 'TaskControl', perm: str) -> 'TaskEngine':
     if control.dormant:
         conn.verify_team_permission(control.teamId, perm)
 
-    # Step 2: the live engine, or the one started again under the same key (plan 7.2)
-    return await conn._server.ensure_engine(control)
+    # Step 2: the live engine, or the one started again under the same key
+    # (plan 7.2). A restart authorizes the control's cloud databases again, as
+    # this request: its connection's credential goes along and is not kept
+    from ..task_engine import presenting_credential
+
+    return await conn._server.ensure_engine(control, credential=presenting_credential(conn))
 
 
 async def wait_running(engine: 'TaskEngine') -> None:

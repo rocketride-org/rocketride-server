@@ -33,7 +33,7 @@
 // =============================================================================
 
 /** The localStorage key of the record (the version lives INSIDE the record, `v`). */
-export const CONSENT_KEY = 'rr:consent';
+export const CONSENT_KEY = 'rr_consent_v1';
 /** Bump to re-prompt every visitor (a policy change). */
 export const CONSENT_VERSION = 1;
 /** A stored choice older than this reads as undecided (12 months). */

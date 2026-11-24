@@ -679,7 +679,6 @@ class DeployCommands(_DeployBase):
         project_id = pipeline.get('project_id')
         if not project_id:
             raise ValueError('pipeline.project_id is required')
-
         # The file carries only the SHORT id; the registry name is DERIVED
         # from the actor's developer namespace, never read from the file, so
         # no org can produce another's namespace (plan S7). The namespace
@@ -713,6 +712,10 @@ class DeployCommands(_DeployBase):
 
         org_id = self._org_id()
         caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
+        # metadata.build is the SERVER's build lifecycle (stamped by the build
+        # worker / seeder; it gates serving). The app door overwrites it; a
+        # pipe has no build, so a caller-supplied one is dropped, never stored.
+        caller_meta = {k: v for k, v in caller_meta.items() if k != 'build'}
         # The listing manifest the publish row snapshots (plan 9): the store
         # block plus the pipe's own root keys; never a publisher or author
         # (derived, plan S7). It replaces a caller-supplied one: the block is

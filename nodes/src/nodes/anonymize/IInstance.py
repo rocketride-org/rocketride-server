@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from rocketlib import Entry, IInstanceBase
 from .IGlobal import IGlobal
@@ -46,10 +46,12 @@ class IInstance(IInstanceBase):
     #
     target_object_text: str = ''
     has_classifications: bool = False
+    _anonymize_error: Optional[BaseException] = None
 
     def open(self, object: Entry):
         self.target_object_text = ''
         self.has_classifications = False
+        self._anonymize_error = None
 
     def writeText(self, text: str):
         self.target_object_text = self.target_object_text + text
@@ -58,11 +60,21 @@ class IInstance(IInstanceBase):
 
     def writeClassifications(self, classifications: dict, classificationPolicy: dict, classificationRules: dict):
         self.has_classifications = True
-        self.target_object_text = self.IGlobal.recognizer.handleClassifications(
-            classifications, self.target_object_text, classificationPolicy, classificationRules, **self._redaction()
-        )
+        try:
+            # The call's redaction is read inside the guard: a setting that does
+            # not resolve leaves the text unredacted just as a failed prediction does.
+            self.target_object_text = self.IGlobal.recognizer.handleClassifications(
+                classifications, self.target_object_text, classificationPolicy, classificationRules, **self._redaction()
+            )
+        except Exception as exc:
+            self._anonymize_error = exc
+            raise
 
     def closing(self):
+        # The engine still calls closing() after writeClassifications raised, and
+        # target_object_text then still holds the unredacted input: emit nothing.
+        if self._anonymize_error is not None:
+            raise RuntimeError('Cannot emit text after failed anonymization') from self._anonymize_error
         if not self.has_classifications:
             # No classifications received - anonymize with the call's entity types:
             # clean_entity_types drops blank entries and falls back to the common

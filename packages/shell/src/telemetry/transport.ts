@@ -26,7 +26,7 @@ import { bindConsentHost, consentedProperties, createConsented, guardStorage, ma
 import type { ConsentHost } from './consented';
 import type { SdkQueue } from './sdkQueue';
 
-export { markReplayResumePending, resumeSignedOutCapture, getConsentedCapture, trackConsentShown } from './consented';
+export { markReplayResumePending, resumeSignedOutCapture, consentedSession, onConsentedSessionId, trackConsentShown } from './consented';
 
 /** What the transport needs from the TelemetryHost (the page-load context the shell knows). */
 export type TransportDeps = {
@@ -42,12 +42,6 @@ export type TransportDeps = {
 	visibleLoad(): boolean;
 	/** Initialise-if-needed, from the host (false = telemetry off). */
 	ensureInit(): boolean;
-	/**
-	 * The app-registerable before-send veto: an event carrying experiment
-	 * identifiers (assignment_id) is captured only while this allows it.
-	 * Default allows everything; home-ui registers its roulette gate.
-	 */
-	allowAttribution(event: unknown): boolean;
 };
 
 let deps: TransportDeps | null = null;
@@ -153,9 +147,6 @@ export function bindTransport(d: TransportDeps): void {
 	const consentHost: ConsentHost = {
 		mode: () => {
 			return mode;
-		},
-		allowAttribution: (event) => {
-			return d.allowAttribution(event);
 		},
 		sdkStarted: () => {
 			return d.queue.started;

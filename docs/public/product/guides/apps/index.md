@@ -1100,7 +1100,7 @@ exposure. The account service validates its experiment/catalog separately. This 
 untrusted analytics input and must never authorize access or establish account identity.
 
 The consent record is written by the shell's consent banner (`packages/shell/src/telemetry`),
-under `localStorage['rr:consent']`. Its shared schema is
+under `localStorage['rr_consent_v1']`. Its shared schema is
 `{ v: 1, choice: 'accepted' | 'rejected', at: number }`, where `at` is milliseconds since epoch.
 A record is valid up to 365 days old, with at most 60 seconds of future clock skew. A consented
 context needs a valid `accepted` record. A cookieless context needs no valid record at all (missing,
