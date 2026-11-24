@@ -1082,6 +1082,36 @@ class WebServer:
             # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_private_paths = None
 
+    def remove_route(self, path: str) -> None:
+        """
+        Undo ``add_route`` for ``path``: its routes, their (method, path) registrations and its public or private entry.
+
+        For a module whose load is refused after it registered a route, so a
+        retry on the same server is not refused by what the first attempt
+        left. One public and one private entry equal to ``path`` go, as
+        ``add_route`` appended one of each; an equal entry registered again
+        stays, and a path with nothing registered is left alone.
+
+        Args:
+            path (str): The path exactly as it was passed to ``add_route``.
+        """
+        # Drop the routes (never the catch-all), then the pairs, so the path can be registered again
+        routes = self.app.router.routes
+        routes[:] = [route for route in routes if route is self._catch_all or getattr(route, 'path', None) != path]
+        if hasattr(self, '_registered_routes'):
+            self._registered_routes = {key for key in self._registered_routes if key[1] != path}
+        self.app.openapi_schema = None
+
+        if path in self._public_paths:
+            self._public_paths.remove(path)
+            # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
+            self._compiled_public_paths = None
+
+        if path in self._private_paths:
+            self._private_paths.remove(path)
+            # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
+            self._compiled_private_paths = None
+
     def add_catch_all(self, route: BaseRoute) -> None:
         """Register ``route`` to match after every other route, including routes ``add_route`` and ``add_raw_route`` add later.
 
@@ -1117,8 +1147,10 @@ class WebServer:
         # Known gap (tracked in rocketride-org/rocketride-server#3166):
         # a request already judged public on the old table (an unrouted path)
         # is routed on the new one, so for that instant a new private route
-        # can answer it unauthenticated. /use is admin-only; guard private
-        # routes if modules are loaded at runtime in production.
+        # can answer it unauthenticated. /use checks no role, but it exists
+        # only on a server built with standardEndpoints, which no production
+        # server is (eaas.py and node.py pass False); guard private routes
+        # before modules are loaded at runtime in production.
         routes = self.app.router.routes
         routes[:] = [route for route in routes if route is not self._catch_all] + [self._catch_all]
 

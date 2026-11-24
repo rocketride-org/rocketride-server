@@ -399,6 +399,24 @@ def test_a_public_pattern_only_the_probe_sees_unmounts_mcp(monkeypatch, tmp_path
     assert [r.path for r in server.app.router.routes if getattr(r, 'path', '').startswith('/mcp')] == []
 
 
+def test_a_mount_the_probe_refused_can_be_retried_once_the_claimant_is_gone(monkeypatch, tmp_path):
+    # The refused mount takes its upload door's public pattern and registration
+    # with it, so a retry on the same server is not refused by what it left.
+    server = _web_server(monkeypatch, tmp_path, [])
+    server._public_paths.append('/{name}')
+    server._compiled_public_paths = None
+    with pytest.raises(RuntimeError, match='public:/mcp'):
+        server.use('mcp', {})
+    assert server.is_public_route('/mcp/upload/some-nonce') is False
+
+    server._public_paths.remove('/{name}')
+    server._compiled_public_paths = None
+    server.use('mcp', {})  # must not raise
+
+    assert server.is_public_route('/mcp/upload/some-nonce') is True
+    assert server.is_public_route('/mcp') is False
+
+
 @pytest.mark.parametrize('pattern', ['/mcp-server', '/mcpx', '/mcp-server/{page}', '/mcpx/{rest:path}', '/'])
 def test_public_patterns_that_merely_start_with_mcp_do_not_trip_the_guard(monkeypatch, tmp_path, pattern):
     """The namespace is `/mcp` and `/mcp/...` -- not every path spelled `mcp*`.

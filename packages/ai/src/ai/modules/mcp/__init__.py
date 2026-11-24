@@ -169,9 +169,12 @@ def _refuse_public_probes(server: Any, mcp_routes: Tuple[Any, ...]) -> None:
     MCP path its catch-all would answer as public.
 
     A refusal leaves nothing of this module under ``/mcp``: the upload door
-    (``apps.UPLOAD_PATH``), registered just before the mount, goes with it.
-    ``_refuse_existing_claimants`` ran first, so a route at that path can
-    only be this call's own.
+    (``apps.UPLOAD_PATH``), registered just before the mount, goes with it,
+    together with its public pattern and its route registration
+    (``WebServer.remove_route``), so a retry on the same server is not
+    refused by what this attempt left. ``_refuse_existing_claimants`` ran
+    first, so a route or public pattern at that path can only be this call's
+    own.
 
     Args:
         server: The WebServer (or test double) the endpoint was mounted onto.
@@ -187,11 +190,13 @@ def _refuse_public_probes(server: Any, mcp_routes: Tuple[Any, ...]) -> None:
     if not public:
         return
     routes = server.app.router.routes
-    routes[:] = [
-        route
-        for route in routes
-        if not any(route is mounted for mounted in mcp_routes) and getattr(route, 'path', None) != apps_mod.UPLOAD_PATH
-    ]
+    routes[:] = [route for route in routes if not any(route is mounted for mounted in mcp_routes)]
+    remove_route = getattr(server, 'remove_route', None)
+    if remove_route is not None:
+        remove_route(apps_mod.UPLOAD_PATH)
+    else:
+        # A test double without remove_route keeps no registrations to undo
+        routes[:] = [route for route in routes if getattr(route, 'path', None) != apps_mod.UPLOAD_PATH]
     raise _claimed(public)
 
 
