@@ -209,6 +209,7 @@ async function resolvePython() {
  *   2. CLI docs against both CLIs' registered commands — blocking
  *   3. the whole node corpus (--all) — blocking
  *   4. the node README and CLI docs validators' own unit tests — blocking
+ * Phase 4 also runs the manifest description check, tests/test_manifest_descriptions.py.
  */
 function makeValidateAction() {
 	return {
@@ -231,12 +232,16 @@ function makeValidateAction() {
 			// 4. the validators' own regression tests — the only per-PR gate on
 			// scripts/validate-node-readme.py and scripts/validate-cli-docs.py
 			// themselves; nodes:test also runs the node README file, but nothing
-			// in .github/workflows invokes nodes:test.
+			// in .github/workflows invokes nodes:test. The manifest description
+			// check runs here too, because docs-schemas.yml runs this task on
+			// every change under docs/, where the plugin manifests live.
 			// The engine carries pytest; a PATH Python may not (docs-schemas.yml
 			// installs it), so skip there instead of failing on the import.
-			const testsFiles = ['test_validate_node_readme.py', 'test_validate_cli_docs.py'].map((name) =>
-				path.join(PROJECT_ROOT, 'tests', name),
-			);
+			const testsFiles = [
+				'test_validate_node_readme.py',
+				'test_validate_cli_docs.py',
+				'test_manifest_descriptions.py',
+			].map((name) => path.join(PROJECT_ROOT, 'tests', name));
 			if (python !== ENGINE && !(await pythonRuns(python, 'import pytest'))) {
 				const skipped = testsFiles.map((file) => path.relative(PROJECT_ROOT, file)).join(', ');
 				task.output =

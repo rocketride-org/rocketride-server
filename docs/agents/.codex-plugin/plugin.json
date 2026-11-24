@@ -1,6 +1,6 @@
 {
   "name": "rocketride",
-  "description": "RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. Five skills that take a plain-language request to a validated, running RocketRide pipeline, plus the hosted RocketRide MCP server.",
+  "description": "Build, check and run RocketRide data and AI pipelines, and read each run's logs and traces. Five skills guide your coding agent from a plain-language request to a checked, running pipeline. Uses the hosted RocketRide MCP server and your RocketRide account.",
   "author": {
     "name": "RocketRide",
     "url": "https://rocketride.org/"
@@ -8,10 +8,11 @@
   "homepage": "https://docs.rocketride.ai/",
   "repository": "https://github.com/rocketride-org/rocketride-server",
   "license": "MIT",
-  "keywords": ["rocketride", "agents", "pipelines", "mcp", "ai-meta-harness"],
+  "keywords": ["rocketride", "agents", "pipelines", "mcp", "data-pipelines"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "RocketRide"
+    "displayName": "RocketRide",
+    "shortDescription": "Build, check and run RocketRide data and AI pipelines"
   }
 }
