@@ -251,8 +251,11 @@ TEST_CASE("store::parse") {
     }
 
     //-----------------------------------------------------------------
-    // Data that reaches parse after its end fails with Cancelled instead
-    // of being dropped: the end completed the buffer, so nothing parses it
+    // Data that reaches parse after its end fails instead of being
+    // dropped: the end completed the buffer, so nothing parses it. An
+    // instance lives one binding here, so the ended instance is on no pipe
+    // and the binder refuses the touch (InvalidCommand) before parse's own
+    // Cancelled, which a caller still inside the binding gets
     //-----------------------------------------------------------------
     SECTION("write after the end") {
         ParseFilterTest filter;
@@ -269,14 +272,14 @@ TEST_CASE("store::parse") {
         REQUIRE_NO_ERROR(filter.endFilters(*pipe));
 
         REQUIRE_ERROR(filter.writeTagData(*pipe, strlen(pText), (void *)pText),
-                      Ec::Cancelled);
+                      Ec::InvalidCommand);
 
         REQUIRE_NO_ERROR(filter.disconnect());
     }
 
     //-----------------------------------------------------------------
-    // Opening an object on a pipe whose parse has ended fails with
-    // Cancelled
+    // Opening an object on a pipe whose parse has ended fails: the binder
+    // refuses it, as above
     //-----------------------------------------------------------------
     SECTION("open after the end") {
         ParseFilterTest filter;
@@ -288,14 +291,14 @@ TEST_CASE("store::parse") {
         auto entry = filter.getDummyEntry("test.txt"_tv);
         REQUIRE_NO_ERROR(filter.endFilters(*pipe));
 
-        REQUIRE_ERROR(pipe->open(entry), Ec::Cancelled);
+        REQUIRE_ERROR(pipe->open(entry), Ec::InvalidCommand);
 
         REQUIRE_NO_ERROR(filter.disconnect());
     }
 
     //-----------------------------------------------------------------
     // A data tag after the object was closed, once parse has ended, fails
-    // with Cancelled although parse has no current object
+    // although parse has no current object: the binder refuses it, as above
     //-----------------------------------------------------------------
     SECTION("data after close at the end") {
         ParseFilterTest filter;
@@ -313,7 +316,7 @@ TEST_CASE("store::parse") {
         REQUIRE_NO_ERROR(filter.endFilters(*pipe));
 
         REQUIRE_ERROR(filter.writeTagData(*pipe, strlen(pText), (void *)pText),
-                      Ec::Cancelled);
+                      Ec::InvalidCommand);
 
         REQUIRE_NO_ERROR(filter.disconnect());
     }
