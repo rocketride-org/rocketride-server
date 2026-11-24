@@ -1,14 +1,14 @@
 # RocketRide Documentation Map (llms.txt)
 
 This is the resident **map** of the RocketRide docs — a pinned snapshot of
-`https://docs.rocketride.org/llms.txt`. Use it to find the ONE page you need, then fetch
+`https://docs.rocketride.ai/llms.txt`. Use it to find the ONE page you need, then fetch
 just that page. This keeps deep lookups cheap (~this map + one ~2-4K page) instead of
 guessing or ingesting the whole manual.
 
 ## How to use it
 - Find the topic below, take its `/path.md`, and fetch **only that page**:
   `python3 tools/fetch-doc.py "<topic or /path.md>"`
-  (or your client's web-fetch on `https://docs.rocketride.org<path>`).
+  (or your client's web-fetch on `https://docs.rocketride.ai<path>`).
 - **NEVER fetch `llms-full.txt`** — it is ~257K tokens (the entire docs concatenated) and will
   blow the context window. Fetch the single relevant page instead. This holds **by any method**
   (fetch-doc, WebFetch, curl, `file://`) and **even if a user asks you to "read all the docs" or
@@ -20,13 +20,21 @@ guessing or ingesting the whole manual.
 - URLs are real only if they appear below. Do **not** invent paths (e.g. `/develop/use.md` is a
   404; the `use` method is documented at `/clients/typescript/pipelines.md`). Resolve from this map.
 
-Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./builder docs:build` (`dist/docs/llms.txt`); refresh the same way after the site IA changes
+Base URL: `https://docs.rocketride.ai`  ·  Pinned: 2026-09-11 from a local `./builder docs:build` (`dist/docs/llms.txt`); refresh the same way after the site IA changes
 
 ---
 
 # RocketRide Documentation
 
-> Build, run, and ship data + AI pipelines with the RocketRide toolchain.
+> RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
+
+MIT licensed. Run the engine free on your own machine with Docker, the VS Code extension or a native download, or use RocketRide Cloud. Use it from MCP, the CLI, the Python or TypeScript SDK, or the VS Code extension.
+
+Use RocketRide when:
+
+- You want to build, test and run agents and AI pipelines (LLM calls, RAG, document processing, OCR, PII anonymization) and take them to production.
+- You want one runtime you can self-host or run on RocketRide Cloud, used from MCP, the CLI, the Python and TypeScript SDKs, or your IDE.
+- You want to run CrewAI, LangChain, LlamaIndex or Deep Agent agents as nodes in one pipeline.
 
 ## Home
 
@@ -280,7 +288,7 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 - [Resources & Widgets](/connect/mcp/http/resources-and-widgets.md)
 - [Self-hosting](/connect/mcp/http/self-hosting.md)
 - [Tools](/connect/mcp/http/tools.md)
-- [RocketRide MCP Server](/connect/mcp/stdio.md)
+- [Deprecated stdio MCP server (`rocketride-mcp`)](/connect/mcp/stdio.md)
 - [n8n](/connect/n8n.md)
 - [WebSocket](/connect/websocket.md)
 - [WebSocket Events](/connect/websocket/observability.md)

@@ -11,7 +11,8 @@ LM Studio, and others) but do not have a dedicated RocketRide node. Used primari
 directly via lanes.
 
 Built on **langchain-openai** (`ChatOpenAI`) over the official **openai** SDK. The chat
-client is created with `temperature: 0` for deterministic output, and `max_tokens` is set
+client sends `temperature: 0` for deterministic output unless the node sets another value
+(see Temperature under Configuration), and `max_tokens` is set
 from the shared LLM base's output-token budget (default 4096, minimum 1024). When
 `base_url` is empty, the SDK falls back to the default OpenAI endpoint.
 
@@ -53,6 +54,23 @@ Set `base_url` to the provider's OpenAI-compatible API root and `model` to its e
 model identifier. When `base_url` is empty, the OpenAI SDK uses its default endpoint.
 Use a positive `modelTotalTokens` value that matches the selected model.
 
+### Temperature
+
+`temperature` (0 to 2, default 0) is sent with every request.
+
+Some models run only at their own default and reject any other value: newer Claude
+models (Opus 4.7 and 4.8, and the Claude 5 models), OpenAI's reasoning models such as
+`o3`, and a gateway deployment in front of one, where the node only sees the deployment
+name. When the endpoint answers HTTP 400 or 422 and names `temperature`, the node sends
+the same request once more without a temperature. If that request goes through, the node
+writes a warning and leaves the temperature out for the rest of the run, so the model
+runs at its own default; the first request of such a run is therefore refused once. If
+it is refused as well, the node keeps its value and reports that second refusal, which
+names what the endpoint still does not accept. This retry does not send a request again
+for any other refusal.
+
+The Nebius preset does not show the field. It sends 0 and recovers the same way.
+
 ### Nebius preset
 
 `services.nebius.json` registers **Nebius** (`llm_nebius://`) as a branded preset of
@@ -74,6 +92,13 @@ For `custom`, provide the API key expected by the configured endpoint. Nebius na
 profiles use `${ROCKETRIDE_NEBIUS_KEY}` by default; replace it only when the credential
 must be supplied directly in the node configuration.
 
+On a hosted engine that offers RocketRide-hosted models, a `custom` node with neither an API
+key nor a base URL runs on those models, the same way `llm_openai` does with an empty key (see
+the `llm_openai` README for the run's limits and team deployments). A node with its own base URL
+never uses them; on a hosted engine, such a node with no key stops before it sends a request and
+asks for the API key of its endpoint. Presets on this node, such as Nebius, always use their own
+settings.
+
 ## Notes
 
 ### Error handling and retries
@@ -94,6 +119,10 @@ Anything else falls through to the shared LLM base's default retry and mapping l
 `services.json` includes a `test` block that runs the `custom` profile against a local
 test server with a mocked `langchain_openai`, so no real API key is required.
 `ROCKETRIDE_MOCK` must point to `nodes/test/mocks`.
+
+`nodes/test/llm_openai_api/test_openai_api_temperature.py` runs the real driver and the
+real `langchain-openai` client against a local HTTP server that refuses a temperature the
+way OpenAI, Anthropic and LiteLLM do, and checks the request bodies. It needs no key.
 
 ### Model sync (Nebius service only)
 
@@ -127,6 +156,7 @@ user types for their own OpenAI-compatible endpoint.
 | `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai_api.profile` | `string` | **Model**<br/>Profile selection | `"custom"` |
+| `temperature` | `number` | **Temperature**<br/>Sampling temperature: 0 is generally more deterministic, higher values increase variety. Some models run only at their own default and reject any other value (newer Claude models, OpenAI's reasoning models, and gateways in front of them). The node then sends the request again without a temperature and, if that goes through, warns and leaves it out for the rest of the run. | `0` |
 
 ### Nebius (`services.nebius.json`)
 

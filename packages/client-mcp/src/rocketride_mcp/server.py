@@ -173,7 +173,7 @@ def main() -> None:
     print(
         'rocketride-mcp is deprecated: the RocketRide engine ships a built-in HTTP MCP server '
         'at https://api.rocketride.ai/mcp (self-hosted: http://<host>:5565/mcp). '
-        'See https://docs.rocketride.org/connect/mcp/http',
+        'See https://docs.rocketride.ai/connect/mcp/http',
         file=sys.stderr,
     )
     try:

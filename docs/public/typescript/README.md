@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Build, run, and manage AI pipelines from Node.js or the browser.
+  RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. TypeScript SDK and CLI.
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
-**Full documentation: [docs.rocketride.org/clients/typescript](https://docs.rocketride.org/clients/typescript)** — guides, the complete API reference, and worked examples.
+**Full documentation: [docs.rocketride.ai/clients/typescript](https://docs.rocketride.ai/clients/typescript)** — guides, the complete API reference, and worked examples.
 
 ## Quick Start
 
@@ -40,18 +40,16 @@ await client.disconnect();
 
 `send()` / `sendFiles()` are for pipelines whose **source** is `webhook` or `dropper`;
 if your pipeline source is `chat`, use `client.chat()` instead. Don't have a pipeline
-yet? Build one visually with the [RocketRide IDE extension](https://docs.rocketride.org/quickstart/ide-walkthrough).
+yet? Build one visually with the [RocketRide IDE extension](https://docs.rocketride.ai/quickstart/ide-walkthrough).
 
 The SDK ships complete type definitions, runs in Node.js and the browser, includes
-the `rocketride` [CLI](https://docs.rocketride.org/connect/cli), and covers the full
+the `rocketride` [CLI](https://docs.rocketride.ai/connect/cli), and covers the full
 engine surface: pipeline execution, streaming data, chat, deployments with cron
 schedules, server-side file storage, and run-log replay.
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only
-enterprise-grade runtime built on C++. Build, test and publish durable agents that
-scale in production. It spans the full AI Development Lifecycle (AIDLC): build,
+[RocketRide](https://rocketride.ai) is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. It spans the full AI Development Lifecycle (AIDLC): build,
 stage, test, release and maintain. Its rapidly growing node library includes agents,
 models, vector/graph/SQL databases, OCR, tools, data stores, NER and more. MIT licensed. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 
@@ -63,21 +61,21 @@ models, vector/graph/SQL databases, OCR, tools, data stores, NER and more. MIT l
 | `ROCKETRIDE_APIKEY` | API key for authentication |
 
 All client config options, timeouts, and reconnection behavior:
-[Configuration](https://docs.rocketride.org/clients/typescript/configuration).
+[Configuration](https://docs.rocketride.ai/clients/typescript/configuration).
 
 ## Documentation
 
-- [Overview & quickstart](https://docs.rocketride.org/clients/typescript)
-- [Running pipelines](https://docs.rocketride.org/clients/typescript/pipelines) · [Sending data](https://docs.rocketride.org/clients/typescript/data) · [Chat](https://docs.rocketride.org/clients/typescript/chat)
-- [Deployments](https://docs.rocketride.org/clients/typescript/deploy) · [File storage](https://docs.rocketride.org/clients/typescript/storage) · [Run logs](https://docs.rocketride.org/clients/typescript/logs)
-- [Error handling](https://docs.rocketride.org/clients/typescript/errors) · [API reference](https://docs.rocketride.org/clients/typescript/reference) · [Examples](https://docs.rocketride.org/clients/typescript/examples)
+- [Overview & quickstart](https://docs.rocketride.ai/clients/typescript)
+- [Running pipelines](https://docs.rocketride.ai/clients/typescript/pipelines) · [Sending data](https://docs.rocketride.ai/clients/typescript/data) · [Chat](https://docs.rocketride.ai/clients/typescript/chat)
+- [Deployments](https://docs.rocketride.ai/clients/typescript/deploy) · [File storage](https://docs.rocketride.ai/clients/typescript/storage) · [Run logs](https://docs.rocketride.ai/clients/typescript/logs)
+- [Error handling](https://docs.rocketride.ai/clients/typescript/errors) · [API reference](https://docs.rocketride.ai/clients/typescript/reference) · [Examples](https://docs.rocketride.ai/clients/typescript/examples)
 
 ## Links
 
-- [Documentation](https://docs.rocketride.org/clients/typescript)
+- [Documentation](https://docs.rocketride.ai/clients/typescript)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
 - [Discord](https://discord.gg/PMXrtenMsY)
-- [Release notes](https://docs.rocketride.org/support/release-notes)
+- [Release notes](https://docs.rocketride.ai/support/release-notes)
 
 ## License
 

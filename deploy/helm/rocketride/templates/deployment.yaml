@@ -38,6 +38,26 @@ spec:
       serviceAccountName: {{ include "rocketride.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.engine.podSecurityContext | nindent 8 }}
+      # Runs unpack the nodes they name into nodes/, so it is a writable copy of the image's
+      initContainers:
+        - name: nodes
+          image: {{ include "rocketride.engine.image" . }}
+          imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
+          # Entries, not nodes/.: cp -a cannot set the times of the emptyDir root, which root owns
+          command: ['sh', '-c', 'cp -a /opt/rocketride/nodes/* /nodes/']
+          securityContext:
+            {{- toYaml .Values.engine.securityContext | nindent 12 }}
+          # A namespace quota on cpu or memory refuses a pod whose init container sets none; devices stay with the engine
+          {{- with .Values.engine.resources }}
+          resources:
+            requests:
+              {{- toYaml (pick (.requests | default dict) "cpu" "memory") | nindent 14 }}
+            limits:
+              {{- toYaml (pick (.limits | default dict) "cpu" "memory") | nindent 14 }}
+          {{- end }}
+          volumeMounts:
+            - name: nodes
+              mountPath: /nodes
       containers:
         - name: engine
           image: {{ include "rocketride.engine.image" . }}
@@ -78,11 +98,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: nodes
+              mountPath: /opt/rocketride/nodes
             {{- with .Values.engine.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: nodes
           emptyDir: {}
         {{- with .Values.engine.volumes }}
         {{- toYaml . | nindent 8 }}

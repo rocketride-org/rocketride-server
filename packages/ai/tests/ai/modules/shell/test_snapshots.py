@@ -195,6 +195,58 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
     assert human.headers['cache-control'] == 'private, no-cache'
 
 
+def test_home_shell_preloads_only_the_matching_versioned_hero(shell_root):
+    (shell_root / 'index.html').write_text(
+        '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>'
+        f'<body>{SHELL_BODY}</body></html>'
+    )
+    hint = {
+        'mobile': 'static/image/hero-mobile.abc123.webp',
+        'desktop': 'static/image/hero.abc456.webp',
+        'maxMobileWidth': 1024,
+    }
+    home = _page('/', data=(), extra={'heroImagePreload': hint})
+    _seed()
+    _serve(home, _page(extra=home.extra))
+    client = _client()
+
+    human = client.get('/', headers={'User-Agent': BROWSER})
+    assert human.text.index('name="viewport"') < human.text.index('rel="preload"')
+    assert (
+        '<link rel="preload" as="image" type="image/webp" fetchpriority="high" '
+        'href="/apps/rocketride.home/v3/static/image/hero-mobile.abc123.webp" media="(max-width: 1024px)">'
+    ) in human.text
+    assert (
+        '<link rel="preload" as="image" type="image/webp" fetchpriority="high" '
+        'href="/apps/rocketride.home/v3/static/image/hero.abc456.webp" media="not all and (max-width: 1024px)">'
+    ) in human.text
+    assert 'fetchpriority="high"' not in _crawl(client, '/').text
+    assert 'fetchpriority="high"' not in client.get('/pricing', headers={'User-Agent': BROWSER}).text
+
+
+@pytest.mark.parametrize(
+    'bad_hint',
+    [
+        {'mobile': 'https://example.com/mobile.webp'},
+        {'mobile': 'static/image/../escaped.webp'},
+        {'desktop': 'static/image/a.webp" onload="bad'},
+        {'maxMobileWidth': True},
+        {'maxMobileWidth': '1024px'},
+    ],
+)
+def test_home_shell_skips_invalid_hero_hints(shell_root, bad_hint):
+    hint = {
+        'mobile': 'static/image/hero-mobile.webp',
+        'desktop': 'static/image/hero.webp',
+        'maxMobileWidth': 1024,
+        **bad_hint,
+    }
+    _serve(_page('/', data=(), extra={'heroImagePreload': hint}))
+    response = _client().get('/', headers={'User-Agent': BROWSER})
+    assert response.status_code == 200 and SHELL_BODY in response.text
+    assert 'fetchpriority="high"' not in response.text
+
+
 def test_head_on_a_snapshot_page_answers_like_get(shell_root, monkeypatch):
     # A bound page's max-age counts down on cache hits: keep the clock still.
     monkeypatch.setattr(pages, 'monotonic', lambda: 1000.0)
@@ -396,7 +448,7 @@ def test_a_store_that_does_not_answer_in_time_falls_back_uncached(shell_root, mo
     assert resp.status_code == 200 and SHELL_BODY in resp.text
     assert resp.headers['cache-control'] == 'private, no-cache'
     assert len(pages._render_cache) == 0 and len(pages._snapshot_cache) == 0
-    assert len(warned) == 1 and 'did not answer within 0.05 s' in warned[0]
+    assert len(warned) == 1 and 'no snapshot within 0.05 s' in warned[0]
     # The store answers again: the first crawl after the backoff gets the snapshot.
     monkeypatch.setattr(pp, 'artifact_file_info', file_info)
     assert SHELL_BODY in _crawl(client).text
@@ -443,7 +495,7 @@ def test_a_crawler_that_stops_waiting_never_cancels_the_shared_read(shell_root, 
         await asyncio.sleep(0)
         read = pages._snapshot_reads[path]
         gone.cancel()
-        with pytest.raises(StorageError, match='did not answer within 0.05 s'):
+        with pytest.raises(StorageError, match='no snapshot within 0.05 s'):
             await late
         with pytest.raises(asyncio.CancelledError):
             await gone
@@ -480,7 +532,7 @@ def test_a_read_that_outlives_its_deadline_serves_the_next_crawl_in_the_backoff(
 
     late, after = asyncio.run(scenario())
     assert SHELL_BODY in late.text and late.headers['cache-control'] == 'private, no-cache'
-    assert len(warned) == 1 and 'did not answer within 0.05 s' in warned[0]
+    assert len(warned) == 1 and 'no snapshot within 0.05 s' in warned[0]
     assert 'Pricing plans' in after.text
 
 
@@ -527,7 +579,7 @@ def test_a_shared_read_that_fails_after_its_waiters_left_is_logged_and_backs_off
     assert unhandled == []
     assert SHELL_BODY in after.text and after.headers['cache-control'] == 'private, no-cache'
     assert stats == [path]
-    assert len([line for line in warned if 'did not answer within 0.05 s' in line]) == 1
+    assert len([line for line in warned if 'no snapshot within 0.05 s' in line]) == 1
     assert len([line for line in warned if "'pages/pricing.html'" in line and 'store down' in line]) == 1
     clock[0] += pages._STORAGE_BACKOFF_SECONDS
     _crawl(_client())
@@ -854,3 +906,17 @@ def test_snapshot_assets_are_served_to_anonymous_crawlers(engine):
     # Only the version the public rung serves, of an app it serves.
     assert engine.get('/apps/rocketride.home/v2/seo-assets/logo.svg').status_code == 404
     assert engine.get('/apps/rocketride.preview/v1/seo-assets/logo.svg').status_code == 404
+
+
+def test_a_snapshot_fetched_as_a_build_file_is_noindex(engine):
+    # The raw template ({{assets}} unrendered) stays out of search; the build's other files do not change.
+    raw = engine.get('/apps/rocketride.home/v3/pages/pricing.html', headers={'User-Agent': GOOGLEBOT})
+    assert raw.status_code == 200 and '{{assets}}' in raw.text
+    assert raw.headers['x-robots-tag'] == 'noindex'
+    # Wherever the manifest puts a snapshot: any HTML file of the build is noindex.
+    for name in ('seo/landing.html', 'seo/landing.htm', 'seo/landing.HTML'):
+        FILES[f'{DIST}/{name}'] = b'<!doctype html><h1>{{assets}}</h1>'
+        elsewhere = engine.get(f'/apps/rocketride.home/v3/{name}', headers={'User-Agent': GOOGLEBOT})
+        assert elsewhere.status_code == 200 and elsewhere.headers['x-robots-tag'] == 'noindex', name
+    asset = engine.get('/apps/rocketride.home/v3/seo-assets/logo.svg', headers={'User-Agent': GOOGLEBOT})
+    assert asset.status_code == 200 and 'x-robots-tag' not in asset.headers

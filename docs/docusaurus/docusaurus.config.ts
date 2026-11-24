@@ -27,14 +27,14 @@ function isPartial(filePath: unknown): boolean {
 
 const config: Config = {
 	title: 'RocketRide Documentation',
-	tagline: 'Build, run, and ship data + AI pipelines',
+	tagline: 'Build, test and publish durable agents that scale in production.',
 	favicon: 'img/rocketride-favicon.jpg',
 
 	future: {
 		v4: true,
 	},
 
-	url: 'https://docs.rocketride.org/',
+	url: 'https://docs.rocketride.ai/',
 	baseUrl: '/',
 
 	// GitHub Pages serves every page at its trailing-slash URL and 301s the
@@ -44,7 +44,7 @@ const config: Config = {
 
 	// Bing Webmaster site verification. Docusaurus injects this into every page's
 	// <head> at build time, which is what Bing's crawler scans. Renders only on
-	// docs.rocketride.org (this package is built and deployed by .github/workflows/
+	// docs.rocketride.ai (this package is built and deployed by .github/workflows/
 	// docs.yml to GitHub Pages; the docs subpackage is NOT bundled into any
 	// self-hosted RocketRide install, so the tag does not ride into other people's
 	// deployments).
@@ -63,19 +63,19 @@ const config: Config = {
 			},
 		},
 		// Site-wide structured data: the WebSite is this docs site, the
-		// Organization is RocketRide (marketing site as url; cloud app, GitHub and open source site as sameAs).
+		// Organization is RocketRide (marketing site as url; cloud app and GitHub as sameAs).
 		{
 			tagName: 'script',
 			attributes: { type: 'application/ld+json' },
 			innerHTML: JSON.stringify({
 				'@context': 'https://schema.org',
 				'@graph': [
-					{ '@type': 'WebSite', name: 'RocketRide', url: 'https://docs.rocketride.org/' },
+					{ '@type': 'WebSite', name: 'RocketRide', url: 'https://docs.rocketride.ai/' },
 					{
 						'@type': 'Organization',
 						name: 'RocketRide',
 						url: 'https://rocketride.ai/',
-						sameAs: ['https://cloud.rocketride.ai/', 'https://github.com/rocketride-org', 'https://rocketride.org/'],
+						sameAs: ['https://cloud.rocketride.ai/', 'https://github.com/rocketride-org'],
 					},
 				],
 			}),

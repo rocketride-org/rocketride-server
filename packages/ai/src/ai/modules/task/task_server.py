@@ -96,8 +96,10 @@ from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
 from ai.account.models import AccountInfo, public_key_reaches, resolve_run_permissions
 from ai.account.store import Store
-from .task_conn import TaskConn
+from .task_conn import NOTICE_SEND_TIMEOUT, TaskConn, authority_narrowed, authority_subject
+from .authz_recheck import REBUILD_TIMEOUT, AuthzRecheck
 from .task_engine import Task
+from .launcher import Launcher, create_launcher
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
@@ -292,6 +294,10 @@ class TaskServer(DAPBase):
         _server: Reference to parent web server for statistics
     """
 
+    # Live re-check of platform authority (#972); None when the account edition
+    # cannot read it (set in __init__; class default for servers built without it).
+    _authz: Optional[AuthzRecheck] = None
+
     def __init__(self, server: WebServer, **kwargs) -> None:
         """
         Initialize the TaskServer with connection management and cleanup systems.
@@ -324,6 +330,9 @@ class TaskServer(DAPBase):
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
         self._connection_id = 0  # Monotonic connection identifier generator
         self._unauthed_by_ip: Dict[str, int] = {}  # Count of unauthenticated connections per client IP
+        # Authority re-check counters (#972): revoked, denied_unavailable,
+        # read_failed. Reported in the revoke/deny warning lines.
+        self._authz_counters: Dict[str, int] = {}
 
         # Global port allocation tracking
         self._allocated_ports: List[int] = []
@@ -344,15 +353,42 @@ class TaskServer(DAPBase):
             asyncio.create_task(self._monitor_ttl()),
         ]
 
+        # Live re-check of platform authority (#972), only when the account
+        # edition can read it; otherwise every authority gate is off.
+        from ai.account import account
+
+        self._authz = AuthzRecheck(self, account) if getattr(account, 'supports_live_authority', False) else None
+        if self._authz is not None:
+            self._bg_tasks.append(asyncio.create_task(self._authz.run()))
+
         # Store reference to parent server for statistics integration
         self._server = server
         self._config = server.config
+
+        # The runtime every Task of this process starts with (see launcher())
+        self._launcher: Optional[Launcher] = None
 
         # Register authentication handler for our keys
         server.add_authenticator(self.authenticate)
 
         # Initialize DAP base class with server identification
         super().__init__('SERVER', **kwargs)
+
+    def launcher(self) -> Launcher:
+        """
+        The launcher every Task of this process starts with.
+
+        Built once from ``server.config['runtime']`` (``--runtime`` on
+        ``eaas.py``), so a runtime's one-time work happens once per process
+        and the state of one run lives in its ``Launch``. A config without a
+        runtime gets spawn.
+
+        Returns:
+            Launcher: The shared launcher.
+        """
+        if self._launcher is None:
+            self._launcher = create_launcher(self._config.get('runtime') or '', self)
+        return self._launcher
 
     @property
     def store(self) -> Store:
@@ -491,11 +527,31 @@ class TaskServer(DAPBase):
 
     async def shutdown(self) -> None:
         """Cancel all background tasks."""
+        if self._authz is not None:
+            await self._authz.stop()
         bg_tasks = getattr(self, '_bg_tasks', [])
         for task in bg_tasks:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*bg_tasks, return_exceptions=True)
+
+    def acquire_unauthed_slot(self, ip: str) -> None:
+        """
+        Increment the unauthenticated connection count for an IP.
+
+        Called when an authenticated connection drops back to unauthenticated
+        (deauth or revoke), so the slot its auth released is held again and the
+        disconnect handler's ``release_unauthed_slot`` balances.
+        """
+        if not ip:
+            return
+        self._unauthed_by_ip[ip] = self._unauthed_by_ip.get(ip, 0) + 1
+
+    def count_authz(self, name: str) -> int:
+        """Increment and return one authority re-check counter (#972)."""
+        counters = self.__dict__.setdefault('_authz_counters', {})
+        counters[name] = counters.get(name, 0) + 1
+        return counters[name]
 
     def release_unauthed_slot(self, ip: str) -> None:
         """
@@ -600,7 +656,11 @@ class TaskServer(DAPBase):
         if not getattr(conn, '_authenticated', False):
             self.release_unauthed_slot(getattr(conn, '_client_ip', ''))
 
-        conn_user_id = getattr(getattr(conn, '_account_info', None), 'userId', None)
+        # A revoked connection holds the bare identity by now; its dashboard
+        # event is still scoped to the user it belonged to (#972).
+        conn_user_id = getattr(conn, '_revoked_user_id', None) or getattr(
+            getattr(conn, '_account_info', None), 'userId', None
+        )
 
         # No dev-overlay cleanup: dev previews are LOCAL-FIRST — the
         # registration lives in preview pages and dies with them; the
@@ -1099,12 +1159,9 @@ class TaskServer(DAPBase):
             # userToken (to_push_result) for the full-user connections.
             if (getattr(conn._account_info, 'auth', '') or '').startswith(('pk_', 'tk_')):
                 continue
-            try:
-                fresh = await account._service.get_authentication_result(user_id, conn._account_info.auth)
-                conn._account_info = fresh
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
-            except Exception as e:
-                self.debug_message(f'push_account_update failed for conn {conn.get_connection_id()}: {e}')
+            if not getattr(conn, '_authenticated', False):
+                continue
+            await self._push_rebuilt(account, conn, conn._account_info, 'push_account_update')
 
     async def push_org_update(self, org_id: str) -> None:
         """
@@ -1135,16 +1192,114 @@ class TaskServer(DAPBase):
             # rebuilt as the full user or handed the user's rr_ session key.
             if (getattr(info, 'auth', '') or '').startswith(('pk_', 'tk_')):
                 continue
-            try:
-                fresh = await account._service.get_authentication_result(info.userId, info.auth)
-                conn._account_info = fresh
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
+            if not getattr(conn, '_authenticated', False):
+                continue
+            if await self._push_rebuilt(account, conn, info, 'push_org_update'):
                 notified += 1
-            except Exception as e:
-                self.debug_message(f'push_org_update failed for conn {conn.get_connection_id()}: {e}')
 
         if notified:
             self.debug_message(f'push_org_update notified {notified} connection(s) for org={org_id}')
+
+    async def _push_rebuilt(self, account: Any, conn: TaskConn, info: AccountInfo, label: str) -> bool:
+        """
+        Rebuild one connection's identity and push it, one refresh at a time per connection.
+
+        Refreshes on one connection are serialized by a lazily created lock, so
+        two overlapping pushes cannot interleave and leave the older rebuild
+        installed. A refresh that waited for the lock starts from the identity
+        the connection holds by then (same user, not task-scoped), so the
+        newer refresh replaces the older one; if the connection was deauthed
+        or re-authenticated as someone else meanwhile, it does nothing.
+        See ``_push_rebuilt_locked`` for the rebuild itself.
+
+        Returns:
+            bool: True when a fresh identity was installed and pushed.
+        """
+        state = vars(conn)
+        lock = state.get('_identity_refresh_lock')
+        if lock is None:
+            lock = state['_identity_refresh_lock'] = asyncio.Lock()
+        async with lock:
+            current = conn._account_info
+            if current is not info:
+                if current is None or not getattr(conn, '_authenticated', False):
+                    return False
+                if current.userId != info.userId or (getattr(current, 'auth', '') or '').startswith(('pk_', 'tk_')):
+                    return False
+                info = current
+            return await self._push_rebuilt_locked(account, conn, info, label)
+
+    async def _push_rebuilt_locked(self, account: Any, conn: TaskConn, info: AccountInfo, label: str) -> bool:
+        """
+        Rebuild one connection's identity and push it (#972, F1).
+
+        ``info`` is the identity the rebuild starts from. For a connection
+        holding platform authority (``authority_subject``) a failed rebuild
+        never keeps the old identity: a narrower result (waitlisted, or a
+        cached ``sysPermissions`` element missing) or ``ValueError`` (user not
+        found) revokes the connection. Any other exception revokes it when
+        there is no live re-check; with one (``_authz``) the connection is
+        marked unverified, so the gate refuses it at once, and the next sweep
+        decides. A rebuild that does not finish within REBUILD_TIMEOUT counts as
+        such an error (so a stalled read cannot hold the connection's lock or
+        the rest of a push fan-out). For every connection, a good result replaces the identity
+        only if the connection is still authenticated and still holds
+        ``info`` (a deauth or newer auth during the rebuild wins), and stamps
+        it verified as of the clock read before the rebuild. Other
+        connections keep today's behaviour otherwise: log on error, replace
+        on success. The notice send is bounded by NOTICE_SEND_TIMEOUT.
+
+        Returns:
+            bool: True when a fresh identity was installed and pushed.
+        """
+        subject = authority_subject(info)
+        authz = self._authz
+        t0 = authz.clock() if authz is not None else None
+        try:
+            fresh = await asyncio.wait_for(account.rebuild_account_info(info), REBUILD_TIMEOUT)
+        except ValueError as e:
+            if subject:
+                await conn.revoke(info, f'{label}: user not found ({e})')
+            else:
+                self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+            return False
+        except Exception as e:
+            if subject and authz is not None:
+                # Invalidate only the identity whose rebuild failed: a newer
+                # identity installed meanwhile keeps its own verification.
+                if conn._account_info is info and getattr(conn, '_authenticated', False):
+                    conn._authz_verified_at = 0.0
+                failed = self.count_authz('read_failed')
+                warning(
+                    f'[AUTHZ] {label} rebuild failed conn={conn.get_connection_id()} user={info.userId} '
+                    f'error={e!r} read_failed={failed}; unverified until the next sweep'
+                )
+            elif subject:
+                await conn.revoke(info, f'{label}: rebuild failed ({e})')
+            else:
+                self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+            return False
+
+        # The edition cannot rebuild identities: nothing to push.
+        if fresh is None:
+            return False
+
+        if subject and authority_narrowed(info, fresh):
+            await conn.revoke(info, f'{label}: authority narrowed', pushed=fresh)
+            return False
+        # Never install over a deauth or a newer auth that landed during the rebuild
+        if conn._account_info is not info or not getattr(conn, '_authenticated', False):
+            return False
+
+        try:
+            conn._account_info = fresh
+            if authz is not None:
+                conn._authz_verified_at = t0
+            await asyncio.wait_for(conn.send_event('apaext_account', body=fresh.to_push_result()), NOTICE_SEND_TIMEOUT)
+        except Exception as e:
+            self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+            return False
+        return True
 
     async def push_org_changed(self, user_id: str, org_id: str) -> None:
         """

@@ -1,0 +1,52 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Composite action that checks the node archive in release-assets/ before a
+# release is published. Shared by _release.yaml and experimental-release.yaml.
+name: Check node archive
+description: >-
+  Fail unless release-assets/ holds the node index, the archive it names, and
+  at least one server archive, and every server archive names the index's
+  node digests.
+
+runs:
+  using: 'composite'
+  steps:
+    # Only the Ubuntu build uploads the node archive: every platform's server must name its digests.
+    # Digests, not bytes: the index's key order follows each file system's readdir order
+    - name: Check every server names the node archive's digests
+      shell: bash
+      run: |
+        [ -f release-assets/index.json ] || { echo "::error::release-assets has no node index (index.json)"; exit 1; }
+        archive=$(jq -r .archive release-assets/index.json)
+        [ -f "release-assets/$archive" ] || { echo "::error::the node index names $archive, which is not in release-assets"; exit 1; }
+        shopt -s nullglob
+        servers=(release-assets/rocketride-server-*.tar.gz release-assets/rocketride-server-*.zip)
+        [ ${#servers[@]} -gt 0 ] || { echo "::error::release-assets has no server archive"; exit 1; }
+        digests() { jq -S '{archive, nodes: (.nodes | map_values(.sha256))}'; }
+        want=$(digests < release-assets/index.json)
+        for a in release-assets/rocketride-server-*.tar.gz; do
+          [ "$(tar -xzOf "$a" nodes/index.json | digests)" = "$want" ] || { echo "::error::$a names other node digests"; exit 1; }
+        done
+        for a in release-assets/rocketride-server-*.zip; do
+          [ "$(unzip -p "$a" nodes/index.json | digests)" = "$want" ] || { echo "::error::$a names other node digests"; exit 1; }
+        done

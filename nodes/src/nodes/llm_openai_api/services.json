@@ -53,7 +53,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "openai.svg",
-	"documentation": "https://docs.rocketride.org/nodes/llm_openai_api",
+	"documentation": "https://docs.rocketride.ai/nodes/llm_openai_api",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
@@ -113,9 +113,17 @@
 			"minimum": 1024,
 			"optional": true
 		},
+		"temperature": {
+			"type": "number",
+			"title": "Temperature",
+			"description": "Sampling temperature: 0 is generally more deterministic, higher values increase variety. Some models run only at their own default and reject any other value (newer Claude models, OpenAI's reasoning models, and gateways in front of them). The node then sends the request again without a temperature and, if that goes through, warns and leaves it out for the rest of the run.",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 2
+		},
 		"openai_api.custom": {
 			"object": "custom",
-			"properties": ["model", "base_url", "modelTotalTokens", "modelOutputTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": ["model", "base_url", "modelTotalTokens", "modelOutputTokens", "llm.cloud.apikey", "llm.cloud.modelSource", "temperature"]
 		},
 		"openai_api.profile": {
 			"title": "Model",

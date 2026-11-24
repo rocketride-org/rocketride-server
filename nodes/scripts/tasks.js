@@ -32,12 +32,17 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const crypto = require('crypto');
+const AdmZip = require('adm-zip');
+const { stripComments } = require('jsonc-parser');
 const {
 	syncDir,
 	syncFile,
 	formatSyncStats,
 	isDirectory,
 	removeDir,
+	setState,
+	readDirSafe,
 	PROJECT_ROOT,
 	DIST_ROOT,
 	OVERLAY_ROOT,
@@ -55,7 +60,7 @@ const {
 	isLinux,
 	loadPackageJson,
 } = require('../../scripts/lib');
-const { stageNodeLibrary, makeNodeModule } = require('./node-build');
+const { nodeLibrary, stageNodeLibrary, makeNodeModule } = require('./node-build');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 
@@ -70,6 +75,19 @@ const SRC_NODE_DIRS = new Map(
 );
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'nodes');
+
+// The Python nodes ship in one archive, each under <name>/, beside the index.json that names it
+const PACKAGES_DIR = path.join(DIST_ROOT, 'nodes');
+
+// A packaged node's requirement files stay in the server, without its code, for the
+// constraints solve and the image's wheel cache; the dash keeps it from importing
+const REQUIREMENTS_DIR = path.join(DIST_DIR, 'node-requirements');
+
+// The index format the engine reads; bump it when that format changes
+const NODES_CONTRACT = 1;
+
+// The nodes the engine itself needs stay in the server; so do the C++ ones
+const SERVER_NODES = new Set(['core', 'autopipe']);
 
 // Build inputs or runtime files - none of it belongs in dist.
 const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**', '**/__pycache__/**'];
@@ -101,19 +119,159 @@ function makeSyncNodesAction() {
 	return {
 		run: async (ctx, task) => {
 			task.output = 'Scanning for changes...';
-
 			const stats = {};
-
-			for (const [name, srcDir] of SRC_NODE_DIRS) {
-				const src = path.join(srcDir, name);
-
-				if (await isDirectory(src)) await syncNode(name, src, stats);
-				else await syncFile(src, path.join(DIST_DIR, name), { package: true }, stats);
-			}
-
-			task.output = formatSyncStats(stats);
+			const packages = await syncNodes(stats);
+			task.output = `${formatSyncStats(stats)}, ${Object.keys(packages).length} packages`;
 		},
 	};
+}
+
+// Where the build puts each node, and the helpers that copy and record it; a test passes its own
+const SYNC = {
+	srcNodeDirs: SRC_NODE_DIRS,
+	distDir: DIST_DIR,
+	packagesDir: PACKAGES_DIR,
+	archiveName: async () => `rocketride-nodes-v${(await loadPackageJson()).version}.zip`,
+	libraryOf: nodeLibrary,
+	copyFile: (src, dest, stats) => syncFile(src, dest, { package: true }, stats),
+	copyNode: (name, src, stats) => syncNode(name, src, stats),
+	forget: (src) => setState(['package', src], null),
+};
+
+// The server keeps core, autopipe and the C++ nodes; every other node goes into the archive beside
+// index.json, and only its requirement files stay in the server. Returns the index's nodes
+async function syncNodes(stats, sync = SYNC) {
+	sync = { ...SYNC, ...sync };
+	const requirementsDir = path.join(sync.distDir, path.basename(REQUIREMENTS_DIR));
+	const archive = await sync.archiveName();
+	const { zip, packages, sources } = await packageNodes(stats, sync, requirementsDir);
+	await dropStale(sync, packages, sources, requirementsDir, archive);
+	await writeIndex(stats, sync, archive, zip, packages);
+	return packages;
+}
+
+// Copies the server's nodes into it and packs every other one into the archive, with only its
+// requirement files left in the server; the archive, the index's entries and each node's source folder
+async function packageNodes(stats, { srcNodeDirs, distDir, libraryOf, copyFile, copyNode, forget }, requirementsDir) {
+	const zip = new AdmZip();
+	const packages = {};
+	const sources = {};
+
+	for (const [name, srcDir] of srcNodeDirs) {
+		const src = path.join(srcDir, name);
+
+		if (!(await isDirectory(src))) {
+			await copyFile(src, path.join(distDir, name), stats);
+			continue;
+		}
+
+		const lib = await libraryOf(name, src);
+		if (lib || SERVER_NODES.has(name)) {
+			await copyNode(name, src, stats);
+			continue;
+		}
+
+		const { files, entry } = await packageNode(name, src);
+		for (const [file, data] of Object.entries(files)) zip.addFile(`${name}/${file}`, data);
+		packages[name] = entry;
+		sources[name] = src;
+
+		// It no longer ships inside the server archive, but its requirements do
+		await removeDir(path.join(distDir, name));
+		await forget(src);
+		for (const file of await readDirSafe(src)) {
+			if (!/^(requirement.*\.txt|overrides\.txt)$/.test(file)) continue;
+			await copyFile(path.join(src, file), path.join(requirementsDir, name, file), stats);
+		}
+	}
+
+	// A node it needs that the server keeps is on disk already; only packaged ones are listed
+	for (const entry of Object.values(packages)) {
+		entry.requires = entry.requires.filter((other) => other in packages);
+	}
+	return { zip, packages, sources };
+}
+
+// Removes what this build no longer ships: a file an older build left in the server, another
+// version's archive, and the requirement files of a node that is gone or no longer has them
+async function dropStale({ srcNodeDirs, distDir, packagesDir, forget }, packages, sources, requirementsDir, archive) {
+	// Such as a nodes/__init__.py
+	for (const name of await readDirSafe(distDir)) {
+		if (srcNodeDirs.has(name) || name === path.basename(requirementsDir)) continue;
+		await fs.promises.rm(path.join(distDir, name), { recursive: true, force: true });
+		await forget(path.join(PACKAGE_DIR, 'src', 'nodes', name));
+	}
+
+	// Another version's archive, so it is not published again
+	for (const file of await readDirSafe(packagesDir)) {
+		if (file !== archive && file !== 'index.json') {
+			await fs.promises.rm(path.join(packagesDir, file), { recursive: true, force: true });
+		}
+	}
+	for (const name of await readDirSafe(requirementsDir)) {
+		for (const file of await readDirSafe(path.join(requirementsDir, name))) {
+			if (name in packages && fs.existsSync(path.join(sources[name], file))) continue;
+			await fs.promises.rm(path.join(requirementsDir, name, file), { force: true });
+			// Or server:package still lists the copy
+			await forget(path.join(sources[name] ?? path.join(PACKAGE_DIR, 'src', 'nodes', name), file));
+		}
+		if (!(name in packages)) {
+			await fs.promises.rm(path.join(requirementsDir, name), { recursive: true, force: true });
+		}
+	}
+}
+
+// Writes the archive and its index beside the server, and the index into the server too
+async function writeIndex(stats, { distDir, packagesDir, copyFile }, archive, zip, packages) {
+	const index = { contract: NODES_CONTRACT, archive, nodes: packages };
+	await fs.promises.mkdir(packagesDir, { recursive: true });
+	await fs.promises.writeFile(path.join(packagesDir, archive), zip.toBuffer());
+	await fs.promises.writeFile(path.join(packagesDir, 'index.json'), JSON.stringify(index));
+	// The server archive carries its own copy, so an engine reads the index of the build that made it
+	await copyFile(path.join(packagesDir, 'index.json'), path.join(distDir, 'index.json'), stats);
+}
+
+// The digest of a node's files ({path inside the node: bytes}), as ai.common.node_packages.content_digest:
+// the sha256 of '<path>\0<sha256 hex of the file>\n' for each file in path order (code point, as Python sorts)
+function contentDigest(files) {
+	const digest = crypto.createHash('sha256');
+	for (const file of Object.keys(files).sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))) {
+		digest.update(`${file}\0${crypto.createHash('sha256').update(files[file]).digest('hex')}\n`);
+	}
+	return digest.digest('hex');
+}
+
+// A node's files with its .rrnode marker, keyed by their path inside the node, and its index entry
+async function packageNode(name, srcDir) {
+	const { glob } = require('glob');
+
+	// Definitions travel as text so Python reads 1.0 as a float; JSON.parse checks they are plain JSON
+	const services = {};
+	const icons = {};
+	const requires = new Set();
+	const files = {};
+	// Paths with '/' on every OS: they are part of the digest
+	const found = await glob('**', { cwd: srcDir, nodir: true, ignore: IGNORE });
+	for (const file of found.map((entry) => entry.replace(/\\/g, '/')).sort()) {
+		const data = await fs.promises.readFile(path.join(srcDir, file));
+		files[file] = data;
+		// Another node it imports must be on disk beside it
+		if (file.endsWith('.py')) {
+			for (const [, other] of data.toString('utf8').matchAll(/^\s*(?:from|import)\s+nodes\.(\w+)/gm)) {
+				if (other !== name) requires.add(other);
+			}
+		}
+		if (!/^services.*\.json$/.test(file)) continue;
+
+		const text = stripComments(data.toString('utf8'));
+		const { icon } = JSON.parse(text);
+		services[file] = text;
+		if (icon) icons[icon] = await fs.promises.readFile(path.join(srcDir, icon), 'utf8');
+	}
+	files['.rrnode'] = Buffer.from(JSON.stringify({ name }));
+
+	const sha256 = contentDigest(files);
+	return { files, entry: { sha256, services, icons, requires: [...requires].sort() } };
 }
 
 function makeStartTestServerAction(options = {}) {
@@ -384,6 +542,10 @@ function makeTestAction(options = {}) {
 	return { description: 'Testing nodes', steps };
 }
 
+// No provenance attestation on these local images: it records the build time, so a fully
+// cached rebuild still gets a new digest and every image built FROM it misses its cache
+const LOCAL_BUILD_FLAGS = ['--provenance=false'];
+
 // Builds engine-base from dist/server, then the node image FROM it.
 function makeBuildImageAction(options = {}) {
 	return {
@@ -399,7 +561,15 @@ function makeBuildImageAction(options = {}) {
 			task.output = `Building ${base}...`;
 			await execCommand(
 				'docker',
-				['build', '-f', path.join(dockerDir, 'Dockerfile.engine-base'), '-t', base, path.dirname(DIST_ROOT)],
+				[
+					'build',
+					...LOCAL_BUILD_FLAGS,
+					'-f',
+					path.join(dockerDir, 'Dockerfile.engine-base'),
+					'-t',
+					base,
+					path.dirname(DIST_ROOT),
+				],
 				{ task, env, verbose: options.verbose }
 			);
 
@@ -408,6 +578,7 @@ function makeBuildImageAction(options = {}) {
 				'docker',
 				[
 					'build',
+					...LOCAL_BUILD_FLAGS,
 					'-f',
 					path.join(dockerDir, 'Dockerfile.node'),
 					'--build-arg',
@@ -545,6 +716,7 @@ module.exports = {
 				description: 'Cleaning nodes',
 				run: async (ctx, task) => {
 					await removeDir(DIST_DIR);
+					await removeDir(PACKAGES_DIR);
 					task.output = 'Cleaned nodes';
 				},
 			}),
@@ -558,3 +730,7 @@ module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
 // Export paths for external use
 module.exports.DIST_DIR = DIST_DIR;
 module.exports.TEST_DIR = TEST_DIR;
+module.exports.packageNode = packageNode;
+module.exports.contentDigest = contentDigest;
+module.exports.syncNodes = syncNodes;
+module.exports.NODES_CONTRACT = NODES_CONTRACT;

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Build, run, and manage AI pipelines from Python.
+  RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. Python SDK and CLI.
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
-**Full documentation: [docs.rocketride.org/clients/python](https://docs.rocketride.org/clients/python)** — guides, the complete API reference, and worked examples.
+**Full documentation: [docs.rocketride.ai/clients/python](https://docs.rocketride.ai/clients/python)** — guides, the complete API reference, and worked examples.
 
 ## Quick Start
 
@@ -42,18 +42,16 @@ asyncio.run(main())
 
 `send()` / `send_files()` are for pipelines whose **source** is `webhook` or `dropper`;
 if your pipeline source is `chat`, use `client.chat()` instead. Don't have a pipeline
-yet? Build one visually with the [RocketRide IDE extension](https://docs.rocketride.org/quickstart/ide-walkthrough).
+yet? Build one visually with the [RocketRide IDE extension](https://docs.rocketride.ai/quickstart/ide-walkthrough).
 
 The SDK is async-first (built on `asyncio` and `websockets`), includes the
-`rocketride` [CLI](https://docs.rocketride.org/connect/cli), and covers the full
+`rocketride` [CLI](https://docs.rocketride.ai/connect/cli), and covers the full
 engine surface: pipeline execution, streaming data, chat, deployments with cron
 schedules, server-side file storage, and run-log replay.
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only
-enterprise-grade runtime built on C++. Build, test and publish durable agents that
-scale in production. It spans the full AI Development Lifecycle (AIDLC): build,
+[RocketRide](https://rocketride.ai) is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. It spans the full AI Development Lifecycle (AIDLC): build,
 stage, test, release and maintain. Its rapidly growing node library includes agents,
 models, vector/graph/SQL databases, OCR, tools, data stores, NER and more. MIT licensed. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 
@@ -65,21 +63,21 @@ models, vector/graph/SQL databases, OCR, tools, data stores, NER and more. MIT l
 | `ROCKETRIDE_APIKEY` | API key for authentication |
 
 All constructor options, timeouts, and reconnection behavior:
-[Configuration](https://docs.rocketride.org/clients/python/configuration).
+[Configuration](https://docs.rocketride.ai/clients/python/configuration).
 
 ## Documentation
 
-- [Overview & quickstart](https://docs.rocketride.org/clients/python)
-- [Running pipelines](https://docs.rocketride.org/clients/python/pipelines) · [Sending data](https://docs.rocketride.org/clients/python/data) · [Chat](https://docs.rocketride.org/clients/python/chat)
-- [Deployments](https://docs.rocketride.org/clients/python/deploy) · [File storage](https://docs.rocketride.org/clients/python/storage) · [Run logs](https://docs.rocketride.org/clients/python/logs)
-- [Error handling](https://docs.rocketride.org/clients/python/errors) · [API reference](https://docs.rocketride.org/clients/python/reference) · [Examples](https://docs.rocketride.org/clients/python/examples)
+- [Overview & quickstart](https://docs.rocketride.ai/clients/python)
+- [Running pipelines](https://docs.rocketride.ai/clients/python/pipelines) · [Sending data](https://docs.rocketride.ai/clients/python/data) · [Chat](https://docs.rocketride.ai/clients/python/chat)
+- [Deployments](https://docs.rocketride.ai/clients/python/deploy) · [File storage](https://docs.rocketride.ai/clients/python/storage) · [Run logs](https://docs.rocketride.ai/clients/python/logs)
+- [Error handling](https://docs.rocketride.ai/clients/python/errors) · [API reference](https://docs.rocketride.ai/clients/python/reference) · [Examples](https://docs.rocketride.ai/clients/python/examples)
 
 ## Links
 
-- [Documentation](https://docs.rocketride.org/clients/python)
+- [Documentation](https://docs.rocketride.ai/clients/python)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
 - [Discord](https://discord.gg/PMXrtenMsY)
-- [Release notes](https://docs.rocketride.org/support/release-notes)
+- [Release notes](https://docs.rocketride.ai/support/release-notes)
 
 ## License
 

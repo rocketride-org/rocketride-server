@@ -10,7 +10,7 @@ Key Features:
 - Isolated subprocess execution with complete lifecycle management
 - Multi-interface communication (DAP, stdio) with the task subprocess
 - Real-time status monitoring and event broadcasting
-- Resource management (ports, temporary files, cleanup)
+- Resource management through the runtime's Launcher (task file, port, cleanup)
 - Multi-client support for collaborative debugging
 - Environment-aware configuration (development/production)
 
@@ -25,7 +25,6 @@ Constants:
 
 Global Resources:
     allocated_ports: Port allocation tracking to prevent conflicts
-    copied_python_shim: Development environment optimization flag
 """
 
 import os
@@ -34,27 +33,24 @@ import inspect
 import contextlib
 import sys
 import json
-import tempfile
 import time
 import socket
 import hashlib
 import secrets
 import shlex
-import shutil
 import signal
+import uuid
 from collections import deque
-from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple, Union
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
-from hosting import HOSTED_FLAG, SHARED_HOST_FLAG
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
     CONST_STATUS_UPDATE_FREQ,
     CONST_MAX_READY_TIME,
     CONST_READY_POLL_INTERVAL,
-    CONST_SUBPROCESS_BUFFER_LIMIT,
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
     CONST_STATUS_HISTORY_LIMIT,
     CONST_ANALYTICS_SLOWEST_DOCS,
@@ -68,8 +64,8 @@ from ai.constants import (
     CONST_CHANNEL_REDIAL_DELAY,
 )
 from ai.account.base import OutOfCreditsError
-from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
+from ai.common.model_gateway import GATEWAY_ENV, PASS_RENEW_INTERVAL_S, no_pass_marker, wants_hosted_openai
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task import node_store
 from ai.modules.task.pipeflow import apply_pipeflow_event
@@ -90,6 +86,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
+from .launcher import Launch, Launcher, LaunchSpec
 from .pipeline import references_env, resolve_pipeline_env
 from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
@@ -154,10 +151,6 @@ def cap_trace_payload(trace: Any) -> Any:
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
-
-
-# Development environment optimization
-copied_python_shim = False
 
 
 # Environment the task subprocess inherits from the engine. The engine process
@@ -320,10 +313,27 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
     return frozenset(names), tuple(prefixes)
 
 
+# The hosted backend's own model provider key. A task reaches hosted models
+# only through its per-run pass (ROCKETRIDE_MODEL_GATEWAY).
+CONST_MODEL_GATEWAY_KEY_ENV = 'RR_MODEL_GATEWAY_OPENAI_KEY'
+
 # Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
-# token key would let pipeline code mint any run's private token.
-CONST_SUBPROCESS_ENV_NEVER = frozenset({CONST_TASK_TOKEN_KEY_ENV})
+# token key would let pipeline code mint any run's private token. The datacore
+# grant key would let it mint a grant for any tenant's database, and the broker
+# token is the provisioner's bearer under the name production sets today
+# (ROCKETRIDE_DB_BROKER_TOKEN, also popped in _build_subprocess_env) and the
+# operator-only name it is moving to (RR_DB_BROKER_TOKEN). rocketride-saas #975.
+# The hosted backend's model key would let it call the models on the platform's account.
+CONST_SUBPROCESS_ENV_NEVER = frozenset(
+    {
+        CONST_TASK_TOKEN_KEY_ENV,
+        'RR_DATACORE_GRANT_KEY',
+        'RR_DB_BROKER_TOKEN',
+        'ROCKETRIDE_DB_BROKER_TOKEN',
+        CONST_MODEL_GATEWAY_KEY_ENV,
+    }
+)
 
 
 def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
@@ -379,13 +389,6 @@ def resolve_parameter_tokens(pipeline: Dict[str, Any], environ: Mapping[str, str
 # case-insensitive.
 CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
 CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
-
-# Task subprocesses of a hosted engine get these flags on their command line
-# (see the hosting module): --hosted always, --shared-host when the task shares
-# the engine's host. Pipeline-supplied args can add flags but not remove these,
-# so the task can rely on them.
-CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
-CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
 # Signals that end a task process as a crash: the engine's crash signals and an OOM kill
 CONST_CRASH_SIGNALS = ('SIGSEGV', 'SIGBUS', 'SIGFPE', 'SIGILL', 'SIGABRT', 'SIGKILL')
@@ -497,6 +500,19 @@ async def _check_spend(task: 'Task', arguments: Dict[str, Any], data: Optional[b
 register_channel_command('spend.check', _check_spend)
 
 
+def _authority_gate_ok(conn: Any) -> bool:
+    """False when this debugger connection may not receive events (#972).
+
+    A connection that is no longer authenticated (deauthed or revoked)
+    receives nothing; an authenticated subject the live re-check refuses
+    receives nothing either.
+    """
+    if not getattr(conn, '_authenticated', False):
+        return False
+    authz = getattr(getattr(conn, '_server', None), '_authz', None)
+    return authz is None or authz.gate_ok(conn)
+
+
 class Task(DAPBase):
     """
     Pipeline task execution and lifecycle management system.
@@ -524,15 +540,20 @@ class Task(DAPBase):
         token (str): Unique task identifier
         _server (TaskServer): Central orchestration server
         _status (TASK_STATUS): Task state and statistics
-        _engine_process (Optional[Process]): Subprocess handle
+        _launch (Optional[Launch]): The running task — process, address, exit code
+        _launcher (Launcher): The runtime that starts it (shared by the process)
         _debugger (Optional[TaskConn]): Primary debugging connection
         _debug_stdio (Optional[DbgStdio]): stdio interface
         _data_client (Optional[DAPClient]): Data communication client
-        _data_port (Optional[int]): Data communication port
         _status_update_task (Optional[Task]): Background status broadcasting
         _is_terminating (bool): Termination state flag
         _termination_lock (asyncio.Lock): Atomic termination operations
     """
+
+    # The run ID this run's hosted models pass was issued for; None when it has none
+    _model_run_id: Optional[str] = None
+    # Renews that pass while the task runs; cancelled with the pass
+    _model_pass_renewal: Optional[asyncio.Task] = None
 
     class TaskDbgStdio(DbgStdio):
         """DAP client for stdio communication with subprocess."""
@@ -712,8 +733,9 @@ class Task(DAPBase):
         self._crash: Optional[str] = None
         self._process_killed = False
 
-        # Server reference
+        # Server reference, and the runtime it starts tasks with
         self._server = server
+        self._launcher: Launcher = server.launcher()
 
         # Store configuration
         self._kwargs = kwargs
@@ -730,7 +752,7 @@ class Task(DAPBase):
         self._threads = _args.get('threads', CONST_DEFAULT_MAX_THREADS)
         self._pipelineTraceLevel = _args.get('pipelineTraceLevel', None)
         self._task_name: Optional[str] = _args.get('name', None)
-        self._engine_process: Optional[asyncio.subprocess.Process] = None
+        self._launch: Optional[Launch] = None
 
         # Status tracking
         self._status = TASK_STATUS()
@@ -748,7 +770,6 @@ class Task(DAPBase):
         self._hostname = socket.gethostname()
 
         # Lifecycle state
-        self._tmpfile = None
         self._stop_requested = False
         # Bumped by every stop_task, so a restart can tell whether a stop arrived
         # while it loaded, even on a task whose last run was already stopped
@@ -767,11 +788,12 @@ class Task(DAPBase):
 
         # Data communication
         self._data_lock: asyncio.Lock = asyncio.Lock()
-        self._data_port: Optional[int] = None
         self._data_client: Optional[Task.TaskData] = None
         # Per-run credential for the child's /task/data, separate from self.token
         self._data_token: Optional[str] = None
         self._reset_channel_state()
+        self._model_run_id = None
+        self._model_pass_renewal = None
 
         # Status broadcasting
         self._status_update_task: Optional[asyncio.Task] = None
@@ -1157,7 +1179,12 @@ class Task(DAPBase):
         return {dsn_key(scope, target): dsns[(scope, owner)] for scope, target, owner in wanted}
 
     async def _build_subprocess_env(
-        self, db_access: Tuple[List[Tuple[str, str]], bool], *, credential: Optional[str] = None
+        self,
+        db_access: Tuple[List[Tuple[str, str]], bool],
+        wants_hosted_openai: bool = False,
+        model_run_id: str = '',
+        *,
+        credential: Optional[str] = None,
     ) -> Dict[str, str]:
         """Build the environment for the task subprocess.
 
@@ -1166,6 +1193,9 @@ class Task(DAPBase):
         ``credential`` is the presenting connection's ``AccountInfo.auth``,
         passed straight to ``_authorize_db_targets`` and nowhere else: it never
         reaches the child's environment or the task file.
+        ``wants_hosted_openai`` is ``_wants_hosted_openai`` of the same
+        pipeline, and ``model_run_id`` the ID this run's hosted models pass is
+        asked for under ('' asks for none).
 
         The child never gets a copy of the engine's environment: it runs user
         pipeline code, so it only inherits the allowlist in
@@ -1198,6 +1228,19 @@ class Task(DAPBase):
         subprocess_env.pop('ROCKETRIDE_DB_DSNS', None)
         subprocess_env.pop('ROCKETRIDE_DB_DSN', None)
         subprocess_env.pop('ROCKETRIDE_DB_RESOLVE_ERROR', None)
+        # Only a pass issued below for this run reaches the task
+        subprocess_env.pop(GATEWAY_ENV, None)
+
+        if wants_hosted_openai and model_run_id and _is_saas_engine():
+            gateway = await self._issue_model_pass(model_run_id)
+            if isinstance(gateway, dict):
+                # The backend refused this run a pass (a team deployment, for one):
+                # the task learns why, so a node with no key can say so
+                self._model_run_id = None
+                subprocess_env[GATEWAY_ENV] = json.dumps(gateway)
+            elif gateway is not None:
+                subprocess_env[GATEWAY_ENV] = gateway
+                self._model_pass_renewal = asyncio.create_task(self._renew_model_pass(model_run_id))
 
         # Authorize and resolve every database the DB nodes use, server-side
         # (the SaaS account context exists only in this process), and hand
@@ -1229,6 +1272,83 @@ class Task(DAPBase):
                 subprocess_env['ROCKETRIDE_DB_DSNS'] = json.dumps(dsns)
 
         return subprocess_env
+
+    def _wants_hosted_openai(self, pipeline: Dict[str, Any]) -> bool:
+        """Whether this run should get a hosted models pass: a hosted engine, and
+        an OpenAI node in ``pipeline`` (the resolved one the task runs) with no key.
+        """
+        if not _is_saas_engine():
+            return False
+        try:
+            return wants_hosted_openai(pipeline, node_store.served)
+        except Exception as e:
+            self.debug_message(f'Hosted models check failed: {type(e).__name__}')
+            return False
+
+    async def _issue_model_pass(self, model_run_id: str) -> Union[str, Dict[str, Any], None]:
+        """Ask the account for this run's hosted models pass: its JSON; or, when the
+        backend refuses with a code, ``no_pass_marker`` of that code; or None.
+
+        A refusal or a failure is not an error: the task starts without a pass,
+        and a node with no key says that hosted models are not available (or why).
+        """
+        from ai.account import account
+
+        identity = {
+            'org_id': self.org_id or '',
+            'user_id': self.client_id or '',
+            'team_id': self.team_id or '',
+            'run_id': model_run_id,
+            'task_id': self.id or '',
+        }
+        try:
+            gateway = await account.issue_model_pass(identity)
+            if isinstance(gateway, dict) and 'error' in gateway:
+                marker = no_pass_marker(gateway)
+                self.debug_message(f'No hosted models pass for this run: {marker["error"]["code"] or "refused"}')
+                return marker
+            if isinstance(gateway, dict):
+                return json.dumps(gateway)
+            self.debug_message('No hosted models pass for this run')
+        except Exception as e:
+            self.debug_message(f'Hosted models pass not issued: {type(e).__name__}')
+        return None
+
+    async def _renew_model_pass(self, run_id: str) -> None:
+        """Renew this run's pass every PASS_RENEW_INTERVAL_S while the run keeps it.
+
+        Cancelled by ``_drop_model_pass``, so renewing stops wherever the pass is revoked.
+        """
+        from ai.account import account
+
+        while True:
+            await asyncio.sleep(PASS_RENEW_INTERVAL_S)
+            if self._model_run_id != run_id:
+                return
+            try:
+                renewed = await account.renew_model_pass(run_id)
+            except Exception as e:
+                self.debug_message(f'Hosted models pass not renewed: {type(e).__name__}')
+                continue
+            if renewed is None:
+                # The pass has ended for good; a later renewal cannot bring it back
+                self.debug_message('Hosted models pass not renewed: it has ended')
+                return
+
+    async def _drop_model_pass(self) -> None:
+        """End this run's hosted models pass, if it has one. Errors are ignored."""
+        renewal, self._model_pass_renewal = self._model_pass_renewal, None
+        if renewal is not None and not renewal.done() and renewal is not asyncio.current_task():
+            renewal.cancel()
+        run_id, self._model_run_id = self._model_run_id, None
+        if not run_id:
+            return
+        try:
+            from ai.account import account
+
+            await account.revoke_model_pass(run_id)
+        except Exception as e:
+            self.debug_message(f'Hosted models pass not revoked: {type(e).__name__}')
 
     def _shares_host(self) -> bool:
         """
@@ -1292,20 +1412,20 @@ class Task(DAPBase):
             provider = source_component.get('provider', 'Unknown')
             config['type'] = provider
 
-    def _build_task(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_task(self, pipeline: Dict[str, Any], data_path: Optional[str] = None) -> Dict[str, Any]:
         """
         Construct complete task configuration for subprocess.
 
         Args:
             pipeline: Resolved pipeline dict (secrets already substituted). Must
-                      not be stored — caller discards it after the temp file is written.
+                      not be stored — caller discards it after the task file is built.
+            data_path: The engine data directory as the task sees it; the
+                      runtime's (``Launcher.task_data_path``), this engine's by default.
 
         Returns:
             Complete subprocess task configuration
         """
-        data_path = CONST_TASK_DATA_PATH
-
-        os.makedirs(data_path, exist_ok=True)
+        data_path = data_path or CONST_TASK_DATA_PATH
 
         config = {
             'keystore': 'kvsfile://data/keystore.json',
@@ -1375,49 +1495,23 @@ class Task(DAPBase):
             return ''
         return validate_storage_root(f'users/{self.client_id}/files')
 
-    async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:
+    def _task_file_bytes(self, pipeline: Dict[str, Any], data_path: str) -> bytes:
         """
-        Write task configuration to temporary file.
+        Serialize the task configuration for the runtime.
 
-        Uses mkstemp for secure temporary file creation:
-        - Owner-only permissions (0o600) to protect API keys in pipeline config
-        - Unpredictable filename to prevent symlink attacks
-        - O_EXCL flag to prevent TOCTOU race conditions
+        The runtime decides where it goes: a ``mkstemp`` 0600 file for a
+        subprocess, a tar stream into the container for docker.
 
         Args:
             pipeline: Resolved pipeline dict (secrets already substituted). The
                       caller must not retain a reference after this returns.
+            data_path: The engine data directory as the task sees it.
 
         Returns:
-            Path to temporary task configuration file
-
-        Raises:
-            OSError: If file cannot be created or written
+            The task file, UTF-8 encoded.
         """
-        pipeline_task = self._build_task(pipeline)
-        pipeline_str = json.dumps(pipeline_task, indent=2) + '\n\n'
-
-        fd, taskpath = tempfile.mkstemp(suffix='.json', prefix=f'task-{self.id}-')
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            await asyncio.to_thread(f.write, pipeline_str)
-
-        return taskpath
-
-    def _file_checksum(self, path: str) -> str:
-        """
-        Calculate SHA256 checksum for file integrity.
-
-        Args:
-            path: File path for checksum calculation
-
-        Returns:
-            Hexadecimal SHA256 checksum
-        """
-        hash_sha256 = hashlib.sha256()
-        with open(path, 'rb') as f:
-            while chunk := f.read(8192):
-                hash_sha256.update(chunk)
-        return hash_sha256.hexdigest()
+        pipeline_task = self._build_task(pipeline, data_path)
+        return (json.dumps(pipeline_task, indent=2) + '\n\n').encode('utf-8')
 
     def _is_debugging(self) -> bool:
         """
@@ -1484,7 +1578,7 @@ class Task(DAPBase):
         Returns:
             str: The websocket URI.
         """
-        return f'ws://127.0.0.1:{self._data_port}/task/data'
+        return f'ws://{self._launch.address}/task/data'
 
     def _on_channel_signal(self, state: Optional[str], channel_id: Optional[str]) -> None:
         """React to a ``>CHN*`` line from the task.
@@ -1622,8 +1716,8 @@ class Task(DAPBase):
         )
         async def _connect_data_client():
             # Don't retry if subprocess has died
-            if self._engine_process and self._engine_process.returncode is not None:
-                raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
+            if self._launch and self._launch.returncode is not None:
+                raise RuntimeError(f'Subprocess exited with code {self._launch.returncode}')
             headers = {'Authorization': f'Bearer {self._data_token}', 'X-Channel-Id': channel_id}
             transport = TransportWebSocket(uri, headers=headers)
             name = f'DATA-{self.id}'
@@ -1700,8 +1794,9 @@ class Task(DAPBase):
         # No connection yet, or the signalled dial failed: dial here
         async with self._data_lock:
             if not self._data_client:
-                # No token: the run never started or was torn down while we waited for the lock
-                if not self._data_token:
+                # No token or no launch: the run never started, the runtime is still
+                # starting it, or it was torn down while we waited for the lock
+                if not self._data_token or self._launch is None:
                     raise RuntimeError('Task is not running, cannot open the data channel')
                 self._data_client = await self._dial()
                 self._data_connected.set()
@@ -1744,14 +1839,15 @@ class Task(DAPBase):
         return response
 
     async def _process_exit_code(self) -> Optional[int]:
-        """The subprocess exit code, or None if it could not be reaped (see below).
+        """The task's exit code, or None if it could not be reaped (see below).
 
         _terminated() runs when the task's output closes, which can come a
         moment before the process is reaped. Waiting briefly means the code is
         known when it is recorded; _terminated() runs only once, so a code that
-        is unknown then is never recorded.
+        is unknown then is never recorded. The runtime supplies the code: the
+        process's own for a subprocess, ``docker wait``'s for a container.
         """
-        engine = self._engine_process
+        engine = self._launch
         if not engine:
             return 1
         if engine.returncode is None:
@@ -1901,28 +1997,17 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up metrics: {e}')
 
         try:
-            # Clean up temporary files
-            if self._tmpfile:
-                try:
-                    os.remove(self._tmpfile)
-                    self.debug_message('Temporary file removed')
-                except OSError as e:
-                    self.debug_message(f'Could not remove temporary file: {self._tmpfile} - {e}')
-                self._tmpfile = None
+            # Give back what the launch holds: the task file and port, or the container
+            if self._launch:
+                await self._launch.cleanup()
+                self.debug_message('Launch resources released')
         except Exception as e:
-            self.debug_message(f'Error cleaning up temporary file: {e}')
-
-        try:
-            # Release ports
-            if self._data_port:
-                self._server.release_port(self._data_port)
-                self.debug_message(f'Data port {self._data_port} released')
-                self._data_port = None
-        except Exception as e:
-            self.debug_message(f'Error cleaning up data port: {e}')
+            self.debug_message(f'Error releasing launch resources: {e}')
 
         # The token dies with the run; a restart mints a new one
         self._data_token = None
+        # So does the run's hosted models pass
+        await self._drop_model_pass()
 
         try:
             # Cancel status update task
@@ -1946,7 +2031,8 @@ class Task(DAPBase):
         try:
             # Clean up attached debugger
             if self._debugger:
-                await self._debugger.send_event('terminated', id=self.id)
+                if _authority_gate_ok(self._debugger):
+                    await self._debugger.send_event('terminated', id=self.id)
                 await self._debugger._transport.disconnect()
 
                 self._debugger = None
@@ -2313,7 +2399,7 @@ class Task(DAPBase):
         # Route debug events to debugger
         if type & EVENT_TYPE.DEBUGGER:
             # If we have an attach debugger
-            if self._debugger is not None:
+            if self._debugger is not None and _authority_gate_ok(self._debugger):
                 try:
                     event = message.get('event', '')
                     body = message.get('body', {})
@@ -3028,16 +3114,14 @@ class Task(DAPBase):
             ValueError: If pipeline configuration invalid
             OSError: If subprocess creation or resource allocation fails
         """
-        global copied_python_shim
-
         # Validate not already started
         if self._status.state != TASK_STATE.NONE.value:
             raise RuntimeError('Task has already been started')
 
-        # A restart reuses this Task: drop the previous run's process so a
+        # A restart reuses this Task: drop the previous run's launch so a
         # startup failure before the new one exists is not recorded with the
         # old exit code.
-        self._engine_process = None
+        self._launch = None
 
         try:
             # Make sure some of our start is initialized in case we are restarting
@@ -3053,12 +3137,14 @@ class Task(DAPBase):
             self._stop_reason = None
             self._is_terminating = False
             self._reset_channel_state()
+            # A restart that begins before the last run's cleanup still ends its pass
+            await self._drop_model_pass()
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
 
             # Resolve ${...} placeholders into a local variable — never stored on self
-            # so secrets are not retained in memory beyond the temp file write.
+            # so secrets are not retained in memory beyond the launch.
             resolved = await self._resolve_pipeline(self._pipeline)
 
             # Check it - throws on error
@@ -3077,8 +3163,12 @@ class Task(DAPBase):
             # Decode parameter tokens the subprocess has no key for
             resolved = resolve_parameter_tokens(resolved)
 
-            # Write it out, then let `resolved` go out of scope
-            self._tmpfile = await self._write_task_file(resolved)
+            # Whether an OpenAI node would run with no key, read while the
+            # resolved pipeline still exists. One boolean; the pipeline is not kept.
+            wants_hosted = self._wants_hosted_openai(resolved)
+
+            # Serialize it for the runtime, then let `resolved` go out of scope
+            task_file = self._task_file_bytes(resolved, self._launcher.task_data_path)
 
             # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
             try:
@@ -3087,65 +3177,14 @@ class Task(DAPBase):
                 raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
             del resolved
 
-            # Setup the first part of the command line args
-            # --autoterm: exit when parent dies (stdin closes)
-            child_args = [CONST_AI_NODE_SCRIPT, self._tmpfile, '--autoterm', '--monitor=app']
-
-            # Configure execution environment
-            if self._is_debugging() and self._get_attach_subprocesses():
-                # VS Code subprocess debugging
-                self._debug_subprocess = False
-
-                execdir = os.path.dirname(sys.executable)
-                _, ext = os.path.splitext(sys.executable)
-                execpython = os.path.join(execdir, f'python{ext}')
-                execengine = sys.executable
-
-                if not copied_python_shim:
-                    should_copy = not os.path.exists(execpython)
-                    if not should_copy:
-                        try:
-                            should_copy = self._file_checksum(execengine) != self._file_checksum(execpython)
-                        except Exception:
-                            should_copy = True
-
-                    if should_copy:
-                        try:
-                            shutil.copy2(execengine, execpython)
-                        except Exception as e:
-                            if not os.path.exists(execpython):
-                                raise RuntimeError(f"Failed to create debug shim '{execpython}': {e}")
-
-                    copied_python_shim = True
-
-                exec_path = execpython
-            else:
-                # Production environment
-                self._debug_subprocess = True
-                exec_path = sys.executable
+            # VS Code subprocess debugging goes through the python shim (subprocess runtime)
+            debug_attach = self._is_debugging() and self._get_attach_subprocesses()
+            self._debug_subprocess = not debug_attach
 
             # Configure data communication; a fresh channel token per start, and
             # only its hash goes on argv — the token itself stays here
-            self._data_port = self._server.assign_port()
             self._data_token = secrets.token_urlsafe(32)
             token_sha256 = hashlib.sha256(self._data_token.encode('utf-8')).hexdigest()
-            child_args.extend(
-                [
-                    f'--data_port={self._data_port}',
-                    '--data_host=127.0.0.1',
-                    f'--data_token_sha256={token_sha256}',
-                ]
-            )
-            # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
-            if _is_saas_engine():
-                child_args.append(CONST_HOSTED_CHILD_FLAG)
-            if self._shares_host():
-                child_args.append(CONST_SHARED_HOST_CHILD_FLAG)
-
-            # Pass model server address if configured
-            modelserver = self._server._config.get('modelserver')
-            if modelserver:
-                child_args.append(f'--modelserver={modelserver}')
 
             def _user_args():
                 """A pipeline's own arguments, a quoted string split as a shell would split it."""
@@ -3156,6 +3195,8 @@ class Task(DAPBase):
                         self.debug_message(f'Failed to parse engine arg {arg!r}: {e}, using as-is')
                         yield arg
 
+            # The end of the command line; the runtime puts its own part in front
+            child_args: List[str] = []
             for arg in _user_args():
                 # Crash dumps are the operator's call, so a pipeline's own --dumps is skipped
                 if arg.split('=', 1)[0].lower() != '--dumps':
@@ -3176,28 +3217,46 @@ class Task(DAPBase):
             # ROCKETRIDE_* env namespace is caller-influenced by design.
             # _build_subprocess_env additionally scrubs the RocketRide DB
             # broker credentials and injects the resolved per-tenant DSN.
-            subprocess_env = await self._build_subprocess_env(db_access, credential=credential)
+            # A run that wants hosted models gets a new run ID for its pass, kept
+            # on the task before the pass is asked for, so cleanup can revoke it
+            model_run_id = str(uuid.uuid4()) if wants_hosted else ''
+            self._model_run_id = model_run_id or None
+            subprocess_env = await self._build_subprocess_env(
+                db_access, wants_hosted, model_run_id, credential=credential
+            )
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
 
             # A stop that arrived during the awaits above (loading the
-            # placeholder values, writing the task file) found no process to
-            # end: honour it here instead of starting one
+            # placeholder values, building the environment) found no process
+            # to end: honour it here instead of starting one
             if self._stop_requested:
                 raise RuntimeError('the task was stopped before it started')
 
-            self._engine_process = await asyncio.create_subprocess_exec(
-                exec_path,
-                *child_args,
-                cwd=os.path.dirname(exec_path),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=CONST_SUBPROCESS_BUFFER_LIMIT,
-                env=subprocess_env,
+            # The one place the runtimes differ: a child process or a container
+            self._launch = await self._launcher.start(
+                LaunchSpec(
+                    task_id=self.id,
+                    task_file=task_file,
+                    token_sha256=token_sha256,
+                    env=subprocess_env,
+                    args=child_args,
+                    modelserver=self._server._config.get('modelserver'),
+                    # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
+                    hosted=_is_saas_engine(),
+                    shared_host=self._shares_host(),
+                    debug_attach=debug_attach,
+                )
             )
+            del task_file
+
+            # A stop that arrived while the runtime started the task found
+            # nothing to end: end the task here
+            if self._stop_requested:
+                self._launch.kill()
+                raise RuntimeError('the task was stopped before it started')
 
             # Initialize stdio interface
             try:
@@ -3205,7 +3264,7 @@ class Task(DAPBase):
                     parent_task=self,
                     id=self.id,
                     token=self.token,
-                    process=self._engine_process,
+                    process=self._launch.process,
                 )
                 await self._debug_stdio.connect()
 
@@ -3271,12 +3330,17 @@ class Task(DAPBase):
                 self._run_log = None
                 self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
 
+            # The engine may end during the awaits above: its stdout reader
+            # then started _terminated(), which ends the run
+            if self._terminated_called:
+                return
+
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
                 # Resolve billing identity from task control
                 _control = self._server.get_task_control(self.token) if self.token else None
                 self._task_metrics = TaskMetrics(
-                    pid=self._engine_process.pid,
+                    **self._launch.metrics(),
                     task_status=self._status,
                     task_id=self.id,
                     client_id=self.client_id,
@@ -3288,7 +3352,7 @@ class Task(DAPBase):
                     on_update_callback=self._on_metrics_updated,
                 )
                 self._task_metrics.start_monitoring()
-                self.debug_message(f'Started metrics monitoring for PID {self._engine_process.pid}')
+                self.debug_message(f'Started metrics monitoring for PID {self._launch.pid}')
             except Exception as e:
                 self._task_metrics = None
                 self.debug_message(f'Failed to initialize metrics tracking: {e}')
@@ -3342,7 +3406,7 @@ class Task(DAPBase):
             await self._send_status_update()
 
             # And done
-            self.debug_message(f'Task started successfully with PID {self._engine_process.pid}')
+            self.debug_message(f'Task started successfully with PID {self._launch.pid}')
 
         except Exception as e:
             # A start that fails ends the run, restart or not. Left set, the
@@ -3352,6 +3416,12 @@ class Task(DAPBase):
             self._is_restarting = False
             await self._terminated()
             self.debug_message(f'Task startup failed: {e}')
+            raise
+        except asyncio.CancelledError:
+            # A cancelled start skips the handler above. Before the engine is
+            # launched nothing else ends this run's hosted models pass.
+            if self._launch is None:
+                await asyncio.shield(self._drop_model_pass())
             raise
 
     async def stop_task(self, reason: str = 'user') -> None:
@@ -3366,8 +3436,8 @@ class Task(DAPBase):
         try:
             # Prevent race conditions
             async with self._termination_lock:
-                # Get subprocess reference
-                engine = self._engine_process
+                # The running task (a process, or a container behind the docker CLI)
+                engine = self._launch
 
                 # Mark as a requested stop and block new operations.
                 self._stop_requested = True

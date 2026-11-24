@@ -1,0 +1,49 @@
+{
+  "project_id": "3930b843-a483-425e-a6f6-5642c91ca0bc",
+  "source": "tools_1",
+  "components": [
+    {
+      "id": "tools_1",
+      "provider": "tools",
+      "config": {
+        "mode": "Source",
+        "type": "tools"
+      },
+      "input": [],
+      "name": "Redis tools",
+      "ui": {
+        "position": {
+          "x": 40,
+          "y": 120
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "redis_1",
+      "provider": "tool_redis",
+      "config": {
+        "key_prefix": "rr:demo:",
+        "allow_writes": false
+      },
+      "input": [],
+      "control": [
+        {
+          "classType": "tool",
+          "from": "tools_1"
+        }
+      ],
+      "name": "Redis",
+      "ui": {
+        "position": {
+          "x": 330,
+          "y": 120
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "version": 1
+}

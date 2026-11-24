@@ -1,7 +1,9 @@
 """
 Tests for secure temporary file handling in task engine.
 
-Validates that _write_task_file creates files with:
+The subprocess runtime writes the task file: ``Task._task_file_bytes``
+serializes it and ``launcher.subprocess.write_task_file`` puts it on disk.
+Validates that the file it creates has:
 - Restrictive permissions (0o600, owner-only read/write)
 - Unpredictable filenames (not based solely on task ID)
 - Exclusive creation (O_EXCL via mkstemp, preventing symlink attacks)
@@ -16,14 +18,15 @@ from unittest.mock import MagicMock
 
 
 class TestWriteTaskFileSecurity(unittest.TestCase):
-    """Security-focused tests for _write_task_file."""
+    """Security-focused tests for the subprocess runtime's task file."""
 
     def _make_task_engine(self):
         """
-        Create a minimal mock of Task that has enough structure
-        to call _write_task_file directly.
+        Create a minimal mock of Task whose ``_write_task_file`` writes the task
+        file the way the subprocess runtime does.
         """
-        # Import the actual method so we test real code, not a mock
+        # Import the actual code so we test real code, not a mock
+        from ai.modules.task.launcher.subprocess import write_task_file
         from ai.modules.task.task_engine import Task
 
         mock = MagicMock(spec=Task)
@@ -35,8 +38,14 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
                 'type': 'pipeline',
             }
         )
-        # Bind the real method to our mock
-        mock._write_task_file = Task._write_task_file.__get__(mock, Task)
+        # Bind the real serializer to our mock and write with the real writer
+        task_file_bytes = Task._task_file_bytes.__get__(mock, Task)
+
+        async def _write_task_file(pipeline):
+            """Serialize and write the task file as start_task and the subprocess runtime do."""
+            return await write_task_file(mock.id, task_file_bytes(pipeline, '/data'))
+
+        mock._write_task_file = _write_task_file
         return mock
 
     @unittest.skipIf(os.name == 'nt', 'POSIX file permissions not available on Windows')

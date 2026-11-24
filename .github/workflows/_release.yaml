@@ -108,6 +108,10 @@ jobs:
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
         run: find release-assets -type f | sort
 
+      - name: Check the node archive
+        if: matrix.type == 'server' && (inputs.prerelease || steps.tag_check.outputs.exists == 'false')
+        uses: ./.github/actions/check-node-archive
+
       # --- GPG-sign server tarballs/zips ---
       #
       # Produces detached ASCII-armored signatures (.asc) attached to the
@@ -170,6 +174,10 @@ jobs:
             echo "::error::No server archives (.tar.gz/.zip) found in release-assets/ to sign"
             ls -la release-assets/ || true
             exit 1
+          fi
+          # And the node index: it holds the digest of each node in the node archive
+          if [ -f release-assets/index.json ]; then
+            files+=(release-assets/index.json)
           fi
           for f in "${files[@]}"; do
             echo "$GPG_SIGNING_PASSPHRASE" | gpg --batch --yes \

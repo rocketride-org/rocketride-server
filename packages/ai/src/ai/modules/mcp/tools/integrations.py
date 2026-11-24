@@ -27,7 +27,10 @@ async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
             return _bad(f'Unknown integration: {name}', 'call list_integrations for valid names')
 
         env_keys = await credentials_mod.fetch_env_keys(client)
-        state = credentials_mod.evaluate(spec, env_keys)
+        hosted_models = (
+            await credentials_mod.fetch_hosted_models(client) if name in credentials_mod.HOSTED_INTEGRATIONS else False
+        )
+        state = credentials_mod.evaluate(spec, env_keys, hosted_models)
         result = {
             'ok': True,
             'name': spec.name,
@@ -55,19 +58,22 @@ async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
     # an integration nobody here can use is noise, not a readiness signal.
     relevant = {n: catalog[n] for n in definitions if n in catalog}
     env_keys = await credentials_mod.fetch_env_keys(client) if relevant else None
+    has_hosted = any(n in credentials_mod.HOSTED_INTEGRATIONS for n in relevant)
+    hosted_models = await credentials_mod.fetch_hosted_models(client) if has_hosted else False
 
     integrations = []
     for n in sorted(relevant):
         spec = relevant[n]
-        state = credentials_mod.evaluate(spec, env_keys)
-        integrations.append(
-            {
-                'name': spec.name,
-                'title': spec.title,
-                'status': state['status'],
-                'missing_count': len(state['missing']),
-            }
-        )
+        state = credentials_mod.evaluate(spec, env_keys, hosted_models)
+        row = {
+            'name': spec.name,
+            'title': spec.title,
+            'status': state['status'],
+            'missing_count': len(state['missing']),
+        }
+        if state.get('hosted'):
+            row['hosted'] = True
+        integrations.append(row)
 
     return {
         'ok': True,
