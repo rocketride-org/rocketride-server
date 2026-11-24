@@ -158,7 +158,8 @@ so `tool_filesystem` and fetch URLs do not work in that run. Keys the pipeline n
 with `${ROCKETRIDE_*}` still resolve.
 
 A run gets, when it is launched, the version bound to the caller's own rung,
-else a team's, and keeps it until it ends. The catalogue and validation show the
+else a team's, and keeps it until it ends; a scheduled `@me` run reaches the
+nodes published to its owner and to the team it bills, not their other teams. The catalogue and validation show the
 node only to callers it is published to; a caller who cannot run it gets a
 `CommandException` with `NODE_NOT_ENTITLED`, or `NODE_NOT_FOUND` when no one in
 the org uploaded it. One server runs one version of a node at a time: while a run

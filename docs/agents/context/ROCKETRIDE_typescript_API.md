@@ -784,7 +784,7 @@ Deploy an object as the next immutable registry version. Returns `{ artifact, de
 
 - `options.kind?: 'pipe' | 'app' | 'node'` — default `'pipe'`
 - `options.pipeline?: PipelineConfig & { name: string }` — the pipeline definition (kind `'pipe'`; `name` is REQUIRED — it renders on every deploy surface forever)
-- `options.data?: Uint8Array` — the source zip bytes (kind `'app'`; the server owns the build and never trusts client-produced binaries)
+- `options.data?: Uint8Array` — the source zip bytes (kind `'app'`; the server owns the build and never trusts client-produced binaries), or one `.rrnode` (kind `'node'`: a zip of one Python node folder named `<developer>__<name>`, landing as a private version that `client.call('rrext_deploy_node', { nodeId, subcommand: 'publish', version, target })` publishes to `@me` or a team; only on a server started with `RR_NODE_RAIL_ENABLED=1`)
 - `options.metadata?: Record<string, unknown>` — optional metadata (e.g. projectId provenance, `appRoot` for workspace-relative app zips)
 - `options.comment?: string` — "what changed" note kept in the registry
 - `options.deployTo?: string` — team id to deploy the new version to immediately (one-step add+deploy; pipes only)
