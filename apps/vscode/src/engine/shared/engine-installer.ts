@@ -38,7 +38,7 @@ import * as lockfile from 'proper-lockfile';
 import { execFile, execFileSync } from 'child_process';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
-import { commitStagedRelease, fetchNodeArchive, missingNodeArchive, nodeArchiveOf } from './node-archive';
+import { commitStagedRelease, downloadThenRename, missingNodeArchive, nodeArchiveOf, renameRetrying } from './node-archive';
 
 // =============================================================================
 // TYPES
@@ -428,7 +428,12 @@ export class EngineInstaller {
 		const archive = missingNodeArchive(this.engineDir, this.nodesDir());
 		if (!archive) return;
 
-		await fetchNodeArchive(this.nodesDir(), archive, (staging) => this.downloadNodeArchive(release, archive, staging, progress, token, githubToken));
+		const nodesDir = this.nodesDir();
+		fs.mkdirSync(nodesDir, { recursive: true });
+		// Renamed into place once whole, so an archive that is there is complete
+		await downloadThenRename(path.join(nodesDir, archive), path.join(nodesDir, `${archive}.download`), (staging) =>
+			this.downloadNodeArchive(release, archive, staging, progress, token, githubToken)
+		);
 	}
 
 	/** Downloads the release's node archive to dest. */
@@ -770,7 +775,7 @@ export class EngineInstaller {
 				}
 			}
 
-			fs.renameSync(tmpDownloadPath, destPath);
+			await renameRetrying(tmpDownloadPath, destPath);
 		} catch (err) {
 			try {
 				file.close();

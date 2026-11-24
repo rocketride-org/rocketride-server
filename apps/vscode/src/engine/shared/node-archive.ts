@@ -55,23 +55,17 @@ export async function renameRetrying(src: string, dest: string, delayMs = 500): 
 }
 
 /**
- * Fetches a node archive into nodesDir: written under a staging name and renamed into place
- * once whole, so an archive that is there is complete. The staging file never stays behind.
- *
- * @param nodesDir - The nodes/ folder beside the engine directory.
- * @param archive - The archive's file name.
- * @param download - Writes the archive to the path it is given.
- * @param delayMs - The pause between tries of a rename Windows refuses.
+ * Downloads into staging, then renames it to dest with renameRetrying, so a file Windows
+ * holds right after its download still lands; staging never outlives the call.
  */
-export async function fetchNodeArchive(nodesDir: string, archive: string, download: (dest: string) => Promise<void>, delayMs = 500): Promise<void> {
-	fs.mkdirSync(nodesDir, { recursive: true });
-	const staging = path.join(nodesDir, `${archive}.download`);
+export async function downloadThenRename(dest: string, staging: string, download: (staging: string) => Promise<void>): Promise<void> {
 	try {
 		await download(staging);
-		// Retried as in a fresh install: a scanner may still hold the file just written
-		await renameRetrying(staging, path.join(nodesDir, archive), delayMs);
+		await renameRetrying(staging, dest);
 	} finally {
-		fs.rmSync(staging, { force: true });
+		// Async with retries, as in the installer; a cleanup failure must not hide the download's own error
+		// recursive: Node retries only a recursive removal
+		await fs.promises.rm(staging, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 }).catch(() => undefined);
 	}
 }
 
