@@ -21,7 +21,9 @@ is not offered (see its entry). This page is the full reference; the
   `BadRequest` (bad or missing arguments), `Timeout` (one engine call ran past
   its budget — the hint says how to recover), `NotFound`/`TraceExpired` (log
   tools), `Unavailable` (a local-engine-only tool called on a deployed engine),
-  `UnknownTool`. Hard failures (lost engine connection, auth) surface
+  `UnknownTool`, `RateLimited` (the account reached its limit of tool calls a
+  minute; the call did not run, and `retry_after` gives the seconds to wait).
+  Hard failures (lost engine connection, auth) surface
   as MCP protocol errors with the original message preserved.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,

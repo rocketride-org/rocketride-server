@@ -13,6 +13,8 @@ from typing import Any, Optional
 
 CALLER_AUTH: ContextVar[Optional[str]] = ContextVar('mcp_caller_auth', default=None)
 REQUEST_CLIENTS: ContextVar[Optional[list]] = ContextVar('mcp_request_clients', default=None)
+# The rate-limit key of the signed-in account (ratelimit.account_key), or None.
+CALLER_KEY: ContextVar[Optional[str]] = ContextVar('mcp_caller_key', default=None)
 
 
 def credential_from_scope(scope: Any) -> Optional[str]:

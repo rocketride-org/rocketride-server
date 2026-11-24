@@ -45,6 +45,39 @@ async def test_call_tool_dispatches_to_registered_handler(monkeypatch, fake_engi
 
 
 @pytest.mark.asyncio
+async def test_call_tool_over_the_account_limit_returns_rate_limited_without_calling_the_handler(
+    monkeypatch, fake_engine
+):
+    import ai.modules.mcp.handlers as handlers_mod
+    from ai.modules.mcp import identity
+    from ai.modules.mcp.ratelimit import SlidingWindow
+
+    calls = []
+
+    def _register_all(registry):
+        @registry.register('dummy_tool', 'A dummy tool', _dummy_schema())
+        async def _handler(client, tasks, args):
+            calls.append(args)
+            return {'ok': True}
+
+    monkeypatch.setattr(handlers_mod.tools_pkg, 'register_all', _register_all)
+    server = handlers_mod.build_mcp_server(lambda: fake_engine, call_limiter=SlidingWindow(1))
+    token = identity.CALLER_KEY.set('user:u1')
+    try:
+        async with Client(server) as client:
+            allowed = await client.call_tool('dummy_tool', {})
+            refused = await client.call_tool('dummy_tool', {})
+    finally:
+        identity.CALLER_KEY.reset(token)
+
+    assert allowed.is_error is False
+    assert len(calls) == 1
+    assert refused.is_error is True
+    assert refused.structured_content['error_type'] == 'RateLimited'
+    assert refused.structured_content['message'].startswith('This account reached its limit of 1 tool call a minute')
+
+
+@pytest.mark.asyncio
 async def test_call_tool_unknown_name_returns_error_result_not_crash(fake_engine):
     import ai.modules.mcp.handlers as handlers_mod
 

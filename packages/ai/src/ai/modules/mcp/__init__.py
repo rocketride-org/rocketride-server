@@ -18,6 +18,7 @@ from ai.web import oauth_resource, openai_apps_challenge
 
 from . import auth
 from . import identity
+from . import ratelimit
 from .apps import origin_of
 from .engine import make_engine_client
 from .handlers import build_mcp_server
@@ -700,12 +701,22 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     engine_origin = _base_url_from_uri(engine_uri)
     ui_domain = _resolve_ui_domain()
     logger.info('MCP widget domain for ChatGPT: %s', ui_domain or 'not set')
+    # Per-account rate limits, read once here. Every mount shares these two
+    # windows, so one account has one budget per engine process.
+    limits = ratelimit.limits_from_env(local_engine)
+    logger.info(
+        'MCP rate limit per account: %d requests and %d tool calls a minute (0 is no limit)',
+        limits.requests_per_minute,
+        limits.calls_per_minute,
+    )
+    request_window = ratelimit.SlidingWindow(limits.requests_per_minute)
     mcp_server = build_mcp_server(
         engine_factory,
         task_registry,
         engine_origin=engine_origin,
         local_engine=local_engine,
         ui_domain=ui_domain,
+        call_limiter=ratelimit.SlidingWindow(limits.calls_per_minute),
     )
 
     session_manager = StreamableHTTPSessionManager(
@@ -751,6 +762,26 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
         )
         await send({'type': 'http.response.body', 'body': body})
 
+    async def _too_many(send: Any, wait: int) -> None:
+        """Send a 429 with Retry-After for an account over its request limit, in raw ASGI."""
+        message = (
+            f'This account reached its limit of {ratelimit.plural(request_window.limit, "request")} a minute to '
+            f'RocketRide, so this request did not go through. Try again in {ratelimit.plural(wait, "second")}.'
+        )
+        body = json.dumps({'error': message, 'retry_after': wait}).encode()
+        await send(
+            {
+                'type': 'http.response.start',
+                'status': 429,
+                'headers': [
+                    (b'content-type', b'application/json'),
+                    (b'retry-after', str(wait).encode()),
+                    (b'content-length', str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({'type': 'http.response.body', 'body': body})
+
     async def handle_mcp(scope: Any, receive: Any, send: Any) -> None:
         # AuthMiddleware is a BaseHTTPMiddleware, which only wraps 'http'
         # scopes — a websocket routed here by Mount would arrive with no
@@ -766,12 +797,22 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             await _reject(send, denial)
             return
 
+        # Counted only after sign-in, so a refused request builds no engine client.
+        key = ratelimit.account_key(scope)
+        wait = None
+        if key is not None:
+            wait = request_window.check(key)
+        if wait is not None:
+            await _too_many(send, wait)
+            return
+
         # Only past the auth gate does the stashed credential (if any) become
         # the per-request caller identity — presence of mcp_credential alone
         # does not imply an authorized request (auth.authorize stashes it on
         # rejected requests too, but those never reach here).
         caller_auth = identity.credential_from_scope(scope)
         auth_token = identity.CALLER_AUTH.set(caller_auth)
+        key_token = identity.CALLER_KEY.set(key)
         # Bind the bucket to a local name and pass THAT object to .set() --
         # draining `bucket` below (rather than calling REQUEST_CLIENTS.get()
         # again) means a downstream .set() (e.g. a nested/re-entrant call
@@ -804,6 +845,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             finally:
                 identity.REQUEST_CLIENTS.reset(clients_token)
                 identity.CALLER_AUTH.reset(auth_token)
+                identity.CALLER_KEY.reset(key_token)
             if pending is not None:
                 raise pending
 

@@ -13,6 +13,8 @@ result dict.
 
 from typing import Any, Optional
 
+from .ratelimit import plural
+
 HARD_EXC_NAMES = ('ConnectionError', 'AuthenticationException', 'TimeoutError')
 
 
@@ -56,6 +58,31 @@ def _timeout(message: str, hint: str) -> dict:
     (not ``'TimeoutError'``) so it never collides with ``HARD_EXC_NAMES``.
     """
     return {'ok': False, 'error_type': 'Timeout', 'message': message, 'hint': hint}
+
+
+def rate_limited(wait: int, limit: int) -> dict:
+    """Build the result for a tool call refused by the per-account call limit.
+
+    Args:
+        wait: Whole seconds until the account may call again.
+        limit: The account's tool calls per minute.
+    """
+    seconds = plural(wait, 'second')
+    return {
+        'ok': False,
+        'error_type': 'RateLimited',
+        'message': (
+            f'This account reached its limit of {plural(limit, "tool call")} a minute to RocketRide, '
+            f'so this call did not run. Try again in {seconds}.'
+        ),
+        'hint': (
+            f'Make no RocketRide tool calls for at least {seconds}. Every RocketRide tool counts toward this '
+            'limit, and RocketRide refuses any call sent sooner. If you have no way to wait, such as a sleep '
+            'command, make no more RocketRide tool calls this turn, and report that this account can call RocketRide '
+            f'again in {seconds}.'
+        ),
+        'retry_after': wait,
+    }
 
 
 def _extract_dap_failure(exc: Exception) -> Optional[str]:
