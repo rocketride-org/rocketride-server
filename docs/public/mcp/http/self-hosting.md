@@ -32,6 +32,14 @@ keys are refused with 401.
 > whatever `MCP_RESOURCE_IDENTIFIER` says, so setting the variable alone, on a
 > localhost-bound engine behind a TLS proxy, does not move them.
 >
+> With `MCP_RESOURCE_IDENTIFIER` set and `RR_MCP_ENGINE_URI` not, the engine address is
+> the identifier's origin (`wss://<public host>`, no path): each tool call leaves the
+> engine and comes back through your proxy as a WebSocket connection. A proxy that
+> forwards only `/mcp` does not carry it, and tool calls fail. Either forward WebSocket
+> upgrades on that origin to the engine, or also set `RR_MCP_ENGINE_URI` to an address
+> of the engine itself (`ws://127.0.0.1:<port>` for an engine that listens on all
+> interfaces), which keeps tool calls off the proxy.
+>
 > Engine image 3.6.0 and earlier read `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` where
 > this version reads `RR_MCP_ENGINE_URI` and `RR_APIKEY`, and with nothing set they
 > connect tool calls to `wss://api.rocketride.ai` (RocketRide Cloud), not to your

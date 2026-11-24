@@ -92,6 +92,12 @@ export ROCKETRIDE_URI=ws://localhost:5565
 export ROCKETRIDE_APIKEY=rr_local
 ```
 
+These two are the client's. If you later start the engine from the same shell
+it inherits `ROCKETRIDE_APIKEY`, and an engine that has it without its own
+`RR_APIKEY` refuses to start. Give the engine the same key
+(`export RR_APIKEY=rr_local`), or start it from a shell that does not have the
+client's variable.
+
 ```typescript
 import { RocketRideClient } from 'rocketride';
 

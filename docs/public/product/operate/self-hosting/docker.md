@@ -129,14 +129,17 @@ docker rm -f rocketride-engine
 # re-run the docker run command you started it with (see the note below first)
 ```
 
-Upgrading from an image before 4.0: two of the engine's own settings were
-renamed, and the old names no longer work on the container.
+Upgrading from an image before 4.0: the engine's own settings were renamed,
+and the old names no longer work on the container.
 
 - `-e ROCKETRIDE_APIKEY=...` becomes `-e RR_APIKEY=...`. An engine that has
   `ROCKETRIDE_APIKEY` without `RR_APIKEY` refuses to start.
 - `-e ROCKETRIDE_URI=...` becomes `-e RR_MCP_ENGINE_URI=...`, if you set the
   address MCP tool calls use. It is no longer needed for an engine that runs
   its own tool calls.
+- `-e ROCKETRIDE_AUTH=...` becomes `-e RR_MCP_ENGINE_AUTH=...`, if you gave the
+  MCP server a credential of its own for that engine. Without it the MCP
+  server uses the engine's key, `RR_APIKEY`.
 
 Clients keep `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`: those names are theirs.
 
