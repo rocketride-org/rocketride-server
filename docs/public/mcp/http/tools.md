@@ -499,7 +499,7 @@ List per-object trace summaries — one per file or document that traveled the
 pipeline — for the latest run or a specific past run.
 
 - **Parameters:** the key parameters; `n` (integer, optional, default 20,
-  clamped 1–100); `chapterBeginSeq` (integer, optional — address a specific
+  clamped 1–50); `chapterBeginSeq` (integer, optional — address a specific
   past run by its chapter `beginSeq` from `log_chapters`).
 - **Returns:** `{ok, traces, open, context, note?}` — `traces` are finished
   journeys, `open` are still in flight; each summary carries `beginSeq`, the

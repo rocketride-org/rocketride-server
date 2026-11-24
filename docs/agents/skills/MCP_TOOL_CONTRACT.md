@@ -61,7 +61,7 @@ chapters/console but **empty traces**.
 |---|---|
 | `log_chapters` | Run/chapter listing — find the run. |
 | `log_read` | Paged events (≤200 events / 1 MiB per page, cursor to continue). |
-| `log_traces` | Per-object trace summaries (1–100, default 20). |
+| `log_traces` | Per-object trace summaries (1–50, default 20). |
 | `log_trace` | One object's full node/lane trace — the per-node enter/leave evidence. |
 
 ## Capability

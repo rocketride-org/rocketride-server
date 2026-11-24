@@ -183,7 +183,10 @@ async def test_log_traces_unrelated_keyerror_is_not_swallowed(fake_engine):
 
 @pytest.mark.asyncio
 async def test_log_traces_clamps_n_to_valid_range(fake_engine):
-    """Finding 5: n is clamped to 1..100 (default 20)."""
+    """Finding 5: n is clamped to 1..50 (default 20), the most the SDK's get_traces accepts."""
+    from rocketride.log_stream import _MAX_TRACES
+
+    assert logs.LOG_TRACES_MAX_N == _MAX_TRACES
     fake_engine.log_traces_result = {'open': [], 'closed': []}
     await logs._log_traces(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'n': 5000})
     assert fake_engine.log_calls[0]['n'] == logs.LOG_TRACES_MAX_N

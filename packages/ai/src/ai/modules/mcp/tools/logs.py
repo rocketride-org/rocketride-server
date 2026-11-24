@@ -30,7 +30,8 @@ LOG_READ_MAX_BYTES = 1_048_576
 # unbounded concurrency multiplies worst-case memory.
 _LOG_READ_CONCURRENCY = asyncio.Semaphore(4)
 LOG_TRACES_MIN_N = 1
-LOG_TRACES_MAX_N = 100
+# The SDK's get_traces refuses more than 50 (rocketride.log_stream._MAX_TRACES).
+LOG_TRACES_MAX_N = 50
 LOG_TRACES_DEFAULT_N = 20
 
 # Sent in `truncated` when a trace list is cut to fit the result size limit.
