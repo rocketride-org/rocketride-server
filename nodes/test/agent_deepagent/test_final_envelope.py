@@ -313,9 +313,11 @@ def test_unescaping_joins_a_surrogate_pair_into_one_character(dp):
     assert recovered.encode('utf-8').decode('utf-8') == recovered
 
 
-def test_unescaping_leaves_a_lone_high_surrogate_alone(dp):
-    """Only a real pair is joined; a half-written escape keeps the old behaviour."""
-    assert dp.protocol._unescape_json_string_body('\\uD83Dx') == chr(0xD83D) + 'x'
+def test_unescaping_preserves_a_lone_high_surrogate_as_escape_text(dp):
+    """Only a real pair is joined; an unpaired escape stays encodable as text."""
+    recovered = dp.protocol._unescape_json_string_body('\\uD83Dx')
+    assert recovered == '\\uD83Dx'
+    assert recovered.encode('utf-8').decode('utf-8') == recovered
 
 
 def test_unescaping_passes_through_what_it_does_not_recognise(dp):

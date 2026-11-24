@@ -163,7 +163,10 @@ inside another object that parses is not read. A marker inside or after a broken
 marker is unwrapped; a truncated one is retried. A whole tool-call envelope
 after the marker is retried with guidance to omit the marker, and a valid
 `final` followed by pending tool work is also retried instead of delivering
-its claim.
+its claim. A new closed markdown block after a parsed final quotes examples,
+including malformed calls, and does not prevent delivery of that final. Calls
+outside that block, in the final's own fence, or in an unclosed block remain
+pending work. LF, CRLF and bare CR all start a new `FINAL>>>` line.
 
 Without a sentinel the first JSON object in the reply is the envelope, also
 inside a markdown fence, after a line of prose, or inside a JSON array.
@@ -196,7 +199,9 @@ empty reply, a `FINAL>>>` with nothing after it, a reply that opens with a
 JSON object that is neither shape, a tool call or an answer that never parsed,
 and an object that has a tool call's `name` and `args` and no `type`, is not
 quoted, and is the reply's first object or has no word before it on its line
-are not answers: the run fails with `stop_reason: error`. That holds
+are not answers: the run fails with `stop_reason: error`. Explicit code
+expressions (`return`/`yield`, assignments and function arguments) are exempt
+from the first-object rule; prose such as `Calling: {...}` is not. That holds
 for a sub-agent's turn too, and a sub-agent turn that fails this way fails the
 orchestrator's run. The returned error contains the reason and position,
 while excerpts of the model's reply go only into the repair hint. Whitespace
@@ -204,7 +209,9 @@ around a reply is trimmed before parsing. Recovery decodes recognized JSON
 escapes, including `\n`, `\t`, `\b` and `\f`; unknown escapes remain
 literal. A malformed envelope cannot distinguish a literal Windows-path
 backslash from a recognized escape. Use escaped backslashes in JSON or
-`FINAL>>>` for literal paths.
+`FINAL>>>` for literal paths. Recovery joins valid surrogate pairs and keeps
+unpaired surrogates as their original `\uXXXX` escape text, preserving UTF-8
+encodability.
 
 A damaged first key or an early closing brace does not hide a tool-call
 type in the remaining members. The reply is retried as a call, and a claim

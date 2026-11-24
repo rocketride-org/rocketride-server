@@ -91,6 +91,23 @@ ANSWERED = {
         ANSWER_JSON,
     ),
     'final_wrapped_in_an_array': ('[' + json.dumps({'type': 'final', 'content': ANSWER_JSON}) + ']', 1, ANSWER_JSON),
+    'final_with_a_fenced_tool_example': (
+        '{"type":"final","content":"Here is how to call it."}\n```json\n'
+        '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":1}}\n```',
+        1,
+        'Here is how to call it.',
+    ),
+    'code_with_a_first_typeless_dictionary': (
+        'Use this helper:\n\ndef f():\n    return {"name": "x", "args": [1]}',
+        3,
+        'Use this helper:\n\ndef f():\n    return {"name": "x", "args": [1]}',
+    ),
+    'marker_after_a_bare_carriage_return': ('Thinking\rFINAL>>> ok', 1, 'ok'),
+    'recovery_preserves_an_unpaired_unicode_escape': (
+        '{"type":"final","content":"bad \\ud800 "x""}',
+        1,
+        'bad \\ud800 "x"',
+    ),
 }
 
 # Replies with no answer to deliver: (reply, what the error says about it).

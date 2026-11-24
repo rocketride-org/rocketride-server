@@ -131,6 +131,7 @@ also enables parallel `tool_calls`. The shared reply handling works as follows:
   marker, with or without a fence, is retried with instructions to omit the
   marker; it is never presented as the answer. A space, tab, LF, CRLF or bare
   CR separates the marker from its answer, and only one separator is removed.
+  LF, CRLF and bare CR also start a new marker line.
 - A tool call, the first line included, is not replaced by a `FINAL>>>` line
   after it: the line is a claim about work not yet done. The reply is then
   read as its first JSON object, as always: a tool call there runs, and
@@ -144,7 +145,10 @@ also enables parallel `tool_calls`. The shared reply handling works as follows:
   call is no word. A tool call wrapped inside another object that parses is not read.
 - A valid `final` followed by a pending tool call is retried. Its claim is
   withheld until the model sends the call and that work runs. A quoted, valid
-  call example after the final is still ordinary trailing prose.
+  call example after the final is still ordinary trailing prose. A new, closed
+  markdown code block after that final also quotes examples, including malformed
+  calls. An unfenced trailing call, a call in the same fence as the final, or a
+  call in an unclosed block remains pending work; no successful fallback drops it.
 - A `FINAL>>>` line after a `final` envelope that parses is read. With
   nothing after the marker, the envelope's content is the answer. After the
   opening of a broken one that is not quoted, inside its content or after it,
@@ -168,8 +172,10 @@ says what was wrong with the model's last reply without quoting it. An object
 that does not parse is read by the members it carries itself, not the ones
 nested in their values: its `type`, or a tool call's `name` and `args` when it
 has no type. Such an object with no type counts as a tool call only as the
-reply's first object or with no word before it on its line. Elsewhere it is
-data or code, as in an answer that shows a function called with one. A tool
+reply's first object or with no word before it on its line. The first-object
+rule excludes explicit code expressions: a leading `return`/`yield`, an
+assignment, or a function argument. Prose such as `Calling: {...}` still counts
+as a call. Elsewhere it is data or code, as in an answer that shows a function called with one. A tool
 call's `type` right after the brace is still read when its colon is missing or
 miswritten, or its key is in curly quotes or lost its closing quote. A brace that opens no object, as in a block of code, is prose and
 hides nothing after it. With no word before it on its line, a tool call's
@@ -196,6 +202,9 @@ whether a recognized escape was intended as a control character or as part of
 a literal path such as `C:\new\temp`. Literal paths should use escaped
 backslashes in JSON or follow `FINAL>>>`, where backslashes are preserved.
 The parser does not guess path semantics or disable valid JSON escape decoding.
+Recovery joins valid Unicode surrogate pairs and keeps an unpaired surrogate
+as its original `\uXXXX` escape text, so recovery does not create a character
+that cannot be encoded as UTF-8.
 
 ## Upstream docs
 
