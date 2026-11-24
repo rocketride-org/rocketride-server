@@ -1047,3 +1047,34 @@ async def test_socket_close_frees_a_running_pipe_within_the_shutdown_limit(monke
 
     gate(b'stuck')[1].set()
     await asyncio.gather(write, parked, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_socket_close_lets_a_handler_finish_within_the_shutdown_limit(monkeypatch):
+    """A handler still running when the socket closes finishes if it returns within the limit.
+
+    The close signal is sent first, so a new connection can attach while this
+    handler drains. Cancelling it immediately would drop that drain.
+    """
+    conn, _conn_pipe = _make_text_conn(monkeypatch)
+    _ready_to_disconnect(conn, monkeypatch)
+    monkeypatch.setattr(data_conn, 'CONST_DATA_SHUTDOWN_TIMEOUT', 2)
+    conn.channel_id = None
+    conn._server._closing = AsyncMock()
+    release = asyncio.Event()
+
+    async def handler():
+        await release.wait()
+
+    running = asyncio.create_task(handler())
+    conn._transport = SimpleNamespace(_message_tasks={running})
+
+    closing = asyncio.create_task(conn.on_closing())
+    await asyncio.sleep(0.05)
+    assert not closing.done()
+    assert running.cancelling() == 0
+
+    release.set()
+    await asyncio.wait_for(closing, 2)
+    await running
+    assert not running.cancelled()

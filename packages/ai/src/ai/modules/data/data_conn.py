@@ -256,13 +256,44 @@ class DataConn(DAPConn):
 
         The socket has stopped receiving. ``disconnect`` waits up to
         ``CONST_DATA_SHUTDOWN_TIMEOUT`` for a call still running on a pipe,
-        then returns the pipe. Handlers still blocked after that are cancelled
-        so the transport's drain, which has no timeout of its own, can finish.
+        then returns the pipe. The close signal is sent before that wait, so
+        a new connection can serve requests while this one drains. Handlers
+        still running are given the same limit to finish, unless the pipe
+        wait already used it, and then cancelled so the transport's drain,
+        which has no timeout of its own, can finish.
         """
         await self._server._closing(self, self.channel_id)
-        await self.disconnect()
+        timed_out = await self.disconnect()
+        await self._stop_blocked_handlers(already_waited=timed_out)
+
+    async def _stop_blocked_handlers(self, *, already_waited: bool) -> None:
+        """Let in-flight handlers finish, then cancel any that are still blocked.
+
+        A handler that returns within the shutdown limit completes on its own.
+        The drain of this connection must be allowed to end after a newer one
+        has attached, without being cut off first. A handler still blocked
+        after the limit is cancelled.
+
+        Args:
+            already_waited: True when ``disconnect`` already spent the shutdown
+                limit on a stuck pipe call. Handlers are cancelled at once.
+        """
         transport = getattr(self, '_transport', None)
-        for task in list(getattr(transport, '_message_tasks', ())):
+        me = asyncio.current_task()
+        pending = [
+            task for task in list(getattr(transport, '_message_tasks', ())) if task is not me and not task.done()
+        ]
+        if not pending:
+            return
+        if not already_waited:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=CONST_DATA_SHUTDOWN_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                pass
+        for task in pending:
             if not task.done():
                 task.cancel()
 
@@ -420,11 +451,14 @@ class DataConn(DAPConn):
             )
         return self._target
 
-    async def disconnect(self):
+    async def disconnect(self) -> bool:
         """
         Disconnect and clean up all resources.
 
         This method stops all background tasks and cleans up pipes.
+
+        Returns:
+            True when a call was still running on a pipe after the shutdown limit.
         """
         # Release any cProfile session owned by this connection
         profiler.release(f'data:{id(self)}')
@@ -441,6 +475,7 @@ class DataConn(DAPConn):
 
         # Wait for calls still running on them, up to the shutdown limit, so
         # a dropped connection or task shutdown cannot hang on a stuck call
+        timed_out = False
         busy = [conn_pipe for conn_pipe in remaining if conn_pipe.in_flight > 0]
         if busy:
             try:
@@ -449,6 +484,7 @@ class DataConn(DAPConn):
                     timeout=CONST_DATA_SHUTDOWN_TIMEOUT,
                 )
             except asyncio.TimeoutError:
+                timed_out = True
                 still_running = [conn_pipe.pipe_id for conn_pipe in busy if conn_pipe.in_flight > 0]
                 self.debug_message(
                     f'Freeing pipes {still_running} during disconnect while a call still runs on them '
@@ -466,6 +502,8 @@ class DataConn(DAPConn):
             if conn_pipe.semaphore_acquired:
                 self._pipe_sem.release()
                 self.debug_message(f'Released semaphore for remaining pipe {pipe_id}')
+
+        return timed_out
 
     def _determine_lane(self, mime_type: str, pipe_instance: IServiceFilterPipe) -> str:
         """
