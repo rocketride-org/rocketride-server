@@ -16,11 +16,12 @@ returns a refusal that never touches the engine or its arguments.
 Each production tool also passes ``hints=ToolHints(...)``, the three annotation
 booleans plus the reason for them (``tests/test_tool_contract.py`` enforces it
 over ``register_all``), and may pass ``always_load=True`` to ask Claude Code to
-load it upfront under tool search.
+load it upfront under tool search. Display titles come from one table,
+``tools/_titles.py``, which ``register_all`` passes to ``set_titles``.
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, NamedTuple, Optional
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional
 
 import mcp.types as types
 
@@ -54,9 +55,10 @@ class ToolHints:
         """Build the hints for a tool that retrieves or computes and changes nothing."""
         return cls(read_only=True, destructive=False, open_world=False, reason=reason)
 
-    def to_annotations(self) -> types.ToolAnnotations:
-        """Return the wire form: the three booleans, nothing else."""
+    def to_annotations(self, title: Optional[str] = None) -> types.ToolAnnotations:
+        """Return the wire form: the three booleans, and the display title when there is one."""
         return types.ToolAnnotations(
+            title=title,
             read_only_hint=self.read_only,
             destructive_hint=self.destructive,
             open_world_hint=self.open_world,
@@ -104,6 +106,7 @@ class ToolRegistry:
         """
         self._entries: Dict[str, _ToolEntry] = {}
         self._local_engine = local_engine
+        self._titles: Dict[str, str] = {}
 
     def _offered(self, entry: _ToolEntry) -> bool:
         return self._local_engine or not entry.local_engine_only
@@ -147,6 +150,14 @@ class ToolRegistry:
 
         return _decorator
 
+    def set_titles(self, titles: Mapping[str, str]) -> None:
+        """Use ``titles`` as the display title of each tool, by tool name.
+
+        A tool with no row is listed without a title. A row for a name that is
+        not registered is ignored.
+        """
+        self._titles = dict(titles)
+
     def tools(self) -> List[types.Tool]:
         """Return the registered tools as MCP ``types.Tool`` descriptors."""
         return [self._descriptor(name, entry) for name, entry in self._entries.items() if self._offered(entry)]
@@ -157,11 +168,17 @@ class ToolRegistry:
             meta['ui'] = {'resourceUri': entry.ui_resource_uri}
         if entry.always_load is not None:
             meta[ALWAYS_LOAD_META_KEY] = entry.always_load
+        # Hosts read the title from either field, so it goes in both.
+        title = self._titles.get(name)
+        annotations = None
+        if entry.hints:
+            annotations = entry.hints.to_annotations(title)
         return types.Tool(
             name=name,
+            title=title,
             description=entry.description,
             input_schema=entry.schema,
-            annotations=entry.hints.to_annotations() if entry.hints else None,
+            annotations=annotations,
             meta=meta or None,
         )
 

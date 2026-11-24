@@ -20,10 +20,12 @@ Every `registry.register(...)` in `tools/` passes `hints=ToolHints(...)` with a
 reason, and `packages/ai/tests/ai/modules/mcp/test_tool_contract.py` pins the
 values. A new tool fails that test until it has hints and a row in
 `EXPECTED_HINTS`; add the same row to the Annotations table in
-`docs/public/mcp/http/tools.md`. A hint must cover every input form the tool
-accepts, including optional modes: `validate_pipeline` is a destructive,
-open-world write because of its single-component form, even though the whole
-pipeline form is static.
+`docs/public/mcp/http/tools.md`. It also fails until the tool has a title in
+`TOOL_TITLES` in `tools/_titles.py`, whose docstring gives the rules for one;
+add that row to the Titles table in `tools.md` too. A hint must cover every
+input form the tool accepts, including optional modes: `validate_pipeline` is
+a destructive, open-world write because of its single-component form, even
+though the whole pipeline form is static.
 
 `always_load=True` (`_meta["anthropic/alwaysLoad"]`) is reserved for the core
 workflow tools. Name any other tool in `SERVER_INSTRUCTIONS` in `handlers.py`, so

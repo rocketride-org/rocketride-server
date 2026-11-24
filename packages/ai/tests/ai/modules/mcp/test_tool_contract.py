@@ -6,6 +6,8 @@ reason. A new registration fails ``test_every_tool_sets_all_three_hints_explicit
 until it passes ``hints=`` and adds a row to ``EXPECTED_HINTS``.
 """
 
+import re
+
 import pytest
 from mcp.client import Client
 
@@ -14,6 +16,7 @@ from ai.modules.mcp import handlers
 from ai.modules.mcp.handlers import build_mcp_server
 from ai.modules.mcp.tooling import ToolRegistry
 from ai.modules.mcp.tools import register_all
+from ai.modules.mcp.tools._titles import TOOL_TITLES
 
 from .conftest import EXPECTED_TOOL_NAMES
 
@@ -114,6 +117,28 @@ def test_always_load_is_exactly_the_core_workflow_tools(registry):
 
     assert {tool.name for tool in tools if (tool.meta or {}).get('anthropic/alwaysLoad') is True} == CORE_WORKFLOW_TOOLS
     assert not [tool.name for tool in tools if 'anthropic/maxResultSizeChars' in (tool.meta or {})]
+
+
+def test_every_offered_tool_sends_its_title_in_both_fields(registry):
+    for tool in registry.tools():
+        assert tool.name in TOOL_TITLES, f'{tool.name} has no row in tools/_titles.py'
+        assert tool.title == tool.annotations.title == TOOL_TITLES[tool.name]
+
+
+@pytest.mark.parametrize(('name', 'title'), sorted(TOOL_TITLES.items()))
+def test_title_is_short_sentence_case_and_plain(name, title):
+    first, *rest = title.split(' ')
+
+    assert len(title) <= 40 and not title.endswith('.') and '_' not in title, name
+    assert first == first.capitalize() and all(word == word.lower() for word in rest), name
+    assert not {'rocketride', 'best', 'official'} & set(re.findall('[a-z]+', title.lower())), name
+
+
+def test_titles_are_unique_and_cover_tools_from_open_pull_requests():
+    titles = [title.lower() for title in TOOL_TITLES.values()]
+
+    assert len(set(titles)) == len(titles)
+    assert {'view_pipeline', 'account_status'} <= set(TOOL_TITLES)
 
 
 def test_widget_meta_is_preserved_next_to_other_meta(registry):
