@@ -1204,6 +1204,7 @@ DAPException                      (base; wraps DAP error responses)
 └── RocketRideException           (catch-all for any RocketRide error)
     ├── ConnectionException       (server unreachable, network, connection lost)
     │   └── AuthenticationException   (bad API key / credentials)
+    ├── CommandException          (a command the server refuses; .code; also a RuntimeError)
     ├── PipeException             (data-transfer failures; also a RuntimeError)
     ├── ExecutionException        (pipeline execution failures)
     └── ValidationException       (invalid input / pipeline configuration)
@@ -1214,17 +1215,19 @@ DAPException                      (base; wraps DAP error responses)
 - `connect()` / `login()`: `AuthenticationException` on rejected credentials; transport failures surface as connection errors.
 - `use()`: `ValueError` (neither `pipeline` nor `filepath` given), `FileNotFoundError` (bad `filepath`), `RuntimeError` (server refused to start or returned no token).
 - `send()` / `send_files()` / `chat()` / pipe `open()`/`write()`/`close()`: `PipeException` on transfer failure. `PipeException` also inherits `RuntimeError`, so legacy `except RuntimeError` handlers still catch it.
-- Every other typed API — `terminate()`, `restart()`, `validate()`, `get_services()`, all `fs_*` methods, and the `deploy`, `log`, `account`, `billing`, `database`, dashboard, and app methods — raises **`RuntimeError`** carrying the server's error message when the server signals failure; client-side argument problems raise `ValueError`.
+- Every other typed API — `terminate()`, `restart()`, `validate()`, `get_services()`, `get_server_info()`, all `fs_*` methods, pipe `tool()`, and the `deploy`, `log`, `account`, `billing`, `database`, dashboard, and app methods — raises **`CommandException`** when the server refuses: its message is the server's, and `code` says why when the server sends one (for example `TASK_NOT_REGISTERED`). It is importable from `rocketride` and also inherits `RuntimeError`, so `except RuntimeError` still catches it. Client-side argument problems raise `ValueError`.
 - `ConnectionException`, `ExecutionException`, and `ValidationException` complete the importable hierarchy; current SDK code paths predominantly raise the types listed above.
 
 ```python
-from rocketride import RocketRideException, AuthenticationException
+from rocketride import RocketRideException, AuthenticationException, CommandException
 
 try:
     await client.connect()
     result = await client.use(filepath='pipeline.pipe')
 except AuthenticationException as e:
     print(f'Bad credentials: {e}')
+except CommandException as e:
+    print(f'Refused ({e.code}): {e}')
 except RocketRideException as e:
     print(f'RocketRide error: {e} (raw: {e.dap_result})')
 except RuntimeError as e:

@@ -281,7 +281,8 @@ export class DataPipe {
 	 *                 tool-lane nodes; the first node that owns the tool handles it.
 	 * @param input - Arguments forwarded to the tool function
 	 * @returns The tool's return value (typically a record/object)
-	 * @throws Error if the pipe is not open or no node handles the tool
+	 * @throws Error if the pipe is not open
+	 * @throws CommandException if the server refuses the call, no node handling the tool included (`code` says why, when it sends one)
 	 */
 	async tool<T = any>(tool: string, nodeId = '', input: Record<string, unknown> = {}): Promise<T> {
 		if (!this._opened) {
@@ -302,8 +303,7 @@ export class DataPipe {
 		const response = await this._client.request(request);
 
 		if (this._client.didFail(response)) {
-			const msg = response.message || `Tool "${tool}" invocation failed.`;
-			throw new Error(msg);
+			throw new CommandException({ ...response, message: response.message || `Tool "${tool}" invocation failed.` });
 		}
 
 		return (response.body as any)?.result as T;
@@ -561,6 +561,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param timeout - Optional timeout in ms for the entire operation
 	 * @returns Server info including version and capability tags
 	 * @throws Error if the server is unreachable or does not support probes
+	 * @throws CommandException if the server refuses the probe (`code` says why, when it sends one)
 	 *
 	 * @example
 	 * ```typescript

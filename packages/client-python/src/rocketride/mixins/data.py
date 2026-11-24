@@ -57,7 +57,7 @@ import asyncio
 import mimetypes
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-from ..core import DAPClient, PipeException
+from ..core import CommandException, DAPClient, PipeException
 from ..types import PIPELINE_RESULT, UPLOAD_RESULT
 
 # A just-registered pipeline's per-pipe data listener can occasionally still be
@@ -372,6 +372,7 @@ class DataMixin(DAPClient):
 
             Raises:
                 RuntimeError: If the pipe is not open.
+                CommandException: If the server refuses the call (``code`` says why, when it sends one).
             """
             if not self._opened:
                 raise RuntimeError('Pipe is not open')
@@ -391,8 +392,9 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                msg = response.get('message') or f'Tool "{tool}" invocation failed.'
-                raise RuntimeError(msg)
+                raise CommandException(
+                    {**response, 'message': response.get('message') or f'Tool "{tool}" invocation failed.'}
+                )
 
             body = response.get('body', {})
             return body.get('result')

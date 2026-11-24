@@ -247,6 +247,17 @@ describe('every refused command keeps the server code', () => {
 		expect((await refusedBy(() => refusingClient().fsReadMany(['a.txt']))).message).toBe('refused');
 	});
 
+	it('pipe.tool()', async () => {
+		const client = {
+			buildRequest: (command: string, extra: Record<string, unknown>) => ({ command, ...extra }),
+			request: async (r: { arguments: { subcommand: string } }) => (r.arguments.subcommand === 'open' ? { success: true, body: { pipe_id: 1 } } : refusal),
+			didFail: (r: Record<string, unknown>) => r.success === false,
+		} as unknown as RocketRideClient;
+		const pipe = await new DataPipe(client, 'tk').open();
+
+		expect((await refusedBy(() => pipe.tool('search'))).message).toBe('refused');
+	});
+
 	it('getServerInfo()', async () => {
 		const proto = RocketRideClient.prototype as unknown as Record<string, unknown>;
 		const saved = { attach: proto.attach, request: proto.request, disconnect: proto.disconnect };

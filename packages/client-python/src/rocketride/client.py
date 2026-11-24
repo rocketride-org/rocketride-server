@@ -459,6 +459,7 @@ class RocketRideClient(
 
         Raises:
             RuntimeError: If the server is unreachable or does not support probes.
+            CommandException: If the server refuses the probe (``code`` says why, when it sends one).
 
         Example::
 

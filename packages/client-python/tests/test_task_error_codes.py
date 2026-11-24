@@ -194,15 +194,25 @@ async def test_refused_store_reads_keep_the_code():
             raise AssertionError('the read did not raise')
 
 
-def test_a_refused_store_command_keeps_the_code():
+async def test_a_refused_pipe_tool_call_keeps_the_code():
     from rocketride.core.exceptions import CommandException
 
+    client = _refusing_client(code='TASK_NOT_REGISTERED', message='the task has ended')
+
+    async def request(message_, timeout=None):
+        if message_['arguments']['subcommand'] == 'open':
+            return {'success': True, 'body': {'pipe_id': 1}}
+        return {'success': False, 'message': 'the task has ended', 'code': 'TASK_NOT_REGISTERED'}
+
+    client.request = request
+    pipe = await (await client.pipe('tk')).open()
     try:
-        _refusing_client()._check_response({'success': False, 'message': 'denied', 'code': 'STORE_DENIED'})
+        await pipe.tool(tool='search')
     except CommandException as e:
-        assert e.code == 'STORE_DENIED' and str(e) == 'denied'
+        assert isinstance(e, RuntimeError)
+        assert e.code == 'TASK_NOT_REGISTERED' and str(e) == 'the task has ended'
     else:
-        raise AssertionError('_check_response did not raise')
+        raise AssertionError('pipe.tool() did not raise')
 
 
 async def test_a_refused_server_info_probe_keeps_the_code(monkeypatch):

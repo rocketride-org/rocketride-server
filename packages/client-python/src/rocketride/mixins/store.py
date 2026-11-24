@@ -514,8 +514,3 @@ class StoreMixin(DAPClient):
             raise ValueError(f'{name} must not contain path separators')
         if any(c in StoreMixin._INVALID_PATH_CHARS or ord(c) < 0x20 for c in value):
             raise ValueError(f'{name} contains invalid characters: {value}')
-
-    def _check_response(self, response: Dict[str, Any]) -> None:
-        """Raise CommandException if the response indicates failure."""
-        if self.did_fail(response):
-            raise CommandException({**response, 'message': response.get('message') or 'Unknown storage error'})

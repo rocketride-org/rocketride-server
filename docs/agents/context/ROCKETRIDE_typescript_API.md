@@ -1206,6 +1206,7 @@ DAPException                      // base — wraps any DAP error response (.dap
 └─ RocketRideException            // root of all RocketRide-specific errors
    ├─ ConnectionException         // connect/transport problems, dropped connections
    │  └─ AuthenticationException  // bad API key / credentials
+   ├─ CommandException            // a command the server refuses (.code)
    ├─ PipeException               // data pipe / upload / streaming failures
    ├─ ExecutionException          // pipeline start/run/management failures
    └─ ValidationException         // invalid pipeline configuration
@@ -1217,6 +1218,7 @@ LoginAttemptCancelledError        // extends Error directly — control flow, no
 
 - `AuthenticationException`: thrown by `login()` (and therefore `connect()`) on auth failure. In persist mode the client does **not** retry after an auth failure — fix credentials and reconnect.
 - `ConnectionException`: `attach()`/`connect()` transport failures; also delivered to the `onConnectError` constructor callback (whose argument is typed `ConnectionException`).
+- `CommandException`: a command the server refuses, from `call()` and every method built on it, `terminate()`, `getTaskStatus()`, `ping()`, `setEvents()`, `fsRead()`, `fsReadMany()`, `getServerInfo()` and `DataPipe.tool()`. Its message is the server's, and `code` says why when the server sends one (for example `TASK_NOT_REGISTERED`).
 - `PipeException`: `DataPipe.open()/write()/close()` (and therefore `send()`, `sendFiles()`, `chat()`) on server-reported pipe failures.
 - `LoginAttemptCancelledError`: a `login()`/`connect()` superseded by newer intent (`reason`: `'superseded' | 'logout' | 'detached'`) — treat as control flow, not an error condition.
 
@@ -1228,6 +1230,8 @@ try {
 } catch (err) {
 	if (err instanceof AuthenticationException) {
 		console.error('Bad credentials:', err.message);
+	} else if (err instanceof CommandException) {
+		console.error(`Refused (${err.code}):`, err.message);
 	} else if (err instanceof RocketRideException) {
 		console.error('RocketRide error:', err.message, err.dapResult);
 	} else {

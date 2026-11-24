@@ -158,7 +158,7 @@ from .types.billing import (
 )
 
 # Import the primary client class and its exception, plus the specialised
-# authentication exception for callers that need to distinguish auth failures.
+# exceptions that callers catch by class: failed authentication and refused commands.
 from .client import RocketRideClient, RocketRideException
 from .core.exceptions import AuthenticationException, CommandException
 
