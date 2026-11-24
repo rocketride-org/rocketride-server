@@ -16,7 +16,7 @@ from .. import credentials as credentials_mod
 from .. import result_size
 from ..errors import _bad
 from ..tooling import ToolHints, ToolRegistry
-from ._common import engine_call
+from ._common import PAGED, PAGING_PROPS, engine_call, paging_args
 from ._common import load_pipeline
 
 # One overall budget for describe_pipeline's per-provider lookups: without it a
@@ -25,17 +25,6 @@ from ._common import load_pipeline
 # unresolved when the budget elapses fall back to the pipeline's own metadata.
 DESCRIBE_LOOKUP_BUDGET_SECONDS = 30
 
-
-def _components_note(payload: dict, notes: Dict[str, Any], kept: int, components: list) -> None:
-    notes['components'] = {'returned': kept, 'total': len(components)}
-    notes['hint'] = (
-        f'Only the first {kept:,} of {len(components):,} components fit in one reply, and calling list_components '
-        'again returns the same list. If the user names a component that is not listed, call describe_component '
-        'with that name.'
-    )
-
-
-_COMPONENTS_STEPS = (result_size.rows('components', note=_components_note),)
 # Sent when a service definition fits once its editor layout is left out.
 _LAYOUT_HINT = (
     "The ui blocks, which lay out the visual editor's form, were left out so the rest fits in one reply. The schema "
@@ -54,6 +43,9 @@ _PIPELINE_SCHEMA = {
 
 
 async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
+    offset, limit, err = paging_args(args)
+    if err:
+        return err
     services, err = await engine_call(client.get_services(), 'list_components')
     if err:
         return err
@@ -91,10 +83,12 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
             entry['wiring'] = state['wiring']
         components.append(entry)
 
-    result = {'ok': True, 'components': components}
+    result = {'ok': True, 'components': [], 'total': len(components), 'next_offset': None}
     if skipped:
         result['note'] = f'{skipped} integrations need setup - call list_integrations.'
-    result_size.fit(result, _COMPONENTS_STEPS)
+    result['components'], result['next_offset'] = result_size.take_rows(
+        components, offset, limit, result_size.room(result)
+    )
     return result
 
 
@@ -275,8 +269,8 @@ def register(registry: ToolRegistry) -> None:
     registry.register(
         'list_components',
         'List RocketRide components ready to use now (zero-config plus integrations you have configured). '
-        'Call describe_component for a config schema, list_integrations for integrations needing setup.',
-        {'type': 'object', 'properties': {}},
+        f'Call describe_component for a config schema, list_integrations for integrations needing setup. {PAGED}',
+        {'type': 'object', 'properties': dict(PAGING_PROPS)},
         hints=ToolHints.reads(
             "Reads the engine catalog and the caller's variable names; writes nothing; bounded to this engine "
             'and account.'

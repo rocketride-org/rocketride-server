@@ -326,3 +326,18 @@ def test_shipped_tool_github_still_asks_for_a_token_without_env():
 
     assert result['status'] != 'configured'
     assert result['missing'] == ['ROCKETRIDE_GITHUB_TOKEN']
+
+
+@pytest.mark.asyncio
+async def test_list_integrations_pages_a_long_list(monkeypatch, result_limit):
+    result_limit(1000)
+    names = [f'store_{i:02d}' for i in range(12)]
+    catalog = credentials_mod.catalog_from_dict({n: {'title': 'T' * 40, 'docs': '', 'fields': []} for n in names})
+    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', lambda: catalog)
+    engine = FakeEngineClient(services={'services': {n: {} for n in names}})
+
+    first = await integrations._list_integrations(engine, None, {})
+    rest = await integrations._list_integrations(engine, None, {'offset': first['next_offset']})
+
+    assert [row['name'] for row in first['integrations'] + rest['integrations']] == names
+    assert (first['total'], 0 < first['next_offset'] < 12, rest['next_offset']) == (12, True, None)

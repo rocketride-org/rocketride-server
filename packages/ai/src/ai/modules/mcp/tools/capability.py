@@ -13,11 +13,14 @@ enable/disable/remove act on one team's deployment, addressed by
 (project_id, team_id).
 """
 
+import codecs
 from typing import Any, Dict, Optional
 
+from .. import result_size
 from ..credentials import TEAM_DEPLOY_WARNING, fetch_hosted_models
 from ..errors import _bad
 from ..tooling import ToolHints, ToolRegistry
+from ._common import PAGED, PAGING_PROPS, paging_args, whole_number
 from ._common import engine_call as _engine_call
 from ._common import load_pipeline
 
@@ -30,6 +33,16 @@ _STORE_READ_SCHEMA = {
     'type': 'object',
     'properties': {
         'path': {'type': 'string', 'description': 'Store-relative file path'},
+        'offset': {
+            'type': 'integer',
+            'minimum': 0,
+            'description': 'Byte to start at (default 0): next_offset of the last call',
+        },
+        'max_bytes': {
+            'type': 'integer',
+            'minimum': 4,
+            'description': 'Most bytes to read (default and most: what fits in one result)',
+        },
     },
     'required': ['path'],
 }
@@ -38,8 +51,12 @@ _STORE_LIST_SCHEMA = {
     'type': 'object',
     'properties': {
         'path': {'type': 'string', 'description': "Store-relative directory path (default '' = root)"},
+        **PAGING_PROPS,
     },
 }
+
+# The most bytes the engine returns from one fs_read call.
+_READ_CHUNK_BYTES = 4_194_304
 
 _STORE_STAT_SCHEMA = {
     'type': 'object',
@@ -199,23 +216,110 @@ _MISSING_HINTS = {
 }
 
 
+async def _read_bytes(client, handle: str, offset: int, want: int):
+    """Read ``want`` bytes from ``offset``, fewer if the file ends first."""
+    chunks = []
+    got = 0
+    while got < want:
+        chunk, err = await _engine_call(
+            client.fs_read(handle, offset + got, min(want - got, _READ_CHUNK_BYTES)), 'store_read'
+        )
+        if err:
+            return None, err
+        if not chunk:
+            break
+        chunks.append(chunk)
+        got += len(chunk)
+    return b''.join(chunks), None
+
+
+def _text_page(path: str, data: bytes, offset: int, size: int, at_end: bool) -> dict:
+    """Decode one range of a file as UTF-8 and cut it to fit one result.
+
+    A character cut at the end of the range is left for the next page. Text
+    that escapes to more JSON than fits is halved until it fits, down to one
+    character, so every page that is not the last moves ``next_offset`` on.
+    """
+    if offset and data and data[0] & 0xC0 == 0x80:
+        return _bad(
+            'offset is not at the start of a character',
+            'pass next_offset from the last store_read call, or 0 to read from the start',
+        )
+    try:
+        content = codecs.getincrementaldecoder('utf-8')().decode(data, final=at_end)
+    except UnicodeDecodeError:
+        return _bad(
+            'This file is not UTF-8 text, and store_read reads text files only.',
+            'call store_get_url for a download link to the file',
+        )
+    result = {'ok': True, 'path': path, 'content': content, 'offset': offset, 'next_offset': None, 'size': size}
+    max_chars = result_size.limit()
+    while True:
+        end = offset + len(content.encode('utf-8'))
+        result['content'] = content
+        result['next_offset'] = None
+        if end < size:
+            result['next_offset'] = end
+        if not max_chars or len(content) <= 1 or result_size.size_of(result) <= max_chars:
+            return result
+        content = content[: len(content) // 2]
+
+
 async def _store_read(client, tasks, args: Dict[str, Any]) -> dict:
     path = args.get('path')
     if not path:
         return _bad('path is required', 'pass a store file path (see store_list)')
+    offset = args.get('offset')
+    if offset is None:
+        offset = 0
+    if not whole_number(offset, 0):
+        return _bad('offset must be a whole number of bytes, 0 or more', 'pass next_offset from the last call, or 0')
+    budget = result_size.page_budget()
+    max_bytes = args.get('max_bytes')
+    if max_bytes is None:
+        max_bytes = budget
+    elif not whole_number(max_bytes, 4):
+        return _bad('max_bytes must be a whole number, 4 or more', 'leave max_bytes out to read as much as fits')
+    elif budget is not None:
+        max_bytes = min(max_bytes, budget)
 
-    content, err = await _engine_call(client.fs_read_string(path), 'store_read')
+    opened, err = await _engine_call(client.fs_open(path, 'r'), 'store_read')
     if err:
         return err
-    return {'ok': True, 'path': path, 'content': content}
+    handle, size = opened['handle'], opened['size']
+    want = max(size - offset, 0)
+    if max_bytes is not None:
+        want = min(want, max_bytes)
+    try:
+        data, err = await _read_bytes(client, handle, offset, want)
+    finally:
+        await _engine_call(client.fs_close(handle, 'r'), 'store_read')
+    if err:
+        return err
+    # A read that ends short means the file ended there.
+    at_end = len(data) < want or offset + len(data) >= size
+    return _text_page(path, data, offset, size, at_end)
 
 
 async def _store_list(client, tasks, args: Dict[str, Any]) -> dict:
     path = args.get('path') or ''
+    offset, limit, err = paging_args(args)
+    if err:
+        return err
     listing, err = await _engine_call(client.fs_list_dir(path), 'store_list')
     if err:
         return err
-    return {'ok': True, 'path': path, 'listing': listing}
+    entries = listing.get('entries') or []
+    result = {
+        'ok': True,
+        'path': path,
+        'listing': {**listing, 'entries': []},
+        'total': len(entries),
+        'next_offset': None,
+    }
+    page, result['next_offset'] = result_size.take_rows(entries, offset, limit, result_size.room(result))
+    result['listing']['entries'] = page
+    return result
 
 
 async def _store_stat(client, tasks, args: Dict[str, Any]) -> dict:
@@ -481,14 +585,15 @@ def register(registry: ToolRegistry) -> None:
     """
     registry.register(
         'store_read',
-        'Read a text file from the RocketRide store by its store-relative path.',
+        'Read a text file from the RocketRide store by its store-relative path. Returns as much of the file as '
+        'fits. When next_offset is not null, call again with offset set to it.',
         _STORE_READ_SCHEMA,
         hints=ToolHints.reads("Reads one file from the caller's own account store."),
     )(_store_read)
 
     registry.register(
         'store_list',
-        "List entries under a store-relative directory path (default '' = root).",
+        f"List entries under a store-relative directory path (default '' = root). {PAGED}",
         _STORE_LIST_SCHEMA,
         hints=ToolHints.reads("Lists entries in the caller's own account store."),
     )(_store_list)

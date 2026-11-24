@@ -152,7 +152,7 @@ class _FakeUnderlyingClient:
         self.send_calls = []
         self.terminate_calls = []
         self.send_files_calls = []
-        self.fs_read_string_calls = []
+        self.store_calls = []
         self.fs_list_dir_calls = []
         self.save_template_calls = []
         self.get_template_calls = []
@@ -214,9 +214,16 @@ class _FakeUnderlyingClient:
         self.send_files_calls.append({'files': files, 'token': token})
         return {'uploaded': len(files)}
 
-    async def fs_read_string(self, path: str) -> str:
-        self.fs_read_string_calls.append(path)
-        return 'contents'
+    async def fs_open(self, *args, **kwargs) -> dict:
+        self.store_calls.append(('fs_open', args, kwargs))
+        return {'handle': 'h-1', 'size': 8}
+
+    async def fs_read(self, *args, **kwargs) -> bytes:
+        self.store_calls.append(('fs_read', args, kwargs))
+        return b'contents'
+
+    async def fs_close(self, *args, **kwargs) -> None:
+        self.store_calls.append(('fs_close', args, kwargs))
 
     async def fs_list_dir(self, path: str = '') -> dict:
         self.fs_list_dir_calls.append(path)
@@ -408,13 +415,25 @@ async def test_send_files_passes_files_then_token():
     assert result == {'uploaded': 2}
 
 
-async def test_fs_read_string_calls_sdk_with_path():
+@pytest.mark.parametrize(
+    'method, args, sent, returned',
+    [
+        ('fs_open', ('a.txt',), {'path': 'a.txt', 'mode': 'r'}, {'handle': 'h-1', 'size': 8}),
+        ('fs_read', ('h-1', 8, 4), {'handle': 'h-1', 'offset': 8, 'length': 4}, b'contents'),
+        ('fs_close', ('h-1',), {'handle': 'h-1', 'mode': 'r'}, None),
+    ],
+)
+async def test_ranged_read_seam_calls_the_real_sdk_methods(method, args, sent, returned):
+    """store_read's three calls bind to the real SDK signatures with every argument passed through."""
+    from rocketride.mixins.store import StoreMixin
+
     client, fake = _make_client_with_fake()
 
-    result = await client.fs_read_string('/store/a.txt')
-
-    assert fake.fs_read_string_calls == ['/store/a.txt']
-    assert result == 'contents'
+    assert await getattr(client, method)(*args) == returned
+    [(called, call_args, call_kwargs)] = fake.store_calls
+    bound = inspect.signature(getattr(StoreMixin, called)).bind(None, *call_args, **call_kwargs)
+    bound.apply_defaults()
+    assert (called, {k: v for k, v in bound.arguments.items() if k != 'self'}) == (method, sent)
 
 
 async def test_fs_list_dir_calls_sdk_not_fs_dir():

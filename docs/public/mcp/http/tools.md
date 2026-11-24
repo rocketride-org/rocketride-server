@@ -31,6 +31,14 @@ is not offered (see its entry). This page is the full reference; the
   The entries below say how each tool shortens. Any other result over the limit
   is replaced by `{ok: false, error_type: 'ResultTooLarge', message, hint}`,
   with `isError` set. The run tools always keep `task_token`.
+- **Paging.** `store_read`, `store_list`, `list_components` and
+  `list_integrations` (without `name`) return one page that fits under the
+  size limit, and `next_offset` for the next one. Call again with `offset`
+  set to `next_offset` until it is `null`. A list takes `offset` (rows,
+  default 0) and `limit` (the most rows); `store_read` takes `offset` (bytes,
+  default 0) and `max_bytes`. A list that fits, or a small file, still comes
+  back whole in one call. With the limit off (`MCP_RESULT_MAX_CHARS=0`) only
+  `limit` and `max_bytes` cut a page.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
   `send_files`, `terminate`) get 120 seconds per engine call.
@@ -56,17 +64,17 @@ minus credentialed integrations that are not fully configured (call
 [`list_integrations`](#list_integrations) to see those and how to finish their
 setup).
 
-- **Parameters:** none.
-- **Returns:** `{ok, components: [{name, category, summary, wiring?}], note?}`.
-  `wiring` (a config-path → `${ENV_VAR}` map) appears only for configured
-  credentialed integrations; `note` appears when unconfigured integrations were
-  omitted.
+- **Parameters:** `offset` and `limit` (integers, optional — see
+  [Paging](#how-every-tool-behaves)).
+- **Returns:** `{ok, components: [{name, category, summary, wiring?}], total,
+  next_offset, note?}`. `wiring` (a config-path → `${ENV_VAR}` map) appears
+  only for configured credentialed integrations; `note` appears when
+  unconfigured integrations were omitted. `total` counts every listed
+  component.
 - **Notable:** on an engine that runs `llm_openai` on RocketRide-hosted models
   (the engine reports the `hosted-models:openai` capability), `llm_openai` is
   listed even when you saved no key, with an empty `wiring`: leave `apikey`
   empty. A key you saved still wires as usual.
-- **Size limit:** a list over the limit keeps its leading rows, and
-  `truncated.components` gives `{returned, total}`.
 
 ### describe_component
 
@@ -108,11 +116,13 @@ Report credential setup status for integrations — the discovery counterpart to
 node on the connected engine are listed.
 
 - **Parameters:** `name` (string, optional) — request full field detail for one
-  integration.
+  integration. Without `name`: `offset` and `limit` (integers, optional — see
+  [Paging](#how-every-tool-behaves)).
 - **Returns (bare call):** `{ok, integrations: [{name, title, status,
-  missing_count, hosted?}], note}` with status one of `configured`, `available`
-  (needs setup — no matching variables found), or `unconfirmed` (candidate
-  variables found for you to confirm, or the variable read failed).
+  missing_count, hosted?}], total, next_offset, note}` with status one of
+  `configured`, `available` (needs setup — no matching variables found), or
+  `unconfirmed` (candidate variables found for you to confirm, or the variable
+  read failed).
 - **Returns (with `name`):** `{ok, name, title, fields, caller_variables,
   status, missing, candidates, wiring | setup, hosted?, note?}` — `setup`
   carries the suggested variable names, instructions to relay to the user, and
@@ -316,17 +326,28 @@ account's file store.
 
 ### store_read
 
-Read a text file from the store.
+Read a UTF-8 text file from the store, one page at a time.
 
-- **Parameters:** `path` (string, required).
-- **Returns:** `{ok, path, content}`.
+- **Parameters:** `path` (string, required); `offset` (integer ≥ 0, optional —
+  the byte to start at, default 0); `max_bytes` (integer ≥ 4, optional — the
+  most bytes to read; the default and the most is three quarters of the size
+  limit, 30,000 bytes by default).
+- **Returns:** `{ok, path, content, offset, next_offset, size}`. `size` is the
+  file's size in bytes, and `next_offset` is `null` at the end of the file.
+- **Notable:** a page never ends inside a character. Text that takes more
+  JSON than bytes (quotes, backslashes, non-ASCII) comes back in a shorter
+  page. A file that is not UTF-8 text, or an `offset` inside a character,
+  returns `BadRequest`; use `store_get_url` for binary files.
 
 ### store_list
 
 List the entries under a store directory.
 
-- **Parameters:** `path` (string, optional — defaults to the store root).
-- **Returns:** `{ok, path, listing}`.
+- **Parameters:** `path` (string, optional — defaults to the store root);
+  `offset` and `limit` (integers, optional — see
+  [Paging](#how-every-tool-behaves)).
+- **Returns:** `{ok, path, listing: {entries, count}, total, next_offset}`.
+  `entries` holds this page; `listing.count` and `total` count every entry.
 
 ### store_stat
 

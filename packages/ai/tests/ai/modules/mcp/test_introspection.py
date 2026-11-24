@@ -673,16 +673,22 @@ async def test_validate_pipeline_over_the_size_limit_keeps_the_leading_errors(fa
 
 
 @pytest.mark.asyncio
-async def test_list_components_over_the_size_limit_lists_the_leading_rows(fake_engine, result_limit):
+async def test_list_components_pages_a_large_catalog(fake_engine, result_limit):
     result_limit(1000)
-    fake_engine._services = {'services': {f'node_{i}': {'description': 'd' * 40} for i in range(100)}}
+    fake_engine._services = {'services': {f'node_{i}': {'description': 'd' * 40} for i in range(12)}}
 
-    result = await introspection._list_components(fake_engine, None, {})
+    first = await introspection._list_components(fake_engine, None, {})
+    rest = await introspection._list_components(fake_engine, None, {'offset': first['next_offset']})
+    result_limit(0)
+    whole = await introspection._list_components(fake_engine, None, {})
+    refused = await introspection._list_components(fake_engine, None, {'limit': 0})
 
-    kept = len(result['components'])
-    assert 0 < kept < 100 and len(json.dumps(result)) <= 1000
-    assert result['truncated']['components'] == {'returned': kept, 'total': 100}
-    assert 'describe_component' in result['truncated']['hint']
+    names = [row['name'] for row in first['components'] + rest['components']]
+    assert (names, rest['next_offset'], first['total']) == ([f'node_{i}' for i in range(12)], None, 12)
+    assert len(json.dumps(first)) <= 1000 and len(whole['components']) == 12
+    # The page holds as many rows as fit: one more would not.
+    assert len(json.dumps({**first, 'components': first['components'] + rest['components'][:1]})) > 1000
+    assert refused['error_type'] == 'BadRequest'
 
 
 @pytest.mark.asyncio

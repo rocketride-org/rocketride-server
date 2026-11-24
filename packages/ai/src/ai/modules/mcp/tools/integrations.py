@@ -12,9 +12,10 @@ next steps to the caller instead of a bare "not configured".
 from typing import Any, Dict
 
 from .. import credentials as credentials_mod
+from .. import result_size
 from ..errors import _bad
 from ..tooling import ToolHints, ToolRegistry
-from ._common import engine_call
+from ._common import PAGED, PAGING_PROPS, engine_call, paging_args
 
 
 async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
@@ -50,6 +51,9 @@ async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
         result.update(credentials_mod.describe_state(spec, state))
         return result
 
+    offset, limit, err = paging_args(args)
+    if err:
+        return err
     services, err = await engine_call(client.get_services(), 'list_integrations')
     if err:
         return err
@@ -75,11 +79,17 @@ async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
             row['hosted'] = True
         integrations.append(row)
 
-    return {
+    result = {
         'ok': True,
-        'integrations': integrations,
+        'integrations': [],
+        'total': len(integrations),
+        'next_offset': None,
         'note': 'Call list_integrations with a name for full field detail and setup instructions.',
     }
+    result['integrations'], result['next_offset'] = result_size.take_rows(
+        integrations, offset, limit, result_size.room(result)
+    )
+    return result
 
 
 def register(registry: ToolRegistry) -> None:
@@ -89,11 +99,12 @@ def register(registry: ToolRegistry) -> None:
         'List credentialed integrations and their setup status. '
         'Entries include setup instructions you can relay to the user; unconfirmed entries '
         "list the caller's variable names so you can propose a binding and confirm with the "
-        'user before using it. Pass a name for full field detail.',
+        f'user before using it. Pass a name for full field detail. Without a name: {PAGED}',
         {
             'type': 'object',
             'properties': {
                 'name': {'type': 'string', 'description': 'Integration name for full field detail'},
+                **PAGING_PROPS,
             },
         },
         hints=ToolHints.reads(

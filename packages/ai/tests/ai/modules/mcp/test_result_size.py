@@ -7,7 +7,7 @@ import pytest
 
 from ai.modules.mcp import result_size
 from ai.modules.mcp import tools as tools_pkg
-from ai.modules.mcp.result_size import drop, fit, rows, size_of, text
+from ai.modules.mcp.result_size import drop, fit, page_budget, rows, size_of, take_rows, text
 from ai.modules.mcp.tooling import ToolRegistry
 
 
@@ -92,3 +92,29 @@ def test_the_setting(caplog, raw, expected, warns):
     if warns:
         assert 'MCP_RESULT_MAX_CHARS' in messages[0]
         assert raw not in messages[0]
+
+
+@pytest.mark.parametrize(
+    'offset, limit, budget, expected',
+    [
+        (0, None, None, (20, None)),
+        # Ten rows of 10 characters are 100, but with the separators only 8 fit.
+        (0, None, 100, (8, 8)),
+        (2, 3, None, (3, 5)),
+        (18, None, 100, (2, None)),
+        (25, None, 100, (0, None)),
+    ],
+)
+def test_take_rows(offset, limit, budget, expected):
+    all_rows = [f'{i:08d}' for i in range(20)]
+    page, next_offset = take_rows(all_rows, offset, limit, budget)
+    assert (len(page), next_offset) == expected
+    assert page == all_rows[offset : offset + len(page)]
+
+
+def test_take_rows_always_returns_a_row_and_the_budget_is_three_quarters(result_limit):
+    assert take_rows(['x' * 500, 'y'], 0, None, 100) == (['x' * 500], 1)
+    result_limit(1000)
+    assert page_budget() == 750
+    result_limit(0)
+    assert page_budget() is None

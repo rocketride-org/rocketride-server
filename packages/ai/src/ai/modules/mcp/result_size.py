@@ -8,6 +8,9 @@ the JSON text of each result under one limit, ``MCP_RESULT_MAX_CHARS``:
 - A handler whose result can shrink calls ``fit`` as its last step. ``fit``
   shrinks the keys its steps name, in order, until the whole payload fits, and
   says what it left out in a ``truncated`` key.
+- A list read in pages takes as many rows as fit with ``take_rows``, and a
+  file read in pages reads ``page_budget`` bytes. Both return ``next_offset``
+  for the next page.
 - The dispatcher checks every result last. A result still over the limit is
   replaced by the ``ResultTooLarge`` envelope from ``too_large``.
 
@@ -33,10 +36,6 @@ _DEFAULT_HINT = (
     'to show here.'
 )
 _HINTS = {
-    'store_read': 'Calling store_read again on this file returns this same error. To give the user the whole file, '
-    'call store_get_url on it for a download link.',
-    'store_list': 'Calling store_list again on this path returns this same error. Ask the user for a folder or file '
-    'inside it, then call store_list or store_read on that path.',
     'load_template': 'Calling load_template again returns this same error. To give the user the whole template, call '
     'store_get_url with path .templates/<template_id>.json for a download link.',
     'deploy_list': 'Call deploy_list again with a smaller page_size, then use page for the rest. page_size is 50 when '
@@ -94,6 +93,53 @@ def limit() -> int:
 def size_of(value: Any) -> int:
     """The length of the JSON text the dispatcher sends for ``value``."""
     return len(json.dumps(value, default=str))
+
+
+def page_budget() -> Optional[int]:
+    """How many bytes one page of a file may read, or None when there is no limit.
+
+    Three quarters of the limit. Escaping can still make the text longer than
+    its bytes, so the reader measures what it decoded as well.
+    """
+    if not _max_chars:
+        return None
+    return _max_chars * 3 // 4
+
+
+def room(payload: dict) -> Optional[int]:
+    """The characters left under the limit once ``payload`` is sent, or None when there is no limit.
+
+    A paged list measures its result with an empty page and a null
+    ``next_offset``, and passes this to ``take_rows`` as the budget.
+    """
+    if not _max_chars:
+        return None
+    return _max_chars - size_of(payload)
+
+
+def take_rows(
+    rows: List[Any], offset: int, limit: Optional[int], budget: Optional[int]
+) -> Tuple[List[Any], Optional[int]]:
+    """The longest run of rows from ``offset`` that fits ``budget``, and the offset after it.
+
+    Each row counts as its JSON size plus 2, for the separator after it. At
+    most ``limit`` rows when it is given. Always at least one row while any are
+    left, so every page moves forward. The offset after the run is None when
+    the run reaches the end. A budget of None sets no size bound.
+    """
+    end = len(rows)
+    if limit is not None:
+        end = min(end, offset + limit)
+    stop = min(offset, end)
+    used = 0
+    while stop < end:
+        used += size_of(rows[stop]) + 2
+        if budget is not None and stop > offset and used > budget:
+            break
+        stop += 1
+    if stop >= len(rows):
+        return rows[offset:], None
+    return rows[offset:stop], stop
 
 
 def too_large(tool: Optional[str], size: int) -> dict:
