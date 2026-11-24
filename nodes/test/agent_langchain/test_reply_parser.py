@@ -240,7 +240,7 @@ class TestSentinel:
 
         assert parse(raw) is None
         assert reply._parse_failure_hint(raw).endswith(
-            'Send the SAME tool call again as one valid JSON object: repair the JSON, do not answer in prose.'
+            'Generate the required tool call from the task and tool schema as one valid JSON object; do not answer in prose.'
         )
 
     def test_a_tool_call_after_a_line_of_prose_keeps_its_stacked_final_out_too(self):
@@ -991,7 +991,7 @@ class TestRetryHint:
         """The hint must not talk the model out of the work: no sentinel for a broken call."""
         hint = reply._parse_failure_hint(BROKEN_TOOL_CALL)
 
-        assert 'SAME tool call again' in hint
+        assert 'Generate the required tool call' in hint
         assert 'do not answer in prose' in hint
         assert FINAL_SENTINEL not in hint
 
@@ -1001,7 +1001,7 @@ class TestRetryHint:
 
         assert 'not valid JSON' in hint
         assert hint.endswith(
-            'Send the SAME tool call again as one valid JSON object: repair the JSON, do not answer in prose.'
+            'Generate the required tool call from the task and tool schema as one valid JSON object; do not answer in prose.'
         )
         assert 'Write the answer after' not in hint
 
@@ -1152,7 +1152,7 @@ class TestRetryHint:
         """The envelope's own type decides the hint. A tool call named inside the content asked for a tool call."""
         hint = reply._parse_failure_hint('FINAL>>> {"type":"final","content":{"type":"tool_call","note":"unfinished')
 
-        assert 'SAME tool call' not in hint
+        assert 'Generate the required tool call' not in hint
         assert hint.endswith(f'send the answer as {FINAL_SENTINEL} followed by plain text.')
 
     def test_a_broken_envelope_after_the_marker_is_diagnosed_without_the_marker(self):
@@ -1171,7 +1171,9 @@ class TestRetryHint:
         hint = reply._parse_failure_hint(raw)
 
         assert 'not one of the allowed shapes' in hint
-        assert hint.endswith('Send the tool call again as {"type":"tool_call","name":"server.tool","args":{...}}.')
+        assert hint.endswith(
+            'Generate the required tool call from the task and tool schema as {"type":"tool_call","name":"server.tool","args":{...}}.'
+        )
         assert FINAL_SENTINEL not in hint
 
     def test_a_claim_after_a_tool_call_that_lost_its_type_is_not_asked_for_as_an_answer(self):
@@ -1186,7 +1188,7 @@ class TestRetryHint:
         hint = reply._parse_failure_hint('{"type":"tool_call","name":"","args":{}}')
 
         assert 'not one of the allowed shapes' in hint
-        assert 'Send the tool call again as {"type":"tool_call"' in hint
+        assert 'Generate the required tool call from the task and tool schema as {"type":"tool_call"' in hint
         assert FINAL_SENTINEL not in hint
 
     @pytest.mark.parametrize(
@@ -1259,7 +1261,7 @@ class TestRetryHint:
 
         hint = reply._parse_failure_hint(raw)
 
-        assert 'SAME tool call again' in hint
+        assert 'Generate the required tool call' in hint
         assert FINAL_SENTINEL not in hint
 
 
@@ -1304,7 +1306,7 @@ def test_a_damaged_first_key_or_early_closing_cannot_turn_a_call_into_a_claim(br
     with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts'):
         reply._run_model_turn(ask)
     assert len(feedback) == 3
-    assert 'SAME tool call again' in feedback[1]
+    assert 'Generate the required tool call' in feedback[1]
     repaired = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}'
     ask, feedback = scripted(raw, repaired)
     turn = reply._run_model_turn(ask)
@@ -1467,7 +1469,7 @@ class TestRunModelTurn:
             (
                 'Sure, creating it now.\n'
                 '{"type":"tool\\u005fcall","name":"crm.create","args":{"note":"a "quoted" word"}}',
-                'Send the SAME tool call again',
+                'Generate the required tool call',
                 'not valid JSON',
             ),
             (
@@ -1601,36 +1603,147 @@ class TestRunModelTurn:
 
 
 @pytest.mark.parametrize(
-    'raw',
+    'make_reply, count',
     [
-        # A brace that opens no object costs a look at what follows it, not a walk to the end of the reply.
-        pytest.param('{' * 5000, id='braces_that_open_nothing'),
-        # An object that never closes is read once, not once from every line inside it.
-        pytest.param('{"a":\n' * 9000, id='objects_that_never_close'),
-        # An object that does not parse is refused on its own text, not on the text before it.
-        pytest.param('{"a": x}\n' * 30000, id='objects_that_do_not_parse'),
-        # The reply is searched to its end once, not once from every object with a quote out of place.
-        pytest.param('{"a": "b" c}\n' * 12000, id='objects_with_a_quote_out_of_place'),
-        # The objects inside an object are read with it, not again one by one.
-        pytest.param(('{"a": "' + 'x' * 4000 + '",\n"b":\n') * 400 + '1' + '}' * 400, id='objects_inside_each_other'),
-        # A fence that never closes is not tried against the fence pattern, and a comment is cut off where it starts.
-        pytest.param(FINAL_SENTINEL + ' ```python\n' + ' ' * 60000 + 'x = 1', id='a_fence_that_never_closes'),
-        pytest.param('{"a": 1, ' + '/* ' * 20000 + '\n"b": 2}', id='comments_that_never_close'),
-        # The objects after the closings in a broken `final` are read once each, not once from every closing.
-        pytest.param('{"type":"final","content":"a "b" c' + '"}{"k":["x' * 4000 + '"}', id='objects_after_closings'),
+        pytest.param(lambda n: '{' * n, 5000, id='braces_that_open_nothing'),
+        pytest.param(lambda n: '{"a":\n' * n, 9000, id='objects_that_never_close'),
+        pytest.param(lambda n: '{"a": x}\n' * n, 30000, id='objects_that_do_not_parse'),
+        pytest.param(lambda n: '{"a": "b" c}\n' * n, 12000, id='objects_with_a_quote_out_of_place'),
+        pytest.param(
+            lambda n: ('{"a": "' + 'x' * 4000 + '",\n"b":\n') * n + '1' + '}' * n,
+            400,
+            id='objects_inside_each_other',
+        ),
+        pytest.param(
+            lambda n: FINAL_SENTINEL + ' ```python\n' + ' ' * n + 'x = 1', 60000, id='a_fence_that_never_closes'
+        ),
+        pytest.param(lambda n: '{"a": 1, ' + '/* ' * n + '\n"b": 2}', 20000, id='comments_that_never_close'),
+        pytest.param(
+            lambda n: '{"type":"final","content":"a "b" c' + '"}{"k":["x' * n + '"}',
+            4000,
+            id='objects_after_closings',
+        ),
     ],
 )
-def test_a_long_reply_is_read_in_linear_time(raw):
-    """
-    With its rule taken out, each of these takes from three seconds to over a minute. The bound
-    is wide: each takes a few tenths of a second at most.
-    """
-    import time
+def test_a_long_reply_is_read_in_linear_time(make_reply, count):
+    """Four times the input must not approach quadratic (16x) CPU growth.
 
-    ask, _ = scripted(raw)
-    started = time.monotonic()
-    try:
+    Alternate sizes on the same worker and compare medians. Thread CPU time excludes
+    scheduling delays from other CI workers; a generous 8x ratio allows normal noise.
+    The floor keeps sub-millisecond samples from determining the ratio. Pytest's suite
+    timeout remains the watchdog for a parser that never returns.
+    """
+    from statistics import median
+    from time import thread_time
+
+    replies = [make_reply(count // 4), make_reply(count)]
+    samples = [[], []]
+    for _ in range(3):
+        for index, raw in enumerate(replies):
+            ask, _feedback = scripted(raw)
+            started = thread_time()
+            try:
+                reply._run_model_turn(ask)
+            except ValueError:
+                pass
+            samples[index].append(thread_time() - started)
+    small, large = (median(sample) for sample in samples)
+    assert large < 8 * max(small, 0.001), (small, large)
+
+
+@pytest.mark.parametrize('prefix', ['Sets look like {1, 2}.\n', 'Example: {"x": 1}\n', '{curly} braces.\n'])
+@pytest.mark.parametrize('envelope', [TOOL_CALL, '{"type":"final","content":"done"}'])
+def test_a_preamble_object_does_not_hide_a_standing_envelope(prefix, envelope):
+    ask, feedback = scripted(prefix + envelope)
+    turn = reply._run_model_turn(ask)
+    if 'tool_call' in envelope:
+        assert [(c['name'], c['args']) for c in turn.tool_calls] == [('crm.create', {'name': 'Acme'})]
+    else:
+        assert answer_of(turn) == 'done'
+    assert len(feedback) == 1
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        '{"data":' + TOOL_CALL + '}',
+        '{' + TOOL_CALL + '}',
+        '{\n' + TOOL_CALL + '\n}',
+        'Example: {"x":1}\nPreviously ' + TOOL_CALL + ' returned successfully.',
+        'Example: {"x":1}\n' + BROKEN_TOOL_CALL + '\n' + TOOL_CALL,
+    ],
+)
+def test_finding_a_later_envelope_does_not_execute_nested_quoted_or_blocked_calls(raw):
+    assert parse(raw) is None
+
+
+@pytest.mark.parametrize('body', [TOOL_CALL, '```json\n' + TOOL_CALL + '\n```', PARALLEL_CALLS])
+def test_a_whole_tool_envelope_after_the_marker_is_retried(body):
+    raw = FINAL_SENTINEL + '\n' + body
+    assert parse(raw) is None
+    ask, feedback = scripted(raw)
+    with pytest.raises(ValueError):
         reply._run_model_turn(ask)
-    except ValueError:
-        pass
-    assert time.monotonic() - started < 2.0
+    assert len(feedback) == 3
+    assert 'tool call' in feedback[1]
+    assert 'To give this JSON as your answer' not in feedback[1]
+    ask, feedback = scripted(raw, TOOL_CALL)
+    assert reply._run_model_turn(ask).tool_calls[0]['name'] == 'crm.create'
+    assert len(feedback) == 2
+
+
+def test_the_marker_can_still_introduce_prose_explaining_a_tool_envelope():
+    answer = 'For example, use ' + TOOL_CALL + ' to create a record.'
+    assert answer_of(parse(FINAL_SENTINEL + '\n' + answer)) == answer
+
+
+@pytest.mark.parametrize('call', [TOOL_CALL, BROKEN_TOOL_CALL, PARALLEL_CALLS])
+def test_a_final_followed_by_pending_work_is_retried(call):
+    raw = '{"type":"final","content":"Created."}\n' + call
+    ask, feedback = scripted(raw)
+    with pytest.raises(ValueError):
+        reply._run_model_turn(ask)
+    assert len(feedback) == 3
+    assert 'do not answer in prose' in feedback[1]
+
+
+def test_a_final_can_be_followed_by_a_quoted_call_example():
+    raw = '{"type":"final","content":"Done."}\nFor example, ' + TOOL_CALL + ' creates a record.'
+    assert answer_of(parse(raw)) == 'Done.'
+
+
+@pytest.mark.parametrize('label', ['json', 'json5', 'c++', 'objective-c'])
+def test_fence_labels_with_digits_or_punctuation_allow_final_recovery(label):
+    raw = '```' + label + '\n{"type":"final","content":"a "b" c"}\n```'
+    assert answer_of(parse(raw)) == 'a "b" c'
+    assert parse('FINAL>>>\n' + raw).content == 'a "b" c'
+    assert parse('```' + label + '\n' + CUT_OFF_FINAL) is None
+    assert parse('FINAL>>>\n```' + label + '\n' + TOOL_CALL + '\n```') is None
+
+
+@pytest.mark.parametrize('separator', ['\r', '\r\n', '\n'])
+def test_a_marker_line_separator_is_removed_once(separator):
+    assert answer_of(parse(FINAL_SENTINEL + separator + '  hello')) == '  hello'
+
+
+def test_a_retry_does_not_pretend_the_model_has_its_previous_full_reply():
+    raw = '{"type":"tool_call","name":"crm.create","args":{"note":"' + 'x' * 150 + ' a "b" c"}}'
+    ask, feedback = scripted(raw, TOOL_CALL)
+    assert reply._run_model_turn(ask).tool_calls
+    assert raw not in feedback[1]
+    assert 'from the task and tool schema' in feedback[1]
+    assert 'SAME' not in feedback[1]
+
+
+@pytest.mark.parametrize('body', ['{"type":"final","content":"done"}', '[{"name":"example"}]'])
+def test_an_inline_fence_without_a_language_keeps_its_json(body):
+    raw = 'FINAL>>> ```' + body + '```'
+    expected = 'done' if '"type":"final"' in body else '```' + body + '```'
+    assert answer_of(parse(raw)) == expected
+
+
+def test_a_standing_final_that_cannot_be_unwrapped_is_not_delivered_as_protocol():
+    ask, feedback = scripted('Example: {"x":1} {"type":"final","content":"done"}')
+    with pytest.raises(ValueError):
+        reply._run_model_turn(ask)
+    assert len(feedback) == 3
