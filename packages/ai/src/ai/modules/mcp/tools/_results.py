@@ -261,11 +261,19 @@ TRACE_SUMMARY = record(
 
 LOG_CONTEXT = record({'projectId': ANY, 'source': ANY, 'teamId': ANY}, ['projectId', 'source'])
 
+# Optional keys of a result that was shortened or paged to stay under the server's result size limit.
+TRUNCATED = record(
+    description='Present when part of the result was left out to fit the size limit: what, and how to get it.'
+)
+NEXT_OFFSET = nullable('integer', description='Pass it as offset to get the next page. Null on the last page.')
+_PAGE = {'total': typed('integer', description='Rows in the whole list.'), 'next_offset': NEXT_OFFSET}
+
 _VALIDATION_RESULT = result_schema(
     success(
         {
             'errors': {'description': 'The engine diagnostics, normally a list.'},
             'warnings': ANY,
+            'truncated': TRUNCATED,
         },
         ['errors', 'warnings'],
         title='Validation',
@@ -295,13 +303,15 @@ RESULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                     )
                 ),
                 'note': STRING,
+                'truncated': TRUNCATED,
+                **_PAGE,
             },
             ['components'],
         )
     ),
     'describe_component': result_schema(
         success(
-            {'credentials': CREDENTIAL_STATE},
+            {'credentials': CREDENTIAL_STATE, 'truncated': TRUNCATED},
             description="The component's service definition (title, protocol, classType, lanes, config) is spread "
             'at the top level.',
         )
@@ -327,26 +337,45 @@ RESULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
     # execution
     'run_pipeline': result_schema(
         success(
-            {'task_token': STRING, 'projectId': ANY, 'source': ANY, 'result': ANY},
+            {'task_token': STRING, 'projectId': ANY, 'source': ANY, 'result': ANY, 'truncated': TRUNCATED},
             ['task_token', 'projectId', 'source'],
         )
     ),
     'run_dropper_pipe': result_schema(
         success(
-            {'task_token': STRING, 'upload_url': STRING, 'dropper_url': STRING, 'projectId': ANY, 'source': ANY},
+            {
+                'task_token': STRING,
+                'upload_url': STRING,
+                'dropper_url': STRING,
+                'projectId': ANY,
+                'source': ANY,
+                'truncated': TRUNCATED,
+            },
             ['task_token', 'upload_url', 'dropper_url', 'projectId', 'source'],
         )
     ),
-    'send_data': result_schema(success({'result': ANY}, ['result'])),
+    'send_data': result_schema(success({'result': ANY, 'truncated': TRUNCATED}, ['result'])),
     'terminate': result_schema(
         success({'terminated': {'description': 'The task_token argument, echoed.'}}, ['terminated'])
     ),
-    'send_files': result_schema(success({'result': ANY}, ['result'])),
+    'send_files': result_schema(success({'result': ANY, 'truncated': TRUNCATED}, ['result'])),
     # store and templates
-    'store_read': result_schema(success({'path': ANY, 'content': STRING}, ['path', 'content'])),
+    'store_read': result_schema(
+        success(
+            {
+                'path': ANY,
+                'content': STRING,
+                'offset': typed('integer', description='The byte this page starts at.'),
+                'next_offset': NEXT_OFFSET,
+                'size': typed('integer', description='The file size in bytes.'),
+            },
+            ['path', 'content'],
+        )
+    ),
     'store_list': result_schema(
         success(
-            {'path': ANY, 'listing': record({'entries': array(STORE_ENTRY), 'count': INTEGER})}, ['path', 'listing']
+            {'path': ANY, 'listing': record({'entries': array(STORE_ENTRY), 'count': INTEGER}), **_PAGE},
+            ['path', 'listing'],
         )
     ),
     'store_stat': result_schema(success({'path': ANY, 'stat': STORE_STAT}, ['path', 'stat'])),
@@ -396,6 +425,7 @@ RESULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 'warnings': ANY,
                 'polls': INTEGER,
                 'poll_timed_out': {'const': True},
+                'truncated': TRUNCATED,
             },
             [
                 'task_token',
@@ -426,7 +456,13 @@ RESULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
     ),
     'log_traces': result_schema(
         success(
-            {'traces': array(TRACE_SUMMARY), 'open': array(TRACE_SUMMARY), 'context': LOG_CONTEXT, 'note': STRING},
+            {
+                'traces': array(TRACE_SUMMARY),
+                'open': array(TRACE_SUMMARY),
+                'context': LOG_CONTEXT,
+                'note': STRING,
+                'truncated': TRUNCATED,
+            },
             ['traces', 'open', 'context'],
         )
     ),
@@ -437,6 +473,7 @@ RESULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 'summary': {'oneOf': [TRACE_SUMMARY, {'type': 'null'}]},
                 'events': array(LOG_EVENT),
                 'context': LOG_CONTEXT,
+                'truncated': TRUNCATED,
             },
             ['beginSeq', 'summary', 'events', 'context'],
         )
@@ -470,6 +507,7 @@ RESULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                     )
                 ),
                 'note': STRING,
+                **_PAGE,
             },
             ['integrations', 'note'],
             title='Listing',

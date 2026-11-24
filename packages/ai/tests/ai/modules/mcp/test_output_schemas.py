@@ -73,7 +73,7 @@ async def test_every_error_envelope_matches_every_schema():
 @pytest.mark.parametrize(
     'name, args, key, value',
     [
-        ('store_read', {'path': 'a.txt'}, 'content', 5),
+        ('store_read', {'path': 'foo/bar.txt'}, 'content', 5),
         ('run_pipeline', {'pipeline': PIPE}, 'task_token', 1),
         ('validate_pipeline', {'pipeline': PIPE}, 'ok', 'false'),
         ('monitor', {'task_token': 't', 'timeout': 0}, 'state', 'x'),
