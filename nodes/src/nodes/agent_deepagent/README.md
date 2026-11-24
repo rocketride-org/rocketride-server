@@ -145,7 +145,7 @@ The host LLM is opaque to the driver, so tool calling uses a JSON envelope proto
 
 **Why the answer left JSON.** Arguments are structured data, where JSON earns its keep. An answer is prose, and the JSON form asked the model to escape a whole markdown table into a string value — one missed inner quote and the envelope stopped parsing, so the person read the envelope instead of the answer. After `FINAL>>>` there is nothing left to escape, and the text is delivered exactly as written. The `{"type":"final","content":"..."}` shape is still accepted by the parser for any model that emits it; it is no longer what the preamble asks for.
 
-"Exactly as written" is literal: only the separator between the marker and the answer is removed, which is one newline, or one space on the same line. Whitespace after that belongs to the answer, so `FINAL>>>` followed by an indented line still arrives as a markdown code block. Two things are not delivered as written: whitespace at the very end of the reply is trimmed, and text after the marker that is itself a `{"type":"final"}` envelope is unwrapped to its content.
+"Exactly as written" is literal: only the separator between the marker and the answer is removed, which is one LF, CRLF or CR newline, or one space or tab on the same line. Whitespace after that belongs to the answer, so `FINAL>>>` followed by an indented line still arrives as a markdown code block. Two things are not delivered as written: whitespace at the very end of the reply is trimmed, and text after the marker that is itself a `{"type":"final"}` envelope is unwrapped to its content.
 
 Reply parsing, final-answer recovery and the three-attempt retry loop are
 shared with `agent_langchain` in `ai.common.agent._internal.protocol`. The
@@ -160,7 +160,10 @@ wherever it sits. One that parses with a word before it and a word after it
 on its line is quoted and does not override the sentinel, and one wrapped
 inside another object that parses is not read. A marker inside or after a broken
 `final` envelope is ambiguous and the reply is retried. A `final` envelope kept after the
-marker is unwrapped; a truncated one is retried.
+marker is unwrapped; a truncated one is retried. A whole tool-call envelope
+after the marker is retried with guidance to omit the marker, and a valid
+`final` followed by pending tool work is also retried instead of delivering
+its claim.
 
 Without a sentinel the first JSON object in the reply is the envelope, also
 inside a markdown fence, after a line of prose, or inside a JSON array.
@@ -174,9 +177,21 @@ and closes it; one that was cut off, or is followed by more text, by other
 members (including strings with broken escaping) or by a second envelope, is retried. An answer cut off exactly at an
 unescaped inner `"}` can look complete.
 
-Each retry describes what broke and asks for either a repaired tool call or
+A preamble containing braces or ordinary JSON no longer hides a standalone
+envelope on a later line. Nested objects, quoted examples and template
+wrappers are not newly dispatched; an ambiguous mix with `FINAL>>>` is
+retried. Final recovery accepts fence labels such as `json5`, `c++` and
+`objective-c`. The marker itself must be plain: markdown wrappers such as
+`**FINAL>>>**` are not recognized.
+
+Each retry describes what broke and asks for either a regenerated tool call or
 an answer after `FINAL>>>`. Ordinary prose is delivered after three attempts,
-also when it starts with a brace that opens no object (`{curly} braces`). An
+also when it starts with a brace that opens no object (`{curly} braces`).
+This deliberately retains up to three model calls and their latency and
+token cost. Hints include only an excerpt of the failed reply, so they ask
+the model to generate the call from the task and tool schema. A parsed
+`final` with missing, null, empty or whitespace-only content remains a
+successful answer for compatibility. An
 empty reply, a `FINAL>>>` with nothing after it, a reply that opens with a
 JSON object that is neither shape, a tool call or an answer that never parsed,
 and an object that has a tool call's `name` and `args` and no `type`, is not
@@ -185,7 +200,11 @@ are not answers: the run fails with `stop_reason: error`. That holds
 for a sub-agent's turn too, and a sub-agent turn that fails this way fails the
 orchestrator's run. The returned error contains the reason and position,
 while excerpts of the model's reply go only into the repair hint. Whitespace
-around a reply is trimmed before parsing.
+around a reply is trimmed before parsing. Recovery decodes recognized JSON
+escapes, including `\n`, `\t`, `\b` and `\f`; unknown escapes remain
+literal. A malformed envelope cannot distinguish a literal Windows-path
+backslash from a recognized escape. Use escaped backslashes in JSON or
+`FINAL>>>` for literal paths.
 
 A damaged first key or an early closing brace does not hide a tool-call
 type in the remaining members. The reply is retried as a call, and a claim

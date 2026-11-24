@@ -115,13 +115,22 @@ also enables parallel `tool_calls`. The shared reply handling works as follows:
   where the answer ended cannot be told. One cut-off cannot be told from a
   finished answer and is delivered: a reply that stops exactly after a `"}`
   inside the answer.
+- A valid envelope can follow a preamble containing braces or ordinary JSON.
+  When the first object is not an envelope, a standalone envelope on a later
+  line is read. Nested objects and quoted examples are not dispatched. Replies
+  mixing this fallback with `FINAL>>>` are retried instead of guessing.
 - A `content` that is not a string (a JSON object, array, number or boolean) is
-  delivered as JSON text.
+  delivered as JSON text. For compatibility, a parsed `final` with missing,
+  null, empty or whitespace-only content remains a successful answer; this is
+  distinct from an empty model reply, which is retried.
 - `FINAL>>>` at the start of a line, followed by the answer as plain text, is
   also an answer. Nothing after the marker needs escaping. The prompt does not
   ask for this form; a retry does, when an answer did not parse. When all that
   follows the marker is a `final` envelope, its content is the answer, and one
-  that was cut off there is retried.
+  that was cut off there is retried. A whole tool-call envelope after the
+  marker, with or without a fence, is retried with instructions to omit the
+  marker; it is never presented as the answer. A space, tab, LF, CRLF or bare
+  CR separates the marker from its answer, and only one separator is removed.
 - A tool call, the first line included, is not replaced by a `FINAL>>>` line
   after it: the line is a claim about work not yet done. The reply is then
   read as its first JSON object, as always: a tool call there runs, and
@@ -133,6 +142,9 @@ also enables parallel `tool_calls`. The shared reply handling works as follows:
   after it on its line. It is prose, and a `FINAL>>>` line after it is the
   answer. Punctuation, a brace, a closing, a markup tag or a comment around a
   call is no word. A tool call wrapped inside another object that parses is not read.
+- A valid `final` followed by a pending tool call is retried. Its claim is
+  withheld until the model sends the call and that work runs. A quoted, valid
+  call example after the final is still ordinary trailing prose.
 - A `FINAL>>>` line after a `final` envelope that parses is read. With
   nothing after the marker, the envelope's content is the answer. After the
   opening of a broken one that is not quoted, inside its content or after it,
@@ -142,7 +154,11 @@ A reply that is neither a tool call nor an answer is retried twice, each time
 with a hint that says what was wrong and how to send it: a broken tool call is
 asked for again as a tool call, a broken answer after `FINAL>>>`, and a bare
 JSON object (it may be an answer, or a tool call that lost its `type`) either
-way. After the third reply, prose is delivered as the answer, also when it
+way. Hints include an excerpt, not the entire previous reply, and ask the
+model to generate the required call from the task and tool schema. The
+three-attempt budget is deliberate: a model that keeps replying in prose can
+use three model calls, with their latency and token cost, before the fallback
+accepts its text. After the third reply, prose is delivered as the answer, also when it
 starts with a brace that opens no object (`{curly} braces`) or mentions a
 `type`. An empty reply, a `FINAL>>>` with nothing after it, a reply that opens
 with a JSON object that is neither shape, an envelope that was refused, a
@@ -168,6 +184,18 @@ even when the model intended an example. A standalone `final` with unquoted
 or single-quoted keys is retried, including in a fence or after `FINAL>>>`;
 its raw envelope is not delivered as prose. Whitespace around a reply is
 trimmed before it is read, as it always was.
+
+Fence labels such as `json5`, `c++` and `objective-c` are supported for final
+recovery. The marker itself must be plain `FINAL>>>` at the start of a line;
+markdown wrappers such as `**FINAL>>>**` or backticks are not protocol markers
+and may be delivered as prose after retries.
+
+Recovery decodes recognized JSON escapes, including `\n`, `\t`, `\b` and
+`\f`, while preserving unknown escapes. A malformed envelope does not reveal
+whether a recognized escape was intended as a control character or as part of
+a literal path such as `C:\new\temp`. Literal paths should use escaped
+backslashes in JSON or follow `FINAL>>>`, where backslashes are preserved.
+The parser does not guess path semantics or disable valid JSON escape decoding.
 
 ## Upstream docs
 

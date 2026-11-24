@@ -423,3 +423,49 @@ def test_a_tool_call_runs_and_its_result_reaches_the_next_turn(run):
     assert result.payload['meta']['tool_calls'] == 1
     assert len(result.prompts) == 2
     assert '"stage": "won"' in result.prompts[1]
+
+
+@pytest.mark.parametrize('prefix', ['Sets look like {1, 2}.\n', 'Example: {"x":1}\n'])
+def test_a_tool_call_after_a_preamble_object_runs_once(run, prefix):
+    result = run(
+        prefix + '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}',
+        'FINAL>>> Deal 42 is won.',
+        tools=(GET_DEAL,),
+    )
+    assert result.invocations == [('crm.get_deal', {'deal_id': 42})]
+    assert result.content == 'Deal 42 is won.'
+    assert result.stop_reason is None
+    assert len(result.prompts) == 2
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        'FINAL>>>\n{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}',
+        '{"type":"final","content":"Sent."}\n{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}',
+    ],
+)
+def test_a_misplaced_tool_call_is_retried_then_runs_once(run, raw):
+    result = run(
+        raw,
+        '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}',
+        'FINAL>>> Deal 42 is won.',
+        tools=(GET_DEAL,),
+    )
+    assert result.invocations == [('crm.get_deal', {'deal_id': 42})]
+    assert result.content == 'Deal 42 is won.'
+    assert result.stop_reason is None
+    assert len(result.prompts) == 3
+
+    failed = run(raw, tools=(GET_DEAL,))
+    assert failed.invocations == []
+    assert failed.stop_reason == 'error'
+    assert len(failed.prompts) == 3
+
+
+def test_a_final_after_a_preamble_object_reaches_the_answer_lane(run):
+    result = run('Example: {"x":1}\n{"type":"final","content":"done"}')
+    assert result.content == 'done'
+    assert result.written == ['done']
+    assert result.stop_reason is None
+    assert len(result.prompts) == 1

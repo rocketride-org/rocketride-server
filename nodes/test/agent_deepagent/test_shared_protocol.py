@@ -190,3 +190,31 @@ def test_a_sub_agent_turn_with_no_reply_fails_the_run(run):
     for prompt in result.prompts[1:]:
         assert delegated in prompt
         assert QUESTION not in prompt
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        'FINAL>>>\n' + PARALLEL_CALLS,
+        '{"type":"final","content":"Both sent."}\n' + PARALLEL_CALLS,
+    ],
+)
+def test_misplaced_parallel_calls_retry_before_any_work_runs(run, raw):
+    failed = run(raw, tools=(GET_DEAL,))
+    assert failed.invocations == []
+    assert failed.stop_reason == 'error'
+    assert len(failed.prompts) == 3
+
+    repaired = run(raw, PARALLEL_CALLS, 'FINAL>>> Both checked.', tools=(GET_DEAL,))
+    assert by_deal(repaired.invocations) == BOTH_DEALS
+    assert repaired.content == 'Both checked.'
+    assert repaired.stop_reason is None
+    assert len(repaired.prompts) == 3
+
+
+def test_a_parallel_call_after_a_preamble_object_runs_once(run):
+    result = run('Example: {"x":1}\n' + PARALLEL_CALLS, 'FINAL>>> Both checked.', tools=(GET_DEAL,))
+    assert by_deal(result.invocations) == BOTH_DEALS
+    assert result.content == 'Both checked.'
+    assert result.stop_reason is None
+    assert len(result.prompts) == 2
