@@ -89,7 +89,14 @@ def db_account(monkeypatch):
     asked: List[Dict[str, Any]] = []
 
     async def authorize(identity, request, *, credential=None):
-        asked.append({'task_id': identity['task_id'], 'identity': dict(identity), 'credential': credential})
+        asked.append(
+            {
+                'task_id': identity['task_id'],
+                'identity': dict(identity),
+                'request': dict(request),
+                'credential': credential,
+            }
+        )
         if credential == SCOPED:
             return SimpleNamespace(allowed=False, reason='this key may not reach the org database', owner_id='')
         owner = request.get('team_id') or request.get('user_id') or identity['org_id']
@@ -123,8 +130,14 @@ def engines(monkeypatch):
     return started
 
 
-async def _start_as(ts: TaskServer, pipeline: Dict[str, Any], auth: Any = SESSION, **arguments):
-    """Start (or attach to) a control as user-a over a connection that presents ``auth``."""
+async def _start_as(
+    ts: TaskServer,
+    pipeline: Dict[str, Any],
+    auth: Any = SESSION,
+    caller_env: Optional[Dict[str, str]] = None,
+    **arguments,
+):
+    """Start (or attach to) a control as user-a over a connection that presents ``auth``, with the call's own env."""
     request = {'command': 'execute', 'arguments': {'pipeline': copy.deepcopy(pipeline), **arguments}}
     result = await ts.start_task(
         request,
@@ -134,6 +147,7 @@ async def _start_as(ts: TaskServer, pipeline: Dict[str, Any], auth: Any = SESSIO
         team_id='team-1',
         org_id='org-1',
         developer_id='acme',
+        caller_env=caller_env,
     )
     return ts._task_control[result['token']]
 
@@ -348,6 +362,56 @@ async def test_use_existing_on_a_run_without_databases_asks_nothing(catalog, eng
     reused = await _start_as(ts, _pipeline(instructions=['other']), SCOPED, useExisting=True)
 
     assert reused is running and db_account == []
+
+
+# One spec whose database is named by the call's environment
+_ENV_SPEC = {'scope': 'team', 'target': '${ROCKETRIDE_DB_TEAM}'}
+
+
+@pytest.mark.asyncio
+async def test_the_same_spec_on_another_environments_database_is_asked_about_on_its_own(catalog, engines, db_account):
+    """A spec is compared with its placeholders in place: the same spec can hold another database.
+
+    The answer given for what this call resolved does not cover the running
+    control, whose engine holds the database its own environment named.
+    """
+    ts = _server()
+    running = await _start_as(ts, _db_pipeline(**_ENV_SPEC), SESSION, caller_env={'ROCKETRIDE_DB_TEAM': 'team-1'})
+    assert running.db_approved == {'team:team-1': 'team-1'}
+    del db_account[:]
+
+    again = await _start_as(ts, _db_pipeline(**_ENV_SPEC), SESSION, caller_env={'ROCKETRIDE_DB_TEAM': 'team-9'})
+
+    assert again is running, 'the same spec: the caller gets the control it already has'
+    # What this call resolved, then what the running control holds
+    assert [q['request'].get('team_id') for q in db_account] == ['team-9', 'team-1']
+    assert [q['credential'] for q in db_account] == [SESSION, SESSION]
+    assert running.db_approved == {'team:team-1': 'team-1'}, 'what the engine was handed does not change'
+
+
+@pytest.mark.asyncio
+async def test_a_key_denied_the_running_controls_database_cannot_reach_it_through_another_environment(
+    catalog, engines, monkeypatch
+):
+    """A key that may reach team-9 and not team-1 does not get the control that holds team-1's database."""
+    import ai.account
+
+    async def authorize(identity, request, *, credential=None):
+        if credential == SCOPED and request.get('team_id') == 'team-1':
+            return SimpleNamespace(allowed=False, reason='this key may not reach that team database', owner_id='')
+        return SimpleNamespace(allowed=True, reason='', owner_id=request.get('team_id') or identity['org_id'])
+
+    monkeypatch.setattr(ai.account.account, 'authorize_db_target', authorize, raising=False)
+    ts = _server()
+    running = await _start_as(ts, _db_pipeline(**_ENV_SPEC), SESSION, caller_env={'ROCKETRIDE_DB_TEAM': 'team-1'})
+
+    with pytest.raises(PermissionError) as refused:
+        await _start_as(ts, _db_pipeline(**_ENV_SPEC), SCOPED, caller_env={'ROCKETRIDE_DB_TEAM': 'team-9'})
+
+    message = str(refused.value)
+    assert message.startswith(f'Cannot reuse the running task "{running.id}"')
+    assert 'this key may not reach that team database' in message
+    assert list(ts._task_control.values()) == [running]
 
 
 # =============================================================================

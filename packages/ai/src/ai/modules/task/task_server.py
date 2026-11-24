@@ -3460,6 +3460,17 @@ class TaskServer(DAPBase):
                 and existing.task.engine_key == key
             )
 
+        def _covered(existing: TaskControl) -> bool:
+            """Whether the account's answer for this call (``control.db_approved``) answers for ``existing`` too.
+
+            The same spec is not enough. A spec is compared with its
+            placeholders in place, so a control submitted with another
+            environment is the same spec and can still name other databases
+            than this call resolved. Covered means the same spec AND the same
+            databases, approved for the same owners.
+            """
+            return _same_spec(existing) and existing.db_approved == control.db_approved
+
         # The caller's controls under the same index key (rung, owner,
         # address): on @spec the one with the same configuration ON THE
         # ENGINE OF THIS SHAPE is REUSED (plan 3.4); a finished one is
@@ -3505,10 +3516,13 @@ class TaskServer(DAPBase):
             # started it. The caller's own credential must reach them too, or
             # a restricted key would ride a wider run of the same owner. The
             # account has just answered for the pipeline this caller
-            # submitted (above): that covers a control of the same spec. A
-            # control of another spec (useExisting) is asked about on its
-            # own; a dormant one is asked by its restart below
-            if not _same_spec(existing_control) and not existing_control.dormant:
+            # submitted (above): that covers a control of the same spec whose
+            # databases are the ones just approved (``_covered``). A control
+            # of the same spec that resolved other databases from another
+            # environment, and a control of another spec (useExisting), is
+            # asked about on its own; a dormant one is asked by its restart
+            # below
+            if not _covered(existing_control) and not existing_control.dormant:
                 await self._authorize_reuse(existing_control, credential)
             await self.ensure_engine(existing_control, credential=credential)
             if wait_for_running:
@@ -3572,11 +3586,12 @@ class TaskServer(DAPBase):
             )
 
             # The gate answered with a twin: the caller's control already runs.
-            # A twin taken with useExisting may run another spec than the one
-            # this caller submitted (and was authorized for above), so the
+            # A twin may run another spec than the one this caller submitted
+            # (useExisting), or the same spec on other databases (another
+            # environment): unless the answer given above covers it, the
             # caller's credential is checked against the twin's own databases
             if reused is not None:
-                if not _same_spec(reused):
+                if not _covered(reused):
                     await self._authorize_reuse(reused, credential)
                 if wait_for_running:
                     await reused.task.wait_for_running()
