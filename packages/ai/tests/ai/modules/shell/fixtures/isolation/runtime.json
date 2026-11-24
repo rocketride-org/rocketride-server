@@ -1,0 +1,7 @@
+{
+  "runtime": 1,
+  "guest": "guest-test.js",
+  "protoMin": 1,
+  "protoMax": 1,
+  "capabilitiesSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}
