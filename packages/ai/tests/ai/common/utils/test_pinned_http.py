@@ -407,6 +407,24 @@ def test_abort_ends_a_slow_tls_handshake(default_ca_bundle):
     assert isinstance(outcome, requests.ConnectionError)
 
 
+def test_the_slow_handshake_server_stops_with_a_client_that_never_spoke():
+    """Its teardown ends a worker still waiting for a ClientHello, so no thread outlives the test."""
+    server = tls_test_server.serve_slow_handshake()
+    client = socket.create_connection(('127.0.0.1', server.port), timeout=5)
+    try:
+        # Connected, and silent: the worker is in recv, which no timeout bounds
+        for _ in range(50):
+            if server._trickles:
+                break
+            threading.Event().wait(0.02)
+        assert server._trickles, 'the server never accepted the connection'
+        server.close()
+        assert not any(worker.is_alive() for worker in server._trickles)
+    finally:
+        client.close()
+        server.close()
+
+
 def test_an_abort_while_the_socket_connects_ends_the_request(monkeypatch):
     """abort() after a socket is registered but before its connect returns still ends the request."""
     listener = socket.create_server(('127.0.0.1', 0))
@@ -456,6 +474,7 @@ def test_an_abort_while_tls_takes_over_the_socket_is_not_lost(monkeypatch, defau
             aborter = threading.Thread(target=session.abort, daemon=True)
             aborting = threading.Event()
             handshaking = threading.Event()
+            taken_over = []
             real_shutdown = socket.socket.shutdown
             real_wrap_socket = ssl.SSLContext.wrap_socket
             real_do_handshake = ssl.SSLSocket.do_handshake
@@ -463,7 +482,8 @@ def test_an_abort_while_tls_takes_over_the_socket_is_not_lost(monkeypatch, defau
             def shutdown(sock, how):
                 if threading.current_thread() is aborter:
                     aborting.set()
-                    handshaking.wait(5)  # by now the wrap has detached the raw socket
+                    # By now the wrap has detached the raw socket; whether it had is checked below
+                    taken_over.append(handshaking.wait(5))
                 return real_shutdown(sock, how)
 
             def wrap_socket(context, sock, *args, **kwargs):
@@ -485,6 +505,10 @@ def test_an_abort_while_tls_takes_over_the_socket_is_not_lost(monkeypatch, defau
             assert not aborter.is_alive()
             assert done.wait(3), 'the handshake went on after abort() returned'
             thread.join()
+    # The race was the one meant: the handshake had started, and every shutdown abort() made waited for it.
+    # A request that failed before TLS took the socket over would end with a ConnectionError as well.
+    assert handshaking.is_set(), 'the TLS handshake never started'
+    assert taken_over and all(taken_over), 'abort() shut the socket down before TLS took it over'
     assert isinstance(outcome[0], requests.ConnectionError)
 
 
@@ -544,6 +568,10 @@ def test_abort_after_a_failed_handshake_leaves_other_sockets_alone(monkeypatch, 
         other_server.close()
     assert 'error' not in seen, seen
     assert seen['delivered'] == b'ping'
+    if not seen['reused']:
+        # The fault needs the closed number to go to the next socket. The system decides that, so a run
+        # where it did not has shown nothing about the fault and says so, instead of passing.
+        pytest.skip('the closed descriptor did not go to the next socket in this run')
 
 
 def test_a_session_aborted_before_it_connects_never_connects():

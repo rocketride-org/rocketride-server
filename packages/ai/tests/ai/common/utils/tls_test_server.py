@@ -138,10 +138,26 @@ class SlowHandshakeServer:
             self._trickles.append(trickle)
             trickle.start()
 
+    def _hello(self, conn: socket.socket) -> bytes:
+        """The ClientHello, or nothing once the server stops or the client leaves.
+
+        The wait is bounded like the accept's: a client that connects and
+        never speaks must not hold its worker, and neither a shutdown nor a
+        close from another thread wakes a blocked ``recv`` on every platform.
+        """
+        conn.settimeout(0.1)
+        while not self._stop.is_set():
+            try:
+                return conn.recv(4096)
+            except socket.timeout:
+                continue
+        return b''
+
     def _trickle(self, conn: socket.socket) -> None:
         try:
-            if not conn.recv(4096):  # the ClientHello
+            if not self._hello(conn):
                 return
+            conn.settimeout(None)
             conn.sendall(b'\x16\x03\x03\x40\x00')  # a 16 KB handshake record follows...
             self.stalled.set()
             for _ in range(100):
