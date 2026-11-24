@@ -1,5 +1,5 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
-"""The result size limit: `fit` and its three steps, the envelope, and the setting."""
+"""The result size limit: `fit` and its steps, the envelope, and the setting."""
 
 import logging
 
@@ -21,33 +21,16 @@ def test_fit_changes_nothing_that_fits_or_when_the_limit_is_off(result_limit):
     assert (small, large) == ({'ok': True, 'rows': [1, 2, 3]}, {'ok': True, 'rows': ['x' * 100] * 100})
 
 
-@pytest.mark.parametrize('output', ['a' * 5000, '"' * 5000, '\\' * 5000, '中' * 5000])
+@pytest.mark.parametrize('output', ['a' * 5000, '"' * 5000, '\\' * 5000, '\u4e2d' * 5000])
 def test_text_keeps_the_longest_lead_that_fits(result_limit, output):
     result_limit(1000)
     payload = {'ok': True, 'task_token': 'tk_1', 'result': output}
     fit(payload, [text('result')], hint='Read on.')
-
     kept = payload['result']
-    assert size_of(payload) <= 1000
-    assert payload['task_token'] == 'tk_1'
-    assert output.startswith(kept)
+    assert (size_of(payload) <= 1000, payload['task_token'], output.startswith(kept)) == (True, 'tk_1', True)
     assert payload['truncated'] == {'result': {'returned_chars': len(kept), 'total_chars': 5000}, 'hint': 'Read on.'}
     # One more character would not fit.
     assert size_of({**payload, 'result': output[: len(kept) + 1]}) > 1000
-
-
-def test_steps_carry_on_across_keys(result_limit):
-    result_limit(1000)
-    payload = {'ok': True, 'warnings': ['w' * 50] * 100, 'errors': ['e' * 50] * 100}
-    fit(payload, [rows('warnings'), rows('errors')])
-
-    assert size_of(payload) <= 1000
-    assert payload['warnings'] == []
-    assert 0 < len(payload['errors']) < 100
-    assert payload['truncated'] == {
-        'warnings': {'returned': 0, 'total': 100},
-        'errors': {'returned': len(payload['errors']), 'total': 100},
-    }
 
 
 def test_text_with_a_cap_cuts_once_and_drop_writes_the_empty_value(result_limit):

@@ -324,6 +324,13 @@ async def test_log_read_shortens_a_page_over_the_size_limit(fake_engine, result_
     assert (page['events'], page['nextCursor'], size_of(page) <= 2000) == ([first], 2, True)
     assert 'truncated' not in page
 
+    # A first event that fills the page to the limit exactly is sent whole, not as a stub.
+    probe = {'ok': True, 'events': [_event(1, '')], 'nextCursor': 2, 'truncatedAtSeq': None}
+    first = _event(1, 'a' * (2000 - size_of(probe)))
+    fake_engine.log_read_result = {'events': [first, _event(2, 'b')]}
+    page = await logs._log_read(fake_engine, None, key)
+    assert (page['events'], page['nextCursor'], size_of(page)) == ([first], 2, 2000)
+
     # One event too large to send alone comes back as a stub, and the cursor moves past it.
     result_limit(1000)
     big = {'event': '\U0001f600' * 200, 'body': {'logSeq': 7, 'eventTime': 1.5, 'text': 'x' * 5000}}

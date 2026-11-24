@@ -400,7 +400,6 @@ class FakeEngineClient:
 
 @pytest.fixture
 def result_limit():
-    """Set the result size limit for one test, and put the default back after it."""
     from ai.modules.mcp import result_size
 
     yield result_size.configure

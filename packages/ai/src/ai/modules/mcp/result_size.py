@@ -225,13 +225,17 @@ def fit(payload: dict, steps: Iterable[Step], hint: Optional[str] = None, keep: 
     if not max_chars or size_of(payload) <= max_chars:
         return
 
-    def fits() -> bool:
-        return size_of(payload) <= max_chars
-
     notes: Dict[str, Any] = {}
     if hint:
         notes['hint'] = hint
-    payload['truncated'] = notes
+
+    def fits() -> bool:
+        # Measure what will be sent: an empty note is never sent.
+        payload.pop('truncated', None)
+        if notes:
+            payload['truncated'] = notes
+        return size_of(payload) <= max_chars
+
     for step in steps:
         step(payload, notes, fits)
         if fits():
@@ -241,9 +245,8 @@ def fit(payload: dict, steps: Iterable[Step], hint: Optional[str] = None, keep: 
         dropped = [key for key in payload if key not in kept and key != 'truncated']
         for key in dropped:
             payload[key] = None
-        notes = {'dropped': dropped}
+        notes.clear()
+        notes['dropped'] = dropped
         if hint:
             notes['hint'] = hint
-        payload['truncated'] = notes
-    if not payload['truncated']:
-        del payload['truncated']
+        fits()

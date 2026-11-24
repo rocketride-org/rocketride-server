@@ -657,9 +657,6 @@ async def test_validate_pipeline_reports_an_unknown_provider_once(fake_engine):
     assert result == {'ok': False, 'errors': [error], 'warnings': []}
 
 
-# --- result size limit --------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_validate_pipeline_over_the_size_limit_keeps_the_leading_errors(fake_engine, result_limit):
     result_limit(1000)
