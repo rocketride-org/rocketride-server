@@ -200,6 +200,23 @@ class TestFeeds:
         with pytest.raises(ValueError, match='RSS/Atom'):
             parse_feed(b'<html><body>not a feed')
 
+    def test_well_formed_xml_that_is_no_feed_is_refused(self):
+        # An XHTML maintenance page parses as XML and holds no item: that is not an empty feed
+        page = b'<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Back soon</p></body></html>'
+        with pytest.raises(ValueError, match='root element is <html>'):
+            parse_feed(page)
+
+    @pytest.mark.parametrize(
+        'feed',
+        [
+            b'<rss version="2.0"><channel><title>T</title></channel></rss>',
+            b'<feed xmlns="http://www.w3.org/2005/Atom"><title>T</title></feed>',
+            b'<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF>',
+        ],
+    )
+    def test_a_feed_without_items_is_an_empty_feed(self, feed):
+        assert parse_feed(feed) == []
+
     def test_unknown_encoding_is_a_parse_error(self):
         feed = b'<?xml version="1.0" encoding="x-no-such-codec"?><rss><channel></channel></rss>'
         with pytest.raises(ValueError, match='unsupported encoding'):
@@ -340,7 +357,7 @@ class TestDeclaredCharset:
         items = extract_html_items(self.PAGE, 'https://e.com/', '.r', {'title': ''}, encoding='windows-1252')
         assert items == [{'title': 'Ã©'}]
 
-    @pytest.mark.parametrize('encoding', [None, 'x-no-such-codec', 'base64'])
+    @pytest.mark.parametrize('encoding', [None, 'x-no-such-codec', 'base64', 'idna'])
     def test_without_a_usable_declared_charset_the_document_decides(self, encoding):
         assert page_to_text(self.PAGE, encoding=encoding)['content'] == 'é'
 

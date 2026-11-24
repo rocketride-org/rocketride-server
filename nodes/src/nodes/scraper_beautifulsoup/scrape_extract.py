@@ -55,6 +55,8 @@ MAX_LINKS = 200
 # A byte order mark names the encoding itself (a UTF-32 mark starts with a UTF-16 one).
 _BOMS = (codecs.BOM_UTF8, codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
 _ATOM = '{http://www.w3.org/2005/Atom}'
+# The root element of a feed, without its namespace, in lower case: RSS 2.0, Atom, RSS 1.0 (rdf:RDF).
+_FEED_ROOTS = ('rss', 'feed', 'rdf')
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +305,9 @@ def parse_feed(content: Union[bytes, str], base_url: Optional[str] = None) -> Li
         raise ValueError(f'Feed declares an unsupported encoding: {e}') from e
     except ET.ParseError as e:
         raise ValueError(f'Not a valid RSS/Atom document: {e}') from e
+    # Well-formed XML that is no feed (an XHTML maintenance page) has no items either: it is not an empty feed
+    if _local(root.tag).lower() not in _FEED_ROOTS:
+        raise ValueError(f'Not an RSS/Atom document: its root element is <{_local(root.tag)}>')
 
     items: List[Dict[str, Any]] = []
     for entry, base in _feed_entries(root, base_url):
@@ -360,8 +365,10 @@ def soup_of(content: Union[bytes, str], encoding: Optional[str] = None) -> Beaut
         if codec:
             try:
                 content = content.decode(codec, errors='replace')
-            except LookupError:
-                pass  # a codec that is not a text encoding (``base64``): detect instead
+            except (LookupError, UnicodeError):
+                # A codec that is not a text encoding (``base64``), or one that cannot
+                # decode with ``errors='replace'`` (``idna``): detect instead
+                pass
     return BeautifulSoup(content, HTML_PARSER)
 
 

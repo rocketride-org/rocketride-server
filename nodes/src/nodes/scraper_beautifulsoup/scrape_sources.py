@@ -220,6 +220,9 @@ def _check_kind_rules(kind: str, item: Dict[str, Any], method: str, fields: Dict
     for name, value in fields.items():
         if isinstance(value, str):
             continue
+        if name == 'url' and value == []:
+            # No fallback to try maps no URL, and a row without one is dropped: the source would answer nothing
+            raise ValueError(f'{where}: fields.url must name at least one path or selector')
         if kind != 'feed' and isinstance(value, list) and all(isinstance(entry, str) for entry in value):
             continue
         expected = 'a string' if kind == 'feed' else 'a string or a list of strings'
@@ -374,6 +377,8 @@ def normalize_row(
     if strip_html:
         title = html_to_text(title or '') or None
         body = html_to_text(body) if body else None
+    # An item without a body gets its title there; the limit applies to what the column ends up holding
+    body = body or title
     if body and len(body) > max_body_chars:
         body = body[:max_body_chars]
 
@@ -387,7 +392,7 @@ def normalize_row(
         'published_at': parse_date(raw.get('published')),
         'score': _to_int(raw.get('score')),
         'comments': _to_int(raw.get('comments')),
-        'body': body or title,
+        'body': body,
         'fetched_at': fetched_at,
     }
     # Custom mapped fields beyond the standard set pass through as-is.

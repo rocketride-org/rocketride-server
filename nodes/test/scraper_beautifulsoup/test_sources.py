@@ -179,6 +179,9 @@ class TestCheckKindRules:
             ('json', {}, {'url': ['url', None]}, 'fields.url must be a string or a list of strings'),
             ('html', {'itemSelector': 'li'}, {'url': 'a@href', 'title': {'css': 'h2'}}, 'fields.title must be a'),
             ('feed', {}, {'url': ['url', 'link']}, 'fields.url must be a string$'),
+            # No fallback to try: every row would be dropped for want of a URL
+            ('json', {}, {'url': []}, 'fields.url must name at least one path or selector'),
+            ('html', {'itemSelector': 'li'}, {'url': []}, 'fields.url must name at least one path or selector'),
         ],
     )
     def test_field_values_must_be_paths(self, kind, item, fields, message):
@@ -297,6 +300,11 @@ class TestNormalizeRow:
     def test_an_unrepresentable_date_keeps_the_row(self):
         row = self.base({'url': 'https://a', 'published': '0001-01-01T00:00:00+01:00'})
         assert row['url'] == 'https://a' and row['published_at'] is None
+
+    def test_a_title_standing_in_for_the_body_gets_the_body_limit(self):
+        # An item without a body carries its title there; the title column keeps it whole
+        row = self.base({'url': 'https://a', 'title': 'T' * 500}, max_body_chars=200, strip_html=False)
+        assert len(row['body']) == 200 and len(row['title']) == 500
 
     def test_text_is_not_stripped_as_html_again(self):
         row = self.base({'url': 'https://a', 'title': 'Use <draft>', 'body': 'a <b> c'}, strip_html=False)
