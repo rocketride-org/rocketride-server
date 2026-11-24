@@ -776,6 +776,8 @@ class Task(DAPBase):
         # Whether the task sent its own >EXIT event this run. Without one,
         # _terminated() falls back to the process exit code.
         self._exit_event_seen = False
+        # Whether a stop was requested, and why, when that event was read
+        self._exit_event_stop: Tuple[bool, Optional[str]] = (False, None)
 
         # This run's crash, as the console shows it, and whether the server killed the process
         self._crash: Optional[str] = None
@@ -1989,6 +1991,11 @@ class Task(DAPBase):
 
         reported = self._crash
         self._apply_process_exit_code(exit_code)
+        # How the run ended is read once, from its >EXIT event or else here: a
+        # stop that arrives later (a TTL pass, a user) does not turn that end into a stop
+        stop_requested, stop_reason = (
+            self._exit_event_stop if self._exit_event_seen else (self._stop_requested, self._stop_reason)
+        )
 
         # The engine reported nothing: the console still shows the crash
         if self._crash and not reported:
@@ -2107,7 +2114,7 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up debugger termination: {e}')
 
         # Set final state
-        if self._stop_requested:
+        if stop_requested:
             if self._is_restarting:
                 self._status.status = 'Restarting'
                 self._status.state = TASK_STATE.CANCELLED.value
@@ -2115,7 +2122,7 @@ class Task(DAPBase):
             else:
                 self._status.status = 'Stopped'
                 self._status.state = TASK_STATE.CANCELLED.value
-                self.debug_task_message('stopped', reason=self._stop_reason or 'user')
+                self.debug_task_message('stopped', reason=stop_reason or 'user')
         elif self._crash:
             # The crash's detail is in the console
             self._status.status = 'Stopped unexpectedly'
@@ -2197,7 +2204,7 @@ class Task(DAPBase):
                         'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
-                        **({'reason': self._stop_reason} if self._stop_reason else {}),
+                        **({'reason': stop_reason} if stop_reason else {}),
                     },
                     id=self.id,
                 )
@@ -2244,15 +2251,15 @@ class Task(DAPBase):
                     # A ttl-window expiry is SUCCESS: the run stayed up
                     # exactly as configured, then shut down. Only a real
                     # stop (or abnormal exit) reads as cancelled; a crash is an error.
-                    if self._crash and not self._stop_requested:
+                    if self._crash and not stop_requested:
                         outcome = 'error'
                     elif self._status.state == TASK_STATE.CANCELLED.value:
-                        outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
+                        outcome = 'ok' if stop_reason == 'ttl' else 'cancelled'
                     elif self._status.exitCode == 0:
                         outcome = 'ok'
                     else:
                         outcome = 'error'
-                    await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
+                    await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=stop_reason)
                     self._run_log = None
             except Exception as e:
                 self.debug_message(f'Run-log close failed: {e}')
@@ -2665,6 +2672,8 @@ class Task(DAPBase):
             if not self._stop_requested:
                 self._status.exitCode = exit_code
                 self._status.exitMessage = exit_message
+            # The run's end is read here: a stop that arrives later does not count
+            self._exit_event_stop = self._stop_requested, self._stop_reason
             self._exit_event_seen = True
 
             # The engine's handlers caught a crash: its >EXIT code is Crash
@@ -3195,6 +3204,7 @@ class Task(DAPBase):
             self._final_events_sent = False
             self._terminated_called = False
             self._exit_event_seen = False
+            self._exit_event_stop = (False, None)
             self._crash = None
             self._process_killed = False
             self._service_up_notes = []
@@ -3513,7 +3523,8 @@ class Task(DAPBase):
         Args:
             reason: WHY the stop happens — 'user' (explicit request) or
                 'ttl' (the run window elapsed). Drives the recorded run
-                outcome: a ttl expiry is a successful run, not a cancel.
+                outcome: a ttl expiry is a successful run, not a cancel. A
+                stop that arrives after the run's end was read changes nothing.
         """
         try:
             # Prevent race conditions

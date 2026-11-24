@@ -123,7 +123,9 @@ the task then reads `Stopped unexpectedly`, as above.
 
 A stop by the server reads `Stopped` with exit code 0 and an empty exit message
 on every platform, also after a restart, whatever the engine reports while it
-stops.
+stops. A stop that arrives once the task's end has been read, from its `>EXIT`
+or, without one, from its exit code, changes nothing: a crash still reads
+`Stopped unexpectedly` and records `error`, and a clean end reads `Completed`.
 
 ## Getting a dump by hand
 

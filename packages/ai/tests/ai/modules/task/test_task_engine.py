@@ -2356,6 +2356,7 @@ async def test_on_event_exit_reads_the_key_the_emitters_write():
     t._status.state = 0
     t._is_restarting = False
     t._stop_requested = False
+    t._stop_reason = None
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2374,6 +2375,7 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     t._status.state = 0
     t._is_restarting = False
     t._stop_requested = False
+    t._stop_reason = None
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2585,6 +2587,7 @@ def _exit_task(exit_event_seen=False):
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
     t._stop_requested = False
+    t._stop_reason = None
     t._crash = None
     t._process_killed = False
     t._launch = None
@@ -2719,12 +2722,70 @@ def _ending_task(process_exit_code):
     t._launcher = SimpleNamespace(isolated=False)
     t._status_update_task = None
     t._final_events_sent = True
-    t._stop_reason = None
     t._run_trigger = None
     t._send_status_update = AsyncMock()
     t._forward_task_event = AsyncMock()
     t._process_exit_code = AsyncMock(return_value=process_exit_code)
     return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'reported, stop_at, status, exit_code, outcome, reason',
+    [
+        # The stop came first: the -11 is its kill, and a run window that ran out is a success
+        (None, 'exit-wait', 'Stopped', 0, 'ok', 'ttl'),
+        # The crash was read first: teardown holds no lock, so the stop still lands
+        (None, 'cleanup', 'Stopped unexpectedly', -11, 'error', None),
+        # A reported end is read when it arrives, before the wait for the exit code
+        (_SEGV, 'exit-wait', 'Stopped unexpectedly', 1, 'error', None),
+        ({'exitCode': 0, 'message': ''}, 'exit-wait', 'Completed', 0, 'ok', None),
+        # What the engine reports while it stops is part of the stop
+        (_SEGV, 'report', 'Stopped', 0, 'ok', 'ttl'),
+    ],
+    ids=[
+        'before-the-end-is-read',
+        'during-the-cleanup',
+        'after-a-reported-crash',
+        'after-a-reported-end',
+        'before-the-report',
+    ],
+)
+async def test_a_ttl_stop_counts_only_if_it_came_before_the_end_was_read(
+    reported, stop_at, status, exit_code, outcome, reason
+):
+    t = _ending_task(-11)
+    t._termination_lock = asyncio.Lock()
+    t._stop_count = 0
+    t._final_events_sent = False
+    t._server = MagicMock(broadcast_server_event=AsyncMock())
+    t._launch = MagicMock(lost=None, returncode=-11, cleanup=AsyncMock())
+    run_log = t._run_log = AsyncMock()
+    stops = []
+
+    async def ttl_stop(result=None):
+        stops.append(asyncio.ensure_future(Task.stop_task(t, reason='ttl')))
+        await asyncio.sleep(0)
+        return result
+
+    if stop_at == 'report':
+        await ttl_stop()
+    if reported:
+        await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(reported)})
+    if stop_at == 'exit-wait':
+        t._process_exit_code = lambda: ttl_stop(-11)
+    elif stop_at == 'cleanup':
+        t._launch.cleanup = ttl_stop
+    await Task._terminated(t)
+    await asyncio.wait_for(stops[0], timeout=5)
+
+    assert t._stop_reason == 'ttl'
+    assert (t._status.status, t._status.exitCode) == (status, exit_code)
+    assert run_log.end_run.await_args.args[0] == outcome
+    end = [
+        call.args[1]['body'] for call in t._forward_task_event.await_args_list if call.args[1]['event'] == 'apaevt_task'
+    ]
+    assert (end[0].get('reason'), run_log.end_run.await_args.kwargs['reason']) == (reason, reason)
 
 
 @pytest.mark.asyncio
