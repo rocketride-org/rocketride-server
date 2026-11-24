@@ -48,8 +48,9 @@
  *     the shell's OWN origin — the PARENT of its preview iframe and the OPENER
  *     of its debug tab (it posts `rrdev:auth`; same-origin only).
  * Messages from anyone else — a cross-origin window.opener, a foreign framing
- * page, a loopback page (a loopback origin is never a sender), any other
- * origin, or an unrelated window — are ignored, and registerRemote entries
+ * page, a loopback page of another origin (being loopback makes no origin a
+ * sender; a loopback-served shell's own origin is one, like any shell's), any
+ * other origin, or an unrelated window — are ignored, and registerRemote entries
  * must be loopback dev-server URLs.
  */
 
@@ -170,6 +171,17 @@ export function waitForEmbeddedSession(timeoutMs: number): Promise<string | null
 			resolve(token);
 		});
 	});
+}
+
+/**
+ * TEST-ONLY: forget the boot-window answer so a test can boot the dev hooks
+ * again as a freshly loaded document would. Production code never calls
+ * this — a real page gets a fresh module, and with it a fresh boot window,
+ * on every load.
+ */
+export function resetDevModeForTests(): void {
+	bootAnswerResolve = null;
+	bootAnswerPromise = null;
 }
 
 // =============================================================================

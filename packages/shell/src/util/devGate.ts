@@ -401,7 +401,9 @@ export function isRelayBounceTarget(origin: string): boolean {
 // and the shell's own origin as PARENT or OPENER. The opener relation is
 // accepted ONLY from the shell's own origin (flow 2b): a page that merely
 // window.open()s the shell is its opener, so "is the opener" alone proves
-// nothing. Loopback origins are not senders (see isAllowedEmbedderOrigin).
+// nothing. Being loopback makes no origin a sender: a loopback-served shell's
+// own origin is one, as any shell's is; another loopback port is not (see
+// isAllowedEmbedderOrigin).
 //
 // Known compatibility cost of a closed set (each is refused, by design):
 // browser-hosted VS Code / Codespaces (webview origins `*.vscode-cdn.net`),
@@ -474,8 +476,10 @@ export function isLoopbackShell(): boolean {
  *   - `vscode-webview://<id>` (the VS Code extension's webview), whichever
  *     engine serves the shell;
  *   - the shell's OWN origin (the web App Builder; see the section comment).
- * A loopback origin is NOT a member, not even for a loopback-served shell: no
- * sender in this repo is one (VS Code is `vscode-webview://`, the web builder
+ * Being loopback does NOT make an origin a member, not even for a
+ * loopback-served shell, whose own origin is a member like any shell's and
+ * whose other ports are not: no sender in this repo is another loopback
+ * origin (VS Code is `vscode-webview://`, the web builder
  * is same-origin, the terminal host sends no messages), and trusting
  * "any other localhost port" would let any page on any local server drive a
  * dev shell whose localStorage holds the token `rocketride app dev` seeded.

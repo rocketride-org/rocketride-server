@@ -141,7 +141,11 @@ test('a production build ignores ?rrdev=1: the gate is closed and no hooks are i
 });
 
 test('a production build ignores the persisted tab session and rr:dev flag (what the flavor picker persists)', async () => {
-	const page = stagePage({ nodeEnv: 'production', sessionDev: true, framed: true });
+	// Top level: a framed shell keeps its tab session in a frame-local store and
+	// would never read the copy seeded into sessionStorage.
+	const page = stagePage({ nodeEnv: 'production', sessionDev: true, framed: false });
+	assert.equal(tabSession().appId, 'org.victim', 'the persisted copy was read');
+	assert.equal(tabSession().dev, false, 'but its dev flag does not make a production build a dev tab');
 	assert.equal(isDevHooksEnabled(), false);
 	assert.equal(isEmbeddedDevShell(), false);
 	assert.equal(isDevPreviewPage(), false);

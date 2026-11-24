@@ -117,7 +117,6 @@ function stubBrowser(opts: BrowserOpts, listeners: Listener[]): { parent: LivePa
 	const posted: LivePage['posted'] = [];
 	const postedToOpener: LivePage['postedToOpener'] = [];
 	let reloads = 0;
-	const self = {};
 	const parent: LivePage['parent'] = { postMessage: (message: { type?: string }, target: string): void => { posted.push({ message, target }); } };
 	// A cross-origin parent's `location` is unreadable in a browser (the access
 	// throws); a same-origin parent's is readable.
@@ -132,10 +131,7 @@ function stubBrowser(opts: BrowserOpts, listeners: Listener[]): { parent: LivePa
 	const sessionMem = new Map<string, string>();
 	const storageOver = (m: Map<string, string>) => ({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), clear: () => m.clear(), key: (i: number) => [...m.keys()][i] ?? null, get length() { return m.size; } });
 	const search = opts.search ?? '?rrdev=1';
-	Reflect.set(globalThis, 'window', {
-		self,
-		top: opts.framed ? parent : self,
-		parent: opts.framed ? parent : self,
+	const win: Record<string, unknown> = {
 		// A framed page has no opener (only top-level browsing contexts do).
 		opener: opts.framed ? null : opener,
 		location: { search, origin: opts.origin, pathname: '/', href: `${opts.origin}/${search}`, ancestorOrigins: opts.ancestorOrigin ? [opts.ancestorOrigin] : [], reload: () => { reloads++; } },
@@ -145,11 +141,20 @@ function stubBrowser(opts: BrowserOpts, listeners: Listener[]): { parent: LivePa
 		requestAnimationFrame: () => 0,
 		matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
 		navigator: { userAgent: 'node' },
-	});
+	};
+	// A window is its own `self`, and a top-level window is also its own `top`
+	// and `parent`: the shell compares all four (`window.self !== window.top`,
+	// `window.parent === window`), so here they are one object, as in a browser.
+	win.self = win;
+	win.top = opts.framed ? parent : win;
+	win.parent = opts.framed ? parent : win;
+	// A top-level page is its own parent: what it posts there lands in `posted`.
+	if (!opts.framed) win.postMessage = parent.postMessage;
+	Reflect.set(globalThis, 'window', win);
 	Reflect.set(globalThis, 'document', stubDocument());
 	Reflect.set(globalThis, 'sessionStorage', storageOver(sessionMem));
 	Reflect.set(globalThis, 'localStorage', storageOver(mem));
-	return { parent, opener, posted, postedToOpener, reloads: () => reloads, mem };
+	return { parent: opts.framed ? parent : (win as unknown as LivePage['parent']), opener, posted, postedToOpener, reloads: () => reloads, mem };
 }
 
 /** Removes the stub browser. */
@@ -162,7 +167,9 @@ async function bootShell(opts: { framed: boolean; origin?: string; ancestorOrigi
 	process.env.NODE_ENV = opts.nodeEnv ?? 'development';
 	const listeners: Listener[] = [];
 	const b = stubBrowser({ ...opts, origin: opts.origin ?? CLOUD }, listeners);
+	// A new document starts with fresh module state: the gate AND the boot window.
 	gate.resetDevGateForTests();
+	hooks.resetDevModeForTests();
 	await hooks.installDevHooks();
 	if (process.env.NODE_ENV !== 'production') assert.ok(listeners.length >= 1, 'the real listener was installed');
 	return { listeners, parent: b.parent, opener: b.opener, posted: b.posted, postedToOpener: b.postedToOpener, reloads: b.reloads, localStorageData: b.mem };
@@ -300,6 +307,7 @@ test('VS Code App Builder preview, exact sequence: a vscode-webview parent drive
 	// 2. the extension answers the handshake with the host credential
 	deliver(page, { type: 'rrdev:auth', token: 'vscode-host-token' }, VSCODE, page.parent);
 	assert.equal(cm.loadToken(), 'vscode-host-token');
+	assert.equal(page.reloads(), 0, 'the boot-window answer continues the boot without a reload');
 	// 3. then injects the dev server's remote together with the workspace manifest
 	const entry = `${PROXY}/apps/org.vsc/dev/remoteEntry.js?t=1730000000000`;
 	deliver(page, { type: 'rrdev:registerRemote', appId: 'org.vsc', moduleId: 'org_vsc', name: 'VSC', entry, manifest: { id: 'org.vsc', name: 'From The Manifest', version: '1.2.3' } }, VSCODE, page.parent);
@@ -313,7 +321,7 @@ test('VS Code App Builder preview, exact sequence: a vscode-webview parent drive
 	restoreConsole();
 	deliver(page, { type: 'rrdev:auth', token: '' }, VSCODE, page.parent);
 	assert.equal(cm.loadToken(), '');
-	assert.ok(page.reloads() >= 1, 'a post-boot change reboots the preview once');
+	assert.equal(page.reloads(), 1, 'a post-boot change reboots the preview exactly once');
 });
 
 test('web App Builder preview iframe, exact sequence: the same-origin builder answers the blob-authored preview', async () => {
@@ -356,6 +364,7 @@ test('web App Builder debug tab, exact sequence: a top-level shell opened by the
 	// (e.g. the builder navigated away and an attacker page now sits behind it)
 	deliver(page, { type: 'rrdev:auth', token: 'attacker-token' }, 'https://attacker.example', page.opener);
 	assert.equal(cm.loadToken(), '', 'a cross-origin opener is refused');
+	assert.deepEqual({ log: console.log, warn: console.warn, error: console.error }, NATIVE_CONSOLE, 'a top-level tab leaves the native console methods in place');
 	console.log('top-level row');
 	assert.deepEqual(page.posted, [], 'a top-level tab forwards no console rows');
 	restoreConsole();

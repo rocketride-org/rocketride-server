@@ -85,9 +85,13 @@ an origin from a closed set of exactly two:
   origin** only (the web App Builder's debug tab). No other origin, and
   `vscode-webview://`, is ever an opener.
 
-A loopback origin is **never** a sender, not even for a loopback-served shell,
-and a page that merely `window.open()`s or frames the shell is not trusted by
-that fact. `rrdev:registerRemote` entries must be absolute `http(s)` loopback
+Being loopback **never** makes an origin a sender, not even for a
+loopback-served shell: a loopback page on another port is refused. Such a
+shell's own origin is accepted as any shell's own origin is (the web App
+Builder on a local engine). A page that merely `window.open()`s or frames the
+shell is not trusted by that fact.
+
+`rrdev:registerRemote` entries must be absolute `http(s)` loopback
 URLs; console rows are posted only to the verified embedder origin. `#rrtoken=`
 seeding is honoured only in a dev build, on a top-level shell served from
 loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`). In a dev build on
