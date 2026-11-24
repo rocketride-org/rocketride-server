@@ -1505,6 +1505,16 @@ async def test_a_task_with_a_published_node_builds_the_runtime_only_env(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_with_the_rail_on_every_task_hides_its_proc_entries(monkeypatch):
+    monkeypatch.delenv('RR_PROC_PRIVATE', raising=False)
+    monkeypatch.delenv('RR_NODE_RAIL_ENABLED', raising=False)
+    assert 'RR_PROC_PRIVATE' not in await _build_env(_env_task())
+
+    monkeypatch.setenv('RR_NODE_RAIL_ENABLED', '1')
+    assert (await _build_env(_env_task()))['RR_PROC_PRIVATE'] == '1'
+
+
+@pytest.mark.asyncio
 async def test_a_task_with_a_published_node_still_resolves_the_keys_its_pipeline_names():
     t = _env_task(
         {'components': [{'id': 'llm', 'provider': 'llm_openai', 'config': {'apikey': '${ROCKETRIDE_OPENAI_KEY}'}}]}
@@ -2669,6 +2679,27 @@ def test_saas_gate_sees_a_nosaas_node_that_only_eaas_serves(monkeypatch):
 
     with pytest.raises(ValueError, match='not available on RocketRide Cloud'):
         Task._check_pipeline(t, {'components': [{'id': 'src', 'provider': 'text_output'}]})
+
+
+def test_a_shared_host_refuses_a_run_that_names_a_published_node(monkeypatch):
+    """A published node is one developer's code: a hosted engine would run it beside every other tenant."""
+    import rocketlib
+
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: {'capabilities': []})
+    pipeline = {'components': [{'id': 'src', 'provider': 'acme.echo'}]}
+    t = _task(source='src')
+    t.node_versions = {'acme.echo': {'version': 1}}
+    t._shares_host = lambda: True
+    with pytest.raises(ValueError, match='Published nodes are not available on RocketRide Cloud'):
+        Task._check_pipeline(t, pipeline)
+
+    t._shares_host = lambda: False
+    Task._check_pipeline(t, pipeline)
+    t._shares_host, t.node_versions = (lambda: True), {}
+    Task._check_pipeline(t, pipeline)
 
 
 def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():

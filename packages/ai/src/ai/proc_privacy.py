@@ -33,18 +33,23 @@ PR_SET_DUMPABLE = 4
 # this one name so the setting reaches task processes.
 CONST_PROC_PRIVATE_ENV = 'RR_PROC_PRIVATE'
 
+# With the node rail on, published nodes run as the server's OS user, so the server hides its entries too
+CONST_NODE_RAIL_ENV = 'RR_NODE_RAIL_ENABLED'
+
 
 def should_make_private() -> bool:
     """True when this process should hide its /proc entries. Always False off Linux.
 
     Hosted engines start with ``--saas`` (the server) or ``--hosted`` (its
     tasks); neither can be removed by a pipeline. ``RR_PROC_PRIVATE=1`` opts
-    any other engine in. It is read from the process environment at call
-    time; the engine calls after loading its ``.env``.
+    any other engine in, and so does ``RR_NODE_RAIL_ENABLED=1``. They are read
+    from the process environment at call time; the engine calls after loading its ``.env``.
     """
     if not sys.platform.startswith('linux'):
         return False
     if '--saas' in sys.argv or '--hosted' in sys.argv:
+        return True
+    if os.environ.get(CONST_NODE_RAIL_ENV) == '1':
         return True
     return os.environ.get(CONST_PROC_PRIVATE_ENV, '').strip() == '1'
 

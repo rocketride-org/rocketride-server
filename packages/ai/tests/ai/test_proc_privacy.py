@@ -122,11 +122,21 @@ def test_never_private_off_linux(monkeypatch):
 def test_should_make_private(monkeypatch, argv, env, expected):
     monkeypatch.setattr(pp.sys, 'platform', 'linux')
     monkeypatch.setattr(pp.sys, 'argv', argv)
+    monkeypatch.delenv(pp.CONST_NODE_RAIL_ENV, raising=False)
     if env is None:
         monkeypatch.delenv(pp.CONST_PROC_PRIVATE_ENV, raising=False)
     else:
         monkeypatch.setenv(pp.CONST_PROC_PRIVATE_ENV, env)
     assert pp.should_make_private() is expected
+
+
+def test_a_server_with_the_node_rail_on_is_private(monkeypatch):
+    """Published nodes run as the server's OS user, so the server hides its own entries too."""
+    monkeypatch.setattr(pp.sys, 'platform', 'linux')
+    monkeypatch.setattr(pp.sys, 'argv', ['eaas.py'])
+    monkeypatch.delenv(pp.CONST_PROC_PRIVATE_ENV, raising=False)
+    monkeypatch.setenv(pp.CONST_NODE_RAIL_ENV, '1')
+    assert pp.should_make_private() is True
 
 
 def test_set_failure_raises_oserror(monkeypatch):
