@@ -18,33 +18,86 @@ https://api.rocketride.ai/mcp
 
 ### Claude
 
-On claude.ai or Claude Desktop, go to **Settings → Connectors → Add custom
-connector** and enter the endpoint URL. Complete the OAuth flow on first use.
-
-### Claude Code
-
-```bash
-claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
-```
-
-The server sends MCP `instructions`, and `list_components`, `describe_component`,
-`validate_pipeline` and `run_pipeline` ask Claude Code to load them upfront under
-tool search; the other tools load on demand.
+In claude.ai and Claude Desktop, add RocketRide as a connector with the
+endpoint URL. In Claude Code, run
+`claude mcp add --transport http rocketride --scope user https://api.rocketride.ai/mcp`.
+[Set up Claude](/connect/mcp/http/claude) has the steps for each plan,
+organization setup and sign-in fixes.
 
 ### Cursor
 
-Add to `.cursor/mcp.json` in your workspace:
+[![Add RocketRide to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg#gh-light-mode-only)](https://cursor.com/install-mcp?name=rocketride&config=eyJ1cmwiOiJodHRwczovL2FwaS5yb2NrZXRyaWRlLmFpL21jcCJ9)
+[![Add RocketRide to Cursor](https://cursor.com/deeplink/mcp-install-light.svg#gh-dark-mode-only)](https://cursor.com/install-mcp?name=rocketride&config=eyJ1cmwiOiJodHRwczovL2FwaS5yb2NrZXRyaWRlLmFpL21jcCJ9)
+
+1. Click **Add to Cursor** and confirm the install in Cursor. If the button
+   does not open Cursor, use the
+   [app link](cursor://anysphere.cursor-deeplink/mcp/install?name=rocketride&config=eyJ1cmwiOiJodHRwczovL2FwaS5yb2NrZXRyaWRlLmFpL21jcCJ9).
+2. In Cursor, open **Customize > MCPs**, find `rocketride`, and turn it on if it
+   is off. Sign in from there. The sign-in page opens in your browser, and you
+   can create a RocketRide account on it. No key is needed.
+3. Ask Cursor's agent "Which RocketRide components can I use?" It should call
+   `list_components` and list them.
+
+If your team's admin limits which MCP servers you can use, see **Cursor
+Enterprise** below.
+
+**By hand.** Put this in `~/.cursor/mcp.json` for every project, or in
+`.cursor/mcp.json` for one project:
 
 ```json
 {
-	"mcpServers": {
-		"rocketride": {
-			"url": "https://api.rocketride.ai/mcp",
-			"headers": { "Authorization": "Bearer rr_..." }
-		}
-	}
+  "mcpServers": {
+    "rocketride": {
+      "url": "https://api.rocketride.ai/mcp"
+    }
+  }
 }
 ```
+
+Save the file, restart Cursor, and sign in the same way.
+
+**Cursor CLI.** The CLI reads the same `mcp.json` as the app. If you use only
+the CLI, create `~/.cursor/mcp.json` with the config above first. Then run:
+
+```bash
+agent mcp enable rocketride
+agent mcp login rocketride
+```
+
+To check, run `agent mcp list-tools rocketride`. It should list
+`list_components`. On a machine with no browser, use the key form below.
+
+**No browser.** Use a RocketRide API key instead. On any computer with a
+browser, create one on the **API Keys** page of your account in the RocketRide
+web app. Then add a `headers` entry on the machine with no browser:
+
+```json
+{
+  "mcpServers": {
+    "rocketride": {
+      "url": "https://api.rocketride.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer rr_..."
+      }
+    }
+  }
+}
+```
+
+Keep the key out of files you commit. Put it in `~/.cursor/mcp.json`, or read
+it from an environment variable with `"Bearer ${env:ROCKETRIDE_APIKEY}"`.
+Cursor reads the variable when it starts, so restart Cursor after you set it.
+
+**Cloud agents.** Cursor's hosted cloud agents do not read
+`~/.cursor/mcp.json`. Add the server at
+[cursor.com/agents](https://cursor.com/agents) and sign in there too. Cloud
+agents keep their own sign-in.
+
+**Cursor Enterprise.** If your team uses Cursor's
+[MCP allowlist](https://cursor.com/docs/mcp#mcp-allowlist), an admin first adds
+a URL entry for `https://api.rocketride.ai/mcp` under **Team Settings > MCP
+Configuration**. Until then, Cursor blocks the server for members, unless the
+admin also lets members add their own MCP servers.
 
 ### VS Code
 
@@ -62,8 +115,8 @@ boundary:
 
 | Credential | Who uses it | How |
 | --- | --- | --- |
-| **OAuth access token** | Claude, ChatGPT, and other OAuth-only clients | Automatic: the client discovers the login flow from the endpoint itself (below) |
-| **RocketRide API key** (`rr_...`) | Cursor, scripts, CLIs — anything that can set a header | `Authorization: Bearer rr_...` |
+| **OAuth access token** | Claude, ChatGPT, Cursor, VS Code, and other clients that sign in through the browser | Automatic. The client discovers the login flow from the endpoint itself (below) |
+| **RocketRide API key** (`rr_...`) | Scripts, CI jobs, and any client that cannot open a browser | `Authorization: Bearer rr_...` |
 
 Task-scoped keys (`tk_`/`pk_`) and PKCE exchange codes (`cd_`) are refused
 outright — they scope a single task, not an account, and never grant access to

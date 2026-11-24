@@ -134,10 +134,10 @@ as the engine's `.env`, on an engine shared by several users.
 The engine's built-in [MCP server](/connect/mcp/http) (`/mcp`) accepts two
 credentials and rejects everything else:
 
-- **OAuth access token**, for Claude, ChatGPT and other OAuth clients. The
-  client discovers the sign-in flow from the endpoint itself.
+- **OAuth access token**, for Claude, ChatGPT, Cursor, VS Code and other OAuth
+  clients. The client discovers the sign-in flow from the endpoint itself.
 - **RocketRide API key** (`rr_...`), sent as `Authorization: Bearer rr_...`, for
-  Cursor, scripts and anything else that can set a header.
+  scripts, CI jobs and any client that cannot open a browser.
 
 Task-scoped keys (`tk_`/`pk_`) and PKCE exchange codes (`cd_`) never grant
 access to `/mcp`. The only exception is the `MCP_DEV_NO_AUTH=1` development
