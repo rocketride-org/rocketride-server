@@ -417,6 +417,31 @@ def test_a_mount_the_probe_refused_can_be_retried_once_the_claimant_is_gone(monk
     assert server.is_public_route('/mcp') is False
 
 
+def test_remove_route_takes_every_public_and_private_entry_of_the_path(monkeypatch, tmp_path):
+    # A route registered one method at a time leaves one entry per call. All
+    # of them go with the routes: one left behind would make whatever is
+    # registered at the path next public, though it never asked to be.
+    server = _web_server(monkeypatch, tmp_path, [])
+
+    async def door():
+        return {}
+
+    for method in ('GET', 'POST'):
+        server.add_route('/door/{nonce}', door, [method], public=True)
+        server.add_route('/vault/{name}', door, [method], private=True)
+    assert server._public_paths.count('/door/{nonce}') == 2 and server._private_paths.count('/vault/{name}') == 2
+    assert server.is_public_route('/door/abc') is True
+
+    server.remove_route('/door/{nonce}')
+    server.remove_route('/vault/{name}')
+
+    assert '/door/{nonce}' not in server._public_paths and '/vault/{name}' not in server._private_paths
+    assert [r.path for r in server.app.router.routes if getattr(r, 'path', '').startswith(('/door', '/vault'))] == []
+    # Registered again without `public`, the path is not public.
+    server.add_route('/door/{nonce}', door, ['GET', 'POST'])
+    assert server.is_public_route('/door/abc') is False
+
+
 @pytest.mark.parametrize('pattern', ['/mcp-server', '/mcpx', '/mcp-server/{page}', '/mcpx/{rest:path}', '/'])
 def test_public_patterns_that_merely_start_with_mcp_do_not_trip_the_guard(monkeypatch, tmp_path, pattern):
     """The namespace is `/mcp` and `/mcp/...` -- not every path spelled `mcp*`.

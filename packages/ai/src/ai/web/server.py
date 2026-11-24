@@ -1084,13 +1084,14 @@ class WebServer:
 
     def remove_route(self, path: str) -> None:
         """
-        Undo ``add_route`` for ``path``: its routes, their (method, path) registrations and its public or private entry.
+        Undo ``add_route`` for ``path``: its routes, their (method, path) registrations and its public and private entries.
 
         For a module whose load is refused after it registered a route, so a
         retry on the same server is not refused by what the first attempt
-        left. One public and one private entry equal to ``path`` go, as
-        ``add_route`` appended one of each; an equal entry registered again
-        stays, and a path with nothing registered is left alone.
+        left. Every route at ``path`` goes, so every public and private entry
+        equal to it goes too: one call per method leaves one entry each, and
+        an entry left behind would classify whatever is registered there
+        next. A path with nothing registered is left alone.
 
         Args:
             path (str): The path exactly as it was passed to ``add_route``.
@@ -1103,12 +1104,12 @@ class WebServer:
         self.app.openapi_schema = None
 
         if path in self._public_paths:
-            self._public_paths.remove(path)
+            self._public_paths[:] = [entry for entry in self._public_paths if entry != path]
             # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_public_paths = None
 
         if path in self._private_paths:
-            self._private_paths.remove(path)
+            self._private_paths[:] = [entry for entry in self._private_paths if entry != path]
             # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_private_paths = None
 
