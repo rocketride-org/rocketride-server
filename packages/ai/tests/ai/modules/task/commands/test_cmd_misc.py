@@ -1805,7 +1805,7 @@ async def test_on_rrext_resolve_config_ignores_structural_and_unselected_profile
     monkeypatch.setattr(
         cmd_misc,
         '_service_profile_names',
-        lambda provider: frozenset({'claude-sonnet-4-6', 'claude-opus-4-1'}),
+        lambda provider, published=None: frozenset({'claude-sonnet-4-6', 'claude-opus-4-1'}),
     )
 
     conn = _make_conn()
@@ -1861,6 +1861,45 @@ async def test_on_rrext_resolve_config_resolves_a_node_that_only_eaas_serves(mon
     body = result['body']
     assert body['resolved']['host'] == 'localhost'
     assert body['dropped'] == ['apikey'], 'the unselected profile is known from the served definition'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_resolves_a_node_published_to_the_caller(monkeypatch):
+    """A published node is in neither the registry nor EaaS's set; the caller's rows carry its definition."""
+    from ai.common import config as config_module
+
+    monkeypatch.setattr(config_module, 'getServiceDefinition', lambda provider: None)
+    monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda provider: None)
+    definition = {
+        'protocol': 'acme.echo://',
+        'preconfig': {'default': 'local', 'profiles': {'local': {'host': 'localhost'}, 'cloud': {'host': 'x'}}},
+    }
+    row = {'snapshot': {'services': {'services.json': definition}, 'icons': {}}}
+    asked = []
+
+    async def nodes_for(conn, components):
+        asked.append(components)
+        return {'acme.echo': row}
+
+    monkeypatch.setattr(cmd_misc.node_deploy, 'nodes_for', nodes_for)
+
+    request = {'arguments': {'provider': 'acme.echo', 'config': {'profile': 'local', 'apikey': 'k', 'cloud': {}}}}
+    body = (await MiscCommands.on_rrext_resolve_config(_make_conn(), request))['body']
+
+    assert asked == [[{'provider': 'acme.echo'}]]
+    assert body['resolved']['host'] == 'localhost'
+    assert body['dropped'] == ['apikey'], 'the unselected profile is known from the published definition'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_refuses_a_node_the_caller_cannot_run(monkeypatch):
+    async def nodes_for(conn, components):
+        raise NodeNotEntitled('acme.other is not published to you or any of your teams')
+
+    monkeypatch.setattr(cmd_misc.node_deploy, 'nodes_for', nodes_for)
+
+    with pytest.raises(NodeNotEntitled):
+        await MiscCommands.on_rrext_resolve_config(_make_conn(), {'arguments': {'provider': 'acme.other'}})
 
 
 @pytest.mark.asyncio

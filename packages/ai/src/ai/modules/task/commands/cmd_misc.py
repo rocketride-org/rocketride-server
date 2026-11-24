@@ -178,7 +178,7 @@ def _can_validate_echo(pipeline: Dict[str, Any]) -> bool:
 _STRUCTURAL_CONFIG_KEYS = frozenset({'profile', 'parameters', 'secureParameters', 'name'})
 
 
-def _service_profile_names(provider: str) -> frozenset:
+def _service_profile_names(provider: str, published: Optional[Dict[str, Any]] = None) -> frozenset:
     """Return every profile name the service declares, or an empty set.
 
     A config saved by an editor carries one sub-object per profile, so an unselected
@@ -186,13 +186,14 @@ def _service_profile_names(provider: str) -> frozenset:
 
     Args:
         provider: Component provider, e.g. 'llm_openai'.
+        published: The caller's published nodes ({node id: publish row}).
 
     Returns:
         The declared profile names. Empty when the service or its preconfig is
         unavailable, which leaves the caller reporting the key rather than hiding it.
     """
     try:
-        service = getServiceDefinition(provider) or node_store.served(provider)
+        service = getServiceDefinition(provider) or node_store.served(provider, published)
         return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
     except Exception:
         return frozenset()
@@ -527,7 +528,9 @@ class MiscCommands(DAPConn):
             if not isinstance(config, dict):
                 raise ValueError('config must be an object')
 
-            resolved = Config.getNodeConfig(provider, config, node_store.served(provider))
+            # A node published to the caller resolves too; one they cannot run is refused
+            published = await node_deploy.nodes_for(self, [{'provider': provider}])
+            resolved = Config.getNodeConfig(provider, config, node_store.served(provider, published))
             profile = config.get('profile')
 
             # Report the keys the resolver discarded rather than leaving the author
@@ -546,7 +549,7 @@ class MiscCommands(DAPConn):
                 # and Rule 6); telling an author to move them inside the profile would
                 # break the component. An unselected profile's own sub-object is the
                 # other: an editor-saved config keeps one per profile.
-                profiles = _service_profile_names(provider)
+                profiles = _service_profile_names(provider, published)
                 dropped = [k for k in config if k != profile and k not in _STRUCTURAL_CONFIG_KEYS and k not in profiles]
 
             body = {
