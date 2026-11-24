@@ -373,6 +373,21 @@ def test_code_examples_and_valid_json_surrogates_reach_the_answer_lane(run, raw,
     assert result.invocations == []
 
 
+@pytest.mark.parametrize(
+    'expression',
+    ['Calling crm.get_deal({call})', 'Tool call = {call}', 'Action: invoke(crm, {call})', 'return {call}'],
+)
+@pytest.mark.parametrize('claim', ['FINAL>>> Found.', '{"type":"final","content":"Found."}'])
+def test_code_shaped_pending_work_with_a_claim_fails_without_running_a_tool(run, expression, claim):
+    raw = expression.format(call='{"name":"crm.get_deal","args":{"deal_id":42}}') + '\n' + claim
+    result = run(raw, tools=(GET_DEAL,))
+    assert result.stop_reason == 'error'
+    assert 'No valid tool call or final answer after 3 attempts.' in result.content
+    assert result.written == [result.content]
+    assert len(result.prompts) == 3
+    assert result.invocations == []
+
+
 def test_a_bare_json_answer_is_delivered_once_the_model_follows_the_hint(run):
     """Case D with a model that reads the retry hint: one extra call, then the JSON as the answer."""
     result = run(ANSWER_JSON, 'FINAL>>>' + ANSWER_JSON)

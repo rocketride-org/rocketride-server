@@ -627,7 +627,7 @@ def _code_object_prefix(prefix: str) -> bool:
     return depth > 0 and not quote
 
 
-def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
+def _envelopes(text: str, *, allow_code: bool = True) -> Iterator[Tuple[str, Any, int]]:
     """
     Yield (type, parsed object, start) for envelopes; an unfinished envelope has no parsed object.
 
@@ -639,10 +639,12 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
     work that never ran is not prose.
 
     An object with a tool call's ``name`` and ``args`` and no type will not run. It counts as a
-    tool call as the first object (unless introduced by a code expression), or with no word
+    tool call as the first object (unless allow_code exempts a code expression), or with no word
     before it on its line. Anywhere else it is data or code, as in an answer that shows a
     function being called with such an object. A leading return/yield, assignment, arrow function
     or same-line function argument marks code; prose such as ``Calling: {...}`` still counts as a call.
+    The exemption permits prose fallback only: checks for pending work before accepting a final
+    and hints for replies containing a final claim use the strict reading, with allow_code=False.
 
     After a parsed final, a new closed markdown block quotes an example. Its objects are not
     pending work. A call outside that block, or inside an unclosed block, still counts.
@@ -718,7 +720,7 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
         read = end is not None and not stray and not (parsed is None and _MEMBER_CONTINUATION.match(text, end))
         own = members.get('type')
         # Where a name and arguments with no type make a tool call. Elsewhere they are data or code.
-        may_lack_type = no_word_before or (at == first and not _code_object_prefix(text[line:at]))
+        may_lack_type = no_word_before or (at == first and not (allow_code and _code_object_prefix(text[line:at])))
         if isinstance(parsed, dict):
             names_a_tool = may_lack_type and isinstance(parsed.get('name'), str) and 'args' in parsed
             kind = parsed.get('type', 'tool_call' if names_a_tool else None) if stands else None
@@ -754,7 +756,7 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
 
 def _unfinished_envelope(text: str) -> Optional[str]:
     """The first pending call or broken final; a parsed final is already complete."""
-    for kind, parsed, _at in _envelopes(text):
+    for kind, parsed, _at in _envelopes(text, allow_code=False):
         if kind in _TOOL_CALL_KINDS or parsed is None:
             return kind
     return None
@@ -1123,7 +1125,7 @@ def _diagnose(raw: Any) -> Tuple[str, str, str]:
     # tool call must come back as a tool call: the sentinel would trade the work for a sentence about it.
     attempted = _attempted_kind(text)
     began_with_final = attempted == 'final'
-    if began_with_final:
+    if began_with_final or _SENTINEL_LINE.search(text):
         attempted = _unfinished_envelope(text) or attempted
     wanted_a_tool_call = attempted in _TOOL_CALL_KINDS
     if marker and wanted_a_tool_call:

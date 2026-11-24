@@ -1822,6 +1822,23 @@ class TestNihalFollowup:
 
 class TestCodeDictionariesAndUnicodeFinals:
     @pytest.mark.parametrize(
+        'expression',
+        ['Calling crm.create({call})', 'Tool call = {call}', 'Action: invoke(crm, {call})', 'return {call}'],
+    )
+    @pytest.mark.parametrize('claim', ['FINAL>>> Created.', '{"type":"final","content":"Created."}'])
+    def test_code_shaped_pending_work_with_a_claim_is_refused(self, expression, claim):
+        raw = expression.format(call='{"name":"crm.create","args":{"n":1}}') + '\n' + claim
+        ask, feedback = scripted(raw)
+        with pytest.raises(ValueError, match='after 3 attempts'):
+            reply._run_model_turn(ask)
+        assert len(feedback) == 3
+        # The repair must request the missing call, never teach the model to drop it for a claim.
+        for hint in feedback[1:]:
+            assert 'Generate the required tool call' in hint
+            assert 'do not answer in prose' in hint
+            assert 'send the answer as FINAL>>>' not in hint
+
+    @pytest.mark.parametrize(
         'prefix',
         [
             'client.run("crm", ',
