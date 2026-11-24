@@ -23,24 +23,32 @@
 # =============================================================================
 
 """
-How a hosted engine started this task: the two flags on its command line.
+How a hosted engine started this process, read from its command line.
 
-``--hosted``: the task belongs to a hosted engine. Its rules hold wherever the
-task runs: a credit check before every pipe, no torch install or import.
+``--saas``: this process is the hosted engine (the cloud front server).
+
+``--hosted``: this process is a task of that engine. Its rules hold wherever
+the task runs: a credit check before every pipe, no torch install or import.
+
+``--modelserver=<address>``: this process sends inference to a model server.
+The model server process itself is not started with this flag.
 
 ``--shared-host``: the task runs on the engine's own host (spawn), so the
 guards for a shared machine apply: the sandbox keeps to its default modules,
 ``tool_python`` ignores ``allowed_modules``, stdio MCP is refused.
 
-The engine passes them as it starts the task (task_engine). A pipeline's own
-args can add one, which only makes the task stricter. Standard library only: nodes and ``_depends_hooks.py`` files import this,
-and importing ``ai`` or ``ai.common`` would run ``depends()``.
+The engine passes ``--hosted`` and ``--shared-host`` as it starts the task
+(task_engine). A pipeline's own args can add a flag, which only makes the
+task stricter. Standard library only: nodes and ``_depends_hooks.py`` files
+import this, and importing ``ai`` or ``ai.common`` would run ``depends()``.
 """
 
 import sys
 
 HOSTED_FLAG = '--hosted'
 SHARED_HOST_FLAG = '--shared-host'
+SAAS_FLAG = '--saas'
+MODEL_SERVER_PREFIX = '--modelserver='
 
 
 def is_hosted() -> bool:
@@ -48,6 +56,23 @@ def is_hosted() -> bool:
     return HOSTED_FLAG in sys.argv
 
 
+def is_saas() -> bool:
+    """True when this process is the hosted engine itself."""
+    return SAAS_FLAG in sys.argv
+
+
 def is_shared_host() -> bool:
     """True when this task shares its host with the engine."""
     return SHARED_HOST_FLAG in sys.argv
+
+
+def delegates_to_model_server() -> bool:
+    """True when this process sends inference to a model server.
+
+    An empty ``--modelserver=`` does not count. The machine that runs the
+    model is a different process and does not carry this flag.
+    """
+    for arg in sys.argv:
+        if arg.startswith(MODEL_SERVER_PREFIX) and arg.split('=', 1)[1]:
+            return True
+    return False
