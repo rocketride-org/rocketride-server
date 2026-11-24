@@ -570,18 +570,52 @@ class TaskConn(
         handles end with it (see ``_end_session``).
         """
         async with self._session_lock:
-            # Nothing to do if not authenticated
-            if not self._authenticated:
-                return self.build_response(request, body={})
-
-            # Re-acquire an unauthenticated slot for this IP
-            if self._client_ip:
-                self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
-
-            # End the session: identity, subscriptions, attachments, handles
-            await self._end_session()
+            await self._sign_out_locked()
 
         return self.build_response(request, body={})
+
+    async def _sign_out_locked(self) -> None:
+        """
+        Sign the connection out: what a deauth does. The caller holds ``_session_lock``.
+
+        Does nothing on a connection that is not authenticated.
+        """
+        if not self._authenticated:
+            return
+
+        # Re-acquire an unauthenticated slot for this IP
+        if self._client_ip:
+            self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
+
+        # End the session: identity, subscriptions, attachments, handles
+        await self._end_session()
+
+    async def sign_out_identity(self, expected_info: AccountInfo) -> bool:
+        """
+        Sign the connection out and close it, if it still acts as ``expected_info``.
+
+        For the server, when the account store says the identity a connection
+        holds no longer exists (``TaskServer._refresh_identity``): the session
+        ends as on a deauth (identity, subscriptions, file-store handles), and
+        the socket is closed. The client's reconnect then authenticates again
+        or fails authentication, which is how clients already show a
+        signed-out user.
+
+        A connection that was signed out or authenticated as someone else in
+        the meantime is left alone: the decision was about ``expected_info``.
+
+        Args:
+            expected_info: The identity the caller decided on.
+
+        Returns:
+            bool: True when this call signed the connection out.
+        """
+        async with self._session_lock:
+            if not self._authenticated or self._account_info is not expected_info:
+                return False
+            await self._sign_out_locked()
+        self._transport.disconnect()
+        return True
 
     async def _end_session(self, replacing: bool = False) -> None:
         """

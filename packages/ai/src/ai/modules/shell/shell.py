@@ -286,7 +286,13 @@ _APP_COOKIE = 'rr_apps_token'
 _KIND_OF_PREFIX = {'apps': 'app', 'pipelines': 'pipe'}
 
 # How long one caller's servable-version verdict stands (HARD expiry, below).
+# A verdict reached because authentication itself failed (``_AuthUnavailable``)
+# is never cached (#972).
 _APP_AUTH_TTL = 300.0
+
+
+class _AuthUnavailable(Exception):
+    """``account.authenticate`` did not answer: the caller's identity is unknown, not anonymous."""
 
 
 def _is_saas() -> bool:
@@ -296,12 +302,27 @@ def _is_saas() -> bool:
     return 'saas' in getattr(account, 'capabilities', ())
 
 
-async def _authenticated(token: str) -> Optional[Any]:
-    """The AccountInfo behind a cookie token, or None for anonymous / unverifiable.
+def _is_auth_denial(result) -> bool:
+    """True when ``authenticate`` answered with a definite denial (401/403).
 
-    ``authenticate()`` returns an ``(int, str)`` error tuple on failure; any
-    non-AccountInfo answer is anonymous rather than a hard deny, so public
+    ``authenticate`` returns an ``(int, str)`` error tuple on failure. Only
+    401/403 are a verdict; any other code (5xx, unavailable, unknown) is an
+    outage, so callers answer anonymously WITHOUT caching (#972).
+    """
+    return isinstance(result, tuple) and bool(result) and result[0] in (401, 403)
+
+
+async def _authenticated(token: str) -> Optional[Any]:
+    """The AccountInfo behind a cookie token, or None for anonymous or a denied token.
+
+    ``authenticate()`` returns an ``(int, str)`` error tuple on failure. A
+    definite denial (401/403) is anonymous rather than a hard deny, so public
     versions resolve without a session.
+
+    Raises:
+        _AuthUnavailable: Authentication raised, or answered something that is
+            neither an identity nor a denial. That is an outage, not a
+            verdict: the caller answers anonymously and caches nothing (#972).
     """
     from ai.account import account
 
@@ -309,9 +330,21 @@ async def _authenticated(token: str) -> Optional[Any]:
         return None
     try:
         info = await account.authenticate(token)
-    except Exception:
+    except Exception as e:
+        raise _AuthUnavailable(str(e)) from e
+    if hasattr(info, 'userId'):
+        return info
+    if info is not None and not _is_auth_denial(info):
+        raise _AuthUnavailable(f'authenticate returned {info!r}')
+    return None
+
+
+async def _authenticated_or_anonymous(token: str) -> Optional[Any]:
+    """``_authenticated``, with an outage answered as anonymous: for callers that cache nothing."""
+    try:
+        return await _authenticated(token)
+    except _AuthUnavailable:
         return None
-    return info if hasattr(info, 'userId') else None
 
 
 def _app_field(entry, name: str):
@@ -329,7 +362,7 @@ async def _apps_for_token(token: str) -> list:
     from ai.account import account
     from ai.account.base import InventoryUnavailableError
 
-    info = await _authenticated(token)
+    info = await _authenticated_or_anonymous(token)
     if info is not None:
         # AccountInfo carries ONE selected organization (singular field); the
         # resolver wants a list. A plural-field lookup here always returned []
@@ -396,7 +429,7 @@ async def _pipe_entry_info(token: str, pipe_id: str) -> Optional[dict]:
     from ai.account import account
     from ai.account.pipe_deploy import resolve_pipe_version
 
-    pin = await resolve_pipe_version(await _authenticated(token), pipe_id)
+    pin = await resolve_pipe_version(await _authenticated_or_anonymous(token), pipe_id)
     if pin is None:
         return None
     version = int(pin.version)
@@ -472,6 +505,9 @@ async def _version_dirs_for(token: str, kind: str, artifact_id: str, want: Optio
     the new version instead of 404ing until the hard expiry. Entitlement
     stays conservative both ways: the refresh can only ADD what the DB now
     grants, and revocation still converges on the hard expiry as before.
+
+    When authenticating the token fails (an outage, not a denial), the caller
+    gets the anonymous map and nothing is cached.
     """
     key = hashlib.sha256(f'{token}.{kind}.{artifact_id}'.encode('utf-8')).hexdigest()
     now = time.time()
@@ -488,7 +524,13 @@ async def _version_dirs_for(token: str, kind: str, artifact_id: str, want: Optio
     from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
 
     if _is_saas():
-        dirs = await entitled_version_dirs(await _authenticated(token), artifact_id, kind)
+        try:
+            info = await _authenticated(token)
+        except _AuthUnavailable:
+            # Not a verdict: the anonymous (public only) map, uncached, so the
+            # caller's own map is resolved again as soon as authentication answers
+            return await entitled_version_dirs(None, artifact_id, kind)
+        dirs = await entitled_version_dirs(info, artifact_id, kind)
     else:
         dirs = await open_version_dirs(artifact_id, kind)
 
@@ -593,7 +635,7 @@ async def artifacts_session(request: Request):
     token = auth[7:].strip() if auth[:7].lower() == 'bearer ' else auth.strip()
     if not token:
         return JSONResponse({'ok': False})
-    if await _authenticated(token) is None:
+    if await _authenticated_or_anonymous(token) is None:
         raise HTTPException(status_code=401, detail='Invalid token')
     # This cookie carries a bearer token, so it must be Secure on any HTTPS
     # path. request.url.scheme is the TRUSTED scheme of the direct connection
