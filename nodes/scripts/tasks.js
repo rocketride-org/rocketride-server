@@ -349,7 +349,8 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${ctx.port} (mocks enabled)`;
 			taskComplete = true;
-			return { port: result.port, server: result.server, serverUri: result.uri };
+			// The store the server was given: the tests that check the disk read it there
+			return { port: result.port, server: result.server, serverUri: result.uri, storeUrl: result.storeUrl };
 		},
 	};
 }
@@ -387,6 +388,8 @@ function makeRunPytestAction(options = {}) {
 				const bracket = ctx.brackets?.['node-test-server'];
 				if (!bracket?.serverUri) throw new Error('node-test-server bracket missing — server did not start');
 				testEnv.ROCKETRIDE_URI = bracket.serverUri;
+				// A test that checks what a run left on disk looks in the store this server uses
+				if (bracket.storeUrl) testEnv.RR_STORE_URL = bracket.storeUrl;
 			} else if (options.taskserver) {
 				// The hardware gate needs to know the tests would run on another machine.
 				testEnv.ROCKETRIDE_URI = parseServerAddress(options.taskserver).uri;

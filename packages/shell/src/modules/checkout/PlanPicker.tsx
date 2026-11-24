@@ -270,6 +270,7 @@ const S = {
 	// shrink and a long unbroken word (a URL, a model name) wraps instead of running past the clipping card.
 	featureText: {
 		overflowWrap: 'anywhere',
+		wordBreak: 'break-word', // Safari before 15.4 lacks overflow-wrap: anywhere.
 	} as CSSProperties,
 
 	featureCheck: {

@@ -144,6 +144,8 @@ _LLM_MOCK_CREDENTIALS = {
     'tool_slack': {'token': 'xoxb-mock-placeholder-for-tests'},
     'tool_notion': {'apikey': 'secret_mock-notion-placeholder-for-tests'},
     'tool_tenki': {'apikey': 'lx_mock-tenki-placeholder-for-tests'},
+    # Pinecone has no local server: both index types require the key, which the mocked SDK never reads
+    'pinecone': {'apikey': 'mock-pinecone-placeholder-for-tests'},
 }
 
 

@@ -85,6 +85,7 @@ and the ``site.notFound`` response once per page map and UA class.
 
 import asyncio
 import math
+import re
 import sys
 from functools import partial
 from pathlib import Path
@@ -513,6 +514,31 @@ def assets_base(page: Page) -> str:
         ``/apps/<appId>/v<N>``, where that version's build output is served.
     """
     return f'/apps/{page.app_id}/v{page.version}'
+
+
+def _home_hero_preload_links(path: str, page: Page, crawler: bool) -> List[str]:
+    """Advertise the homepage build's viewport-specific LCP image in the human shell."""
+    if crawler or path != '/' or page.app_id != 'rocketride.home' or page.version is None:
+        return []
+    hint = page.extra.get('heroImagePreload')
+    if not isinstance(hint, Mapping):
+        return []
+    width = hint.get('maxMobileWidth')
+    mobile = hint.get('mobile')
+    desktop = hint.get('desktop')
+    if type(width) is not int or not 1 <= width <= 4096:
+        return []
+    asset_pattern = r'static/image/[A-Za-z0-9][A-Za-z0-9_.-]*\.webp'
+    if not all(isinstance(asset, str) and re.fullmatch(asset_pattern, asset) for asset in (mobile, desktop)):
+        return []
+
+    mobile_media = f'(max-width: {width}px)'
+    # Complement matchMedia's query, including fractional viewport widths.
+    return [
+        '<link rel="preload" as="image" type="image/webp" fetchpriority="high" '
+        f'href="{assets_base(page)}/{asset}" media="{media}">'
+        for asset, media in ((mobile, mobile_media), (desktop, f'not all and {mobile_media}'))
+    ]
 
 
 def image_url(value: str, owner: Optional[Page]) -> str:
@@ -1191,6 +1217,7 @@ async def _render(
             site_name=site.get('title', ''), image=image, published=page.published, modified=page.modified
         )
         + feed_links(_feeds_of(aggregate, path)),
+        responsive_preloads=_home_hero_preload_links(path, page, crawler),
     )
     headers = {'Vary': 'User-Agent', 'Cache-Control': cache_control}
     if not page.listed:

@@ -34,9 +34,16 @@ function hiddenLists(html: string): string[] {
 		tags.lastIndex = start;
 		let depth = 1;
 		let tag: RegExpExecArray | null = null;
-		while (depth > 0 && (tag = tags.exec(html))) {
-			if (tag[1]) depth--;
-			else depth++;
+		while (depth > 0) {
+			tag = tags.exec(html);
+			if (!tag) {
+				break;
+			}
+			if (tag[1]) {
+				depth--;
+			} else {
+				depth++;
+			}
 		}
 		lists.push(html.slice(start, tag?.index));
 	}
@@ -69,5 +76,8 @@ test('a custom feature font size keeps long feature words wrapping', () => {
 	const html = renderToStaticMarkup(<PlanPicker plans={plans} featureFontSize={13} />);
 	assert.match(html, /font-size:\s*13px/);
 	assert.doesNotMatch(html, /white-space:\s*nowrap/);
-	assert.match(html, /<span style="overflow-wrap:\s*anywhere">Monthly line<\/span>/);
+	const featureText = html.match(/<span style="([^"]*)">Monthly line<\/span>/);
+	assert.ok(featureText);
+	assert.match(featureText[1], /(?:^|;)overflow-wrap:\s*anywhere(?:;|$)/);
+	assert.match(featureText[1], /(?:^|;)word-break:\s*break-word(?:;|$)/);
 });

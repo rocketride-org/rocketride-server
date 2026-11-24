@@ -318,8 +318,11 @@ class Store(DocumentStoreBase):
             content = point.properties.get('content')
 
             if point.metadata.distance is not None:
-                if self.similarity == 'cosine':
-                    score = (point.metadata.distance + 1) / 2
+                if self.similarity == VectorDistances.COSINE:
+                    # Weaviate answers a cosine DISTANCE: 1 - cos(a, b), 0 for an identical
+                    # vector and 2 for an opposite one. Rescaled to [0, 1] with 1 as the
+                    # best match, the space the retrieval score threshold is set in.
+                    score = 1.0 - point.metadata.distance / 2
                 else:
                     score = float(1.0 / (1.0 + np.exp(point.metadata.distance / -100)))
 
