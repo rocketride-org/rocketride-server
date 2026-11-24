@@ -215,3 +215,48 @@ describe('cleanTwin: code fences, escapes and brace links', () => {
 		assert.equal(cleanTwin('```\na\n\n\n\nb\n```\n'), '```\na\n\n\n\nb\n```\n');
 	});
 });
+
+describe('cleanTwin mdx: fences in blockquotes, indented markers and comments', () => {
+	it('keeps a fenced example inside a blockquote untouched', () => {
+		const src = 'Intro.\n\n> ~~~jsx\n> <Widget />\n> ~~~\n\n<Bar />After.\n';
+		assert.equal(mdx(src), 'Intro.\n\n> ~~~jsx\n> <Widget />\n> ~~~\n\nAfter.\n');
+	});
+
+	it('does not close a fence on a marker indented four spaces', () => {
+		const src = '```html\n    ```\ncode text\n<Widget />\n```\n\nReal prose.';
+		assert.equal(mdx(src), `${src}\n`);
+	});
+
+	it('keeps a fenced block and a tag inside a comment', () => {
+		assert.equal(mdx('{/*\n```\nexample\n```\n<Keep />\n*/}\n'), '{/*\n```\nexample\n```\n<Keep />\n*/}\n');
+		assert.equal(mdx('<!--\n```\nexample\n```\n<Keep />\n-->\n'), '<!--\n```\nexample\n```\n<Keep />\n-->\n');
+	});
+
+	it('does not let a fence marker inside a comment protect the text after the comment', () => {
+		assert.equal(mdx('{/*\n```js\n*/}\n<Foo />Text\n'), '{/*\n```js\n*/}\nText\n');
+	});
+
+	it('still protects a real fence after a closed comment', () => {
+		const src = '{/* note */}\n\n```\n<Foo />\n```\n\n<Bar />After\n';
+		assert.equal(mdx(src), '{/* note */}\n\n```\n<Foo />\n```\n\nAfter\n');
+	});
+
+	it('does not read a comment opener inside inline code as a comment', () => {
+		const src = 'Use `{/*` to open a comment.\n\n```\n<Foo />\n```\n\n<Bar />After\n';
+		assert.equal(mdx(src), 'Use `{/*` to open a comment.\n\n```\n<Foo />\n```\n\nAfter\n');
+	});
+});
+
+describe('cleanTwin mdx: backslash escapes', () => {
+	it('keeps an escaped backtick literal, so the code span after it survives', () => {
+		assert.equal(mdx('What is \\`? Use `<your-api-key>`.\n'), 'What is \\`? Use `<your-api-key>`.\n');
+	});
+
+	it('keeps an escaped < as text instead of reading a tag', () => {
+		assert.equal(mdx('Type \\<Foo /> as written.\n'), 'Type \\<Foo /> as written.\n');
+	});
+
+	it('still removes a tag after an escaped backslash', () => {
+		assert.equal(mdx('Path \\\\<Foo /> here\n'), 'Path \\\\ here\n');
+	});
+});

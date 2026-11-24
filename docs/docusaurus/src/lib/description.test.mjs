@@ -86,6 +86,23 @@ describe('describePage', () => {
 		const body = '# T\n\n````md\n```js\ncode();\n```\nmore code\n````\n\nReal prose.\n';
 		assert.equal(describePage(body), 'Real prose.');
 	});
+
+	it('skips a JSX tag whose attributes run over several lines', () => {
+		assert.equal(describePage('<Hero\n  title="Overview"\n/>\n\nReal prose.\n'), 'Real prose.');
+		assert.equal(describePage('<Hero\n  title="Overview" />\nReal prose.\n'), 'Real prose.');
+	});
+
+	it('does not end a multi-line tag at a > inside a quoted value or an expression', () => {
+		assert.equal(describePage('<Hero\n  title="a > b"\n  show={(x) => x > 1}\n/>\n\nReal prose.\n'), 'Real prose.');
+	});
+
+	it('does not let a tag that never closes run past a blank line', () => {
+		assert.equal(describePage('<Hero title="x\nstill the tag\n\nReal prose.\n'), 'Real prose.');
+	});
+
+	it('does not close a fence on a marker indented four spaces', () => {
+		assert.equal(describePage('```html\n    ```\ncode text\n<Widget />\n```\n\nReal prose.'), 'Real prose.');
+	});
 });
 
 describe('firstParagraph', () => {
@@ -101,6 +118,14 @@ describe('firstParagraph', () => {
 	it('keeps a comment opener inside code and strips a real comment', () => {
 		assert.equal(firstParagraph('Use `<!--` to open.\n'), 'Use `<!--` to open.');
 		assert.equal(firstParagraph('<!-- note -->\nVisible text.\n'), 'Visible text.');
+	});
+
+	it('does not let a four-space marker close a fence early and select code as prose', () => {
+		assert.equal(firstParagraph('```html\n    ```\ncode text\n<Widget />\n```\n\nReal prose.'), 'Real prose.');
+	});
+
+	it('keeps a single-line tag skipped with the text after it on the same line', () => {
+		assert.equal(firstParagraph('<Hero title="x" /> lead-in\n\nReal prose.\n'), 'Real prose.');
 	});
 });
 

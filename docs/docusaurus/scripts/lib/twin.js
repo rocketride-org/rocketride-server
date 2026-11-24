@@ -11,7 +11,7 @@
  * handling. An `import`/`export` that never balances is kept as written.
  */
 
-const { fenceOpener, fenceCloses, codeSpanStop, frontMatterTitle } = require('./markdown');
+const { fenceOpener, fenceCloses, codeSpanStop, frontMatterTitle, ESCAPABLE } = require('./markdown');
 
 const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?/;
 const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'wbr', 'col']);
@@ -23,9 +23,11 @@ const BLANK_LINE = /\n[ \t]*\n/;
 /**
  * Split text into fenced and unfenced segments. A fence closes only on the same
  * character with at least as many marks, so a four-backtick fence can hold a
- * three-backtick one. An unclosed fence runs to the end, as in CommonMark.
+ * three-backtick one. An unclosed fence runs to the end, as in CommonMark. On
+ * an MDX page (`mdx`) a fence marker inside a comment is comment text, so the
+ * comment stays in one segment and the cleaner copies it whole.
  */
-function splitFences(text) {
+function splitFences(text, mdx = false) {
 	const segments = [];
 	let buf = [];
 	let fence = null;
@@ -36,7 +38,7 @@ function splitFences(text) {
 	for (const line of text.split(/\r?\n/)) {
 		if (!fence) {
 			const open = fenceOpener(line);
-			if (open) {
+			if (open && !(mdx && endsInComment(buf.join('\n')))) {
 				flush(false);
 				fence = open;
 			}
@@ -167,6 +169,7 @@ class MdxCleaner {
 		this.trimLead = state.depth > 0; // inside a wrapper, the wrapper's indentation would read as code
 		this.frame = null;
 		this.afterStatement = -1; // where the last dropped import/export ended
+		this.openComment = false; // the text ended inside a comment that never closed
 	}
 
 	run() {
@@ -176,6 +179,7 @@ class MdxCleaner {
 			if (this.skipStatement()) continue;
 			if (c === '\n') this.newline();
 			else if (this.trimLead && this.trimIndent()) continue;
+			else if (c === '\\' && ESCAPABLE.test(src[this.i + 1] || '')) this.copyEscape();
 			else if (c === '<' && src.startsWith('<!--', this.i)) this.copyLiteral('-->', 4);
 			else if (c === '{' && src.startsWith('{/*', this.i)) this.copyLiteral('*/}', 3);
 			else if (c === '`') this.copyCodeSpan();
@@ -274,8 +278,15 @@ class MdxCleaner {
 	copyLiteral(closer, openLen) {
 		const k = this.src.indexOf(closer, this.i + openLen);
 		const end = k < 0 ? this.src.length : k + closer.length;
+		this.openComment = k < 0;
 		this.emit(this.src.slice(this.i, end));
 		this.i = end;
+	}
+
+	/** Copy a backslash escape as written: the escaped character is literal, never markup or code. */
+	copyEscape() {
+		this.emit(this.src.slice(this.i, this.i + 2));
+		this.i += 2;
 	}
 
 	/** Copy a code span, or just its backtick run when it never closes. */
@@ -390,6 +401,18 @@ function cleanMdx(src, state) {
 	return new MdxCleaner(src, state).run();
 }
 
+/**
+ * Whether unfenced MDX text ends inside a comment that never closed, so a fence
+ * marker on the next line is comment text. The cleaner answers, so the split and
+ * the clean cannot disagree about what is a comment (inline code, escapes and
+ * tags are read the same way). Its output is thrown away.
+ */
+function endsInComment(src) {
+	const cleaner = new MdxCleaner(src, { depth: 0, bases: [] });
+	cleaner.run();
+	return cleaner.openComment;
+}
+
 /** Whether offset `at` falls inside one of the `[start, end)` fenced ranges. */
 function isInsideFence(at, fenced) {
 	return fenced.some(([a, b]) => at >= a && at < b);
@@ -408,7 +431,7 @@ function isInsideFence(at, fenced) {
 function cleanTwin(raw, { mdx = false, indexUrl = '', addTitle = true } = {}) {
 	const fm = FRONT_MATTER.exec(raw);
 	const title = fm ? frontMatterTitle(raw) : null;
-	const segments = splitFences(fm ? raw.slice(fm[0].length) : raw);
+	const segments = splitFences(fm ? raw.slice(fm[0].length) : raw, mdx);
 	const state = { depth: 0, bases: [] };
 	const parts = segments.map((s) => (mdx && !s.fence ? cleanMdx(s.text, state) : s.text));
 	// Collapse blank-line runs only outside code fences, where blank lines are part of the code.

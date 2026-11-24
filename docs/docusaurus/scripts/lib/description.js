@@ -8,12 +8,12 @@
  * Text inside inline code is kept as written, so `<your-api-key>` survives.
  */
 
-const { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop } = require('./markdown');
+const { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop, ESCAPABLE } = require('./markdown');
 
 const MAX = 160;
 const SKIP_LINE = /^(#{1,6}\s|:::|\||[<{]|-{3,}|[-*+]\s|\d+[.)]\s|>|!\[)/;
+const TAG_LINE = /^<\/?[A-Za-z]/;
 const ESM_LINE = /^(import|export)\s/;
-const ESCAPABLE = /[!-/:-@[-`{-~]/;
 // A period after these does not end a sentence, even when a capital letter follows.
 const SENTENCE_END = /(?<!\b(?:[Ee]\.g|[Ii]\.e|etc|vs|cf)\.)(?<=[.!?])\s+(?=[A-Z0-9"([])/;
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
@@ -89,17 +89,42 @@ function stripComments(text) {
 	return out;
 }
 
+/**
+ * Whether the JSX/HTML tag being read ends on `line`, scanning from `from`. `tag`
+ * carries the open quote and the `{...}` depth across lines, so a `>` inside a
+ * quoted value or an expression does not end the tag. A plain loop, so nothing
+ * backtracks.
+ */
+function tagEnds(line, from, tag) {
+	for (let k = from; k < line.length; k++) {
+		const c = line[k];
+		if (tag.quote) {
+			if (c === tag.quote) tag.quote = null;
+		} else if (c === '"' || c === "'" || c === '`') tag.quote = c;
+		else if (c === '{') tag.depth++;
+		else if (c === '}') tag.depth--;
+		else if (c === '>' && tag.depth <= 0) return true;
+	}
+	return false;
+}
+
 /** The first prose paragraph of a page body, as raw lines joined by spaces ('' if none). */
 function firstParagraph(body) {
 	const text = stripComments(body).replace(/<head>[\s\S]*?<\/head>/gi, '');
 	const para = [];
 	let fence = null; // the open code fence
+	let tag = null; // a JSX/HTML tag whose attributes run onto later lines
 	let inStatement = false; // an MDX import/export runs to the next blank line, as in Docusaurus createExcerpt
 	let prevBlank = true; // import/export is ESM only at the start of a block
 	for (const line of text.split(/\r?\n/)) {
 		const t = line.trim();
 		const blockStart = prevBlank;
 		prevBlank = !t;
+		if (tag && !t) tag = null; // a tag cannot run past a blank line
+		if (tag) {
+			if (tagEnds(line, 0, tag)) tag = null;
+			continue;
+		}
 		if (fence) {
 			if (fenceCloses(line, fence)) fence = null;
 			continue;
@@ -114,6 +139,11 @@ function firstParagraph(body) {
 		else if (blockStart && ESM_LINE.test(line)) inStatement = true;
 		if (!t || inStatement || SKIP_LINE.test(t)) {
 			if (para.length) break;
+			// A tag that does not close on its first line is skipped up to its `>`.
+			if (TAG_LINE.test(t)) {
+				const open = { quote: null, depth: 0 };
+				if (!tagEnds(t, 1, open)) tag = open;
+			}
 			continue;
 		}
 		para.push(t);

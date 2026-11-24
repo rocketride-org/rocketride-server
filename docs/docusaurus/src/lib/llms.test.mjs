@@ -114,6 +114,42 @@ describe('buildIndex', () => {
 			assert.doesNotMatch(full, /title: Guide/);
 		});
 	});
+
+	describe('a fenced example inside a blockquote', () => {
+		const example = '> ~~~jsx\n> <Widget />\n> ~~~';
+		let root;
+		let stat;
+
+		before(async () => {
+			root = await mkdtemp(path.join(os.tmpdir(), 'rr-llms-quote-'));
+			const content = path.join(root, 'content');
+			stat = path.join(root, 'static');
+			await mkdir(content, { recursive: true });
+			await mkdir(stat, { recursive: true });
+			const raw = `---\ntitle: Widgets\n---\n\nimport Widget from "@site/src/Widget";\n\nRender it like this:\n\n${example}\n\n<Widget />\n`;
+			const source = path.join(content, 'widgets.mdx');
+			await writeFile(source, raw);
+			await writeFile(path.join(content, '.manifest.json'), JSON.stringify([{ id: 'widgets', route: '/widgets', title: 'Widgets', mdSibling: '/widgets.md', source }]));
+			await writeFile(path.join(stat, 'widgets.md'), raw);
+			await buildIndex({ contentDir: content, staticDir: stat });
+		});
+
+		after(async () => {
+			await rm(root, { recursive: true, force: true });
+		});
+
+		it('keeps the complete example in the published .md copy', async () => {
+			const twin = await readFile(path.join(stat, 'widgets.md'), 'utf8');
+			assert.ok(twin.includes(`Render it like this:\n\n${example}\n`));
+			assert.equal(twin.split('<Widget />').length - 1, 1); // the tag outside the example is still dropped
+		});
+
+		it('keeps the complete example in llms-full.txt', async () => {
+			const full = await readFile(path.join(stat, 'llms-full.txt'), 'utf8');
+			assert.ok(full.includes(`Render it like this:\n\n${example}\n`));
+			assert.equal(full.split('<Widget />').length - 1, 1);
+		});
+	});
 });
 
 describe('buildIndex Start here section', () => {

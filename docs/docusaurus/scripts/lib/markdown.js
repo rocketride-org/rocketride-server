@@ -3,22 +3,72 @@
  * by the twin writer (twin.js) and the description builder (description.js).
  */
 
-const FENCE_OPEN = /^\s*(`{3,}|~{3,})(.*)$/;
+const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
+// ASCII punctuation: the characters a backslash escapes in CommonMark.
+const ESCAPABLE = /[!-/:-@[-`{-~]/;
 
 /**
- * The fence a line opens, as `{ ch, len }`, or null. This is the one fence rule
- * for the twins and the meta descriptions. A backtick fence cannot carry a
- * backtick in its info string (that line is an inline code span, not a fence).
+ * The blockquote markers that start `line`, at most `max` of them: how many
+ * there are and where the text after them begins. A marker is up to three
+ * spaces, `>`, and one optional space. A plain loop, so nothing backtracks.
  */
-function fenceOpener(line) {
-	const m = FENCE_OPEN.exec(line.replace(/\r$/, ''));
-	return m && !(m[1][0] === '`' && m[2].includes('`')) ? { ch: m[1][0], len: m[1].length } : null;
+function quotePrefix(line, max = Infinity) {
+	let depth = 0;
+	let at = 0;
+	while (depth < max) {
+		let j = at;
+		while (j - at < 3 && line[j] === ' ') j++;
+		if (line[j] !== '>') break;
+		j++;
+		if (line[j] === ' ') j++;
+		depth++;
+		at = j;
+	}
+	return { depth, at };
 }
 
-/** Whether `line` closes `fence`: the same character, at least as many marks, and nothing after them. */
+/** Width in columns of a fence marker's indentation; a tab runs to the next multiple of four. */
+function indentWidth(ws) {
+	let col = 0;
+	for (const c of ws) col = c === '\t' ? col + 4 - (col % 4) : col + 1;
+	return col;
+}
+
+/**
+ * The fence a line opens, as `{ ch, len, indent, quote }`, or null. This is the
+ * one fence rule for the twins and the meta descriptions. A backtick fence cannot
+ * carry a backtick in its info string (that line is an inline code span, not a
+ * fence). A fence may sit inside a blockquote (`> ~~~jsx`): `quote` counts the
+ * `>` markers before it, and `indent` is the marker's indentation after them.
+ */
+function fenceOpener(line) {
+	const text = line.replace(/\r$/, '');
+	const { depth, at } = quotePrefix(text);
+	const m = FENCE_OPEN.exec(text.slice(at));
+	if (!m || (m[2][0] === '`' && m[3].includes('`'))) return null;
+	return { ch: m[2][0], len: m[2].length, indent: indentWidth(m[1]), quote: depth };
+}
+
+/**
+ * Whether `line` closes `fence`: the same character, at least as many marks, and
+ * nothing after them, in the fence's blockquote. The marker may sit at most three
+ * columns deeper than the opener's (CommonMark allows three spaces; a deeper
+ * marker is code). Measuring from the opener keeps a fence nested in a list
+ * item closable. A line that leaves the fence's blockquote ends the fence too.
+ */
 function fenceCloses(line, fence) {
-	const m = FENCE_OPEN.exec(line.replace(/\r$/, ''));
-	return !!m && m[1][0] === fence.ch && m[1].length >= fence.len && !m[2].trim();
+	const text = line.replace(/\r$/, '');
+	const quote = fence.quote || 0;
+	const { depth, at } = quotePrefix(text, quote);
+	if (depth < quote) return true; // the blockquote ended, and the fence with it
+	const m = FENCE_OPEN.exec(text.slice(at));
+	return (
+		!!m &&
+		m[2][0] === fence.ch &&
+		m[2].length >= fence.len &&
+		!m[3].trim() &&
+		indentWidth(m[1]) <= (fence.indent || 0) + 3
+	);
 }
 
 /**
@@ -77,4 +127,4 @@ function frontMatterTitle(content) {
 	return t ? t[2].replace(/^['"]|['"]$/g, '') : null;
 }
 
-module.exports = { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop, frontMatterTitle };
+module.exports = { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop, frontMatterTitle, ESCAPABLE };
