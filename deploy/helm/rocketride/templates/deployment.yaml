@@ -47,6 +47,14 @@ spec:
           command: ['sh', '-c', 'cp -a /opt/rocketride/nodes/* /nodes/']
           securityContext:
             {{- toYaml .Values.engine.securityContext | nindent 12 }}
+          # A namespace quota on cpu or memory refuses a pod whose init container sets none; devices stay with the engine
+          {{- with .Values.engine.resources }}
+          resources:
+            requests:
+              {{- toYaml (pick (.requests | default dict) "cpu" "memory") | nindent 14 }}
+            limits:
+              {{- toYaml (pick (.limits | default dict) "cpu" "memory") | nindent 14 }}
+          {{- end }}
           volumeMounts:
             - name: nodes
               mountPath: /nodes

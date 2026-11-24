@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { commitStagedRelease, fetchNodeArchive, missingNodeArchive, nodeArchiveOf, renameRetrying } from '../engine/shared/node-archive';
+import { commitStagedRelease, downloadThenRename, missingNodeArchive, nodeArchiveOf, renameRetrying } from '../engine/shared/node-archive';
 
 /** An engine/ folder whose nodes/index.json holds index, or none when index is undefined. */
 function engineWith(index?: unknown): string {
@@ -112,25 +112,39 @@ test('a rename still held after ten tries fails', async (t) => {
 	assert.equal(calls(), 10);
 });
 
-test('an archive fetched for an installed server moves into place when Windows holds it for a moment', async (t) => {
-	const nodesDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rr-fetch-')), 'nodes');
-	const calls = failingRename(t, 'EBUSY', 2);
+test('a download Windows holds for a moment after it is written still lands in place', async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-nodes-'));
+	const calls = failingRename(t, 'EPERM', 1);
 
-	await fetchNodeArchive(nodesDir, 'rocketride-nodes-v1.zip', async (dest) => fs.writeFileSync(dest, 'zip'), 1);
+	await downloadThenRename(path.join(dir, 'rocketride-nodes-v1.zip'), path.join(dir, 'rocketride-nodes-v1.zip.download'), async (staging) => fs.writeFileSync(staging, 'zip'));
 
-	assert.equal(calls(), 3);
-	assert.deepEqual(fs.readdirSync(nodesDir), ['rocketride-nodes-v1.zip']);
-	assert.equal(fs.readFileSync(path.join(nodesDir, 'rocketride-nodes-v1.zip'), 'utf8'), 'zip');
+	assert.equal(calls(), 2);
+	assert.deepEqual(fs.readdirSync(dir), ['rocketride-nodes-v1.zip']);
 });
 
-test('a fetch that fails leaves neither the archive nor its staging file', async () => {
-	const nodesDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rr-fetch-')), 'nodes');
-	const halfWritten = async (dest: string) => {
-		fs.writeFileSync(dest, 'half');
-		throw new Error('the download stopped');
-	};
+test('a download that fails leaves neither the file nor its staging copy', async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-nodes-'));
 
-	await assert.rejects(fetchNodeArchive(nodesDir, 'rocketride-nodes-v1.zip', halfWritten, 1), /the download stopped/);
+	await assert.rejects(
+		downloadThenRename(path.join(dir, 'a.zip'), path.join(dir, 'a.zip.download'), async (staging) => {
+			fs.writeFileSync(staging, 'part');
+			throw new Error('connection reset');
+		}),
+		/connection reset/
+	);
+	assert.deepEqual(fs.readdirSync(dir), []);
+});
 
-	assert.deepEqual(fs.readdirSync(nodesDir), []);
+test('a staging copy Windows will not let go of does not hide why the download failed', async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-nodes-'));
+	t.mock.method(fs.promises, 'rm', async () => {
+		throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+	});
+
+	await assert.rejects(
+		downloadThenRename(path.join(dir, 'a.zip'), path.join(dir, 'a.zip.download'), async () => {
+			throw new Error('connection reset');
+		}),
+		/connection reset/
+	);
 });

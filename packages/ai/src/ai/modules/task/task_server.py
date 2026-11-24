@@ -647,6 +647,13 @@ class Resolution(NamedTuple):
     artifact: Optional[Dict[str, Any]] = None
 
 
+# How long one identity push (``apaext_account``) may take to reach its
+# client. The refreshes of a connection run in turn, so a client that stopped
+# reading its socket would otherwise hold back every later refresh of that
+# connection, a revocation included.
+IDENTITY_PUSH_SEND_TIMEOUT = 1.0
+
+
 class TaskServer(DAPBase):
     """
     Central task management server orchestrating computational task lifecycles.
@@ -2500,14 +2507,7 @@ class TaskServer(DAPBase):
                 continue
             if conn._account_info.userId != user_id:
                 continue
-            # The pushed body blanks userToken (to_push_result) so a
-            # connection on a narrower key never adopts the session key.
-            try:
-                fresh = await account._service.get_authentication_result(user_id, conn._account_info.auth)
-                conn._account_info = fresh
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
-            except Exception as e:
-                self.debug_message(f'push_account_update failed for conn {conn.get_connection_id()}: {e}')
+            await self._refresh_identity(account, conn, conn._account_info, 'push_account_update')
 
     async def push_org_update(self, org_id: str) -> None:
         """
@@ -2533,16 +2533,94 @@ class TaskServer(DAPBase):
                 conn_org = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
             if conn_org != org_id:
                 continue
-            try:
-                fresh = await account._service.get_authentication_result(info.userId, info.auth)
-                conn._account_info = fresh
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
+            if await self._refresh_identity(account, conn, info, 'push_org_update'):
                 notified += 1
-            except Exception as e:
-                self.debug_message(f'push_org_update failed for conn {conn.get_connection_id()}: {e}')
 
         if notified:
             self.debug_message(f'push_org_update notified {notified} connection(s) for org={org_id}')
+
+    async def _refresh_identity(self, account: Any, conn: TaskConn, info: AccountInfo, label: str) -> bool:
+        """
+        Rebuild one connection's identity from the account store and push it.
+
+        The rebuild has three outcomes:
+
+        - A fresh identity: installed on the connection and pushed to its
+          client as ``apaext_account``. The pushed body blanks ``userToken``
+          (``to_push_result``), so a connection on a narrower key never adopts
+          the session key. Permission checks read the identity per request,
+          so a narrowed one takes effect on the next request.
+        - ``ValueError``: the account store says the identity no longer
+          exists (the user was deleted). The connection is signed out and
+          closed (``TaskConn.sign_out_identity``). Keeping the identity it
+          held, as this code did before, left a deleted user acting on an
+          open socket until they chose to disconnect.
+        - Any other failure (the store did not answer): nothing changes and
+          the failure is logged. An outage is not a verdict about the user.
+
+        A connection that was signed out or authenticated as someone else
+        while the rebuild was awaited is left alone: a fresh identity is never
+        installed over a newer one.
+
+        Refreshes of one connection run one at a time (a lock the connection
+        carries). Two account changes can push for the same user at once; run
+        side by side, both would read the store, and the one whose read was
+        older could install last, or the newer one could be refused because
+        the identity had just been replaced by the other. In turn, each
+        rebuilds from the identity the one before it installed, so the last
+        read of the store is the one that stands. The send to the client is
+        bounded (``IDENTITY_PUSH_SEND_TIMEOUT``), so a client that stopped
+        reading cannot hold the next refresh back.
+
+        Args:
+            account: The account facade (its ``_service`` rebuilds identities).
+            conn: The connection to refresh.
+            info: The identity the connection held when the push began.
+            label: The calling push, for the log line.
+
+        Returns:
+            bool: True when a fresh identity was installed and pushed.
+        """
+        state = vars(conn)
+        lock = state.get('_identity_refresh_lock')
+        if lock is None:
+            lock = state['_identity_refresh_lock'] = asyncio.Lock()
+        async with lock:
+            # An earlier refresh may have replaced the identity while this one
+            # waited its turn: rebuild from what the connection holds now, as
+            # long as it is still the same user's session
+            current = conn._account_info
+            if current is not info:
+                if current is None or not getattr(conn, '_authenticated', False):
+                    return False
+                if current.userId != info.userId:
+                    return False
+                info = current
+
+            try:
+                fresh = await account._service.get_authentication_result(info.userId, info.auth)
+            except ValueError as e:
+                if await conn.sign_out_identity(info):
+                    warning(f'{label}: conn {conn.get_connection_id()} signed out, user {info.userId} is gone ({e})')
+                return False
+            except Exception as e:
+                self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+                return False
+
+            # Never install over a deauth or a newer auth that landed during the rebuild
+            if conn._account_info is not info:
+                return False
+            # Installed BEFORE the send: permission checks read it from here on,
+            # whatever the client does with the event
+            conn._account_info = fresh
+            try:
+                await asyncio.wait_for(
+                    conn.send_event('apaext_account', body=fresh.to_push_result()), IDENTITY_PUSH_SEND_TIMEOUT
+                )
+            except Exception as e:
+                self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+                return False
+            return True
 
     async def push_org_changed(self, user_id: str, org_id: str) -> None:
         """
