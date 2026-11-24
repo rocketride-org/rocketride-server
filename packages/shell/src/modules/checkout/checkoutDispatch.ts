@@ -16,8 +16,9 @@ export function isCheckoutNotDispatched(error: unknown): error is Error {
  * `call()` raises `CommandException` only for that). The message is the
  * server's own, so it can be shown. It does NOT prove that nothing happened: an
  * uncaught handler exception after Stripe already acted looks the same on the
- * wire. Callers may offer a retry only with the SAME attempt ID, which the
- * server dedupes. A timeout or dropped connection raises something else.
+ * wire, so a retry must stay deduplicated server-side (a reused attempt ID, or
+ * the server's own per-org guards). A timeout or dropped connection raises
+ * something else.
  */
 export function isServerRejection(error: unknown): error is Error {
 	return error instanceof Error && error.name === 'CommandException';

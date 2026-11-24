@@ -123,6 +123,28 @@ test('a server error shows its message and Continue retries with the same attemp
 	assert.equal(successes, 1);
 });
 
+test('an attempt refused twice is final, so the next Continue gets a fresh ID', async (t) => {
+	const attempts: Array<string | undefined> = [];
+	const responses: Array<() => Promise<CheckoutResult>> = [
+		async () => { throw serverRejection('Your card was declined.'); },
+		async () => { throw serverRejection('Your card was declined.'); },
+		async () => ({ clientSecret: null, subscriptionId: 'sub_2', status: 'active' }),
+	];
+	const ui = await renderModal(t, {
+		onCreateCheckout: (_priceId, _promotionCode, attemptId) => {
+			attempts.push(attemptId);
+			return responses.shift()!();
+		},
+	});
+	await ui.click('Continue');
+	await ui.click('Continue');
+	await ui.click('Continue');
+	assert.equal(attempts.length, 3);
+	assert.equal(attempts[0], attempts[1], 'the first retry is deduplicated');
+	assert.notEqual(attempts[1], attempts[2], 'a repeated refusal is not replayed again');
+	assert.match(ui.text(), /Checkout complete/);
+});
+
 test('a lost response stays unconfirmed without replay support', async (t) => {
 	const ui = await renderModal(t, {
 		onCreateCheckout: async () => { throw new Error('Request timed out after 30000ms'); },

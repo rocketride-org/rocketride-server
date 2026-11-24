@@ -461,6 +461,8 @@ interface CheckoutAttempt {
 	priceId: string;
 	promotionCode?: string;
 	session?: { clientSecret: string; subscriptionId: string };
+	/** Server errors answered for this ID. */
+	serverErrors?: number;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -662,11 +664,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				}
 			} else if (!canReplay && isServerRejection(err)) {
 				// The server answered with an error (already subscribed, checkout in
-				// progress, a Stripe failure): show it and keep the picker. The
-				// attempt stays cached, so Continue with the same plan and code
-				// resends the SAME attempt ID, which the server dedupes in case the
-				// first request acted before failing. A lost response (no answer at
-				// all) still ends below as unconfirmed.
+				// progress, a Stripe failure): show it and keep the picker. The first
+				// retry with the same plan and code resends the SAME attempt ID, which
+				// the server dedupes in case the request acted before failing. If that
+				// ID is refused again the answer is final (Stripe replays a stored
+				// error for its idempotency key), so the next try gets a fresh ID; the
+				// server's one-checkout-per-app slot still blocks a duplicate. A lost
+				// response (no answer at all) still ends below as unconfirmed.
+				if (attempt) {
+					attempt.serverErrors = (attempt.serverErrors ?? 0) + 1;
+					if (attempt.serverErrors >= 2) checkoutAttempts.current.delete(JSON.stringify([attempt.priceId, attempt.promotionCode]));
+				}
 				if (mounted.current) {
 					setError(err.message || 'Failed to start checkout. Please try again.');
 					// A catalog read that raced this checkout was discarded.
@@ -772,9 +780,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 					setPromoError(unresolvedGrant.current ? 'Redemption recovery is unavailable. Check your credits before starting again.' : err.message);
 				}
 			} else if (redeeming && !canReplay && isServerRejection(err)) {
-				// The server answered with an error: show it. The cached attempt makes
-				// a retry of this code resend the same attempt ID, and a repeat of a
-				// redemption that did land answers 'already_redeemed'.
+				// The server answered with an error: show it and allow a retry. A
+				// repeat of a redemption that did land answers 'already_redeemed'
+				// (the server checks the org's grant for this code), and the code's
+				// checkout slot answers 'in progress' while the first try is open.
 				if (mounted.current) setPromoError(err.message || 'Could not apply this code. Please try again.');
 			} else if (redeeming && !canReplay) {
 				finishCheckout('pending');
