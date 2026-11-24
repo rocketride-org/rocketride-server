@@ -157,6 +157,64 @@ def test_an_unpack_that_was_killed_is_swept_once_it_is_old(nodes):
     assert not os.path.exists(old) and os.path.exists(fresh)
 
 
+def _failing_replace(monkeypatch, *failing_calls):
+    """Make os.replace raise on the given calls (1-based) and pass the rest through."""
+    replace = os.replace
+    calls = []
+
+    def flaky(src, dst):
+        calls.append((src, dst))
+        if len(calls) in failing_calls:
+            raise OSError(13, 'Access is denied', dst)
+        return replace(src, dst)
+
+    monkeypatch.setattr(node_packages.os, 'replace', flaky)
+    return calls
+
+
+def test_a_replacement_that_fails_puts_the_previous_copy_back(nodes, monkeypatch):
+    old, old_sha = _package(value=1)
+    new, new_sha = _package(value=2)
+    node_packages.unpack('railnode', old, old_sha, nodes)
+    # The first rename moves the previous copy out, the second (the new copy in) fails
+    _failing_replace(monkeypatch, 2)
+
+    with pytest.raises(OSError):
+        node_packages.unpack('railnode', new, new_sha, nodes)
+
+    assert _read(os.path.join(nodes, 'railnode', '__init__.py')) == 'VALUE = 1\n'
+    assert node_packages.digest_of(os.path.join(nodes, 'railnode')) == old_sha
+    assert os.listdir(nodes) == ['railnode']
+
+
+def test_a_previous_copy_that_cannot_be_put_back_is_kept(nodes, monkeypatch):
+    old, old_sha = _package(value=1)
+    new, new_sha = _package(value=2)
+    node_packages.unpack('railnode', old, old_sha, nodes)
+    # The new copy cannot move in, and the previous one cannot move back
+    _failing_replace(monkeypatch, 2, 3)
+
+    with pytest.raises(OSError, match='previous copy is kept in'):
+        node_packages.unpack('railnode', new, new_sha, nodes)
+
+    assert not os.path.exists(os.path.join(nodes, 'railnode'))
+    [staging] = os.listdir(nodes)
+    kept = os.path.join(nodes, staging, 'replaced')
+    assert _read(os.path.join(kept, '__init__.py')) == 'VALUE = 1\n'
+    assert node_packages.digest_of(kept) == old_sha
+
+
+def test_a_replacement_leaves_no_backup_behind(nodes):
+    old, old_sha = _package(value=1)
+    new, new_sha = _package(value=2)
+    node_packages.unpack('railnode', old, old_sha, nodes)
+
+    node_packages.unpack('railnode', new, new_sha, nodes)
+
+    assert os.listdir(nodes) == ['railnode']
+    assert node_packages.digest_of(os.path.join(nodes, 'railnode')) == new_sha
+
+
 def test_a_package_unpacks_when_only_nodes_is_writable(nodes, monkeypatch):
     # A read-only root with nodes/ mounted writable, as the Helm chart runs it
     mkdtemp = node_packages.tempfile.mkdtemp

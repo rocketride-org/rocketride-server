@@ -105,7 +105,12 @@ def pack(name: str, files: dict) -> bytes:
 
 
 def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
-    """Unpack a package into nodes_dir/<name>, replacing another digest's copy, and return the node's folder."""
+    """Unpack a package into nodes_dir/<name>, replacing another digest's copy, and return the node's folder.
+
+    The copy being replaced is moved aside first. When the new copy then cannot be moved in, the previous
+    one is put back; when even that fails, it is left in the staging folder the raised error names (which
+    a later unpack sweeps once it is an hour old, like any staging folder left behind).
+    """
     node_dir = os.path.join(nodes_dir, name)
     if digest_of(node_dir) == sha256:
         return node_dir
@@ -128,6 +133,8 @@ def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
     os.makedirs(nodes_dir, exist_ok=True)
     _sweep(nodes_dir)
     staging = tempfile.mkdtemp(prefix=_STAGING, dir=nodes_dir)
+    replaced = None
+    keep = False
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as package:
             package.extractall(staging)
@@ -135,8 +142,23 @@ def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
             file.write(sha256)
         if os.path.isdir(node_dir):
             # Another digest's copy: move it out of nodes/ first, a folder cannot be replaced in one step
-            os.replace(node_dir, os.path.join(staging, 'replaced'))
-        os.replace(os.path.join(staging, name), node_dir)
+            replaced = os.path.join(staging, 'replaced')
+            os.replace(node_dir, replaced)
+        try:
+            os.replace(os.path.join(staging, name), node_dir)
+        except OSError as e:
+            if replaced is not None:
+                # Put the previous copy back; one that cannot go back is not deleted here
+                try:
+                    os.replace(replaced, node_dir)
+                except OSError as restore_error:
+                    keep = True
+                    raise OSError(
+                        f'{name} could not be moved into place ({e}) and its previous copy could not be put back '
+                        f'({restore_error}); the previous copy is kept in {replaced}'
+                    ) from e
+            raise
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        if not keep:
+            shutil.rmtree(staging, ignore_errors=True)
     return node_dir
