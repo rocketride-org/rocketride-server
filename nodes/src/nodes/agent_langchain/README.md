@@ -55,8 +55,9 @@ The input must be an object with required non-empty `query: string` and optional
 `{content, meta, stack}` to its caller instead of writing to `answers`.
 `meta` holds the framework, agent and run ids, timings and the tool-call count; it carries `stop_reason` when the run reports why it stopped (`error` when it raised, or when the `require_tool_call` guard refused its answer), and no `stop_reason` means none was reported, not that the run finished. The task's control token is never included.
 Non-object input, a blank query, or a non-object context raises `ValueError`.
-If the LLM does not produce a parsable envelope after three attempts, the
-adapter supplies an explanatory final message rather than a tool call.
+If the LLM produces neither a tool call nor an answer in three attempts, the run
+fails: `content` says what was wrong with the model's last reply and
+`meta.stop_reason` is `error`.
 
 ## Configuration
 
@@ -95,10 +96,124 @@ guard error.
 RocketRide's LLM seam is text-based, while the LangChain agent expects
 structured tool calls. On each model turn, the adapter requests exactly one
 JSON object: `{"type":"tool_call","name":"server.tool","args":{...}}` or
-`{"type":"final","content":"..."}`. It retries malformed output twice with
-a correction prompt; after the third invalid response it returns an explanatory
-AI message. Connected tools receive dynamically built argument schemas from
-their declared input schemas, with a generic `input` field as the fallback.
+`{"type":"final","content":"..."}`. Connected tools receive dynamically built
+argument schemas from their declared input schemas, with a generic `input`
+field as the fallback.
+
+The node reads a reply with its own code. Two things follow `agent_deepagent`,
+the `FINAL>>>` form and the recovery of a broken `final` envelope, and the rest
+is this node's own. The parallel `tool_calls` form is not taken:
+
+- A `final` envelope whose content was not escaped correctly (an inner `"`, a
+  literal line break) is recovered when the envelope opens the reply and the
+  reply ends with its closing `"}`, with or without a markdown fence around
+  it. A JSON document pasted in unescaped is delivered exactly as written. An
+  envelope that was cut off, has more text after it, has other members after
+  `content` (`","note":"z"}`, even when that string also has broken escaping), has a second envelope after it, or has a
+  `FINAL>>>` line inside it is retried:
+  where the answer ended cannot be told. One cut-off cannot be told from a
+  finished answer and is delivered: a reply that stops exactly after a `"}`
+  inside the answer.
+- A valid envelope can follow a preamble containing braces or ordinary JSON.
+  When the first object is not an envelope, a standalone envelope on a later
+  line is read. Nested objects and quoted examples are not dispatched. Replies
+  mixing this fallback with `FINAL>>>` are retried instead of guessing.
+- A `content` that is not a string (a JSON object, array, number or boolean) is
+  delivered as JSON text. For compatibility, a parsed `final` with missing,
+  null, empty or whitespace-only content remains a successful answer; this is
+  distinct from an empty model reply, which is retried.
+- `FINAL>>>` at the start of a line, followed by the answer as plain text, is
+  also an answer. Nothing after the marker needs escaping. The prompt does not
+  ask for this form; a retry does, when an answer did not parse. When all that
+  follows the marker is a `final` envelope, its content is the answer, and one
+  that was cut off there is retried. A whole tool-call envelope after the
+  marker, with or without a fence, is retried with instructions to omit the
+  marker; it is never presented as the answer. A space, tab, LF, CRLF or bare
+  CR separates the marker from its answer, and only one separator is removed.
+  LF, CRLF and bare CR also start a new marker line.
+- A tool call, the first line included, is not replaced by a `FINAL>>>` line
+  after it: the line is a claim about work not yet done. The reply is then
+  read as its first JSON object, as always: a tool call there runs, and
+  anything else is retried. That holds for a tool call that lost its `type`
+  and is the reply's first object or has no word before it on its line, and
+  for one that does not parse wherever in the reply it sits: they do not
+  run, and the claim after them is not delivered either. One kind of tool
+  call is read as quoted: one that parses and has a word before it and a word
+  after it on its line. It is prose, and a `FINAL>>>` line after it is the
+  answer. Punctuation, a brace, a closing, a markup tag or a comment around a
+  call is no word. A tool call wrapped inside another object that parses is not read.
+- A valid `final` followed by a pending tool call is retried. Its claim is
+  withheld until the model sends the call and that work runs. A quoted, valid
+  call example after the final is still ordinary trailing prose. A new, closed
+  markdown code block after that final also quotes examples, including malformed
+  calls. An unfenced trailing call, a call in the same fence as the final, or a
+  call in an unclosed block remains pending work; no successful fallback drops it.
+- A `FINAL>>>` line after a `final` envelope that parses is read. With
+  nothing after the marker, the envelope's content is the answer. After the
+  opening of a broken one that is not quoted, inside its content or after it,
+  the reply is retried: the line could as well be the answer's own text.
+
+A reply that is neither a tool call nor an answer is retried twice, each time
+with a hint that says what was wrong and how to send it: a broken tool call is
+asked for again as a tool call, a broken answer after `FINAL>>>`, and a bare
+JSON object (it may be an answer, or a tool call that lost its `type`) either
+way. Hints include an excerpt, not the entire previous reply, and ask the
+model to generate the required call from the task and tool schema. The
+three-attempt budget is deliberate: a model that keeps replying in prose can
+use three model calls, with their latency and token cost, before the fallback
+accepts its text. After the third reply, prose is delivered as the answer, also when it
+starts with a brace that opens no object (`{curly} braces`) or mentions a
+`type`. An empty reply, a `FINAL>>>` with nothing after it, a reply that opens
+with a JSON object that is neither shape, an envelope that was refused, a
+broken envelope that is not quoted, and a broken tool call anywhere in the
+reply are not answers: the run fails with `stop_reason: error`, and its answer
+says what was wrong with the model's last reply without quoting it. An object
+that does not parse is read by the members it carries itself, not the ones
+nested in their values: its `type`, or a tool call's `name` and `args` when it
+has no type. Such an object with no type counts as a tool call only as the
+reply's first object or with no word before it on its line. When deciding whether
+to deliver prose after three attempts, the first-object rule excludes explicit
+code expressions: a leading `return`/`yield`, an
+assignment, an arrow function, or a same-line function argument (including later
+comma-separated arguments inside an open parenthesis). The exemption does not apply
+when accepting a final claim or choosing its retry hint: a code dictionary with
+`name` and `args` before `FINAL>>>` or a `final` envelope is pending work. The
+claim is withheld and the model is asked to regenerate the call. A real code
+example in that position cannot be distinguished from an unexecuted call and
+is refused too. Prose such as `Calling: {...}` still counts
+as a call. Elsewhere it is data or code, as in an answer that shows a function called with one. A tool
+call's `type` right after the brace is still read when its colon is missing or
+miswritten, or its key is in curly quotes or lost its closing quote. A brace that opens no object, as in a block of code, is prose and
+hides nothing after it. With no word before it on its line, a tool call's
+`type` right after the brace is also read with no quotes or in single quotes.
+When a quote out of place or a missing closing kept the members from being
+read, a `type` named in the text after the object decides, or `args` for an
+object that has a name. This fallback also applies when the first key lost
+either quote, gained an extra quote, or a missing opening brace made the
+object appear to close before its remaining members. It is conservative:
+an unreadable object followed by text naming a tool-call type may be retried
+even when the model intended an example. A standalone `final` with unquoted
+or single-quoted keys is retried, including in a fence or after `FINAL>>>`;
+its raw envelope is not delivered as prose. Whitespace around a reply is
+trimmed before it is read, as it always was.
+
+Fence labels such as `json5`, `c++` and `objective-c` are supported for final
+recovery. The marker itself must be plain `FINAL>>>` at the start of a line;
+markdown wrappers such as `**FINAL>>>**` or backticks are not protocol markers
+and may be delivered as prose after retries.
+
+Recovery decodes recognized JSON escapes, including `\n`, `\t`, `\b` and
+`\f`, while preserving unknown escapes. A malformed envelope does not reveal
+whether a recognized escape was intended as a control character or as part of
+a literal path such as `C:\new\temp`. Literal paths should use escaped
+backslashes in JSON or follow `FINAL>>>`, where backslashes are preserved.
+The parser does not guess path semantics or disable valid JSON escape decoding.
+Recovery joins valid Unicode surrogate pairs and keeps an unpaired surrogate
+as its original `\uXXXX` escape text, so recovery does not create a character
+that cannot be encoded as UTF-8.
+Parsed final content also preserves lone surrogates as literal `\uXXXX` escapes,
+including after `FINAL>>>` and in object or array content. Valid Unicode characters
+and surrogate pairs keep their decoded values.
 
 ## Upstream docs
 
