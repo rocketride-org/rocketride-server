@@ -301,6 +301,37 @@ def test_suspect_fields_are_omitted_from_logs(tool):
     assert '192.0.2.1' not in str(result) and 'sensitive-token' not in str(result)
 
 
+@pytest.mark.parametrize('event', [{}, {'type': 'f'}, {'log_id': 'other'}, {'_id': 'other'}])
+def test_log_event_must_identify_requested_event(tool, event):
+    """Reject empty, unidentified, or unrelated event responses."""
+    instance, client, _ = tool
+    client.request.return_value = event
+    result = instance.get_log_event({'log_id': 'l1'})
+    assert result['success'] is False and result['error_code'] == 'API_ERROR'
+
+
+@pytest.mark.parametrize('key', ['log_id', '_id'])
+def test_log_event_accepts_matching_identifier(tool, key):
+    """Accept both Auth0 event identifier fields."""
+    instance, client, _ = tool
+    client.request.return_value = {key: 'l1', 'type': 'f'}
+    assert instance.get_log_event({'log_id': 'l1'})['log_id'] == 'l1'
+
+
+def test_limit_sul_explains_same_ip_limit(tool):
+    """Distinguish the temporary per-IP login limit without exposing the address."""
+    instance, client, _ = tool
+    event = {'log_id': 'l1', 'type': 'limit_sul', 'ip': '192.0.2.1'}
+    client.request.side_effect = [[event], event]
+    logs = instance.get_user_logs({'user_id': 'u'})
+    detail = instance.get_log_event({'log_id': 'l1'})
+    explanation = (
+        'The user was temporarily prevented from logging in after reaching the login limit from the same IP address.'
+    )
+    assert logs['events'][0]['description'] == detail['diagnostics'] == explanation
+    assert '192.0.2.1' not in str(logs) and '192.0.2.1' not in str(detail)
+
+
 def test_limit_wc_explains_an_ip_block_even_when_profile_is_not_blocked(tool):
     """Distinguish an IP-based brute-force event from an administrative block."""
     instance, client, _ = tool
@@ -331,7 +362,13 @@ def test_limit_wc_explains_an_ip_block_even_when_profile_is_not_blocked(tool):
 def test_log_fields_remove_ip_addresses_but_preserve_benign_colons(tool, value, expected):
     """Prevent IP addresses in exposed log fields while keeping harmless colon text."""
     instance, client, _ = tool
-    client.request.return_value = {'type': 'f', 'client_name': value, 'connection': value, 'user_id': value}
+    client.request.return_value = {
+        'log_id': 'l1',
+        'type': 'f',
+        'client_name': value,
+        'connection': value,
+        'user_id': value,
+    }
     result = instance.get_log_event({'log_id': 'l1'})
     assert result['client_name'] == result['connection'] == result['user_id'] == expected
     if expected is None:
@@ -414,7 +451,7 @@ def test_id_validation_and_flat_errors(tool, method, key):
 def test_legitimate_log_names_are_preserved(tool, value):
     """Keep ordinary provider and application names in log results."""
     instance, client, _ = tool
-    client.request.return_value = {'type': 'f', 'connection': value, 'client_name': value}
+    client.request.return_value = {'log_id': 'l', 'type': 'f', 'connection': value, 'client_name': value}
     result = instance.get_log_event({'log_id': 'l'})
     assert result['connection'] == value and result['client_name'] == value
 
@@ -425,7 +462,7 @@ def test_legitimate_log_names_are_preserved(tool, value):
 def test_credential_and_control_log_values_are_removed(tool, value):
     """Omit credential-like, nonprintable, or oversized log fields."""
     instance, client, _ = tool
-    client.request.return_value = {'type': 'f', 'connection': value, 'client_name': value}
+    client.request.return_value = {'log_id': 'l', 'type': 'f', 'connection': value, 'client_name': value}
     result = instance.get_log_event({'log_id': 'l'})
     assert result['connection'] is None and result['client_name'] is None
 

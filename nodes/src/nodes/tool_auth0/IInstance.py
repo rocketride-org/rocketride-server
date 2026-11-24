@@ -251,6 +251,8 @@ class IInstance(IInstanceBase):
             """Fetch and sanitize the requested log event."""
             log_id = _identifier(_input(args, 'get_log_event'), 'log_id')
             data = sanitize.object_response(self._client().request('get_log_event', identifier=log_id))
+            if (data.get('log_id') or data.get('_id')) != log_id:
+                raise Auth0Error('API_ERROR', 'Auth0 returned an invalid log event response.')
             event = sanitize.event(data)
             return {**event, 'user_id': sanitize.log_text(data.get('user_id')), 'diagnostics': event['description']}
 

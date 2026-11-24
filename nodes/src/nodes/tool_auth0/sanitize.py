@@ -36,7 +36,7 @@ _EXPLANATIONS = {
     'fp': 'Login failed because the password was invalid.',
     'fu': 'Login failed because the username was invalid.',
     'limit_wc': 'Brute-force protection blocked logins from an IP address after repeated failed attempts against one account.',
-    'limit_sul': 'Login attempts were temporarily limited for the account.',
+    'limit_sul': 'The user was temporarily prevented from logging in after reaching the login limit from the same IP address.',
     'limit_mu': 'Login attempts were blocked by IP-based protection.',
 }
 _GENERIC = 'No specific diagnostic is available for this event type.'
