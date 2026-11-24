@@ -349,7 +349,8 @@ def _walk(store: Any, root: str, warnings: List[str]) -> Dict[str, str]:
         for entry in listing.get('entries') or []:
             rel = _join(rel_dir, entry['name'])
             if entry.get('type') == 'dir':
-                if depth + 1 < MAX_FOLDER_DEPTH:
+                # The skill folder is depth 0: a folder MAX_FOLDER_DEPTH levels below it is read, a deeper one is not
+                if depth + 1 <= MAX_FOLDER_DEPTH:
                     pending.append((rel, depth + 1))
                 continue
             if rel != SKILL_FILE and len(found) - (SKILL_FILE in found) >= MAX_FILES_PER_SKILL:

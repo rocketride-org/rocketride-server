@@ -126,6 +126,33 @@ def test_malformed_allowed_tools_raise(raw):
         parse_allowed_tools(raw)
 
 
+@pytest.mark.parametrize(
+    'raw',
+    [
+        [False],
+        [0],
+        [None],
+        [['search']],
+        [{'toolName': False}],
+        [{'toolName': 0}],
+        [{'toolName': 'search'}, False],
+        '[false]',
+        '[{"toolName": 0}]',
+        _EngineJson([{'toolName': False}]),
+    ],
+)
+def test_an_entry_that_is_not_a_tool_name_raises_instead_of_allowing_every_tool(raw):
+    # Dropping such an entry could leave the list empty, and an empty list
+    # exposes every tool: the parser must fail closed
+    with pytest.raises(ValueError):
+        parse_allowed_tools(raw)
+
+
+@pytest.mark.parametrize('raw', [['', ' '], [{}, {'toolName': ''}, ''], '[{}]', '[""]'])
+def test_blank_entries_and_rows_still_allow_every_tool(raw):
+    assert parse_allowed_tools(raw) is None
+
+
 # ---------------------------------------------------------------------------
 # Filtering the catalog
 # ---------------------------------------------------------------------------
@@ -227,6 +254,16 @@ def test_a_malformed_allow_list_fails_the_call():
     inst = _instance(_iglobal(_ScriptedClient([_tool('search')])), allowedTools=[{'tool': 'search'}])
     with pytest.raises(ValueError, match='has no toolName'):
         inst._tool_query_dynamic()
+
+
+def test_an_allow_list_of_non_names_fails_the_call_and_exposes_no_tool():
+    client = _ScriptedClient([_tool('search'), _tool('delete_repo')])
+    inst = _instance(_iglobal(client), allowedTools=[{'toolName': False}])
+    with pytest.raises(ValueError, match='toolName'):
+        inst._tool_query_dynamic()
+    with pytest.raises(ValueError, match='toolName'):
+        inst._tool_invoke_dynamic(tool_name='srv.delete_repo', input_obj={})
+    assert client.calls == []
 
 
 # ---------------------------------------------------------------------------

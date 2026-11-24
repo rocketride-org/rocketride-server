@@ -420,6 +420,26 @@ def test_the_file_cap_never_drops_skill_md(monkeypatch):
     assert any('more than 3 files' in p for p in problems)
 
 
+def test_load_folder_reads_files_five_folder_levels_deep():
+    files = {'s/SKILL.md': b'---\ndescription: d\n---\nbody', 's/a/b/c/d/e/ref.md': b'fifth level'}
+    skills, problems = catalog_mod.load_folder(FakeFileStore(files), 's')
+    assert problems == []
+    assert skills[0].files == {'a/b/c/d/e/ref.md': 's/a/b/c/d/e/ref.md'}
+
+
+def test_load_folder_leaves_out_files_below_the_fifth_folder_level():
+    files = {
+        's/SKILL.md': b'---\ndescription: d\n---\nbody',
+        's/a/b/c/d/e/ref.md': b'fifth level',
+        's/a/b/c/d/e/f/deep.md': b'sixth level',
+    }
+    store = FakeFileStore(files)
+    skills, _ = catalog_mod.load_folder(store, 's')
+    assert list(skills[0].files) == ['a/b/c/d/e/ref.md']
+    # The sixth level is not even listed
+    assert store.listings == 7
+
+
 # ---------------------------------------------------------------------------
 # The catalog a call builds from its settings
 # ---------------------------------------------------------------------------

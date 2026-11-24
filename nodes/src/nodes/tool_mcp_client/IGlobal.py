@@ -262,7 +262,10 @@ def parse_allowed_tools(raw: Any) -> Optional[set]:
 
     Accepts the config panel's rows (``[{'toolName': ...}]``), a list of
     names, or a string of names separated by commas or newlines. Returns
-    ``None`` when no names are set, which allows every tool.
+    ``None`` when no names are set, which allows every tool. An entry that is
+    neither a name nor a row, or a row whose ``toolName`` is not a string,
+    raises ``ValueError``: dropping it could leave the list empty and so
+    expose every tool.
     """
     if raw is None or raw == '':
         return None
@@ -290,7 +293,11 @@ def parse_allowed_tools(raw: Any) -> Optional[set]:
             # key must not leave the list empty and expose every tool.
             if item and item.get('toolName') is None:
                 raise ValueError(f'allowedTools row {item!r} has no toolName')
-            item = item.get('toolName')
+            row, item = item, item.get('toolName')
+            if item is not None and not isinstance(item, str):
+                raise ValueError(f'allowedTools row {row!r} has a toolName that is not a string')
+        elif not isinstance(item, str):
+            raise ValueError(f'allowedTools entry {item!r} is not a tool name')
         name = str(item or '').strip()
         if name:
             names.add(name)
