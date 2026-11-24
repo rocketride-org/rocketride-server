@@ -30,8 +30,7 @@ def _engine(client=None):
     t._data_lock = asyncio.Lock()
     t._data_client = client
     t._data_token = 'tok'
-    t._data_port = 20001
-    t._engine_process = None
+    t._launch = SimpleNamespace(address='127.0.0.1:20001', returncode=None)
     t._run_kind = 'dev'
     t._task_metrics = None
     t._status = SimpleNamespace(serviceUp=False, state=0, notes=None)
