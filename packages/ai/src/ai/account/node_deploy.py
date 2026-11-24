@@ -51,6 +51,7 @@ from ai.common.node_packages import (
     module_of,
     node_files,
     node_of,
+    providers_of,
 )
 from ai.constants import CONST_NODES_CONTRACT
 
@@ -492,14 +493,10 @@ async def resolve_pipeline_nodes(reach: Optional[tuple], pipeline: Dict[str, Any
         reach: (org id, user id, team ids) the run resolves for; None resolves nothing.
         pipeline: The pipeline after ``${...}`` expansion, the one that runs.
     """
-    from ai.modules.task import node_store
-
     if not reach:
         return {}
     org_id, user_id, team_ids = reach
-    return await resolve_nodes(
-        org_id, user_id, team_ids, sorted(node_store._providers_of(pipeline.get('components', [])))
-    )
+    return await resolve_nodes(org_id, user_id, team_ids, sorted(providers_of(pipeline.get('components', []))))
 
 
 def _identity(conn: Any) -> tuple:
@@ -527,9 +524,7 @@ async def visible_nodes(conn: Any) -> Dict[str, Dict[str, Any]]:
 
 async def nodes_for(conn: Any, components: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """The published nodes a pipeline names, nested ones included, resolved for this caller; refuses one they cannot run."""
-    from ai.modules.task import node_store
-
-    names = sorted(node_store._providers_of(components))
+    names = sorted(providers_of(components))
     if not getattr(conn, '_account_info', None):
         return await resolve_nodes('local', '', [], names)
     return await resolve_nodes(*_identity(conn), names)

@@ -250,6 +250,9 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         # Operator opt-in that makes task processes hide their /proc entries
         # (ai.proc_privacy); non-secret, and tasks must see it to act on it
         'RR_PROC_PRIVATE',
+        # The node rail switch: with it on, a run solves only its own nodes' requirements,
+        # and its engine must agree with EaaS on which files the server's own solve holds
+        'RR_NODE_RAIL_ENABLED',
         # Executable override for the media toolkit nodes
         'MEDIA_TOOLKIT_FFMPEG',
         # Bare names individual node READMEs document as engine-host fallbacks

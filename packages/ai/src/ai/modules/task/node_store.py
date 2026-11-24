@@ -40,7 +40,7 @@ import os
 import shutil
 import tempfile
 import threading
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from rocketlib import getServiceDefinition, getServiceDefinitions, warning
 
@@ -53,10 +53,6 @@ from ai.constants import CONST_NODES_CONTRACT
 _nodes: Dict[str, Dict[str, Any]] = {}
 _providers: Dict[str, str] = {}
 _definitions: Dict[str, Dict[str, Any]] = {}
-
-# Filters autopipe inserts while it runs (nodes/src/nodes/autopipe/IGlobal.py, getFilter), besides the
-# providers its own config names; a test keeps the two in step
-_AUTOPIPE_FILTERS = ('parse', 'ocr', 'indexer')
 
 # Two runs naming the same node must not unpack it at once
 _unpacking = threading.Lock()
@@ -205,30 +201,6 @@ def served(provider: str, published: Optional[Dict[str, Dict[str, Any]]] = None)
     return _definitions.get(provider.lower()) or _published_definitions(published).get(provider.lower())
 
 
-def _nested_providers(value: Any) -> Iterator[str]:
-    """Every provider named inside a config value, in lower case."""
-    if isinstance(value, dict):
-        if isinstance(value.get('provider'), str):
-            yield value['provider'].lower()
-        for item in value.values():
-            yield from _nested_providers(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from _nested_providers(item)
-
-
-def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
-    """Every provider a pipeline names, with the filters autopipe would insert."""
-    found: Set[str] = set()
-    for component in components:
-        provider = str(component.get('provider', '')).lower()
-        found.add(provider)
-        if provider == 'autopipe':
-            found.update(_AUTOPIPE_FILTERS)
-            found.update(_nested_providers(component.get('config', {})))
-    return found
-
-
 def _with_requires(names: Iterable[str], nodes: Optional[Dict[str, Any]] = None) -> List[str]:
     """The names with the nodes they import (the `requires` of nodes, by default the served ones), each after them.
 
@@ -268,7 +240,7 @@ def place(
         NodeNotEntitled: The pipeline names a published node (one autopipe inserts, say) not resolved for the run.
         NodeVersionInUse: Another live run uses another version of one of the published nodes.
     """
-    providers = _providers_of(pipeline.get('components', []))
+    providers = node_packages.providers_of(pipeline.get('components', []))
     names = _with_requires({_providers[p] for p in providers if p in _providers})
     published = published or {}
     # A release node's name has no dot: another run's copy of a published node must not load in this one
