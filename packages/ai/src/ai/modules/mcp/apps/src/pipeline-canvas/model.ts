@@ -202,19 +202,28 @@ export function fillMissingServices(nodes: INode[], services: IServiceCatalog): 
 	return catalog;
 }
 
-/** Orders nodes so a group always comes before its children (React Flow needs it). */
+/**
+ * Orders nodes so a group always comes before its children (React Flow needs
+ * it), each node once. A damaged file can put a node inside itself, directly
+ * or through other nodes: the parent link that closes the loop is dropped, so
+ * that node is drawn at the top level.
+ */
 export function parentsFirst(nodes: INode[]): INode[] {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
 	const out: INode[] = [];
-	const seen = new Set<string>();
-	const visit = (node: INode, depth: number) => {
-		if (seen.has(node.id)) return;
+	const done = new Set<string>();
+	const visiting = new Set<string>();
+	const visit = (node: INode) => {
+		if (done.has(node.id)) return;
 		const parent = node.parentId ? byId.get(node.parentId) : undefined;
-		if (parent && depth < nodes.length) visit(parent, depth + 1);
-		seen.add(node.id);
+		visiting.add(node.id);
+		if (parent && visiting.has(parent.id)) node = { ...node, parentId: undefined };
+		else if (parent) visit(parent);
+		visiting.delete(node.id);
+		done.add(node.id);
 		out.push(node);
 	};
-	nodes.forEach((node) => visit(node, 0));
+	nodes.forEach((node) => visit(node));
 	return out;
 }
 

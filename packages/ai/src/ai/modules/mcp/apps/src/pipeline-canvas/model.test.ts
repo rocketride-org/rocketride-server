@@ -163,6 +163,28 @@ describe('buildCanvasModel', () => {
 		]);
 	});
 
+	it('draws each node once when a damaged file puts nodes inside themselves', () => {
+		const components = [
+			{ id: 'a', provider: 'webhook', config: {}, ui: { parentId: 'a' } },
+			{ id: 'b', provider: 'webhook', config: {}, ui: { parentId: 'c', position: { x: 0, y: 0 } } },
+			{ id: 'c', provider: 'webhook', config: {}, ui: { parentId: 'b', position: { x: 300, y: 0 } } },
+		];
+		const model = buildCanvasModel(result(summaryFor(components as never), { [CANVAS_META_KEY]: { pipeline: { components }, services: SERVICES } }));
+		if (model.kind !== 'graph') throw new Error(model.kind);
+
+		// The link that closes each loop is dropped; the rest still puts a parent first.
+		expect(model.nodes.map((n) => [n.id, n.parentId])).toEqual([
+			['a', undefined],
+			['c', undefined],
+			['b', 'c'],
+		]);
+
+		// Without saved positions the widget lays the nodes out itself.
+		const bare = buildCanvasModel(result(summaryFor([components[0]] as never), { [CANVAS_META_KEY]: { pipeline: { components: [components[0]] }, services: SERVICES } }));
+		if (bare.kind !== 'graph') throw new Error(bare.kind);
+		expect(bare.nodes.map((n) => n.id)).toEqual(['a']);
+	});
+
 	it('reports an empty pipeline', () => {
 		const empty = summaryFor([], { nodes: [], connections: [], node_count: 0 });
 		expect(buildCanvasModel(result(empty, { [CANVAS_META_KEY]: { pipeline: { components: [] } } })).kind).toBe('empty');
