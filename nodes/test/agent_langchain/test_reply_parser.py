@@ -927,8 +927,8 @@ class TestSalvage:
         assert recovered == 'all done 😀, shipping'
         assert recovered.encode('utf-8').decode('utf-8') == recovered
 
-    def test_unescaping_leaves_a_lone_high_surrogate_alone(self):
-        assert reply._unescape_json_string_body('\\uD83Dx') == chr(0xD83D) + 'x'
+    def test_unescaping_preserves_a_lone_high_surrogate_as_escape_text(self):
+        assert reply._unescape_json_string_body('\\uD83Dx') == '\\uD83Dx'
 
     def test_unescaping_passes_through_what_it_does_not_recognise(self):
         """A lone backslash is far likelier to be a Windows path than a mistake."""
@@ -942,7 +942,7 @@ class TestSalvage:
         assert reply._unescape_json_string_body(body) == body
 
     def test_unescaping_keeps_a_high_surrogate_apart_from_a_malformed_low_one(self):
-        assert reply._unescape_json_string_body('\\uD83D\\u+E00') == chr(0xD83D) + '\\u+E00'
+        assert reply._unescape_json_string_body('\\uD83D\\u+E00') == '\\uD83D\\u+E00'
 
     def test_a_malformed_unicode_escape_does_not_end_the_turn(self):
         """It raised out of the parser, so the turn failed on the first reply with no retry."""
@@ -1757,3 +1757,64 @@ def test_a_standing_final_that_cannot_be_unwrapped_is_not_delivered_as_protocol(
     with pytest.raises(ValueError):
         reply._run_model_turn(ask)
     assert len(feedback) == 3
+
+
+class TestNihalFollowup:
+    @pytest.mark.parametrize('fence', ['```json', '````json5', '~~~json'])
+    @pytest.mark.parametrize('call', [TOOL_CALL, BROKEN_TOOL_CALL, PARALLEL_CALLS])
+    def test_a_closed_fenced_example_after_a_final_is_not_pending_work(self, fence, call):
+        closing = fence.rstrip('json5')
+        raw = '{"type":"final","content":"Here is how to call it."}\n\n' + fence + '\n' + call + '\n' + closing
+        ask, feedback = scripted(raw)
+        assert answer_of(reply._run_model_turn(ask)) == 'Here is how to call it.'
+        assert len(feedback) == 1
+
+    @pytest.mark.parametrize('prefix', ['', '```json\n'])
+    def test_an_unclosed_example_fence_does_not_hide_pending_work(self, prefix):
+        final = '{"type":"final","content":"Done."}'
+        final = prefix + final + ('\n```' if prefix else '')
+        ask, feedback = scripted(final + '\n```json\n' + TOOL_CALL)
+        with pytest.raises(ValueError):
+            reply._run_model_turn(ask)
+        assert len(feedback) == 3
+
+    @pytest.mark.parametrize('example', [TOOL_CALL, BROKEN_TOOL_CALL])
+    @pytest.mark.parametrize('call', [TOOL_CALL, BROKEN_TOOL_CALL])
+    def test_a_fenced_example_does_not_hide_a_later_unfenced_call(self, example, call):
+        raw = '{"type":"final","content":"Done."}\n```json\n' + example + '\n```\n' + call
+        ask, feedback = scripted(raw)
+        with pytest.raises(ValueError):
+            reply._run_model_turn(ask)
+        assert len(feedback) == 3
+        assert 'tool call' in feedback[1]
+
+    @pytest.mark.parametrize('statement', ['return ', 'yield ', 'result = ', 'run('])
+    def test_the_first_dict_in_code_is_not_a_typeless_call(self, statement):
+        raw = 'Use this helper:\n\ndef f():\n    ' + statement + '{"name": "x", "args": [1]}'
+        ask, feedback = scripted(raw)
+        assert answer_of(reply._run_model_turn(ask)) == raw
+        assert len(feedback) == 3
+
+    @pytest.mark.parametrize('line_end', ['\r', '\n', '\r\n'])
+    def test_a_marker_after_a_line_end_delivers_only_its_answer(self, line_end):
+        ask, feedback = scripted('Thinking' + line_end + ' \tFINAL>>> ok')
+        assert answer_of(reply._run_model_turn(ask)) == 'ok'
+        assert len(feedback) == 1
+
+    @pytest.mark.parametrize('prefix', ['I looked at {x}.\n', 'Example: {"x": 1}\n'])
+    def test_the_hint_locates_the_broken_envelope_after_a_preamble(self, prefix):
+        with pytest.raises(json.JSONDecodeError) as error:
+            json.loads(BROKEN_TOOL_CALL)
+        hint = reply._parse_failure_hint(prefix + BROKEN_TOOL_CALL)
+        assert f'at character {error.value.pos}.' in hint
+        assert '{x}' not in hint
+        assert 'tool call' in hint
+
+    @pytest.mark.parametrize('escape', [r'\ud800', r'\udfff', r'\uD83D\u0041', r'\ud800\ud800', r'\udc00\ud800'])
+    def test_recovered_unpaired_surrogates_can_be_encoded(self, escape):
+        raw = '{"type":"final","content":"bad ' + escape + ' "x""}'
+        ask, feedback = scripted(raw)
+        answer = answer_of(reply._run_model_turn(ask))
+        assert answer.encode('utf-8').decode('utf-8') == answer
+        assert '\\u' in answer
+        assert len(feedback) == 1

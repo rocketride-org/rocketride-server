@@ -367,7 +367,10 @@ _FINAL_SENTINEL = 'FINAL>>>'
 _MAX_ATTEMPTS = 3
 
 #: The sentinel at the start of a line. Text that mentions it mid-line does not announce an answer.
-_SENTINEL_LINE = re.compile(rf'(?m)^[ \t]*{re.escape(_FINAL_SENTINEL)}')
+_SENTINEL_LINE = re.compile(rf'(?:\A|(?<=[\r\n]))[ \t]*{re.escape(_FINAL_SENTINEL)}')
+
+#: Markdown fence lines; only a matching, closed block can quote a trailing example.
+_FENCE_LINE = re.compile(r'(?:\A|(?<=[\r\n]))[ \t]*(`{3,}|~{3,})([^\r\n]*)')
 
 #: A reply that opens with a JSON object, optionally inside a markdown fence: a brace, then a quoted key and
 #: its colon, its closing, or the end of a reply that was cut off there. Either kind of quote, because a model
@@ -385,6 +388,9 @@ _LOOSE_FINAL_OPEN = re.compile(r"""\{\s*(?:type|'type')\s*:\s*["']final["']""")
 
 #: A word: a letter or a digit. Punctuation, a brace and an underscore are not words.
 _WORD = re.compile(r'[^\W_]')
+
+#: A first object in an explicit code expression is data, even with name/args keys.
+_CODE_OBJECT_PREFIX = re.compile(r'(?:^[ \t]*(?:return|yield)\b|[=(]\s*$)')
 
 #: A word after an object on its line. Punctuation and closings are not words, and the line is read no
 #: further than a markup tag, a comment or another object that opens there.
@@ -583,6 +589,19 @@ def _named(
     return named_type, arg < len(args) and args[arg] < stop
 
 
+def _closed_fences(text: str) -> Iterator[Tuple[int, int]]:
+    """Closed markdown blocks, in one pass; an unterminated block hides nothing."""
+    opening = None
+    for fence in _FENCE_LINE.finditer(text):
+        marker, rest = fence.groups()
+        if opening is None:
+            if marker[0] != '`' or '`' not in rest:
+                opening = fence
+        elif marker[0] == opening.group(1)[0] and len(marker) >= len(opening.group(1)) and not rest.strip():
+            yield opening.start(), fence.end()
+            opening = None
+
+
 def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
     """
     Yield (type, parsed object, start) for envelopes; an unfinished envelope has no parsed object.
@@ -595,9 +614,13 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
     work that never ran is not prose.
 
     An object with a tool call's ``name`` and ``args`` and no type will not run. It counts as a
-    tool call where a reply's envelope is looked for: as the first object of the text, or with no
-    word before it on its line. Anywhere else it is data or code, as in an answer that shows a
-    function being called with such an object.
+    tool call as the first object (unless introduced by a code expression), or with no word
+    before it on its line. Anywhere else it is data or code, as in an answer that shows a
+    function being called with such an object. A leading return/yield, assignment or function
+    argument marks a code expression; prose such as ``Calling: {...}`` still counts as a call.
+
+    After a parsed final, a new closed markdown block quotes an example. Its objects are not
+    pending work. A call outside that block, or inside an unclosed block, still counts.
 
     An object that does not parse is read by its own members (``_own_members``): its type, or a
     tool call's name and arguments with no type. When it has neither, what its own text names
@@ -618,6 +641,8 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
     grows with the length of the reply and no faster.
     """
     first, read_to, looked_to, word_before = text.find('{'), 0, 0, False
+    final_end = 0
+    fences, fenced = _closed_fences(text), (0, 0)
     mentions: Optional[Tuple[List[int], List[str], List[int], List[int]]] = None
     for opening in _OBJECT_OPENING.finditer(text):
         at = opening.start()
@@ -630,6 +655,12 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
         looked_to, no_word_before = at, not word_before
         if at < read_to:
             continue
+        if final_end:
+            while fenced[1] <= at:
+                fenced = next(fences, (len(text), len(text)))
+            if final_end <= fenced[0] <= at < fenced[1]:
+                read_to = fenced[1]
+                continue
         members, end, stray = _own_members(text, at)
         miswritten = None if 'type' in members else _MISWRITTEN_TYPE.match(text, at)
         if miswritten:
@@ -662,7 +693,7 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
         read = end is not None and not stray and not (parsed is None and _MEMBER_CONTINUATION.match(text, end))
         own = members.get('type')
         # Where a name and arguments with no type make a tool call. Elsewhere they are data or code.
-        may_lack_type = no_word_before or at == first
+        may_lack_type = no_word_before or (at == first and not _CODE_OBJECT_PREFIX.search(text[line:at]))
         if isinstance(parsed, dict):
             names_a_tool = may_lack_type and isinstance(parsed.get('name'), str) and 'args' in parsed
             kind = parsed.get('type', 'tool_call' if names_a_tool else None) if stands else None
@@ -684,6 +715,8 @@ def _envelopes(text: str) -> Iterator[Tuple[str, Any, int]]:
                 names_a_call = named_type in _TOOL_CALL_KINDS
                 kind = 'tool_call' if names_args and has_a_name and not names_a_call else named_type
         if isinstance(kind, str) and kind in (_ENVELOPE_KINDS if stands else _TOOL_CALL_KINDS):
+            if kind == 'final' and parsed is not None and not final_end:
+                final_end = end or 0
             yield kind, parsed, at
             if parsed is None:
                 return
@@ -767,7 +800,8 @@ def _unescape_json_string_body(body: str) -> str:
                 out.append(chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)))
                 i = low_start + 6
                 continue
-            out.append(chr(code))
+            # Preserve an unpaired surrogate as escape text, so recovered answers encode as UTF-8.
+            out.append(body[i : i + 6] if 0xD800 <= code <= 0xDFFF else chr(code))
             i += 6
         else:
             # Preserve unknown escapes literally. Recognized JSON escapes above are
@@ -1063,7 +1097,8 @@ def _diagnose(raw: Any) -> Tuple[str, str, str]:
     # A broken answer should come back after the sentinel, where nothing can break again. A broken
     # tool call must come back as a tool call: the sentinel would trade the work for a sentence about it.
     attempted = _attempted_kind(text)
-    if attempted == 'final':
+    began_with_final = attempted == 'final'
+    if began_with_final:
         attempted = _unfinished_envelope(text) or attempted
     wanted_a_tool_call = attempted in _TOOL_CALL_KINDS
     if marker and wanted_a_tool_call:
@@ -1075,8 +1110,11 @@ def _diagnose(raw: Any) -> Tuple[str, str, str]:
         )
     # Diagnose the JSON itself: without its fence, and from its opening brace when prose came first.
     candidate = _without_fence(text)
-    if attempted and not candidate.startswith('{') and '{' in candidate:
-        candidate = candidate[candidate.find('{') :]
+    if attempted:
+        envelope = next((entry for entry in _envelopes(candidate) if entry[0] == attempted), None)
+        start = envelope[2] if envelope is not None else candidate.find('{')
+        if start >= 0:
+            candidate = candidate[start:]
     try:
         json.loads(candidate)
     except json.JSONDecodeError as err:
@@ -1093,6 +1131,13 @@ def _diagnose(raw: Any) -> Tuple[str, str, str]:
         return problem, shown, f'Do not retype it as JSON: send the answer as {_FINAL_SENTINEL} followed by plain text.'
     except Exception:  # noqa: BLE001 - any other parse failure gets the same advice
         return 'could not be parsed.', '', ''
+
+    if began_with_final and wanted_a_tool_call:
+        return (
+            'combined a final answer with a pending tool call.',
+            '',
+            'Generate the required tool call from the task and tool schema as one valid JSON object; do not answer in prose.',
+        )
 
     # Valid JSON that is neither shape: a bare JSON answer, an unknown "type", a
     # tool call with no name, or several calls in one reply.
