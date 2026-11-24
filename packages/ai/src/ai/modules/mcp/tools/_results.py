@@ -5,8 +5,9 @@ The dispatcher sends one JSON object for every outcome, as text and as
 ``structuredContent`` (``handlers.py``). So each schema is a union:
 ``{'type': 'object', 'oneOf': [<success>..., ERROR_RESULT]}``. ``ok`` tells
 the branches apart: ``const: true`` in a success branch, ``const: false`` in
-the shared error envelope. ``validate_pipeline`` is the one tool whose success
-branch allows ``ok: false`` (a validation result, not an error envelope).
+the shared error envelope. ``validate_pipeline`` and ``probe_component`` share
+the one success branch that allows ``ok: false`` (a validation result, not an
+error envelope).
 
 A client that validates (the MCP Python SDK does, on every result that is not
 an error) fails the call when a result does not match. So a type is decided by
@@ -260,6 +261,20 @@ TRACE_SUMMARY = record(
 
 LOG_CONTEXT = record({'projectId': ANY, 'source': ANY, 'teamId': ANY}, ['projectId', 'source'])
 
+_VALIDATION_RESULT = result_schema(
+    success(
+        {
+            'errors': {'description': 'The engine diagnostics, normally a list.'},
+            'warnings': ANY,
+        },
+        ['errors', 'warnings'],
+        title='Validation',
+        description='ok is false when errors is not empty. This is a validation result, not an error envelope, '
+        'although isError is true when ok is false.',
+        ok=BOOLEAN,
+    )
+)
+
 _DEPLOYMENT_RESULT = result_schema(success({'deployment': DEPLOYMENT}, ['deployment']))
 
 _TEAM_WARNINGS = array(STRING, description='Things to tell the user about this deployment.')
@@ -294,19 +309,7 @@ RESULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
     'resolve_config': result_schema(
         success({'provider': ANY, 'profile': ANY, 'resolved': OBJECT, 'dropped': STRINGS, 'hint': STRING})
     ),
-    'validate_pipeline': result_schema(
-        success(
-            {
-                'errors': {'description': 'The engine diagnostics, normally a list.'},
-                'warnings': ANY,
-            },
-            ['errors', 'warnings'],
-            title='Validation',
-            description='ok is false when errors is not empty. This is a validation result, not an error envelope, '
-            'although isError is true when ok is false.',
-            ok=BOOLEAN,
-        )
-    ),
+    'validate_pipeline': _VALIDATION_RESULT,
     'describe_pipeline': result_schema(
         success(
             {
@@ -488,7 +491,8 @@ RESULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             title='Detail',
         ),
     ),
-    # Tools registered by other modules once they land.
+    # Tools registered by other modules once they land. probe_component returns what validate_pipeline does.
+    'probe_component': _VALIDATION_RESULT,
     'view_pipeline': result_schema(
         success(
             {
