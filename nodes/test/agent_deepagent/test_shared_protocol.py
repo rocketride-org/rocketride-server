@@ -212,6 +212,21 @@ def test_misplaced_parallel_calls_retry_before_any_work_runs(run, raw):
     assert len(repaired.prompts) == 3
 
 
+@pytest.mark.parametrize(
+    'expression',
+    ['Calling crm.get_deal({call})', 'Tool call = {call}', 'Action: invoke(crm, {call})', 'return {call}'],
+)
+@pytest.mark.parametrize('claim', ['FINAL>>> Found.', '{"type":"final","content":"Found."}'])
+def test_code_shaped_pending_work_with_a_claim_fails_without_running_a_tool(run, expression, claim):
+    raw = expression.format(call='{"name":"crm.get_deal","args":{"deal_id":42}}') + '\n' + claim
+    result = run(raw, tools=(GET_DEAL,))
+    assert result.stop_reason == 'error'
+    assert 'No valid tool call or final answer after 3 attempts.' in result.content
+    assert result.written == [result.content]
+    assert len(result.prompts) == 3
+    assert result.invocations == []
+
+
 def test_a_parallel_call_after_a_preamble_object_runs_once(run):
     result = run('Example: {"x":1}\n' + PARALLEL_CALLS, 'FINAL>>> Both checked.', tools=(GET_DEAL,))
     assert by_deal(result.invocations) == BOTH_DEALS

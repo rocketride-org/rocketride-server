@@ -172,10 +172,16 @@ says what was wrong with the model's last reply without quoting it. An object
 that does not parse is read by the members it carries itself, not the ones
 nested in their values: its `type`, or a tool call's `name` and `args` when it
 has no type. Such an object with no type counts as a tool call only as the
-reply's first object or with no word before it on its line. The first-object
-rule excludes explicit code expressions: a leading `return`/`yield`, an
+reply's first object or with no word before it on its line. When deciding whether
+to deliver prose after three attempts, the first-object rule excludes explicit
+code expressions: a leading `return`/`yield`, an
 assignment, an arrow function, or a same-line function argument (including later
-comma-separated arguments inside an open parenthesis). Prose such as `Calling: {...}` still counts
+comma-separated arguments inside an open parenthesis). The exemption does not apply
+when accepting a final claim or choosing its retry hint: a code dictionary with
+`name` and `args` before `FINAL>>>` or a `final` envelope is pending work. The
+claim is withheld and the model is asked to regenerate the call. A real code
+example in that position cannot be distinguished from an unexecuted call and
+is refused too. Prose such as `Calling: {...}` still counts
 as a call. Elsewhere it is data or code, as in an answer that shows a function called with one. A tool
 call's `type` right after the brace is still read when its colon is missing or
 miswritten, or its key is in curly quotes or lost its closing quote. A brace that opens no object, as in a block of code, is prose and

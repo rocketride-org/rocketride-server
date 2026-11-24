@@ -202,7 +202,12 @@ quoted, and is the reply's first object or has no word before it on its line
 are not answers: the run fails with `stop_reason: error`. Explicit code
 expressions (`return`/`yield`, assignments, arrow functions and same-line function
 arguments, including later comma-separated arguments inside an open parenthesis)
-are exempt from the first-object rule; prose such as `Calling: {...}` is not. That holds
+are exempt from the first-object rule only when deciding whether to deliver prose
+after three attempts; prose such as `Calling: {...}` is not. When accepting a
+final claim or choosing its retry hint, a code dictionary with `name` and `args`
+before `FINAL>>>` or a `final` envelope is pending work. The claim is withheld
+and the model is asked to regenerate the call. A real code example in that
+position cannot be distinguished from an unexecuted call and is refused too. That holds
 for a sub-agent's turn too, and a sub-agent turn that fails this way fails the
 orchestrator's run. The returned error contains the reason and position,
 while excerpts of the model's reply go only into the repair hint. Whitespace
