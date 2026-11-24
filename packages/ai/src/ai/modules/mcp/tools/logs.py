@@ -235,13 +235,21 @@ _AFTER_RUN = (
 def _traces_note(payload: dict, notes: Dict[str, Any], kept: int, traces: list) -> None:
     # The engine lists finished traces oldest first, so the newest are the ones left out.
     newest = len(traces) - kept
+    in_flight = len(payload.get('open') or [])
     notes['traces'] = {'returned': kept, 'total': len(traces)}
+    see = f'To see the {newest} newest'
+    if in_flight:
+        # The objects in flight take room in the next reply too, so it may show only some of them.
+        see = 'To see newer ones'
     notes['hint'] = (
-        f'Only the oldest {kept} of {len(traces)} finished traces fit in one reply. To see the {newest} newest, call '
-        f'log_traces again with n set to {newest}.'
+        f'Only the oldest {kept} of {len(traces)} finished traces fit in one reply. {see}, call log_traces again with '
+        f'n set to {newest}.'
     )
     if kept == 0:
-        notes['hint'] = f'None of the {len(traces):,} finished traces fit in one reply. {_AFTER_RUN}'
+        none_fit = f'None of the {len(traces):,} finished traces fit in one reply'
+        if in_flight:
+            none_fit += f' next to the {in_flight:,} objects still in flight'
+        notes['hint'] = f'{none_fit}. {_AFTER_RUN}'
 
 
 def _open_note(payload: dict, notes: Dict[str, Any], kept: int, open_traces: list) -> None:

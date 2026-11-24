@@ -48,16 +48,17 @@ def _output_note(payload: dict, notes: Dict[str, Any], kept: int, whole: str) ->
     notes['result'] = {'returned_chars': kept, 'total_chars': len(whole)}
     notes['hint'] = (
         f'The pipeline ran. Only the first {kept:,} of the {len(whole):,} characters of its output fit in one reply, '
-        'and running it again as it is will not return more. To get all of it on the next run, add a filestore '
-        'component that saves the output as a file. It writes under output/ in the file store unless you set its '
-        "target directory. Then call store_get_url with that file's path for a download link."
+        'and running it again as it is will not return more. To get all of it, add a filestore component and run the '
+        'pipeline again. Filestore saves text, documents and tables as files under output/ in the file store, unless '
+        "you set its target directory. For a model's answers, put an answer_documents component in front of it. Then "
+        'find the file with store_list and call store_get_url on it for a download link.'
     )
 
 
 _OUTPUT_STEPS = (result_size.text('result', note=_output_note),)
 # When even the run's identity and nulled output do not fit with the caller's own long values.
 _KEEP_HINT = (
-    'The pipeline ran, but its reply was too large to send, so the values named in dropped were left out. '
+    'The pipeline started, but its reply was too large to send, so the values named in dropped were left out. '
     'task_token still identifies the run, so use it with monitor or terminate.'
 )
 
