@@ -55,6 +55,27 @@ export async function renameRetrying(src: string, dest: string, delayMs = 500): 
 }
 
 /**
+ * Fetches a node archive into nodesDir: written under a staging name and renamed into place
+ * once whole, so an archive that is there is complete. The staging file never stays behind.
+ *
+ * @param nodesDir - The nodes/ folder beside the engine directory.
+ * @param archive - The archive's file name.
+ * @param download - Writes the archive to the path it is given.
+ * @param delayMs - The pause between tries of a rename Windows refuses.
+ */
+export async function fetchNodeArchive(nodesDir: string, archive: string, download: (dest: string) => Promise<void>, delayMs = 500): Promise<void> {
+	fs.mkdirSync(nodesDir, { recursive: true });
+	const staging = path.join(nodesDir, `${archive}.download`);
+	try {
+		await download(staging);
+		// Retried as in a fresh install: a scanner may still hold the file just written
+		await renameRetrying(staging, path.join(nodesDir, archive), delayMs);
+	} finally {
+		fs.rmSync(staging, { force: true });
+	}
+}
+
+/**
  * Moves a staged release into place once all of it is downloaded: the server's files into
  * engineDir, already cleared, and its node archive, if it has one, into a fresh nodesDir.
  */
