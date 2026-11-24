@@ -60,9 +60,8 @@ TEAM_DEPLOY_WARNING = (
 )
 
 SETUP_HOW = (
-    'Set these variables in RocketRide: VS Code extension -> RocketRide: '
-    'Settings -> Variables, or https://app.rocketride.ai/settings/variables. '
-    'Then re-run list_integrations - the node becomes usable immediately.'
+    'Set these variables in RocketRide under Settings > Environment Variables, in the web app or the '
+    'VS Code extension. Then re-run list_integrations - the node becomes usable immediately.'
 )
 
 
