@@ -54,13 +54,14 @@ function fenceOpener(line) {
  * nothing after them, in the fence's blockquote. The marker may sit at most three
  * columns deeper than the opener's (CommonMark allows three spaces; a deeper
  * marker is code). Measuring from the opener keeps a fence nested in a list
- * item closable. A line that leaves the fence's blockquote ends the fence too.
+ * item closable. A line outside the fence's blockquote is never its closer: the
+ * fence ended before that line (see `fenceLeft`).
  */
 function fenceCloses(line, fence) {
 	const text = line.replace(/\r$/, '');
 	const quote = fence.quote || 0;
 	const { depth, at } = quotePrefix(text, quote);
-	if (depth < quote) return true; // the blockquote ended, and the fence with it
+	if (depth < quote) return false;
 	const m = FENCE_OPEN.exec(text.slice(at));
 	return (
 		!!m &&
@@ -69,6 +70,17 @@ function fenceCloses(line, fence) {
 		!m[3].trim() &&
 		indentWidth(m[1]) <= (fence.indent || 0) + 3
 	);
+}
+
+/**
+ * Whether `line` is outside the blockquote `fence` opened in: it carries fewer
+ * `>` markers, so the blockquote ended, and the fence with it, BEFORE this line
+ * (CommonMark example 237). The line is not part of the fence: the caller ends
+ * the fence and then reads the line as any other.
+ */
+function fenceLeft(line, fence) {
+	const quote = fence.quote || 0;
+	return quote > 0 && quotePrefix(line.replace(/\r$/, ''), quote).depth < quote;
 }
 
 /**
@@ -127,4 +139,4 @@ function frontMatterTitle(content) {
 	return t ? t[2].replace(/^['"]|['"]$/g, '') : null;
 }
 
-module.exports = { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop, frontMatterTitle, ESCAPABLE };
+module.exports = { fenceOpener, fenceCloses, fenceLeft, codeSpanEnd, codeSpanStop, frontMatterTitle, ESCAPABLE };

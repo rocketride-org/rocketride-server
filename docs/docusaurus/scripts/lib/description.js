@@ -8,7 +8,7 @@
  * Text inside inline code is kept as written, so `<your-api-key>` survives.
  */
 
-const { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop, ESCAPABLE } = require('./markdown');
+const { fenceOpener, fenceCloses, fenceLeft, codeSpanEnd, codeSpanStop, ESCAPABLE } = require('./markdown');
 
 const MAX = 160;
 const SKIP_LINE = /^(#{1,6}\s|:::|\||[<{]|-{3,}|[-*+]\s|\d+[.)]\s|>|!\[)/;
@@ -35,6 +35,7 @@ function fenceBlockEnd(text, i) {
 	while (stop < text.length) {
 		const end = lineEnd(text, stop);
 		const line = text.slice(stop, end);
+		if (fenceLeft(line, open)) break; // its blockquote ended: the block stops before this line
 		stop = Math.min(end + 1, text.length);
 		if (fenceCloses(line, open)) break;
 	}
@@ -92,14 +93,17 @@ function stripComments(text) {
 /**
  * Whether the JSX/HTML tag being read ends on `line`, scanning from `from`. `tag`
  * carries the open quote and the `{...}` depth across lines, so a `>` inside a
- * quoted value or an expression does not end the tag. A plain loop, so nothing
- * backtracks.
+ * quoted value or an expression does not end the tag. Inside `{...}` a quote
+ * opens a JavaScript string, where a backslash escapes the next character
+ * (`{"a\"b"}`); an attribute's own quoted value has no escapes. A plain loop,
+ * so nothing backtracks.
  */
 function tagEnds(line, from, tag) {
 	for (let k = from; k < line.length; k++) {
 		const c = line[k];
 		if (tag.quote) {
-			if (c === tag.quote) tag.quote = null;
+			if (c === '\\' && tag.depth > 0) k++;
+			else if (c === tag.quote) tag.quote = null;
 		} else if (c === '"' || c === "'" || c === '`') tag.quote = c;
 		else if (c === '{') tag.depth++;
 		else if (c === '}') tag.depth--;
@@ -125,6 +129,7 @@ function firstParagraph(body) {
 			if (tagEnds(line, 0, tag)) tag = null;
 			continue;
 		}
+		if (fence && fenceLeft(line, fence)) fence = null; // its blockquote ended: this line is read as any other
 		if (fence) {
 			if (fenceCloses(line, fence)) fence = null;
 			continue;

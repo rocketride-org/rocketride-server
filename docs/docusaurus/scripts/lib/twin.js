@@ -11,7 +11,7 @@
  * handling. An `import`/`export` that never balances is kept as written.
  */
 
-const { fenceOpener, fenceCloses, codeSpanStop, frontMatterTitle, ESCAPABLE } = require('./markdown');
+const { fenceOpener, fenceCloses, fenceLeft, codeSpanStop, frontMatterTitle, ESCAPABLE } = require('./markdown');
 
 const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?/;
 const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'wbr', 'col']);
@@ -36,6 +36,11 @@ function splitFences(text, mdx = false) {
 		buf = [];
 	};
 	for (const line of text.split(/\r?\n/)) {
+		if (fence && fenceLeft(line, fence)) {
+			// Its blockquote ended before this line, which is unfenced text (or opens another fence)
+			flush(true);
+			fence = null;
+		}
 		if (!fence) {
 			const open = fenceOpener(line);
 			if (open && !(mdx && endsInComment(buf.join('\n')))) {

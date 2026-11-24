@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import markdown from '../../scripts/lib/markdown.js';
 
-const { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop, frontMatterTitle } = markdown;
+const { fenceOpener, fenceCloses, fenceLeft, codeSpanEnd, codeSpanStop, frontMatterTitle } = markdown;
 
 describe('fenceOpener', () => {
 	it('reads backtick and tilde fences with their length', () => {
@@ -71,13 +71,35 @@ describe('fenceCloses', () => {
 		assert.equal(fenceCloses('>~~~', quoted), true);
 	});
 
-	it('ends a blockquoted fence where its blockquote ends', () => {
-		assert.equal(fenceCloses('', fenceOpener('> ~~~jsx')), true);
-		assert.equal(fenceCloses('> x', fenceOpener('> > ```')), true);
+	it('does not take a line outside the blockquote for the closer', () => {
+		assert.equal(fenceCloses('', fenceOpener('> ~~~jsx')), false);
+		assert.equal(fenceCloses('~~~', fenceOpener('> ~~~jsx')), false);
+		assert.equal(fenceCloses('> ```', fenceOpener('> > ```')), false);
 	});
 
 	it('does not close a top-level fence on a blockquoted marker', () => {
 		assert.equal(fenceCloses('> ```', fenceOpener('```md')), false);
+	});
+});
+
+describe('fenceLeft', () => {
+	it('says a blockquoted fence ended before a line with fewer markers', () => {
+		const quoted = fenceOpener('> ~~~jsx');
+		assert.equal(fenceLeft('Real prose.', quoted), true);
+		assert.equal(fenceLeft('', quoted), true);
+		assert.equal(fenceLeft('> x', fenceOpener('> > ```')), true);
+	});
+
+	it('keeps a line in the same blockquote inside the fence', () => {
+		const quoted = fenceOpener('> ~~~jsx');
+		assert.equal(fenceLeft('> <Widget />', quoted), false);
+		assert.equal(fenceLeft('>', quoted), false);
+		assert.equal(fenceLeft('> > deeper', quoted), false);
+	});
+
+	it('never ends a top-level fence', () => {
+		assert.equal(fenceLeft('', fenceOpener('```md')), false);
+		assert.equal(fenceLeft('text', { ch: '`', len: 3 }), false);
 	});
 });
 

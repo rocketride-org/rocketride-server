@@ -260,3 +260,18 @@ describe('cleanTwin mdx: backslash escapes', () => {
 		assert.equal(mdx('Path \\\\<Foo /> here\n'), 'Path \\\\ here\n');
 	});
 });
+
+describe('review round 2: the line after a blockquoted fence', () => {
+	it('cleans the first line outside the blockquote, and keeps the example whole', () => {
+		const out = cleanTwin('> ~~~jsx\n> <Widget />\n<Bar />After.\n', { mdx: true, addTitle: false });
+		assert.ok(out.includes('> <Widget />'), out);
+		assert.ok(out.includes('After.'), out);
+		assert.ok(!out.includes('<Bar />'), out);
+	});
+
+	it('opens a new fence on the line that leaves the blockquote', () => {
+		const out = cleanTwin('> ~~~jsx\n> <A />\n```jsx\n<B />\n```\n<C />Text.\n', { mdx: true, addTitle: false });
+		assert.ok(out.includes('> <A />') && out.includes('<B />'), out);
+		assert.ok(!out.includes('<C />') && out.includes('Text.'), out);
+	});
+});

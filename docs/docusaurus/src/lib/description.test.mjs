@@ -165,3 +165,20 @@ describe('describePage: code spans and escapes', () => {
 		assert.equal(describePage(text), `${lead}.`);
 	});
 });
+
+describe('review round 2: strings in expressions, and the line after a blockquote', () => {
+	it('reads an escaped quote inside an expression string as part of the string', () => {
+		const body = '<Hero\n  title={"a\\"b"}\n/>\nReal prose.';
+		assert.equal(describePage(body), 'Real prose.');
+	});
+
+	it('does not read a backslash in an attribute value as an escape', () => {
+		const body = '<Hero\n  path="C:\\"\n/>\nReal prose.';
+		assert.equal(describePage(body), 'Real prose.');
+	});
+
+	it('reads the first line after a blockquoted fence as prose', () => {
+		assert.equal(firstParagraph('> ~~~jsx\n> <Widget />\nReal prose.\n'), 'Real prose.');
+		assert.equal(firstParagraph('> ~~~jsx\n> <Widget />\n> ~~~\n\nReal prose.\n'), 'Real prose.');
+	});
+});
