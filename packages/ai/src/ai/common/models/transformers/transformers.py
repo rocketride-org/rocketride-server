@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketlib import debug
 from ai.web.metrics import metrics
-from ai.common.utils.cuda_utils import model_gpu_gb
+from ai.common.utils.cuda_utils import model_gpu_gb, resolve_pipeline_device, select_torch_device
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.transformers')
@@ -119,7 +119,6 @@ class TransformersLoader(BaseLoader):
     ) -> Tuple[Any, Dict[str, Any], int]:
         """Load a transformers model with CPU-first loading."""
         from transformers import AutoModel
-        from ai.common.torch import torch
 
         # Enable trust_remote_code by default (can be overridden via kwargs)
         kwargs.setdefault('trust_remote_code', True)
@@ -155,8 +154,7 @@ class TransformersLoader(BaseLoader):
             model.eval()
         else:
             # === LOCAL MODE ===
-            if device is None:
-                device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+            device, gpu_index = select_torch_device(device)
 
             # Load directly to device
             model = ModelClass.from_pretrained(model_name, **kwargs)
@@ -165,7 +163,6 @@ class TransformersLoader(BaseLoader):
 
             tokenizer = TransformersLoader._load_tokenizer(model_name)
 
-            gpu_index = int(device.split(':')[1]) if ':' in device else (0 if device == 'cuda' else -1)
             memory_gb = TransformersLoader._get_memory_footprint(model)
 
         metadata = {
@@ -191,7 +188,6 @@ class TransformersLoader(BaseLoader):
     ) -> Tuple[Any, Dict[str, Any], int]:
         """Load a transformers pipeline."""
         from transformers import pipeline as hf_pipeline
-        from ai.common.torch import torch
 
         # Enable trust_remote_code by default (can be overridden via kwargs)
         kwargs.setdefault('trust_remote_code', True)
@@ -206,27 +202,18 @@ class TransformersLoader(BaseLoader):
 
             # Load pipeline directly to GPU
             pipe = hf_pipeline(task=task, model=model_name, device=gpu_index, **kwargs)
+            device_str = f'cuda:{gpu_index}' if gpu_index >= 0 else 'cpu'
         else:
             # === LOCAL MODE ===
-            if device is None:
-                device = 0 if torch.cuda.is_available() else -1
-            elif isinstance(device, str):
-                if device == 'cpu':
-                    device = -1
-                elif ':' in device:
-                    device = int(device.split(':')[1])
-                elif device == 'cuda':
-                    device = 0
+            device_str, gpu_index = select_torch_device(device)
+            pipeline_device, _ = resolve_pipeline_device(device_str)
 
-            pipe = hf_pipeline(task=task, model=model_name, device=device, **kwargs)
-            gpu_index = device if device >= 0 else -1
+            pipe = hf_pipeline(task=task, model=model_name, device=pipeline_device, **kwargs)
             memory_gb = TransformersLoader._estimate_memory(model_name, task=task)
 
         if hasattr(pipe, 'model'):
             pipe.model.eval()
             memory_gb = TransformersLoader._get_memory_footprint(pipe.model)
-
-        device_str = f'cuda:{gpu_index}' if gpu_index >= 0 else 'cpu'
 
         metadata = {
             'task': task,

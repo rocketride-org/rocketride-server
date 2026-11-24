@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     import numpy as np
 
 from ai.web.metrics import metrics
-from ai.common.utils.cuda_utils import model_gpu_gb
+from ai.common.utils.cuda_utils import model_gpu_gb, select_torch_device
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.sentence_transformers')
@@ -154,17 +154,12 @@ class SentenceTransformerLoader(BaseLoader):
             model.eval()
         else:
             # === LOCAL MODE: Load directly to specified device ===
-            if device is None:
-                # Auto-detect
-                from ai.common.torch import torch
-
-                device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+            device, gpu_index = select_torch_device(device)
 
             logger.info(f'Loading SentenceTransformer {model_name} to {device}')
             model = ST(model_name_or_path=model_name, device=device, **kwargs)
             model.eval()
 
-            gpu_index = int(device.split(':')[1]) if ':' in device else (0 if device == 'cuda' else -1)
             memory_gb = SentenceTransformerLoader._get_memory_footprint(model)
 
         metadata = {
