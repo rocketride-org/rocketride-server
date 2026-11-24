@@ -3247,7 +3247,7 @@ class Task(DAPBase):
 
             # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
             try:
-                published = await node_store.published_packages(
+                published = await node_deploy.published_packages(
                     self.org_id or 'local', self.client_id, self.node_versions
                 )
                 await asyncio.to_thread(node_store.place, resolved, published, self.token)

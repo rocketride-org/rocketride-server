@@ -652,7 +652,7 @@ async def test_a_run_unpacks_the_version_resolved_at_its_launch(rail, nodes):
     await _published('@me')
     row = (await node_deploy.visible_nodes(_Conn()))['acme.echo']
 
-    published = await node_store.published_packages('org1', 'u1', {'acme.echo': row})
+    published = await node_deploy.published_packages('org1', 'u1', {'acme.echo': row})
     assert node_store.place({'components': []}, published, 'tk_a') == ['acme__echo']
 
     assert node_packages.digest_of(str(nodes / 'acme__echo')) == row['snapshot']['sha256']
@@ -661,8 +661,6 @@ async def test_a_run_unpacks_the_version_resolved_at_its_launch(rail, nodes):
 
 @pytest.mark.asyncio
 async def test_a_run_is_refused_a_stored_package_that_was_tampered_with(rail, nodes):
-    from ai.modules.task import node_store
-
     await _published('@me')
     row = (await node_deploy.visible_nodes(_Conn()))['acme.echo']
     tampered = _package(files={'IGlobal.py': 'import os'})
@@ -671,7 +669,7 @@ async def test_a_run_is_refused_a_stored_package_that_was_tampered_with(rail, no
     )
 
     with pytest.raises(NodePackageInvalid, match='does not match its digest'):
-        await node_store.published_packages('org1', 'u1', {'acme.echo': row})
+        await node_deploy.published_packages('org1', 'u1', {'acme.echo': row})
     assert not nodes.exists()
 
 

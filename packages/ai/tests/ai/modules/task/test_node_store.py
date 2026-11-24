@@ -363,7 +363,7 @@ def test_a_copy_an_earlier_release_unpacked_that_this_release_does_not_list_is_n
 def test_nested_providers_are_named_in_lower_case_at_any_depth():
     config = {'store': {'provider': 'Vector_X', 'inner': [{'provider': 'embed_y'}, 'text']}, 'provider': 1}
 
-    assert sorted(node_store._nested_providers(config)) == ['embed_y', 'vector_x']
+    assert sorted(node_store.node_packages.nested_providers(config)) == ['embed_y', 'vector_x']
 
 
 def test_an_install_writable_only_in_nodes_serves_its_nodes(server, monkeypatch):
@@ -385,7 +385,7 @@ def test_the_autopipe_filters_are_the_ones_autopipe_inserts():
     source = pathlib.Path(__file__).resolve().parents[6] / 'nodes' / 'src' / 'nodes' / 'autopipe' / 'IGlobal.py'
     inserted = set(re.findall(r"getFilter\('[^']+', '([^']+)'", source.read_text(encoding='utf-8')))
 
-    assert inserted and inserted == set(node_store._AUTOPIPE_FILTERS)
+    assert inserted and inserted == set(node_store.node_packages.AUTOPIPE_FILTERS)
 
 
 @pytest.fixture
