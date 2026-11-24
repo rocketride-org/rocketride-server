@@ -33,8 +33,8 @@ _DEFAULT_HINT = (
     'to show here.'
 )
 _HINTS = {
-    'store_read': 'Calling store_read again returns this same error. To give the user the whole file, call '
-    'store_get_url for a download link.',
+    'store_read': 'Calling store_read again on this file returns this same error. To give the user the whole file, '
+    'call store_get_url on it for a download link.',
     'store_list': 'Calling store_list again on this path returns this same error. Ask the user for a folder or file '
     'inside it, then call store_list or store_read on that path.',
     'load_template': 'Calling load_template again returns this same error. To give the user the whole template, call '
@@ -183,12 +183,16 @@ def rows(key: Key, note: Optional[Callable[[dict, Dict[str, Any], int, List[Any]
     return step
 
 
-def text(key: Key, cap: Optional[int] = None) -> Step:
+def text(
+    key: Key, cap: Optional[int] = None, note: Optional[Callable[[dict, Dict[str, Any], int, str], None]] = None
+) -> Step:
     """The value becomes the leading characters of its text.
 
     The text is the string itself, or the JSON text of any other value. Without
     ``cap`` the longest lead that fits is kept, down to an empty string. With
-    ``cap`` the text is cut once to at most that many characters.
+    ``cap`` the text is cut once to at most that many characters. The default
+    note is ``{'returned_chars': n, 'total_chars': m}``; a
+    ``note(payload, notes, n, whole)`` replaces it, as with ``rows``.
     """
     path, name = _split(key)
 
@@ -204,7 +208,10 @@ def text(key: Key, cap: Optional[int] = None) -> Step:
 
         def keep(n: int) -> None:
             parent[path[-1]] = whole[:n]
-            _note(notes, name, {'returned_chars': n, 'total_chars': len(whole)})
+            if note is None:
+                _note(notes, name, {'returned_chars': n, 'total_chars': len(whole)})
+            else:
+                note(payload, notes, n, whole)
 
         if cap is not None:
             keep(cap)

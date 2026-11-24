@@ -356,7 +356,7 @@ async def test_log_trace_and_log_traces_shorten_their_lists_over_the_size_limit(
     kept = len(result['events'])
     assert result['truncated']['events'] == {'returned': kept, 'total': 100} and size_of(result) <= 1000
     hint = result['truncated']['hint']
-    assert f'call log_read with the projectId, source and any teamId from context, and fromSeq set to {kept}.' in hint
+    assert f"any teamId from this reply's context, and fromSeq set to {kept}." in hint
 
     # Finished traces come oldest first, so the hint asks for exactly the newest ones left out.
     fake_engine.log_traces_result = {'open': [], 'closed': [{'beginSeq': i, 'doc': 'd' * 40} for i in range(50)]}

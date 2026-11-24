@@ -236,20 +236,29 @@ def _traces_note(payload: dict, notes: Dict[str, Any], kept: int, traces: list) 
 
 
 def _open_note(payload: dict, notes: Dict[str, Any], kept: int, open_traces: list) -> None:
+    # This step runs only after every finished trace was left out.
     notes['open'] = {'returned': kept, 'total': len(open_traces)}
+    cut = f'Only {kept:,} of the {len(open_traces):,} objects still in flight fit in one reply.'
+    finished = (notes.get('traces') or {}).get('total')
+    if finished:
+        cut = (
+            f'None of the {finished:,} finished traces and only {kept:,} of the {len(open_traces):,} objects still in '
+            'flight fit in one reply.'
+        )
     notes['hint'] = (
-        f'Only {kept:,} of the {len(open_traces):,} objects still in flight fit in one reply. When the run ends, call '
-        'log_traces again to see them as finished traces.'
+        f'{cut} When the run ends, call log_traces again to see the newest finished traces, up to {LOG_TRACES_MAX_N}.'
     )
 
 
 def _trace_note(payload: dict, notes: Dict[str, Any], kept: int, events: list) -> None:
     notes['events'] = {'returned': kept, 'total': len(events)}
+    start = ''
+    if _log_seq(events[kept]):
+        start = f', and fromSeq set to {_log_seq(events[kept])}'
     notes['hint'] = (
         f'Only the first {kept:,} of {len(events):,} events of this trace fit in one reply, and calling log_trace '
-        'again returns the same events. To read on, call log_read with the projectId, source and any teamId from '
-        f"context, and fromSeq set to {_log_seq(events[kept])}. log_read returns every object's events from that "
-        "point, not only this trace's."
+        'again returns the same events. To read on, call log_read with the projectId, source and any teamId from this '
+        f"reply's context{start}. log_read returns every object's events, not only this trace's."
     )
 
 

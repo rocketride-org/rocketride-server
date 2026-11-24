@@ -25,12 +25,22 @@ from ._common import load_pipeline
 # unresolved when the budget elapses fall back to the pipeline's own metadata.
 DESCRIBE_LOOKUP_BUDGET_SECONDS = 30
 
-# Sent in `truncated` when list_components is cut to fit the result size limit.
-_COMPONENTS_HINT = (
-    'Only the first components fit in one reply, and calling list_components again returns the same list. If the '
-    'user names a component that is not listed, call describe_component with that name.'
+
+def _components_note(payload: dict, notes: Dict[str, Any], kept: int, components: list) -> None:
+    notes['components'] = {'returned': kept, 'total': len(components)}
+    notes['hint'] = (
+        f'Only the first {kept:,} of {len(components):,} components fit in one reply, and calling list_components '
+        'again returns the same list. If the user names a component that is not listed, call describe_component '
+        'with that name.'
+    )
+
+
+_COMPONENTS_STEPS = (result_size.rows('components', note=_components_note),)
+# Sent when a service definition fits once its editor layout is left out.
+_LAYOUT_HINT = (
+    "The ui blocks, which lay out the visual editor's form, were left out so the rest fits in one reply. The schema "
+    'is complete, and calling describe_component again returns the same result.'
 )
-_COMPONENTS_STEPS = (result_size.rows('components'),)
 # Where a service definition lists one schema branch per profile.
 _PROFILE_BRANCHES = ('schema', 'dependencies', 'profile', 'oneOf')
 
@@ -84,7 +94,7 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
     result = {'ok': True, 'components': components}
     if skipped:
         result['note'] = f'{skipped} integrations need setup - call list_integrations.'
-    result_size.fit(result, _COMPONENTS_STEPS, hint=_COMPONENTS_HINT)
+    result_size.fit(result, _COMPONENTS_STEPS)
     return result
 
 
@@ -106,9 +116,10 @@ def _profiles_note(section: str):
         notes[name] = {'returned': kept, 'total': len(full)}
         notes['hint'] = (
             f'{section}.schema has the settings of only {_profile_count(full[:kept]):,} of '
-            f'{_profile_count(full):,} profiles, and calling describe_component again returns the same result. Every '
-            f'profile name is still in {section}.schema.properties.profile.enum. To see what one profile resolves '
-            'to, call resolve_config with this component as provider and config {"profile": "<name>"}.'
+            f'{_profile_count(full):,} profiles, in {kept:,} of its {len(full):,} profile branches. Calling '
+            'describe_component again returns the same result. Every profile name is still in '
+            f'{section}.schema.properties.profile.enum. To see what one profile resolves to, call resolve_config with '
+            'this component as provider and config {"profile": "<name>"}.'
         )
 
     return note
@@ -154,7 +165,7 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
         )
         state = credentials_mod.evaluate(spec, env_keys, hosted_models)
         result['credentials'] = credentials_mod.describe_state(spec, state)
-    result_size.fit(result, _describe_steps(result))
+    result_size.fit(result, _describe_steps(result), hint=_LAYOUT_HINT)
     return result
 
 
