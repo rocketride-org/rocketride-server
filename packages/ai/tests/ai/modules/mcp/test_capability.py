@@ -203,6 +203,17 @@ async def test_store_get_url_forwards_expires_in_and_download_name(fake_engine):
     assert fake_engine.fs_get_url_calls == [{'path': 'a/b.txt', 'expires_in': 60, 'download_name': 'x.txt'}]
 
 
+@pytest.mark.asyncio
+async def test_store_get_url_reports_at_most_the_store_lifetime(fake_engine):
+    registry = ToolRegistry()
+    capability.register(registry)
+
+    result = await registry.handler('store_get_url')(fake_engine, None, {'path': 'a/b.txt', 'expires_in': 7200})
+
+    assert result['expires_in'] == 3600
+    assert fake_engine.fs_get_url_calls[0]['expires_in'] == 3600
+
+
 # --- save_template -----------------------------------------------------------
 
 

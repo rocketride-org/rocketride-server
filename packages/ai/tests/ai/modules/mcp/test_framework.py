@@ -114,6 +114,39 @@ def test_bad_shape():
     }
 
 
+_KEY = 'rr_' + '0f' * 16
+_JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl'
+
+
+@pytest.mark.parametrize(
+    ('raw', 'cleaned'),
+    [
+        (f'key {_KEY} refused', 'key [redacted] refused'),
+        (
+            'GET https://user:pw@example.test/f?token=abc&page=2 failed',
+            'GET https://[redacted]@example.test/f?token=[redacted]&page=2 failed',
+        ),
+        (f'bad token {_JWT}', 'bad token [redacted]'),
+        ({'detail': 'rrmg_' + 'b' * 43}, "{'detail': '[redacted]'}"),
+        ('Unknown component: parse_text (see list_components)', 'Unknown component: parse_text (see list_components)'),
+    ],
+)
+def test_error_messages_are_cleaned(raw, cleaned):
+    exc = RuntimeError('generic')
+    exc.dap_result = {'success': False, 'message': raw}
+
+    assert normalize_error(exc)['message'] == cleaned
+    assert _bad(raw, 'hint')['message'] == cleaned
+
+
+def test_hard_error_message_is_cleaned():
+    with pytest.raises(HardError) as excinfo:
+        normalize_error(ConnectionResetError(f'lost wss://u:p@example.test/task as {_KEY}'))
+
+    assert excinfo.value.message == 'lost wss://[redacted]@example.test/task as [redacted]'
+    assert str(excinfo.value) == excinfo.value.message
+
+
 def test_harderror_carries_message_and_error_type():
     err = HardError('down', error_type='ConnectionError')
 
