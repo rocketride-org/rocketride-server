@@ -2567,6 +2567,39 @@ describe('RocketRideClient lifecycle operations', () => {
 		expect(client.getAccountInfo()).toMatchObject({ displayName: 'Refreshed', isNewUser: true });
 	});
 
+	it('keeps the auth session token when account pushes blank it, during and after login', async () => {
+		const client: RocketRideClient = makeClient();
+		await client.addMonitor({ token: 'task-1' }, ['output']);
+		const apikey = () => (client as unknown as { _apikey?: string })._apikey;
+
+		// A one-shot code-exchange credential: the session token only exists in the auth response.
+		const login = loginOutcome(client.login('cd_one-shot-code'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'blank token socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'blank token auth');
+		const account = connectResult('blank-token');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, account);
+		await waitForLifecycle(() => lifecycleRequests('rrext_monitor', socket).length === 1, 'held monitor restoration');
+
+		// The server blanks userToken on every push (ai/account/models.py to_push_result).
+		const pushed = { ...account, userToken: '', displayName: 'Pushed' };
+		await socket.onmessage?.({
+			data: JSON.stringify({ type: 'event', seq: 20_002, event: 'apaext_account', body: pushed }),
+		} as MessageEvent);
+		socket.respond(lifecycleRequests('rrext_monitor', socket)[0].message, {});
+
+		await expect(login).resolves.toEqual({ status: 'resolved', value: { ...pushed, userToken: account.userToken } });
+		expect(client.getAccountInfo()?.userToken).toBe(account.userToken);
+		expect(apikey()).toBe(account.userToken);
+
+		await socket.onmessage?.({
+			data: JSON.stringify({ type: 'event', seq: 20_003, event: 'apaext_account', body: { ...pushed, displayName: 'Later' } }),
+		} as MessageEvent);
+		expect(client.getAccountInfo()).toMatchObject({ displayName: 'Later', userToken: account.userToken });
+		expect(apikey()).toBe(account.userToken);
+	});
+
 	it('coalesces equivalent PKCE credentials regardless of property insertion order', async () => {
 		const client = makeClient();
 		const firstCredential = {

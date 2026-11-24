@@ -1711,8 +1711,13 @@ export class ConnectionManager implements IConnectionManager {
 	}
 
 	private cacheAccountInfo(result: ConnectResult): void {
-		if (this.accountInfo && !isSameAccountScope(this.accountInfo, result)) advanceAccountTransition(this);
-		this.accountInfo = result;
+		const previous = this.accountInfo;
+		if (previous && !isSameAccountScope(previous, result)) advanceAccountTransition(this);
+		// Account pushes carry userToken as '' (the server blanks it): keep the
+		// session token already cached for the same user.
+		this.accountInfo = !result.userToken && previous?.userToken && previous.userId === result.userId
+			? { ...result, userToken: previous.userToken }
+			: result;
 	}
 
 	/** Returns the resolved server HTTP URL. */

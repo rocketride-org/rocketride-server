@@ -2043,6 +2043,23 @@ test('a mirrored org switch ends its workspace transition when the root reconnec
 	assert.equal(cm.getAccountInfo()?.organization?.id, 'org-b');
 });
 
+test('an account push with a blank userToken keeps the cached session token', async () => {
+	// The server blanks userToken on every account push (to_push_result).
+	const cm = createMirroredManager();
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });
+	cm.publish('shell:account', { ...authenticatedResult, userToken: 'rr_session' });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	cm.publish('shell:account', { ...authenticatedResult, userToken: '', displayName: 'Pushed' });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.equal(cm.getAccountInfo()?.displayName, 'Pushed');
+	assert.equal(cm.getAccountInfo()?.userToken, 'rr_session');
+
+	// A different user never inherits the token.
+	cm.publish('shell:account', { ...authenticatedResult, userId: 'someone-else', userToken: '' });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.equal(cm.getAccountInfo()?.userToken, '');
+});
+
 test('a root disconnect moves the realm client with it', async () => {
 	const cm = createMirroredManager();
 	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });

@@ -869,9 +869,12 @@ export class RocketRideClient extends DAPClient {
 			this._assertCurrentOperation(operation);
 
 			// A newer account push can arrive while monitor restoration is waiting.
-			// Keep the auth-only isNewUser flag when the push does not carry one.
+			// Keep the auth-only fields the push does not carry: isNewUser, and the
+			// session token, which the server blanks on every push.
 			const pushed = operation.accountUpdate;
-			const account = pushed ? { ...pushed, isNewUser: pushed.isNewUser ?? result.isNewUser } : result;
+			const account = pushed
+				? { ...pushed, isNewUser: pushed.isNewUser ?? result.isNewUser, userToken: pushed.userToken || result.userToken }
+				: result;
 			this._uri = operation.endpoint;
 			this._connectResult = account;
 			this._authenticated = true;
@@ -2019,7 +2022,13 @@ export class RocketRideClient extends DAPClient {
 
 		// Update cached ConnectResult when the server pushes a full account refresh
 		if (eventType === 'apaext_account') {
-			const account = eventBody as unknown as ConnectResult;
+			const pushed = eventBody as unknown as ConnectResult;
+			// The server blanks userToken on pushes: keep the session token this
+			// connection authenticated with, for the same user.
+			const previous = this._connectResult;
+			const account = !pushed.userToken && previous?.userToken && previous.userId === pushed.userId
+				? { ...pushed, userToken: previous.userToken }
+				: pushed;
 			const operation = this._lifecycleOperation;
 			if (operation?.authRequestSent && !operation.accepted && this._isCurrentOperation(operation) &&
 				typeof account.userId === 'string' && typeof account.userToken === 'string') {
