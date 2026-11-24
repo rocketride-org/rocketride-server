@@ -48,7 +48,14 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'scraper_beautifulsoup'))
 
-from scrape_fetch import SAFE_REDIRECT_HEADERS, Fetcher, FetchError, _redirect_step, compile_patterns  # noqa: E402
+from scrape_fetch import (  # noqa: E402
+    SAFE_REDIRECT_HEADERS,
+    Fetcher,
+    FetchError,
+    FetchResult,
+    _redirect_step,
+    compile_patterns,
+)
 
 _PINNED_PATH = (
     Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'pinned_http.py'
@@ -323,6 +330,86 @@ def test_check_allow_pattern_rejects_unpinned(pattern):
         url_policy.check_allow_pattern(re.compile(pattern))
 
 
+# Allow-list sources over every branch of the authority grammar: the first
+# group follows it, the second does not.
+_GRAMMAR_PATTERNS = [
+    (r'^https://api\.example\.com/', 0),
+    (r'\Ahttps://api\.example\.com/', 0),
+    (r'https://api\.example\.com/', 0),
+    (r'^http://api\.example\.com/', 0),
+    (r'^https://api\.example\.com(?=/|$)', 0),
+    (r'^https://api\.example\.com(?:/|$)', 0),
+    (r'^https://api\.example\.com:443/', 0),
+    (r'^https://api\.example\.com(?::443)?/', 0),
+    (r'^https://api\.example\.com:[0-9]+/', 0),
+    (r'^https://api\.example\.com(?::[0-9]{3,4})?(?:/|$)', 0),
+    (r'^https://[^/]+/', 0),
+    (r'^https://[^/]{1,20}(?:/|$)', 0),
+    (r'^https://[^/]{3}/', 0),
+    (r'^https://\[2001:db8::1\]/', 0),
+    (r'^https://192\.0\.2\.10/', 0),
+    (r'^https://API\.Example\.com/', re.IGNORECASE),
+    (r'^https://api\.example\.com/data$', re.MULTILINE),
+    (r'^https://api\.example\.com', 0),
+    (r'^https://[^/]/', 0),
+    (r'^https://[^/]*/', 0),
+    (r'^https://[^/]{0,5}/', 0),
+    (r'^https://api\.example\.com.*/', 0),
+    (r'^https?://api\.example\.com/', 0),
+    (r'^https://(?:api\.example\.com|[^/]+)/', 0),
+    (r'^https://api\.example\.com/|^https://', 0),
+    (r'^https://api\.example\.com:4[0-9]*/', 0),
+    (r'^https://api\.example\.com$', re.MULTILINE),
+    (r'(?i)^https://api\.example\.com/', 0),
+    (r'news\.ycombinator\.com', 0),
+]
+_GRAMMAR_URLS = [
+    'https://api.example.com/',
+    'https://api.example.com/data',
+    'https://api.example.com:443/data',
+    'https://api.example.com:8443/data',
+    'https://api.example.com.evil.net/data',
+    'https://evil.example/?u=https://api.example.com/',
+    'https://[2001:db8::1]/data',
+    'https://192.0.2.10/data',
+    'https://a/',
+    'https://abc/',
+    'http://api.example.com/data',
+]
+
+
+def test_allow_list_configuration_and_matching_read_one_grammar():
+    """A pattern the configuration check accepts matches every canonical URL its regex matches; a refused one, none.
+
+    Configuration (check_allow_pattern) and request time (url_matches_pattern)
+    must read the authority grammar the same way, or a pattern could pass the
+    node's validator and then never match.
+    """
+    checked = {True: 0, False: 0}
+    for source, flags in _GRAMMAR_PATTERNS:
+        pattern = re.compile(source, flags)
+        try:
+            url_policy.check_allow_pattern(pattern)
+            accepted = True
+        except ValueError:
+            accepted = False
+        for url in _GRAMMAR_URLS:
+            assert url_policy.canonicalize_url(url) == url
+            if pattern.match(url):
+                assert url_policy.url_matches_pattern(pattern, url) is accepted, (source, flags, url)
+                checked[accepted] += 1
+    assert checked[True] >= 20 and checked[False] >= 10, checked
+
+
+@pytest.mark.parametrize('params', [None, {'page': '2'}])
+def test_port_zero_is_refused_before_requests_drops_it(params):
+    """Preparing a URL drops ":0", which would send the request to port 443: the URL as given is refused."""
+    validator = Validator()
+    with pytest.raises(FetchError, match='port'):
+        make(validator).fetch('https://example.com:0/page', params=params)
+    assert validator.seen == []
+
+
 @pytest.mark.parametrize('name', ['Host', 'host', 'HOST'])
 def test_host_header_override_refused(server, name):
     with pytest.raises(FetchError, match='Host header'):
@@ -525,6 +612,19 @@ def test_cross_origin_body_redirect_refused(server, other_server, status):
 def test_same_origin_307_keeps_body(server):
     data = make().fetch(f'{server}/post-307?to=/echo', method='POST', json_body={'q': 2}).json()
     assert data == {'got': {'q': 2}}
+
+
+@pytest.mark.parametrize(
+    'content_type, charset',
+    [
+        ('text/html; charset="Windows-1252"', 'Windows-1252'),
+        ('text/html; Charset=koi8-r', 'koi8-r'),
+        ('text/html', None),
+    ],
+)
+def test_fetch_result_reads_the_declared_charset(content_type, charset):
+    result = FetchResult(url='https://a.example/', status=200, headers={'content-type': content_type}, content=b'')
+    assert result.charset == charset
 
 
 def test_truncated_json_names_the_size_limit(server):

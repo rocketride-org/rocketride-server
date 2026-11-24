@@ -93,12 +93,18 @@ class FetchResult:
     def content_type(self) -> str:
         return self.headers.get('content-type', '').split(';')[0].strip().lower()
 
-    def text(self) -> str:
+    @property
+    def charset(self) -> Optional[str]:
+        """The ``charset`` the ``Content-Type`` header declares, as given; None when it declares none."""
         charset = None
         for part in self.headers.get('content-type', '').split(';')[1:]:
             key, _, value = part.strip().partition('=')
             if key.lower() == 'charset' and value:
                 charset = value.strip('"\'')
+        return charset
+
+    def text(self) -> str:
+        charset = self.charset
         try:
             return self.content.decode(charset or 'utf-8', errors='replace')
         except LookupError:
@@ -166,6 +172,8 @@ class Fetcher:
         """The exact URL to check and send, with ``params`` folded into its query."""
         try:
             if params:
+                if self.canonicalize is not None:
+                    self.canonicalize(url)  # the URL as given: preparing drops an explicit ":0" port
                 url = requests.Request('GET', url, params=params).prepare().url
             if self.canonicalize is not None:
                 url = self.canonicalize(url)
@@ -174,7 +182,7 @@ class Fetcher:
             # MissingSchema are also ValueErrors, so this branch must come first.
             raise FetchError(f'Invalid URL {redact_url(url)}: {type(e).__name__}') from e
         except ValueError as e:
-            # canonicalize_url's own errors (userinfo, dot segments) carry no URL.
+            # canonicalize_url's own errors (userinfo, port zero, dot segments) carry no URL.
             raise FetchError(f'Invalid URL {redact_url(url)}: {e}') from e
         return url
 

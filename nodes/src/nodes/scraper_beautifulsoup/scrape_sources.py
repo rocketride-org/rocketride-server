@@ -216,6 +216,14 @@ def _check_kind_rules(kind: str, item: Dict[str, Any], method: str, fields: Dict
             raise ValueError(f'{where}: html sources need itemSelector')
         if 'url' not in fields:
             raise ValueError(f'{where}: html sources need a fields.url selector (e.g. "a@href")')
+    # A feed field names one parsed key; a json path or html selector may also be a list of fallbacks.
+    for name, value in fields.items():
+        if isinstance(value, str):
+            continue
+        if kind != 'feed' and isinstance(value, list) and all(isinstance(entry, str) for entry in value):
+            continue
+        expected = 'a string' if kind == 'feed' else 'a string or a list of strings'
+        raise ValueError(f'{where}: fields.{name} must be {expected}')
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +238,10 @@ def expand_template(value: Any, now: datetime, per_url: int, max_items: int) -> 
     such as Algolia's ``numericFilters=created_at_i>...``).
 
     Applied recursively to strings inside dicts / lists (for POST bodies).
+
+    Raises:
+        ValueError: An ``_ago`` offset reaches outside the dates Python can
+            represent (``{days_ago:1000000000}``).
     """
     if isinstance(value, dict):
         return {k: expand_template(v, now, per_url, max_items) for k, v in value.items()}
@@ -251,8 +263,11 @@ def expand_template(value: Any, now: datetime, per_url: int, max_items: int) -> 
         unit, _, n = token.partition(':')
         epoch = unit.startswith('unix_')
         unit = unit.removeprefix('unix_')
-        delta = timedelta(days=int(n)) if unit == 'days_ago' else timedelta(hours=int(n))
-        stamp = now - delta
+        try:
+            delta = timedelta(days=int(n)) if unit == 'days_ago' else timedelta(hours=int(n))
+            stamp = now - delta
+        except OverflowError as e:
+            raise ValueError(f'template {{{token}}} is out of range') from e
         if epoch:
             return str(int(stamp.timestamp()))
         return stamp.date().isoformat() if unit == 'days_ago' else stamp.isoformat()
@@ -299,7 +314,11 @@ def parse_date(value: Any) -> Optional[str]:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat()
+    try:
+        return dt.astimezone(timezone.utc).isoformat()
+    except OverflowError:
+        # e.g. 0001-01-01T00:00:00+01:00: its UTC time falls before year 1.
+        return None
 
 
 def _to_int(value: Any) -> Optional[int]:
@@ -330,8 +349,14 @@ def normalize_row(
     fetched_at: str,
     extra: Dict[str, Any],
     max_body_chars: int = DEFAULT_MAX_BODY_CHARS,
+    strip_html: bool = True,
 ) -> Optional[Dict[str, Any]]:
-    """Map a raw extracted item onto the stable row shape; ``None`` if it has no usable URL."""
+    """Map a raw extracted item onto the stable row shape; ``None`` if it has no usable URL.
+
+    ``strip_html`` removes markup from ``title`` and ``body``. Feed items pass
+    False: :func:`parse_feed` has already made them text, in which a literal
+    ``<draft>`` is not a tag.
+    """
     url = _to_text(raw.get('url'))
     if not url:
         return None
@@ -344,9 +369,11 @@ def normalize_row(
     if parsed.scheme not in ('http', 'https') or not parsed.netloc:
         return None
 
-    title = html_to_text(_to_text(raw.get('title')) or '') or None
+    title = _to_text(raw.get('title'))
     body = _to_text(raw.get('body'))
-    body = html_to_text(body) if body else None
+    if strip_html:
+        title = html_to_text(title or '') or None
+        body = html_to_text(body) if body else None
     if body and len(body) > max_body_chars:
         body = body[:max_body_chars]
 
@@ -394,7 +421,8 @@ def run_source(
     """Fetch every URL in ``spec`` and return deduplicated normalized rows.
 
     Per-URL failures are collected in ``errors`` rather than raised, so one
-    dead feed does not sink the whole source.
+    dead feed does not sink the whole source; ``errors`` holds at most one
+    entry per URL.
     """
     now = now or datetime.now(timezone.utc)
     fetched_at = now.isoformat()
@@ -404,9 +432,9 @@ def run_source(
     seen = set()
 
     for entry in spec.urls:
-        url = expand_template(entry.url, now, per_url, spec.max_items)
         label = entry.name or spec.name
         try:
+            url = expand_template(entry.url, now, per_url, spec.max_items)
             raw_items, base = _fetch_items(spec, fetcher, url, now, per_url)
         except (FetchError, ValueError) as e:
             errors.append(f'{label}: {e}')
@@ -423,6 +451,7 @@ def run_source(
                 fetched_at=fetched_at,
                 extra=extra,
                 max_body_chars=max_body_chars,
+                strip_html=spec.kind != 'feed',
             )
             if row is None or row['url_hash'] in seen:
                 continue
@@ -457,7 +486,8 @@ def _fetch_items(
             items = [{k: it.get(v) if isinstance(v, str) else None for k, v in spec.fields.items()} for it in items]
         return items, result.url
 
-    return extract_html_items(result.content, result.url, spec.item_selector, spec.fields), result.url
+    items = extract_html_items(result.content, result.url, spec.item_selector, spec.fields, encoding=result.charset)
+    return items, result.url
 
 
 def row_columns(specs: List[SourceSpec]) -> List[str]:

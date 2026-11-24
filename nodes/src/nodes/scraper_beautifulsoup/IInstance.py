@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
 from .IGlobal import DEFAULT_MAX_BODY_CHARS, DEFAULT_MAX_TOOL_CHARS, MAX_TOOL_CHARS, MIN_TOOL_CHARS, IGlobal
 from .scrape_extract import (
+    MAX_LINKS,
     extract_html_items,
     extract_json_items,
     get_path,
@@ -227,8 +228,10 @@ class IInstance(IInstanceBase):
         out: Dict[str, Any] = {'url': result.url, 'status': result.status, 'truncated': result.truncated}
 
         if fmt == 'links':
-            links, cut = _fit_items(page_links(result.content, result.url), max_chars)
-            out.update(links=links, truncated=result.truncated or cut)
+            # One link past the extractor's limit shows whether it dropped any.
+            found = page_links(result.content, result.url, MAX_LINKS + 1, encoding=result.charset)
+            links, cut = _fit_items(found[:MAX_LINKS], max_chars)
+            out.update(links=links, truncated=result.truncated or cut or len(found) > MAX_LINKS)
             return out
         if fmt == 'html':
             content, clipped = _clip(result.text(), max_chars)
@@ -237,16 +240,19 @@ class IInstance(IInstanceBase):
 
         selector = args.get('selector') or None
         view = (
-            page_to_text(result.content, selector)
+            page_to_text(result.content, selector, encoding=result.charset)
             if fmt == 'text'
-            else page_to_markdown(result.content, result.url, selector)
+            else page_to_markdown(result.content, result.url, selector, encoding=result.charset)
         )
+        # A page's <title> and description meta can be as long as its body: each gets the same bound.
+        title, title_clipped = _clip(view['title'] or '', max_chars)
+        description, description_clipped = _clip(view['description'] or '', max_chars)
         content, clipped = _clip(view['content'], max_chars)
         out.update(
-            title=view['title'] or '',
-            description=view['description'] or '',
+            title=title,
+            description=description,
             content=content,
-            truncated=result.truncated or clipped,
+            truncated=result.truncated or clipped or title_clipped or description_clipped,
         )
         return out
 
@@ -290,7 +296,9 @@ class IInstance(IInstanceBase):
         limit = int_arg(args, 'limit', default=DEFAULT_LIMIT, lo=1, hi=MAX_ITEMS, tool_name='scraper')
         max_chars = self._max_chars(args)
         result = self._fetch_page(args.get('url'))
-        items = extract_html_items(result.content, result.url, str(args.get('item_selector') or ''), fields)
+        items = extract_html_items(
+            result.content, result.url, str(args.get('item_selector') or ''), fields, encoding=result.charset
+        )
         items, cut = _fit_items(items[:limit], max_chars)
         return {'url': result.url, 'items': items, 'truncated': cut or result.truncated}
 
@@ -337,6 +345,7 @@ class IInstance(IInstanceBase):
                 fetched_at='',
                 extra={},
                 max_body_chars=max_body_chars,
+                strip_html=False,
             )
             if row:
                 items.append({k: row[k] for k in ('title', 'url', 'author', 'published_at', 'body')})

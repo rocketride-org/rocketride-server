@@ -124,7 +124,8 @@ class IEndpoint(IEndpointBase):
 
             for err in result.errors:
                 warning(f'Web Scraper [{spec.name}] {err}')
-            if not result.rows and result.errors:
+            # One error per failed URL; a URL that answered with no items has none.
+            if result.errors and len(result.errors) >= len(spec.urls):
                 raise RuntimeError(f'Web Scraper [{spec.name}]: every URL failed ({len(result.errors)} errors)')
 
             if result.rows:

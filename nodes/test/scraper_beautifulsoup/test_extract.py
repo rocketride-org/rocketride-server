@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import codecs
 import sys
 from pathlib import Path
 
@@ -199,6 +200,35 @@ class TestFeeds:
         with pytest.raises(ValueError, match='RSS/Atom'):
             parse_feed(b'<html><body>not a feed')
 
+    def test_unknown_encoding_is_a_parse_error(self):
+        feed = b'<?xml version="1.0" encoding="x-no-such-codec"?><rss><channel></channel></rss>'
+        with pytest.raises(ValueError, match='unsupported encoding'):
+            parse_feed(feed)
+
+    @pytest.mark.parametrize(
+        'guid',
+        [
+            '<guid isPermaLink="false">item-42</guid>',
+            '<guid>item-42</guid>',
+            '<guid isPermaLink="false">https://example.com/p/42</guid>',
+            '<guid>tag:example.com,2026:42</guid>',
+        ],
+    )
+    def test_an_opaque_guid_is_not_a_link(self, guid):
+        rss = f'<rss version="2.0"><channel><item><title>T</title>{guid}</item></channel></rss>'.encode()
+        assert parse_feed(rss, 'https://example.com/feed')[0]['url'] is None
+
+    def test_atom_text_constructs_follow_their_declared_type(self):
+        atom = b"""<feed xmlns="http://www.w3.org/2005/Atom">
+          <entry><title>Use &lt;draft&gt;</title><link href="https://e.example/1"/>
+            <summary type="html">&lt;p&gt;Hello &lt;b&gt;world&lt;/b&gt;&lt;/p&gt;</summary></entry>
+          <entry><title type="text">a &lt;b&gt; c</title><link href="https://e.example/2"/>
+            <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>Keep &lt;tags&gt; <b>here</b></p></div></content></entry>
+        </feed>"""
+        first, second = parse_feed(atom)
+        assert (first['title'], first['body']) == ('Use <draft>', 'Hello world')
+        assert (second['title'], second['body']) == ('a <b> c', 'Keep <tags> here')
+
 
 class TestHtml:
     def test_item_selectors_resolve_links(self):
@@ -296,3 +326,28 @@ class TestHtml:
         assert html_to_text('<p>a&amp;b</p>  <script>x</script>') == 'a&b'
         assert html_to_text('plain   text') == 'plain text'
         assert html_to_text(None) == ''
+
+
+class TestDeclaredCharset:
+    # 'Ã©' in windows-1252 is the same two bytes as 'é' in UTF-8.
+    PAGE = '<html><body><main><p class="r"><a href="/x">Ã©</a></p></main></body></html>'.encode('cp1252')
+
+    def test_the_declared_charset_decides_how_a_page_decodes(self):
+        assert page_to_text(self.PAGE, encoding='windows-1252')['content'] == 'Ã©'
+        markdown = page_to_markdown(self.PAGE, 'https://e.com/', encoding='windows-1252')['content']
+        assert markdown == '[Ã©](https://e.com/x)'
+        assert page_links(self.PAGE, 'https://e.com/', encoding='windows-1252')[0]['text'] == 'Ã©'
+        items = extract_html_items(self.PAGE, 'https://e.com/', '.r', {'title': ''}, encoding='windows-1252')
+        assert items == [{'title': 'Ã©'}]
+
+    @pytest.mark.parametrize('encoding', [None, 'x-no-such-codec', 'base64'])
+    def test_without_a_usable_declared_charset_the_document_decides(self, encoding):
+        assert page_to_text(self.PAGE, encoding=encoding)['content'] == 'é'
+
+    def test_a_byte_order_mark_outranks_the_declared_charset(self):
+        page = codecs.BOM_UTF8 + '<p>é</p>'.encode('utf-8')
+        assert page_to_text(page, encoding='windows-1252')['content'] == 'é'
+
+    def test_latin1_labels_decode_as_windows_1252(self):
+        page = '<p>“quoted”</p>'.encode('cp1252')
+        assert page_to_text(page, encoding='iso-8859-1')['content'] == '“quoted”'

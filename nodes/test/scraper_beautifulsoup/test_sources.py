@@ -123,6 +123,7 @@ class TestParseSources:
             ({'name': 'a', 'kind': 'feed', 'url': 'https://a', 'method': 'POST'}, 'only json'),
             ({'name': 'a', 'kind': 'feed', 'url': 'https://a', 'extra': {'url_hash': 'x'}}, 'reserved'),
             ({'name': 'a', 'kind': 'feed', 'url': 'https://a', 'maxItems': 'lots'}, 'maxItems'),
+            ({'name': 'a', 'kind': 'json', 'url': 'https://a', 'fields': {'url': 'url', 'title': 42}}, 'fields.title'),
         ],
     )
     def test_validation_errors(self, item, message):
@@ -164,10 +165,25 @@ class TestCheckKindRules:
             ('feed', {}, 'GET', {}),
             ('feed', {}, 'GET', {'url': 'url', 'title': 'title'}),
             ('html', {'itemSelector': 'li'}, 'GET', {'url': 'a@href'}),
+            ('json', {}, 'GET', {'url': ['url', 'story_url'], 'title': ''}),
+            ('html', {'itemSelector': 'li'}, 'GET', {'url': ['a@href', '@href'], 'title': ''}),
         ],
     )
     def test_valid(self, kind, item, method, fields):
         _check_kind_rules(kind, item, method, fields, 'src')
+
+    @pytest.mark.parametrize(
+        'kind, item, fields, message',
+        [
+            ('json', {}, {'url': 'url', 'title': 42}, 'fields.title must be a string or a list of strings'),
+            ('json', {}, {'url': ['url', None]}, 'fields.url must be a string or a list of strings'),
+            ('html', {'itemSelector': 'li'}, {'url': 'a@href', 'title': {'css': 'h2'}}, 'fields.title must be a'),
+            ('feed', {}, {'url': ['url', 'link']}, 'fields.url must be a string$'),
+        ],
+    )
+    def test_field_values_must_be_paths(self, kind, item, fields, message):
+        with pytest.raises(ValueError, match=f'src: {message}'):
+            _check_kind_rules(kind, item, 'GET', fields, 'src')
 
     @pytest.mark.parametrize(
         'kind, item, method, fields, message',
@@ -204,6 +220,11 @@ class TestHelpers:
         )
         assert expand_template('{unix_hours_ago:1}', NOW, 1, 1) == str(int(NOW.timestamp()) - 3600)
 
+    @pytest.mark.parametrize('template', ['{days_ago:1000000000}', '{days_ago:800000}', '{unix_hours_ago:99999999999}'])
+    def test_expand_template_out_of_range_is_value_error(self, template):
+        with pytest.raises(ValueError, match='out of range'):
+            expand_template(f'https://x/?since={template}', NOW, 1, 1)
+
     @pytest.mark.parametrize(
         'value, expected',
         [
@@ -217,6 +238,9 @@ class TestHelpers:
             ('not a date', None),
             (None, None),
             (True, None),
+            # Parse, but their UTC time falls outside years 1-9999.
+            ('0001-01-01T00:00:00+01:00', None),
+            ('9999-12-31T23:59:59-01:00', None),
         ],
     )
     def test_parse_date(self, value, expected):
@@ -269,6 +293,14 @@ class TestNormalizeRow:
     def test_extra_and_custom_fields(self):
         row = self.base({'url': 'https://a', 'language': 'Rust', 'stars': 5}, extra={'category': 'ai-lab'})
         assert row['language'] == 'Rust' and row['stars'] == 5 and row['category'] == 'ai-lab'
+
+    def test_an_unrepresentable_date_keeps_the_row(self):
+        row = self.base({'url': 'https://a', 'published': '0001-01-01T00:00:00+01:00'})
+        assert row['url'] == 'https://a' and row['published_at'] is None
+
+    def test_text_is_not_stripped_as_html_again(self):
+        row = self.base({'url': 'https://a', 'title': 'Use <draft>', 'body': 'a <b> c'}, strip_html=False)
+        assert row['title'] == 'Use <draft>' and row['body'] == 'a <b> c'
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +449,26 @@ def test_feed_source_with_extra_and_partial_failure():
     assert len(result.errors) == 1 and result.errors[0].startswith('Dead:')
 
 
+def test_a_url_template_out_of_range_fails_only_that_url():
+    rss = b'<rss><channel><item><title>Post</title><link>https://lab.ai/p</link></item></channel></rss>'
+    (spec,) = parse_sources(
+        [{'name': 'S', 'kind': 'feed', 'urls': ['https://lab.ai/?since={days_ago:1000000000}', 'https://lab.ai/rss']}]
+    )
+    result = run_source(spec, StubFetcher({'https://lab.ai/rss': rss}), now=NOW)
+    assert [row['url'] for row in result.rows] == ['https://lab.ai/p']
+    assert len(result.errors) == 1 and 'out of range' in result.errors[0]
+
+
+def test_feed_rows_keep_the_literal_text_of_their_items():
+    atom = (
+        b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Use &lt;draft&gt;</title>'
+        b'<link href="https://lab.ai/1"/><summary>Write &lt;p&gt; tags</summary></entry></feed>'
+    )
+    (spec,) = parse_sources([{'name': 'A', 'kind': 'feed', 'url': 'https://lab.ai/atom'}])
+    (row,) = run_source(spec, StubFetcher({'https://lab.ai/atom': atom}), now=NOW).rows
+    assert row['title'] == 'Use <draft>' and row['body'] == 'Write <p> tags'
+
+
 def test_malformed_item_url_drops_that_row_only():
     (spec,) = parse_sources(
         [
@@ -473,6 +525,31 @@ def test_html_source():
     )
     result = run_source(spec, StubFetcher({'https://blog.dev/': html}), now=NOW)
     assert [r['url'] for r in result.rows] == ['https://blog.dev/one', 'https://blog.dev/two']
+
+
+def test_html_source_decodes_by_the_declared_charset():
+    # 'Ã©' in windows-1252 is the same two bytes as 'é' in UTF-8.
+    html = '<div class="r"><a href="/one">Ã©</a></div>'.encode('cp1252')
+
+    class CharsetFetcher(StubFetcher):
+        def fetch(self, url, **kwargs):
+            result = super().fetch(url, **kwargs)
+            result.headers = {'content-type': 'text/html; charset=windows-1252'}
+            return result
+
+    (spec,) = parse_sources(
+        [
+            {
+                'name': 'Blog',
+                'kind': 'html',
+                'url': 'https://blog.dev/',
+                'itemSelector': '.r',
+                'fields': {'title': 'a', 'url': 'a@href'},
+            }
+        ]
+    )
+    (row,) = run_source(spec, CharsetFetcher({'https://blog.dev/': html}), now=NOW).rows
+    assert row['title'] == 'Ã©'
 
 
 def test_non_json_response_is_error():

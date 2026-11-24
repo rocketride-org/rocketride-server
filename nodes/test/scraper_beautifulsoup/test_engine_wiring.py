@@ -159,6 +159,21 @@ def test_render_raises_when_every_url_fails_and_still_closes():
     instance.sendClose.assert_called_once()
 
 
+def test_render_does_not_fail_a_source_whose_other_url_answered_empty():
+    empty = b'<rss version="2.0"><channel><title>T</title></channel></rss>'
+    endpoint = make_endpoint(
+        [{'name': 'a', 'kind': 'feed', 'urls': ['https://news.example/empty', 'https://news.example/gone']}]
+    )
+    scan(endpoint)
+    endpoint._fetcher = StubFetcher({'https://news.example/empty': ('application/rss+xml', empty)})
+    instance = MagicMock(name='instance')
+
+    # One URL failed, the other answered with no items: no rows, but not "every URL failed".
+    endpoint.renderSourceObject(SimpleNamespace(name='a'), instance)
+    instance.sendAnswers.assert_not_called()
+    instance.sendClose.assert_called_once()
+
+
 def test_render_unknown_source_raises_and_closes():
     endpoint = make_endpoint([{'name': 'a', 'kind': 'feed', 'url': 'https://news.example/feed'}])
     scan(endpoint)
@@ -310,6 +325,34 @@ def test_fetch_feed_returns_items():
     assert [item['title'] for item in out['items']] == ['One']
 
 
+def test_fetch_feed_keeps_the_literal_text_of_an_atom_title():
+    atom = (
+        b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Use &lt;draft&gt;</title>'
+        b'<link href="https://news.example/1"/></entry></feed>'
+    )
+    instance = make_instance({'https://news.example/atom': ('application/atom+xml', atom)})
+    (item,) = instance.fetch_feed({'url': 'https://news.example/atom'})['items']
+    assert item['title'] == 'Use <draft>' and item['body'] == 'Use <draft>'
+
+
+# 'Ã©' in windows-1252 is the same two bytes as 'é' in UTF-8.
+_CP1252_PAGE = '<html><body><main><p class="r"><a href="/x">Ã©</a></p></main></body></html>'.encode('cp1252')
+
+
+@pytest.mark.parametrize('fmt', ['text', 'markdown', 'links'])
+def test_fetch_page_decodes_by_the_declared_charset(fmt):
+    instance = make_instance({'https://site.example/': ('text/html; charset=windows-1252', _CP1252_PAGE)})
+    out = instance.fetch_page({'url': 'https://site.example/', 'format': fmt})
+    text = out['links'][0]['text'] if fmt == 'links' else out['content']
+    assert 'Ã©' in text and 'é' not in text
+
+
+def test_extract_decodes_by_the_declared_charset():
+    instance = make_instance({'https://site.example/': ('text/html; charset=windows-1252', _CP1252_PAGE)})
+    out = instance.extract({'url': 'https://site.example/', 'item_selector': '.r', 'fields': {'title': ''}})
+    assert out['items'] == [{'title': 'Ã©'}]
+
+
 def test_fetch_error_reaches_the_agent_as_value_error():
     instance = make_instance({})
     with pytest.raises(ValueError, match='HTTP 404'):
@@ -421,6 +464,34 @@ def test_fetch_page_links_are_cut_to_max_chars():
     assert out['truncated'] is True
 
 
+def test_fetch_page_links_past_the_extractor_limit_are_reported_truncated():
+    # The extractor keeps 200 links; the 201st is dropped even though the list fits in max_chars.
+    page = ''.join(f'<a href="/{n}">{n}</a>' for n in range(201)).encode()
+    instance = make_instance({'https://site.example/': page})
+    out = instance.fetch_page({'url': 'https://site.example/', 'format': 'links'})
+    assert len(out['links']) == 200
+    assert out['truncated'] is True
+
+
+def test_fetch_page_links_within_the_extractor_limit_are_not_truncated():
+    page = ''.join(f'<a href="/{n}">{n}</a>' for n in range(200)).encode()
+    out = make_instance({'https://site.example/': page}).fetch_page({'url': 'https://site.example/', 'format': 'links'})
+    assert len(out['links']) == 200 and out['truncated'] is False
+
+
+def test_fetch_page_bounds_the_title_and_description_too():
+    long = 'T' * 5000
+    page = (
+        f'<html><head><title>{long}</title><meta name="description" content="{long}"></head>'
+        '<body><main>Body</main></body></html>'
+    ).encode()
+    instance = make_instance({'https://site.example/': page})
+    out = instance.fetch_page({'url': 'https://site.example/', 'format': 'text', 'max_chars': 1000})
+    assert len(out['title']) == 1000 and len(out['description']) == 1000
+    assert out['content'] == 'Body'
+    assert out['truncated'] is True
+
+
 def test_max_chars_cannot_exceed_the_operator_ceiling():
     page = b'<main>' + b'word ' * 10000 + b'</main>'
     instance = make_instance({'https://site.example/': page}, max_tool_chars=3000)
@@ -490,6 +561,42 @@ def test_build_fetcher_zero_interval_disables_pacing():
 def test_build_fetcher_rejects_an_unpinned_allow_list_row():
     with pytest.raises(ValueError):
         build_fetcher({'urlAllowList': [{'pattern': 'news\\.example'}]})
+
+
+def refusals(pattern):
+    """The messages of the save-time check, the source's fetcher and a tool call for one allow-list pattern."""
+    messages = []
+    for check in (
+        scraper_validator.allow_patterns,
+        build_fetcher,
+        started_global().fetcher,
+    ):
+        try:
+            check({'urlAllowList': [{'allowPattern': pattern}]})
+        except ValueError as e:
+            messages.append(str(e))
+    return messages
+
+
+@pytest.mark.parametrize(
+    'pattern',
+    [
+        r'^https://news\.example/',
+        r'^http://\[::1\]:8080/',
+        r'\Ahttps://api\.example(?=/|$)',
+        # Any host, said on purpose: the documented form (README, "or [^/]+ for any host")
+        '^https://[^/]+/',
+    ],
+)
+def test_the_documented_allow_list_grammar_is_accepted_at_all_three_checks(pattern):
+    assert refusals(pattern) == []
+
+
+@pytest.mark.parametrize('pattern', [r'news\.example', r'^https://news\.example', '^[^/]+://news\\.example/'])
+def test_a_pattern_that_does_not_pin_scheme_and_host_is_refused_at_all_three_checks(pattern):
+    # The same rule, with the same message, when the node is saved, for the source and for a tool call
+    messages = refusals(pattern)
+    assert len(messages) == 3 and len(set(messages)) == 1
 
 
 # -- IGlobal: one fetcher per distinct set of network settings -------------

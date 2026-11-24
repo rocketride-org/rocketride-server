@@ -35,10 +35,11 @@ No engine imports: unit-testable standalone.
 
 from __future__ import annotations
 
+import codecs
 import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from xml.parsers import expat
 
 from bs4 import BeautifulSoup, Comment, Doctype, NavigableString, ProcessingInstruction, Tag
@@ -49,6 +50,11 @@ _STRIP_TAGS = ('script', 'style', 'noscript', 'template', 'svg', 'iframe')
 _WS = re.compile(r'[ \t\r\f\v]+')
 _BLANKS = re.compile(r'\n{3,}')
 _PATH_TOKEN = re.compile(r'([^.\[\]]+)|\[(\d+)\]')
+# The most links page_links returns.
+MAX_LINKS = 200
+# A byte order mark names the encoding itself (a UTF-32 mark starts with a UTF-16 one).
+_BOMS = (codecs.BOM_UTF8, codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
+_ATOM = '{http://www.w3.org/2005/Atom}'
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +136,50 @@ def _child_text(el: ET.Element, *names: str) -> Optional[str]:
             if text:
                 return text
     return None
+
+
+def _holds_html(element: ET.Element) -> bool:
+    """Whether a feed element's text is HTML, whose markup is stripped.
+
+    An Atom text construct declares its kind (RFC 4287, section 3.1):
+    ``type="text"``, the default, is plain text, so an escaped ``&lt;draft&gt;``
+    is the literal ``<draft>``; ``html`` (``text/html`` on ``content``) is
+    escaped HTML; ``xhtml`` is inline markup the XML parser has already turned
+    into elements, leaving only its text. RSS elements declare nothing and
+    carry HTML in practice.
+    """
+    if not element.tag.startswith(_ATOM):
+        return True
+    return (element.get('type') or 'text').strip().lower() in ('html', 'text/html')
+
+
+def _feed_text(entry: ET.Element, *names: str) -> Optional[str]:
+    """:func:`_child_text` as plain text: HTML is stripped, other Atom text keeps its characters."""
+    for name in names:
+        child = _child(entry, name)
+        if child is not None:
+            text = ''.join(child.itertext()).strip()
+            if text:
+                return html_to_text(text) if _holds_html(child) else _WS.sub(' ', text)
+    return None
+
+
+def _guid_link(entry: ET.Element) -> Optional[str]:
+    """The RSS ``<guid>`` when it is a permalink: an absolute http(s) URL not marked ``isPermaLink="false"``.
+
+    Any other guid (``item-42``, ``tag:example.com,2026:1``) is an opaque id:
+    resolved against the feed URL it would make up an article URL and its
+    dedup key.
+    """
+    guid = _child(entry, 'guid')
+    if guid is None or (guid.get('isPermaLink') or '').strip().lower() == 'false':
+        return None
+    text = ''.join(guid.itertext()).strip()
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return None
+    return text if parts.scheme in ('http', 'https') and parts.netloc else None
 
 
 _XML_BASE = '{http://www.w3.org/XML/1998/namespace}base'
@@ -234,22 +284,29 @@ def parse_feed(content: Union[bytes, str], base_url: Optional[str] = None) -> Li
     """Parse an RSS or Atom document into normalized raw items.
 
     Each item has ``title``, ``url``, ``author``, ``published``, ``body``
-    (HTML stripped to text) and ``categories``. ``base_url`` is the URL the
-    feed was fetched from: a relative ``xml:base`` (``../``) resolves against
-    it, as RFC 4287 requires.
+    and ``categories``; ``title`` and ``body`` are text (see
+    :func:`_holds_html`). ``base_url`` is the URL the feed was fetched from:
+    a relative ``xml:base`` (``../``) resolves against it, as RFC 4287
+    requires.
+
+    Raises:
+        ValueError: The document is not a feed, declares entities, or names
+            an encoding Python does not know.
     """
     if isinstance(content, str):
         content = content.encode('utf-8')
-    _refuse_entity_declarations(content)
     try:
+        _refuse_entity_declarations(content)
         root = ET.fromstring(content)
+    except LookupError as e:
+        # Either parser pass: expat looks up the encoding the XML declaration names.
+        raise ValueError(f'Feed declares an unsupported encoding: {e}') from e
     except ET.ParseError as e:
         raise ValueError(f'Not a valid RSS/Atom document: {e}') from e
 
     items: List[Dict[str, Any]] = []
     for entry, base in _feed_entries(root, base_url):
-        link = _atom_link(entry, base) or _child_text(entry, 'guid')
-        body_raw = _child_text(entry, 'content', 'encoded', 'summary', 'description')
+        link = _atom_link(entry, base) or _guid_link(entry)
         categories = []
         for child in entry:
             if _local(child.tag) in ('category', 'subject'):
@@ -258,11 +315,11 @@ def parse_feed(content: Union[bytes, str], base_url: Optional[str] = None) -> Li
                     categories.append(term)
         items.append(
             {
-                'title': html_to_text(_child_text(entry, 'title') or ''),
+                'title': _feed_text(entry, 'title') or '',
                 'url': link,
                 'author': _author(entry),
                 'published': _child_text(entry, 'pubDate', 'published', 'updated', 'date', 'issued'),
-                'body': html_to_text(body_raw) if body_raw else None,
+                'body': _feed_text(entry, 'content', 'encoded', 'summary', 'description'),
                 'categories': categories,
             }
         )
@@ -274,7 +331,37 @@ def parse_feed(content: Union[bytes, str], base_url: Optional[str] = None) -> Li
 # ---------------------------------------------------------------------------
 
 
-def soup_of(content: Union[bytes, str]) -> BeautifulSoup:
+def _transport_codec(charset: Optional[str], content: bytes) -> Optional[str]:
+    """The codec for the ``Content-Type`` charset of ``content``; None leaves the choice to the document.
+
+    None when no charset was declared, Python does not know it, or
+    ``content`` starts with a byte order mark (which outranks the header).
+    The labels the WHATWG Encoding standard reads as windows-1252 (``ascii``,
+    ``iso-8859-1``, ``latin1`` ...) decode as cp1252, as browsers do.
+    """
+    if not charset or content.startswith(_BOMS):
+        return None
+    try:
+        name = codecs.lookup(charset).name
+    except (LookupError, ValueError):
+        return None
+    return 'cp1252' if name in ('ascii', 'iso8859-1') else name
+
+
+def soup_of(content: Union[bytes, str], encoding: Optional[str] = None) -> BeautifulSoup:
+    """Parse HTML; ``encoding`` is the charset the response's ``Content-Type`` declared, if any.
+
+    A declared charset decides how the bytes decode, ahead of a ``<meta
+    charset>`` in the page (the WHATWG order). Without one BeautifulSoup
+    detects the encoding from the document, as it always has.
+    """
+    if isinstance(content, bytes):
+        codec = _transport_codec(encoding, content)
+        if codec:
+            try:
+                content = content.decode(codec, errors='replace')
+            except LookupError:
+                pass  # a codec that is not a text encoding (``base64``): detect instead
     return BeautifulSoup(content, HTML_PARSER)
 
 
@@ -359,10 +446,17 @@ def _select_value(scope: Tag, spec: str, base_url: str) -> Optional[str]:
 
 
 def extract_html_items(
-    content: Union[bytes, str], base_url: str, item_selector: str, fields: Dict[str, Any]
+    content: Union[bytes, str],
+    base_url: str,
+    item_selector: str,
+    fields: Dict[str, Any],
+    encoding: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Select repeated items with ``item_selector`` and map each field selector."""
-    soup = soup_of(content)
+    """Select repeated items with ``item_selector`` and map each field selector.
+
+    ``encoding`` is the response's declared charset (see :func:`soup_of`).
+    """
+    soup = soup_of(content, encoding)
     scopes: Iterable[Tag] = _select(soup, item_selector) if item_selector else [soup]
     out = []
     for scope in scopes:
@@ -379,8 +473,8 @@ def extract_html_items(
     return out
 
 
-def _clean_soup(content: Union[bytes, str]) -> BeautifulSoup:
-    soup = soup_of(content)
+def _clean_soup(content: Union[bytes, str], encoding: Optional[str] = None) -> BeautifulSoup:
+    soup = soup_of(content, encoding)
     for tag in soup(_STRIP_TAGS):
         tag.decompose()
     return soup
@@ -409,16 +503,20 @@ def _main_node(soup: BeautifulSoup, selector: Optional[str] = None) -> Tag:
     return soup.find('main') or soup.find('article') or soup.body or soup
 
 
-def page_to_text(content: Union[bytes, str], selector: Optional[str] = None) -> Dict[str, Any]:
-    soup = _clean_soup(content)
+def page_to_text(
+    content: Union[bytes, str], selector: Optional[str] = None, encoding: Optional[str] = None
+) -> Dict[str, Any]:
+    soup = _clean_soup(content, encoding)
     node = _main_node(soup, selector)
     lines = [_WS.sub(' ', line).strip() for line in node.get_text('\n').splitlines()]
     text = _BLANKS.sub('\n\n', '\n'.join(line for line in lines if line))
     return {'title': page_title(soup), 'description': page_description(soup), 'content': text}
 
 
-def page_links(content: Union[bytes, str], base_url: str, limit: int = 200) -> List[Dict[str, str]]:
-    soup = soup_of(content)
+def page_links(
+    content: Union[bytes, str], base_url: str, limit: int = MAX_LINKS, encoding: Optional[str] = None
+) -> List[Dict[str, str]]:
+    soup = soup_of(content, encoding)
     seen = set()
     links = []
     for a in soup.find_all('a', href=True):
@@ -520,8 +618,10 @@ def _md_block(node: Tag, base_url: str, out: List[str], depth: int = 0) -> None:
                 out.append(text)
 
 
-def page_to_markdown(content: Union[bytes, str], base_url: str, selector: Optional[str] = None) -> Dict[str, Any]:
-    soup = _clean_soup(content)
+def page_to_markdown(
+    content: Union[bytes, str], base_url: str, selector: Optional[str] = None, encoding: Optional[str] = None
+) -> Dict[str, Any]:
+    soup = _clean_soup(content, encoding)
     node = _main_node(soup, selector)
     blocks: List[str] = []
     _md_block(node, base_url, blocks)
