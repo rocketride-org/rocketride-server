@@ -38,8 +38,11 @@ CONST_NODE_RAIL_ENV = 'RR_NODE_RAIL_ENABLED'
 
 
 def node_rail_enabled() -> bool:
-    """True with ``RR_NODE_RAIL_ENABLED=1``: the one reading of the switch, so the rail is never on while the server is not private."""
-    return os.environ.get(CONST_NODE_RAIL_ENV) == '1'
+    """True with ``RR_NODE_RAIL_ENABLED=1``, as depends reads it, so the rail is never on while the server is not private."""
+    # depends, the lowest layer, holds the one reading; `import ai` has already loaded it
+    from depends import rail_enabled
+
+    return rail_enabled()
 
 
 def should_make_private() -> bool:
