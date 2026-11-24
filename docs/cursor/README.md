@@ -16,9 +16,9 @@ this folder.
 | --- | --- |
 | `.cursor-plugin/plugin.json` | The manifest: name, display name, version, description, author, links, license, logo, keywords and category. |
 | `mcp.json` | The one MCP server, by URL, with no headers, auth settings or variables. Cursor signs in through the browser. |
-| `.mcp.json` | The same bytes. cursor.directory finds servers in a file with this name. |
+| `.mcp.json` | The same bytes. cursor.directory finds servers in a file with this name, and Cursor may read either file, so the two must stay identical. |
 | `assets/logo.png` | 512 by 512 pixels, the RocketRide mark on a navy tile. It is the same image as the ChatGPT app's icon, drawn from `packages/shell/src/components/RocketRideMark.tsx`. |
-| `README.md` | What the plugin does, how to install it and sign in, the API key option, the Enterprise allowlist step, and where to get help. |
+| `README.md` | What the plugin does and needs, how to install it and sign in, the Cursor CLI and API key options, the steps for Cursor teams, and where to get help. |
 | `LICENSE` | A copy of the repository's root `LICENSE`. |
 | `CHANGELOG.md` | One entry per version. |
 
