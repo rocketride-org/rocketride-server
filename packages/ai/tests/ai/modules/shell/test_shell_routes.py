@@ -402,7 +402,10 @@ def test_llms_lists_listed_pages_with_absolute_urls(app_url):
     resp = _client().get('/llms.txt')
     assert resp.status_code == 200
     assert resp.headers['content-type'] == 'text/plain; charset=utf-8'
-    assert resp.text.startswith('# RocketRide\n\n> Build, run, and harness AI at rocket speed.')
+    assert resp.text.startswith(
+        '# RocketRide\n\n> RocketRide is an AI meta-harness with an enterprise-grade runtime built on C++, '
+        'for companies and pro-builders building durable AI at production scale.\n'
+    )
     assert '## Pages' in resp.text
     for page in LEGACY.pages():
         line = f'- [{page.title}]({BASE}{page.path}): {page.description}'

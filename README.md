@@ -5,8 +5,7 @@
 </a>
 
 <p>
-  <strong>RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.</strong><br/>
-  Build, test and publish durable agents that scale in production.
+  <strong>RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.</strong>
 </p>
 
 <p>
