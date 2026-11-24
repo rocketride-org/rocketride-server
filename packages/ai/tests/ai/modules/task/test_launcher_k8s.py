@@ -169,7 +169,11 @@ class FakeProcess:
 
 
 class FakeKubectl:
-    """Records every kubectl command; answers from ``responses`` keyed by the subcommand, and plays the watch."""
+    """Records every kubectl command; answers from ``responses`` keyed by the subcommand, and plays the watch.
+
+    A key of two words wins over one: ``delete jobs`` is the sweep's delete of them all and ``get jobs``
+    its listing, so a test's ``delete`` or ``get`` answer (one Job, a pod look, metrics) is not taken for them.
+    """
 
     def __init__(self, **responses):
         self.calls = []
@@ -180,7 +184,8 @@ class FakeKubectl:
         self.attach_process = None
         # What happened, in order: every command, and each write to the attach's stdin
         self.log = []
-        self.responses = {'create': self._create}
+        # No Job is left from an earlier run unless a test says so
+        self.responses = {'create': self._create, 'get jobs': CliResult(0, '', '')}
         self.responses.update(responses)
         self.attach_error = None
         self.spawn_error = None
@@ -217,7 +222,8 @@ class FakeKubectl:
     async def run(self, args, *, stdin=None, check=True, timeout=None):
         self.calls.append(SimpleNamespace(args=list(args), stdin=stdin, timeout=timeout))
         self.log.append(args[0])
-        response = self.responses.get(args[0], CliResult(0, '', ''))
+        key = ' '.join(args[:2])
+        response = self.responses[key] if key in self.responses else self.responses.get(args[0], CliResult(0, '', ''))
         result = response(list(args), stdin) if callable(response) else response
         if check and result.returncode != 0:
             raise K8sError(f'kubectl {args[0]} failed (exit {result.returncode}): {result.stderr}')
@@ -587,6 +593,7 @@ async def test_prepare_failure_is_raised_and_retried():
     tasks started meanwhile.
     """
     cli = FakeKubectl(delete=CliResult(1, '', 'Unable to connect to the server'))
+    cli.responses['get jobs'] = CliResult(1, '', 'Unable to connect to the server')
     gate = asyncio.Event()
     original = cli.run
 
@@ -618,8 +625,8 @@ async def test_prepare_failure_is_raised_and_retried():
     assert isinstance(error, K8sError) and 'Unable to connect' in str(error)
     assert all(other is error for other in others)
     await launcher.prepare()
-    # One sweep that failed for all three, then one sweep and the watch
-    assert cli.log == ['delete', 'delete', 'watch']
+    # One sweep that failed for all three (its delete, then its listing), then one sweep and the watch
+    assert cli.log == ['delete', 'get', 'delete', 'watch']
 
 
 async def test_the_sweep_says_how_many_jobs_it_removed(monkeypatch):
@@ -631,6 +638,76 @@ async def test_the_sweep_says_how_many_jobs_it_removed(monkeypatch):
     )
     await _launcher(FakeKubectl(delete=CliResult(0, swept, ''))).prepare()
     assert any('removed 2 job(s) left by an earlier run of host-a:5565' in line for line in said)
+
+
+LEFTOVERS = CliResult(0, 'job.batch/rr-old-1a2b3c\njob.batch/rr-older-4d5e6f\n', '')
+
+
+def _refused(args, stdin):
+    """The cluster deletes one Job and refuses the other (an admission policy, say)."""
+    return CliResult(
+        1,
+        'job.batch "rr-old-1a2b3c" deleted\n',
+        'Error from server (Forbidden): jobs.batch "rr-older-4d5e6f" is forbidden: denied by policy',
+    )
+
+
+def _delete_timed_out(args, stdin):
+    """The delete does not end in time."""
+    raise K8sError('kubectl delete timed out after 60 s')
+
+
+def _keeps_older(args, stdin):
+    """One Job at a time: the cluster still refuses rr-older-4d5e6f."""
+    if args[1] == 'job.batch/rr-older-4d5e6f':
+        return CliResult(1, '', 'Error from server (Forbidden): denied by policy')
+    return CliResult(0, f'{args[1]} deleted\n', '')
+
+
+@pytest.mark.parametrize('delete_all', [_refused, _delete_timed_out], ids=['refused', 'timed-out'])
+async def test_a_sweep_that_fails_deletes_job_by_job_and_the_start_goes_on(monkeypatch, delete_all):
+    """One leftover the cluster keeps would otherwise fail prepare(), and so every start after it."""
+    said = []
+    monkeypatch.setattr(k8, 'debug', said.append)
+    cli = FakeKubectl(delete=_keeps_older)
+    cli.responses['delete jobs'] = delete_all
+    cli.responses['get jobs'] = LEFTOVERS
+    await _launcher(cli).start(_spec())
+    assert [call.args for call in cli.calls[:4]] == [
+        ['delete', 'jobs', '-l', SELECTOR, '--ignore-not-found', '--wait=false'],
+        ['get', 'jobs', '-l', SELECTOR, '-o', 'name'],
+        ['delete', 'job.batch/rr-old-1a2b3c', '--ignore-not-found', '--wait=false'],
+        ['delete', 'job.batch/rr-older-4d5e6f', '--ignore-not-found', '--wait=false'],
+    ]
+    assert 'create' in cli.commands()
+    (line,) = [line for line in said if 'job(s) left by an earlier run' in line]
+    assert 'could not delete 1 of 2 job(s) left by an earlier run of host-a:5565' in line
+    assert 'job.batch/rr-older-4d5e6f: Error from server (Forbidden): denied by policy' in line
+
+
+async def test_a_sweep_that_fails_then_deletes_every_job_says_how_many(monkeypatch):
+    said = []
+    monkeypatch.setattr(k8, 'debug', said.append)
+    cli = FakeKubectl()
+    cli.responses['delete jobs'] = _delete_timed_out
+    cli.responses['get jobs'] = LEFTOVERS
+    await _launcher(cli).prepare()
+    assert any('removed 2 job(s) left by an earlier run of host-a:5565' in line for line in said)
+
+
+async def test_a_job_delete_with_no_answer_ends_the_sweep(monkeypatch):
+    """Each delete may wait a minute and every start waits for the sweep: after one with no answer, the rest wait."""
+    said = []
+    monkeypatch.setattr(k8, 'debug', said.append)
+    cli = FakeKubectl(delete=_delete_timed_out)
+    cli.responses['get jobs'] = CliResult(0, 'job.batch/rr-a\njob.batch/rr-b\njob.batch/rr-c\n', '')
+    await _launcher(cli).start(_spec())
+    assert [call.args[1] for call in cli.calls if call.args[0] == 'delete'] == ['jobs', 'job.batch/rr-a']
+    assert 'create' in cli.commands()
+    (line,) = [line for line in said if 'job(s) left by an earlier run' in line]
+    assert 'could not delete 3 of 3 job(s) left by an earlier run of host-a:5565' in line
+    assert 'job.batch/rr-a: kubectl delete timed out after 60 s' in line
+    assert 'job.batch/rr-b: not tried; job.batch/rr-c: not tried' in line
 
 
 async def test_a_missing_kubectl_is_named():
