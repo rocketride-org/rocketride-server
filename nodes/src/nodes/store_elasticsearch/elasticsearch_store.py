@@ -49,7 +49,9 @@ from .constants import (
 )
 
 
-# A search rejected for asking for too many hits names the index's limit
+# A search rejected for asking for too many hits names the index's limit.
+# This matches Elasticsearch's error text: if Elasticsearch rewords it, render on an
+# index with a lower index.max_result_window raises on the first page instead of retrying.
 _MAX_RESULT_WINDOW = re.compile(r'Result window is too large, from \+ size must be less than or equal to: \[(\d+)\]')
 
 
