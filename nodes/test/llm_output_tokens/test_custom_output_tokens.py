@@ -251,7 +251,8 @@ def test_a_stale_block_of_another_profile_is_not_reported(monkeypatch):
     """Only the selected profile's settings are in play; another profile's leftovers are not."""
     service = _service('llm_openai/services.json')
     warnings = []
-    conn = {'profile': service['preconfig']['default'], 'modelOutputTokens': 32000}
+    # The node needs a key of its own to start; the one in the stale block is not in play
+    conn = {'profile': service['preconfig']['default'], 'apikey': 'sk-test', 'modelOutputTokens': 32000}
     conn['custom'] = {**_CUSTOM, 'modelOutputTokens': 8192}
 
     _start_openai_node(monkeypatch, conn, warnings)
