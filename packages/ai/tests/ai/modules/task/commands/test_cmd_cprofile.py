@@ -103,7 +103,7 @@ def _server_for(control):
     """A server stub that finds ``control`` by its id and hands back its running engine."""
     server = MagicMock()
     server.control_by_id = MagicMock(return_value=control)
-    server.ensure_engine = AsyncMock(side_effect=lambda c: c.task)
+    server.ensure_engine = AsyncMock(side_effect=lambda c, *, credential=None: c.task)
     return server
 
 
@@ -220,7 +220,8 @@ async def test_an_owner_may_profile_their_own_private_engine(rung):
     response = await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': TARGET}})
 
     assert response['body'] == {'status': 'started'}
-    server.ensure_engine.assert_awaited_once_with(control)
+    # The engine is ensured as this request: its connection's credential goes along (#2987)
+    server.ensure_engine.assert_awaited_once_with(control, credential='ak_x')
 
 
 @pytest.mark.asyncio
