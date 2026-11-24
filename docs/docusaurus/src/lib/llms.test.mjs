@@ -47,9 +47,9 @@ describe('buildIndex', () => {
 		assert.match(index, /## Concepts/);
 		// Links are absolute (the llms.txt format specifies URLs) and carry the
 		// manifest description when the page has one.
-		assert.match(index, /\[Pipelines\]\(https:\/\/docs\.rocketride\.org\/concepts\/pipelines\.md\): A pipeline is a directed graph of nodes\./);
+		assert.match(index, /\[Pipelines\]\(https:\/\/docs\.rocketride\.ai\/concepts\/pipelines\.md\): A pipeline is a directed graph of nodes\./);
 		// An entry without a description degrades to a bare link, no trailing colon.
-		assert.match(index, /\[Quickstart\]\(https:\/\/docs\.rocketride\.org\/quickstart\.md\)\n/);
+		assert.match(index, /\[Quickstart\]\(https:\/\/docs\.rocketride\.ai\/quickstart\.md\)\n/);
 		// Get Started section precedes Concepts (spine order)
 		assert.ok(index.indexOf('## Get Started') < index.indexOf('## Concepts'));
 	});
@@ -58,7 +58,7 @@ describe('buildIndex', () => {
 		const index = await readFile(path.join(staticDir, 'llms.txt'), 'utf8');
 		const firstSection = index.indexOf('\n## ');
 		const header = index.slice(0, firstSection);
-		assert.match(header, /^> RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C\+\+\./m);
+		assert.match(header, /^> RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C\+\+, for companies and pro-builders building durable AI at production scale\./m);
 		assert.match(header, /^MIT licensed\. /m);
 		// The list is free-form text before the first section: llms.txt reads every
 		// H2 as a list of links, so it must not have a heading of its own.

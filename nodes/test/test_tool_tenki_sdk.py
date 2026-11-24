@@ -23,10 +23,10 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Contract tests: the parts of the real tenki SDK that tool_tenki relies on, run against the pinned release.
+"""Contract tests: the parts of the real Luxor SDK (luxor-ai) that tool_tenki relies on, run against the pinned release.
 
 test_tool_tenki.py fakes the SDK, so it cannot notice a release that changes what the node depends on. Run this
-module against any new version before moving the pin in requirements.txt; it is skipped when tenki is not installed.
+module against any new version before moving the pin in requirements.txt; it is skipped when luxor-ai is not installed.
 """
 
 from __future__ import annotations
@@ -41,14 +41,14 @@ from types import SimpleNamespace
 
 import pytest
 
-tenki = pytest.importorskip('tenki')
+tenki = pytest.importorskip('luxor_ai')  # the SDK's implementation package is still tenki_sandbox
 
 from tenki_sandbox import errors as sdk_errors
 from tenki_sandbox._pb import pb
 from tenki_sandbox._transport import _STREAMING_OUT, GrpcConfig, GrpcSandboxRPC
 from tenki_sandbox.client import build_create_session_request
 from tenki_sandbox import data_plane as data_plane_module
-from tenki_sandbox.data_plane import GrpcDataPlaneRPC
+from tenki_sandbox.data_plane import DataPlaneCredentialManager, GrpcDataPlaneRPC
 from tenki_sandbox.errors import map_rpc_error
 from tenki_sandbox.fs import SandboxFS
 from tenki_sandbox.git import SandboxGit
@@ -64,6 +64,10 @@ _spec.loader.exec_module(shims)  # engine-free, so it runs against the real SDK 
 def _parameters(function):
     """Each parameter's default (_REQUIRED when it has none), self left out."""
     return {name: p.default for name, p in inspect.signature(function).parameters.items() if name != 'self'}
+
+
+def _raise(error):
+    raise error
 
 
 def _session(plane, verified=True):
@@ -106,6 +110,7 @@ def test_the_sdk_errors_that_are_also_plain_runtime_or_timeout_errors_are_exactl
     ]
     plain = {error for error in errors if issubclass(error, (RuntimeError, TimeoutError))}
     assert len(errors) > 10 and {error.__name__ for error in plain} == {
+        'ResumeWaitTimeoutError',  # luxor-ai 1.5.2: a SandboxError too, so the node handles it as one
         'SnapshotFailedError',
         'SnapshotWaitTimeoutError',
     }
@@ -151,11 +156,13 @@ def test_the_error_mapping_the_node_is_designed_around(code, details, expected):
 # ---------------------------------------------------------------------------
 
 
-def test_the_client_takes_an_explicit_key_endpoint_and_deadline_and_refuses_a_key_without_tk():
-    client = tenki.Client(
-        auth_token='tk_mock-placeholder', base_url='https://api.tenki.cloud', timeout=60, rpc=object()
-    )
-    assert client.base_url == 'https://api.tenki.cloud' and callable(client.get) and callable(client.close)
+def test_the_client_takes_an_explicit_key_endpoint_and_deadline_and_refuses_a_key_without_lx_or_tk():
+    for key, url in (
+        ('lx_mock-placeholder', 'https://api.luxor.ai'),
+        ('tk_mock-placeholder', 'https://api.tenki.cloud'),
+    ):
+        client = tenki.Client(auth_token=key, base_url=url, timeout=60, rpc=object())
+        assert client.base_url == url and callable(client.get) and callable(client.close)
     with pytest.raises(tenki.InvalidAuthTokenError):
         tenki.Client(auth_token='mock-placeholder', rpc=object())
     # The client's deadline applies to unary control-plane calls only; git has no data-plane call.
@@ -289,6 +296,11 @@ class _RecordingStub:
 _FILE_RPCS = {'Stat', 'ReadFile', 'WriteFile', 'List', 'Mkdir', 'Remove'}
 
 
+def _data_plane_rpc():
+    """The SDK's own data-plane client for the contract session, with no credential to send."""
+    return GrpcDataPlaneRPC('https://127.0.0.1:9', DataPlaneCredentialManager(None), 'sb-contract')
+
+
 def _planes():
     """A real Sandbox over the SDK's own control and data planes, both on recording stubs."""
     config = GrpcConfig(base_url='https://127.0.0.1:9', auth_token='tk_mock-placeholder', timeout=60)
@@ -296,7 +308,7 @@ def _planes():
     control_stub = _RecordingStub()
     object.__setattr__(control, '_stub', control_stub)
     session = tenki.Sandbox(SimpleNamespace(_rpc=control), tenki.SandboxInfo(id='sb-contract'))
-    data = GrpcDataPlaneRPC('https://127.0.0.1:9', SimpleNamespace(current=lambda: ''))
+    data = _data_plane_rpc()
     data_stub = data._stub = _RecordingStub()
     session._data_plane_rpc, session._data_plane_verified = data, True
     return session, control_stub, data_stub
@@ -336,7 +348,7 @@ def test_the_deadline_holds_on_the_control_plane_fallback_and_after_a_resume_res
     session, _, _ = _planes()
     shims.bound_file_calls(session, 75)
     session._reset_data_plane()
-    fresh = GrpcDataPlaneRPC('https://127.0.0.1:9', SimpleNamespace(current=lambda: ''))
+    fresh = _data_plane_rpc()
     fresh_stub = fresh._stub = _RecordingStub()
     session._data_plane_rpc, session._data_plane_verified = fresh, True
     _every_file_call(session)
@@ -390,7 +402,7 @@ def test_close_stdin_waits_for_the_start_and_re_raises_a_run_error_that_followed
     assert 'timeout' in _parameters(Process.wait) and isinstance(inspect.getattr_static(Process, 'pid'), property)
 
 
-def test_a_failed_run_ends_both_output_streams_with_its_error_and_sets_done_first():
+def test_a_failed_run_ends_both_output_streams_with_its_error_and_counts_as_ended():
     class _NoNetwork:
         def run(self, requests):
             raise ConnectionError('no network in contract tests')
@@ -401,13 +413,48 @@ def test_a_failed_run_ends_both_output_streams_with_its_error_and_sets_done_firs
             list(stream)
     with pytest.raises(tenki.SandboxError):
         process.wait(timeout=5)
-    # The output guard skips the kill once _done is set, which the SDK does before it ends the streams.
-    source = inspect.getsource(Process._pump)
-    assert process._done.is_set() and source.index('self._done.set()') < source.index('self.stdout.close()')
+    assert shims.run_ended(process)
     stream = ProcessStream()
     stream.push(b'a')
     stream.close()
     assert list(stream) == [b'a'] and stream.read() == b'a'  # the SDK keeps its own copy of everything read
+
+
+class _EndRecorder(shims.DiscardStream):
+    """Takes the place of a process's stream; notes whether shims.run_ended held as the SDK failed or ended it."""
+
+    def __init__(self, process, seen):
+        self._process, self._seen = process, seen
+
+    def fail(self, error):
+        self._seen.append(('fail', shims.run_ended(self._process)))
+
+    def close(self):
+        self._seen.append(('close', shims.run_ended(self._process)))
+
+
+@pytest.mark.parametrize('ending', ['exit', 'error'])
+def test_a_run_counts_as_ended_once_its_exit_or_error_is_in_before_the_sdk_ends_its_streams(ending):
+    # The output guard skips the kill for a run that has ended, and decides that while reading the streams; luxor-ai
+    # 1.5.2 sets _done only after it ends them, so the exit or error must already count.
+    go_on = threading.Event()
+
+    def frames():
+        yield pb.RunResponse(started=pb.RunStarted(pid=7))
+        go_on.wait(timeout=30)
+        if ending == 'error':
+            raise ConnectionError('the VM paused')
+        yield pb.RunResponse(exit=pb.RunExit(exit_code=0))
+
+    process = _session(_DataPlane(frames)).start('true', timeout=10)
+    process.close_stdin()
+    assert not shims.run_ended(process)
+    seen = []
+    process.stdout, process.stderr = _EndRecorder(process, seen), _EndRecorder(process, seen)
+    go_on.set()
+    assert process._done.wait(timeout=10)
+    ends = [('fail', True)] * 2 if ending == 'error' else []
+    assert seen == ends + [('close', True)] * 2
 
 
 def test_a_commands_first_answer_spares_file_calls_the_sdks_unbounded_check_and_a_resume_brings_it_back():
@@ -423,9 +470,41 @@ def test_a_commands_first_answer_spares_file_calls_the_sdks_unbounded_check_and_
     assert process.wait(timeout=10).exit_code == 0
     session.fs.stat('/home/tenki')
     assert plane.checks == 0
-    assert 'self._reset_data_plane()' in inspect.getsource(tenki.Sandbox.resume)
     session._reset_data_plane()
     assert session._data_plane_verified is False
+
+
+class _DeadlineExceeded(Exception):
+    def code(self):
+        return SimpleNamespace(name='DEADLINE_EXCEEDED')
+
+    def details(self):
+        return 'Deadline Exceeded'
+
+
+def test_a_resume_resets_the_data_plane_and_one_past_its_deadline_raises_resume_wait_timeout():
+    # A resume moves the session's data plane, so the node warms the session up again (IGlobal._warm_up).
+    class _Control:
+        def resume_session(self, request):
+            return pb.ResumeSessionResponse(session=pb.SandboxSession(id=request.session_id))
+
+    session = tenki.Sandbox(SimpleNamespace(_rpc=_Control()), tenki.SandboxInfo(id='sb-contract'))
+    session._data_plane_rpc, session._data_plane_verified = _DataPlane(), True
+    session.resume()
+    assert session._data_plane_rpc is None and session._data_plane_verified is False
+    # Past the deadline it is not a CommandTimeoutError, which IGlobal._call checks for, so the node names it too.
+    session = tenki.Sandbox(
+        SimpleNamespace(_rpc=SimpleNamespace(resume_session=lambda r: _raise(_DeadlineExceeded()))),
+        tenki.SandboxInfo(id='sb-contract'),
+    )
+    session._data_plane_rpc, session._data_plane_verified = _DataPlane(), True
+    with pytest.raises(tenki.ResumeWaitTimeoutError) as raised:
+        session.resume()
+    assert isinstance(raised.value, tenki.SandboxError) and not isinstance(raised.value, tenki.CommandTimeoutError)
+    # It raises before its own reset, though the resume may land, so the node drops the connection itself.
+    assert session._data_plane_verified is True
+    shims.reset_data_plane(session)
+    assert session._data_plane_rpc is None and session._data_plane_verified is False
 
 
 class _FloodingDataPlane(_DataPlane):

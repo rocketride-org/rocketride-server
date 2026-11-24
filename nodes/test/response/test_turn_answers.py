@@ -62,6 +62,33 @@ def test_text_and_json_answers_are_written_as_before():
     assert node.instance.currentObject.response['answers'] == ['hello', {'message': 'a JSON answer, not a turn'}]
 
 
+def test_text_answers_keep_their_tokens_beside_them():
+    """The entries stay plain strings, their counts are summed under `tokens`, and that key is not a lane."""
+    node = _response_node()
+    first, second, bare = Answer(), Answer(), Answer()
+    first.setAnswer('one')
+    first.tokens = {'input': 100, 'output': 10, 'cache_read': 50, 'cache_creation': 0, 'model': 'gpt-5.4'}
+    second.setAnswer('two')
+    second.tokens = {
+        'input': 7,
+        'output': 3,
+        'cache_read': 0,
+        'cache_creation': 20,
+        'model': 'gpt-5.4',
+        'calls': 2,
+        'breakdown': [],
+    }
+    bare.setAnswer('three')  # no counts: adds nothing
+
+    for answer in (first, second, bare):
+        node.writeAnswers(answer)
+
+    response = node.instance.currentObject.response
+    assert response['answers'] == ['one', 'two', 'three']
+    assert response['tokens'] == {'input': 107, 'output': 13, 'cache_read': 50, 'cache_creation': 20}
+    assert 'tokens' not in response['result_types']
+
+
 def _anthropic_chat(monkeypatch, bodies):
     pytest.importorskip('langchain_anthropic')
     import langchain_anthropic.chat_models as lca

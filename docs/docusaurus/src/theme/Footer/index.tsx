@@ -45,11 +45,10 @@ const COLUMNS: FooterColumn[] = [
 	{
 		title: 'RocketRide',
 		items: [
-			{ label: 'Home', href: 'https://rocketride.org' },
-			{ label: 'Cloud', href: 'https://rocketride.ai' },
-			{ label: 'About us', href: 'https://rocketride.org/about-us' },
-			{ label: 'Blog', href: 'https://rocketride.org/blog' },
-			{ label: 'Events', href: 'https://rocketride.org/events' },
+			{ label: 'Home', href: 'https://rocketride.ai' },
+			{ label: 'Cloud', href: 'https://rocketride.ai/cloud' },
+			{ label: 'About us', href: 'https://rocketride.ai/about' },
+			{ label: 'Events', href: 'https://events.rocketride.ai' },
 			{ label: 'Careers', href: 'https://app.trinethire.com/companies/1071922-rocketride-inc/jobs' },
 		],
 	},

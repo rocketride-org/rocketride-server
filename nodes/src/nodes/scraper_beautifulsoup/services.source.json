@@ -8,7 +8,7 @@
 	"path": "nodes.scraper_beautifulsoup",
 	"prefix": "scraper",
 	"icon": "scraper.svg",
-	"documentation": "https://docs.rocketride.org/nodes/scraper_beautifulsoup",
+	"documentation": "https://docs.rocketride.ai/nodes/scraper_beautifulsoup",
 	"description": ["Run-once web scraping source built on BeautifulSoup. Needs no input, so it can start a scheduled deployment.", "Configure sources as JSON: public JSON APIs (GET or POST, with dot-path field mapping), RSS/Atom feeds, or HTML listing pages (CSS selectors). Each source becomes one pipeline object.", "Emits every item of a source as one JSON row list on the answers lane (wire it to a SQL node to load a table; each row carries a url_hash dedup key) and as one text document per item on the text lane.", "Only public hosts are reachable: every request and redirect hop is re-validated, responses are size-capped, and requests to the same host are paced."],
 	"tile": ["Sources: ${parameters.scraper.maxItemsPerSource} items max each"],
 	"lanes": {
