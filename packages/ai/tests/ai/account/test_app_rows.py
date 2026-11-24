@@ -146,8 +146,8 @@ async def test_public_winners_picks_each_apps_serving_precedence_winner():
     rows = [
         _public('a.x', 'org-b'),
         _public('a.x', 'org-0', state='disabled'),
-        # An anonymous caller holds no permissions.
-        _public('a.x', 'org-1', snapshot={'requiredPermissions': ['billing.read']}),
+        # A permission-gated row that loses precedence changes nothing.
+        _public('a.x', 'org-z', snapshot={'requiredPermissions': ['billing.read']}),
         _public('a.x', 'org-a'),
         _public('a.y', 'org-c', artifactState='submit'),
     ]
@@ -156,6 +156,19 @@ async def test_public_winners_picks_each_apps_serving_precedence_winner():
     # Without a review ladder an unapproved public binding serves.
     _, winners = await public_winners(_Account(rows, review_ladder=False))
     assert {app: row['orgId'] for app, row in winners.items()} == {'a.x': 'org-a', 'a.y': 'org-c'}
+
+
+async def test_a_permission_gated_winner_hides_its_app_with_no_fallback():
+    # The catalog's rule: each app's winner is picked among its serving rows,
+    # then dropped for a caller without its permissions; a losing row never
+    # takes its place. Anonymous holds none.
+    rows = [
+        _public('a.x', 'org-b'),
+        _public('a.x', 'org-a', snapshot={'requiredPermissions': ['billing.read']}),
+        _public('a.y', 'org-c'),
+    ]
+    _, winners = await public_winners(_Account(rows))
+    assert {app: row['orgId'] for app, row in winners.items()} == {'a.y': 'org-c'}
 
 
 class _Registry:

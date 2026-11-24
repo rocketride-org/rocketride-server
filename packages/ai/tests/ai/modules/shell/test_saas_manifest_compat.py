@@ -62,7 +62,11 @@ def _emitted():
 
 
 def _newer():
-    """``_emitted()`` from a later contract: blog-ready page fields, redirects, image, feeds, organization, notFound."""
+    """``_emitted()`` from a later contract: blog-ready page fields, redirects, image, feeds, organization, notFound.
+
+    Plus a page key and a site key no engine knows yet: a field of a contract
+    later than this engine's, which this engine must ignore.
+    """
     manifest = _emitted()
     manifest['publicPages'].append(
         {
@@ -73,6 +77,7 @@ def _newer():
             'published': '2026-11-09',
             'modified': '2026-11-10T09:00:00Z',
             'authors': [{'name': 'Ansh', 'url': 'https://rocketride.ai/team/ansh'}],
+            'readingMinutes': 4,
         }
     )
     manifest['site'].update(
@@ -81,6 +86,7 @@ def _newer():
         feeds=[{'path': '/blog/feed.xml', 'prefix': '/blog/', 'title': 'RocketRide blog'}],
         organization={'name': 'RocketRide', 'url': 'https://rocketride.ai', 'sameAs': ['https://x.example/rr']},
         notFound='pages/404.html',
+        locale={'default': 'en', 'alternates': ['de']},
     )
     return manifest
 
@@ -110,14 +116,20 @@ def test_a_newer_home_ui_manifest_still_validates():
     launch = {p.path: p for p in pages}['/blog/launch']
     assert (launch.image, launch.published, launch.modified) == ('/og/launch.png', '2026-11-09', '2026-11-10T09:00:00Z')
     assert launch.authors == (('Ansh', 'https://rocketride.ai/team/ansh'),)
+    # The unknown page key is kept for the layers that serve it; the unknown site key is dropped.
+    assert dict(launch.extra) == {'readingMinutes': 4}
 
 
 async def test_loader_prefers_the_emitted_file_over_metadata():
     acct = HostileAccount()
     acct.add(PLATFORM, 'rocketride.home', {'name': 'Home', **_emitted()}, emit=True)
+    # metadata.manifest holds a different valid claim of its own: the emitted file still wins.
+    metadata = acct.artifacts[(PLATFORM, 'rocketride.home', 1)]['metadata']['manifest']
+    metadata.update(publicPages=[{'path': '/', 'title': 'From metadata'}], site={'title': 'From metadata'})
     [pub] = await load_published(acct)
     assert set(pub.manifest) == {'publicPages', 'site'} and len(pub.manifest['publicPages']) == 26
-    assert 'publicPages' not in acct.artifacts[(PLATFORM, 'rocketride.home', 1)]['metadata']['manifest']
+    assert pub.manifest['publicPages'] == _emitted()['publicPages']
+    assert pub.manifest['site']['title'] == 'RocketRide'
 
 
 async def test_loader_falls_back_to_metadata_manifest_without_the_file():

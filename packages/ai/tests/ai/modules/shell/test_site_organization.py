@@ -165,14 +165,22 @@ def test_without_an_organization_nothing_is_added(monkeypatch):
     assert post['publisher'] == {'@type': 'Organization', 'name': 'Acme Cloud', 'url': f'{APP_URL}/'}
 
 
-def test_only_the_root_owner_supplies_it():
-    root = Published('rocketride.home', HOME, published_at=1)
-    other = Published(
-        'rocketride.other',
-        {'publicPages': [{'path': '/other', 'title': 'O'}], 'site': {'organization': {**ORG, 'name': 'Evil'}}},
-        published_at=0,
-    )
-    assert build_aggregate([other, root]).site['organization']['name'] == 'Acme'
+def test_only_the_root_owner_supplies_it(monkeypatch):
+    # Both apps may claim root and both declare a valid '/' and organization:
+    # the earlier binding owns '/', so its site is the one that takes effect.
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home,rocketride.other')
+    other = {'publicPages': [{'path': '/', 'title': 'O'}], 'site': {'organization': {**ORG, 'name': 'Other'}}}
+    assert check_manifest('rocketride.other', other)[2] == []
+    home_first = [
+        Published('rocketride.other', other, published_at=1),
+        Published('rocketride.home', HOME, published_at=0),
+    ]
+    assert build_aggregate(home_first).site['organization']['name'] == 'Acme'
+    other_first = [
+        Published('rocketride.home', HOME, published_at=1),
+        Published('rocketride.other', other, published_at=0),
+    ]
+    assert build_aggregate(other_first).site['organization']['name'] == 'Other'
 
 
 def test_unknown_organization_keys_are_ignored():

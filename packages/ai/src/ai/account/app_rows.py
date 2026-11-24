@@ -160,9 +160,11 @@ async def public_winners(acct: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
     The public rung is listed under ``''`` (every org) on a SaaS server and
     ``'local'`` otherwise; both store editions return only public rows for
     the public audience. A binding competes only when it serves
-    (``serving_block_of``) and requires no permissions; among those, the
-    precedence winner (``precedence_sorted``) is each app's. The public page
-    map and the ``plans:``/``app:`` page data sources both read the rung
+    (``serving_block_of``); among those, the precedence winner
+    (``precedence_sorted``) is each app's. A winner that requires
+    permissions, which an anonymous caller never holds, hides its app: no
+    losing row takes its place, exactly as the catalog drops it. The public
+    page map and the ``plans:``/``app:`` page data sources both read the rung
     through here, so they can never disagree about which version serves.
 
     Args:
@@ -181,12 +183,13 @@ async def public_winners(acct: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
     review_ladder = getattr(acct, 'review_ladder', True)
     winners: Dict[str, Dict[str, Any]] = {}
     for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
-        # Rows that do not serve an anonymous caller never compete; the
-        # precedence winner among the rest lands last.
-        if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
+        # Rows that do not serve never compete; the precedence winner among
+        # the rest lands last.
+        if serving_block_of(row, review_ladder):
             continue
         winners[str(row.get('appId') or '')] = row
-    return org, winners
+    # Only then the permission gate: anonymous holds no permissions.
+    return org, {app_id: row for app_id, row in winners.items() if holds_required_permissions(row, set())}
 
 
 def resolve_account(acct: Any) -> Any:

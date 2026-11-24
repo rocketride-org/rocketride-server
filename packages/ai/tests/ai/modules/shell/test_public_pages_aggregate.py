@@ -128,6 +128,14 @@ async def test_a_blocked_row_that_wins_precedence_does_not_hide_a_serving_one(bl
     assert published['rocketride.home'].dist_dir.startswith('orgs/00000000-platform/')
 
 
+async def test_a_permission_gated_row_that_wins_precedence_hides_the_app():
+    # A gated row serves, so it competes: when it wins, the store hides the app
+    # from anonymous visitors, and the page map never falls back to a losing row.
+    acct = hostile_account()
+    acct.add('00000000-aaaa', 'rocketride.home', HOME_MANIFEST, required=['sys.admin'])
+    assert await load_published(acct) == []
+
+
 # ---------------------------------------------------------------------------
 # Legacy fallback
 # ---------------------------------------------------------------------------
@@ -491,6 +499,36 @@ async def test_the_gate_loader_is_strict_for_root_claimants_and_names_the_app(mo
         await load_published(acct, strict=True)
     # The publishing app itself is left out unread, so it can always replace its own version.
     assert await load_published(acct, strict=True, exclude='rocketride.home') == []
+
+
+async def test_a_platform_app_that_may_not_claim_root_is_never_read(monkeypatch, warnings):
+    # rocketride.tool holds no claim, so its storage is never touched: a raw
+    # provider error there (not a StorageError) neither fails the gate nor the rebuild.
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    acct = hostile_account()
+    acct.add('00000000-platform', 'rocketride.tool', {'publicPages': [{'path': '/tool', 'title': 'T'}]}, emit=True)
+    reads = []
+    artifact = acct.deployments_artifact
+    read = pp.read_artifact_file
+
+    async def tool_artifact(org_id, app_id, version):
+        if app_id == 'rocketride.tool':
+            reads.append(app_id)
+            raise OSError('provider down')
+        return await artifact(org_id, app_id, version)
+
+    async def tool_file(path):
+        if '/rocketride.tool/' in path:
+            reads.append(path)
+            raise OSError('provider down')
+        return await read(path)
+
+    acct.deployments_artifact = tool_artifact
+    monkeypatch.setattr(pp, 'read_artifact_file', tool_file)
+    assert [p.app_id for p in await load_published(acct, strict=True)] == ['rocketride.home']
+    assert await pp.rebuild(acct)
+    assert _paths(pp.current()) == ['/', '/marketplace', '/pricing', '/store']
+    assert reads == [] and warnings == []
 
 
 async def test_public_false_platform_apps_contribute_nothing():

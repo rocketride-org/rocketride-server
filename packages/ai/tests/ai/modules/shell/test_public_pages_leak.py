@@ -79,7 +79,7 @@ def world(monkeypatch, tmp_path):
 
 
 def _locs(sitemap: str):
-    return [m[len(BASE) :] for m in re.findall(r'<loc>(.*?)</loc>', sitemap)]
+    return re.findall(r'<loc>(.*?)</loc>', sitemap)
 
 
 def test_nothing_hidden_reaches_any_crawler_surface(world):
@@ -89,8 +89,10 @@ def test_nothing_hidden_reaches_any_crawler_surface(world):
     robots = client.get('/robots.txt').text
     for text in (sitemap, llms, robots):
         assert_no_leak(text)
-    urls = _locs(sitemap)
-    assert urls == ['/', '/marketplace', '/pricing']
+    # The whole URL, origin included: a crawler visits the advertised host, not this test client.
+    locs = _locs(sitemap)
+    assert locs == [f'{BASE}/', f'{BASE}/marketplace', f'{BASE}/pricing']
+    urls = [loc[len(BASE) :] for loc in locs]
     # Every advertised URL serves, and leaks nothing, to every UA class.
     for url in urls + ['/store']:
         for ua in UAS:

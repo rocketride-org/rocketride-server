@@ -253,12 +253,12 @@ def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = N
 def _skip_unreadable(
     app_id: str, reason: str, strict: bool, unreadable: Optional[Set[str]], cause: Optional[Exception] = None
 ) -> None:
-    """Leave one app the loader cannot read out of this build; under ``strict``, refuse instead for a root claimant.
+    """Leave one root claimant the loader cannot read out of this build; under ``strict``, refuse instead.
 
     One unreadable app must not freeze the map (a later unpublish elsewhere
     would never apply). The gate is strict: an unverifiable claim refuses.
     """
-    if strict and may_claim_root(app_id):
+    if strict:
         raise RuntimeError(f'cannot read the published manifest of {app_id}: {reason}') from cause
     debug(f'[public_pages] {app_id}: skipped this build: {reason}')
     if unreadable is not None:
@@ -273,11 +273,12 @@ async def load_published(
     Public rows only (a team or user pin, the pre-release cookie path, never
     reaches here), through the SAME serving gate the store walk uses (binding
     enabled, deployment approved on a review-ladder server, build ok),
-    anonymous permission reach (no requiredPermissions), platform namespace
-    only. One winner per app id, chosen among its serving rows (lowest
-    publisher org, as the store walk resolves ties) by
-    ``app_rows.public_winners``, which the ``plans:``/``app:`` data sources
-    read too.
+    anonymous permission reach (no requiredPermissions), root claimants only
+    (``may_claim_root``: any other app, a platform app outside
+    ``RR_PUBLIC_ROOT_APPS`` included, holds no claims, so it is never read).
+    One winner per app id, chosen among its serving rows (lowest publisher
+    org, as the store walk resolves ties) by ``app_rows.public_winners``,
+    which the ``plans:``/``app:`` data sources read too.
 
     ``public: false`` apps never contribute (``app_rows.public_artifact``,
     the data sources' visibility check too). One app whose row is malformed
@@ -287,8 +288,7 @@ async def load_published(
     id goes into ``unreadable`` when one is given: it is still published,
     unlike an app missing from the result for any other reason. With
     ``strict`` (the publish gate) an unreadable root claimant raises instead,
-    since its claims cannot be checked; a platform app that may not claim
-    root holds no claims, so it is skipped either way. ``exclude`` names an
+    since its claims cannot be checked. ``exclude`` names an
     app left out unread: at the gate, the publishing app, whose current
     version is being replaced (an unreadable current version must never lock
     it out of publishing a fix).
@@ -300,15 +300,15 @@ async def load_published(
         unreadable: When given, receives the ids of the apps skipped as unreadable.
 
     Returns:
-        The published platform manifests that declare pages or a site block.
+        The published root claimants' manifests that declare pages or a site block.
 
     Raises:
         Exception: a publish_list failure, or any error other than a
-            ``StorageError`` or ``ValueError`` while reading one app (for
-            example a database error from the saas backend's artifact(),
-            which does not wrap its driver's errors). It propagates:
-            ``PageMap.rebuild`` keeps the previous aggregate and the publish
-            gate refuses (fails closed).
+            ``StorageError`` or ``ValueError`` while reading one root
+            claimant (for example a database error from the saas backend's
+            artifact(), which does not wrap its driver's errors). It
+            propagates: ``PageMap.rebuild`` keeps the previous aggregate and
+            the publish gate refuses (fails closed).
         RuntimeError: with ``strict``, a root claimant that cannot be read
             (the message names it).
     """
@@ -318,7 +318,9 @@ async def load_published(
     org, winners = await public_winners(acct)
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
-        if app_id == exclude or not is_privileged(app_id):
+        # Every page path needs the may-claim-root privilege (contract._page_path_error)
+        # and site needs the '/' page: no other app can hold a claim, so none is read.
+        if app_id == exclude or not may_claim_root(app_id):
             continue
         try:
             # A malformed row is a ValueError here, so it is skipped as unreadable.
@@ -453,7 +455,9 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     live route table, data entries, redirects, cross-app collisions (of page
     paths and redirect sources) against every OTHER published platform
     manifest (first claim wins; ownership is derived from published
-    manifests, so unpublishing releases it, with no table) and of feed
+    manifests, so unpublishing releases it, with no table), of page paths
+    and their slash twins against the feeds and the kept redirects of the
+    app owning ``/`` (a page there would silently drop them), and of feed
     paths against their pages, and snapshot files (each page's and
     ``site.notFound``) missing from the built version or over
     ``MAX_SNAPSHOT_BYTES`` (sized by a stat, never read).
@@ -506,13 +510,26 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     exact, sites = _claims(others, page_map.live_conflict)
     root = exact.get('/')
     root_feeds = {}
+    root_redirects = set()
     if root is not None:
         root_feeds = sites.get(root.app_id, {}).get('feeds', {})
+        # The redirects the aggregate keeps: one whose source (or slash twin) is a page is dropped there.
+        for source in sites.get(root.app_id, {}).get('redirects', {}):
+            if not any(c in exact for c in with_slash_twin(source)):
+                root_redirects.add(source)
     for page in pages:
         for candidate in with_slash_twin(page.path):
             if candidate in root_feeds:
                 errors.append(
                     f'publicPages path {page.path!r} is a feed of the published app {root.app_id}; choose another path'
+                )
+                break
+        for candidate in with_slash_twin(page.path):
+            if candidate in root_redirects:
+                which = slash_twin_label(page.path, candidate)
+                errors.append(
+                    f'publicPages path {page.path!r}: {which}is a redirect of the published app {root.app_id}; '
+                    'a URL is a page or a redirect, not both: choose another path'
                 )
                 break
         owner = exact.get(page.path)

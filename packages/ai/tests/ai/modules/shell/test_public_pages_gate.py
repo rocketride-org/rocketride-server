@@ -125,6 +125,49 @@ async def test_a_page_at_a_feed_path_the_root_owner_declares_is_refused():
     assert "publicPages path '/blog/feed.xml' is a feed of the published app rocketride.home" in errors[0]
 
 
+async def test_a_page_at_a_redirect_the_root_owner_declares_is_refused():
+    # home owns '/' and redirects /plans and /old/: a page at either, or at a
+    # slash twin of either, would silently drop that redirect at the next build.
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['site']['redirects'].append({'from': '/old/', 'to': '/pricing'})
+    manifest = {
+        'publicPages': [
+            {'path': '/plans', 'title': 'P'},
+            {'path': '/old', 'title': 'O'},
+            {'path': '/fine', 'title': 'F'},
+        ]
+    }
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account(home))
+    assert errors == [
+        "publicPages path '/plans': is a redirect of the published app rocketride.home; "
+        'a URL is a page or a redirect, not both: choose another path',
+        "publicPages path '/old': its slash twin '/old/' is a redirect of the published app rocketride.home; "
+        'a URL is a page or a redirect, not both: choose another path',
+    ]
+
+
+async def test_only_the_root_owners_kept_redirects_hold_their_paths(monkeypatch):
+    # rocketride.third declares '/' and redirects too, but home's earlier claim
+    # owns '/', so third's redirects never take effect: their paths stay free.
+    # home's own redirect from /taken loses to third's page there, so /taken is
+    # third's page (one refusal), not a redirect too.
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home,rocketride.other,rocketride.third')
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['site']['redirects'].append({'from': '/taken', 'to': '/pricing'})
+    acct = hostile_account(home)
+    third = {
+        'publicPages': [{'path': '/', 'title': 'T'}, {'path': '/taken', 'title': 'T'}],
+        'site': {'redirects': [{'from': '/gone', 'to': '/taken'}]},
+    }
+    acct.add('00000000-platform', 'rocketride.third', third, published_at=1_700_000_200.0)
+    manifest = {'publicPages': [{'path': '/gone', 'title': 'G'}, {'path': '/taken', 'title': 'T'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, acct)
+    assert errors == [
+        "publicPages path '/taken' is already claimed by the published app rocketride.third "
+        '(first claim wins; the claim is released when that app unpublishes); choose another path'
+    ]
+
+
 async def test_a_relative_image_must_exist_in_the_build_output():
     manifest = {
         'publicPages': [{'path': '/', 'title': 'H', 'image': 'og/home.png'}],
@@ -307,6 +350,21 @@ async def test_an_unreadable_non_root_platform_app_never_blocks_a_publish():
     acct = hostile_account()
     acct.add('00000000-platform', 'rocketride.tool', {'name': 'Tool'})
     del acct.artifacts[('00000000-platform', 'rocketride.tool', 1)]
+    assert await gate_errors('rocketride.home', HOME_MANIFEST, DIST, acct) == []
+
+
+async def test_a_non_root_platform_apps_provider_error_never_blocks_a_publish():
+    # Its storage is never read: an error the store does not wrap as a StorageError cannot refuse home's publish.
+    acct = hostile_account()
+    acct.add('00000000-platform', 'rocketride.tool', {'name': 'Tool'})
+    artifact = acct.deployments_artifact
+
+    async def provider_down(org_id, app_id, version):
+        if app_id == 'rocketride.tool':
+            raise OSError('provider down')
+        return await artifact(org_id, app_id, version)
+
+    acct.deployments_artifact = provider_down
     assert await gate_errors('rocketride.home', HOME_MANIFEST, DIST, acct) == []
 
 
