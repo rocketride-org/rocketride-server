@@ -225,11 +225,20 @@ async def _log_traces(client, tasks, args: Dict[str, Any]) -> dict:
     return payload
 
 
-# The next step when objects still in flight leave no room for finished traces.
-_AFTER_RUN = (
-    f'When the run ends, call log_traces again to see the newest finished traces, up to {LOG_TRACES_MAX_N}. To read '
-    "the run's events now, call log_read with the projectId, source and any teamId from this reply's context."
-)
+def _after_run(open_traces: list) -> str:
+    """The next step when objects still in flight leave no room for finished traces."""
+    text = f'When the run ends, call log_traces again to see the newest finished traces, up to {LOG_TRACES_MAX_N}.'
+    # Without fromSeq, log_read starts at the oldest retained event, which can belong to an older run.
+    starts = []
+    for trace in open_traces:
+        if isinstance(trace, dict) and isinstance(trace.get('beginSeq'), int) and trace['beginSeq'] > 0:
+            starts.append(trace['beginSeq'])
+    if starts:
+        text += (
+            " To read the run's events now, starting where the oldest object still in flight began, call log_read "
+            f"with the projectId, source and any teamId from this reply's context, and fromSeq set to {min(starts)}."
+        )
+    return text
 
 
 def _traces_note(payload: dict, notes: Dict[str, Any], kept: int, traces: list) -> None:
@@ -249,7 +258,7 @@ def _traces_note(payload: dict, notes: Dict[str, Any], kept: int, traces: list) 
         none_fit = f'None of the {len(traces):,} finished traces fit in one reply'
         if in_flight:
             none_fit += f' next to the {in_flight:,} objects still in flight'
-        notes['hint'] = f'{none_fit}. {_AFTER_RUN}'
+        notes['hint'] = f'{none_fit}. {_after_run(payload.get("open") or [])}'
 
 
 def _open_note(payload: dict, notes: Dict[str, Any], kept: int, open_traces: list) -> None:
@@ -262,7 +271,7 @@ def _open_note(payload: dict, notes: Dict[str, Any], kept: int, open_traces: lis
             f'None of the {finished:,} finished traces and only {kept:,} of the {len(open_traces):,} objects still in '
             'flight fit in one reply.'
         )
-    notes['hint'] = f'{cut} {_AFTER_RUN}'
+    notes['hint'] = f'{cut} {_after_run(open_traces)}'
 
 
 def _trace_note(payload: dict, notes: Dict[str, Any], kept: int, events: list) -> None:
