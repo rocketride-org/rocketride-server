@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 564d87b496ec5c3c36e76ab28f51935071348d0f
+// Source commit: 8072094ba7b1dbdc2b61f601bb5f87689ffc7560
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -4376,9 +4376,10 @@ declare class AccountApi {
      *
      * A name with a value is set, a name with `null` is deleted, and a name
      * whose value is the mask from `getEnv` keeps its stored value. Names not
-     * in `env` are left as they are. A name outside `ROCKETRIDE_*`, or with
-     * whitespace, `=`, `#`, a quote or NUL in it, rejects the whole write, and
-     * so does a server too old to merge.
+     * in `env` are left as they are. A name outside `ROCKETRIDE_*` rejects the
+     * whole write, and so does a name given a new value with whitespace, `=`,
+     * `#`, a quote or NUL in it; a stored name can always be kept or deleted.
+     * A server too old to merge rejects the write too.
      *
      * @param scope   - One of 'org', 'team', 'user'.
      * @param env     - Names to set, delete (`null`) or keep (mask).
