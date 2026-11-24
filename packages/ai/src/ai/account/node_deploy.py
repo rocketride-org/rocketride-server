@@ -55,6 +55,7 @@ from ai.common.node_packages import (
 from ai.constants import CONST_NODES_CONTRACT
 
 from .app_deploy import _ZIP_MAX_ZIPPED, _actor_of, _developer_id_of, _org_of, _resolve_target, _team_ids_of, _zip_guard
+from .app_rows import precedence_sorted, serving_block_of
 from .deployment_backend import NotOwner, artifact_content_dir, owner_refusal
 
 PACKAGE_FILE = 'package.rrnode'
@@ -112,8 +113,6 @@ _ICON_STYLE = {
     'font-weight',
     'text-anchor',
 }
-
-_RUNG_RANK = {'team': 1, 'user': 2}
 
 # The catalogue's answer per caller, kept a moment: each one reads the whole rail
 _CATALOGUE_SECONDS = 10.0
@@ -454,13 +453,10 @@ async def entitled_nodes(org_id: str, user_id: str, team_ids: List[str]) -> Dict
         rows = await account.publish_list(org_id, 'node', audiences(user_id, team_ids))
     except Exception as e:
         raise NodeRegistryUnavailable(f'The node registry did not answer: {e}') from None
+    # The app rail's rule for which binding serves: the winner of each id comes last
     best: Dict[str, Dict[str, Any]] = {}
-    for row in rows:
-        if row.get('state') != 'enabled' or row.get('artifactState') == 'failed':
-            continue
-        current = best.get(row['appId'])
-        rank = _RUNG_RANK.get(row['audience']['type'], 0)
-        if current is None or rank > _RUNG_RANK.get(current['audience']['type'], 0):
+    for row in precedence_sorted(rows):
+        if not serving_block_of(row, account.review_ladder):
             best[row['appId']] = row
     return best
 
@@ -528,7 +524,11 @@ async def visible_nodes(conn: Any) -> Dict[str, Dict[str, Any]]:
     except NodeRegistryUnavailable as e:
         warning(f'NODE_REGISTRY_UNAVAILABLE: {e}; the catalogue shows only the release nodes')
         return {}
-    _catalogue[key] = (time.monotonic() + _CATALOGUE_SECONDS, rows)
+    now = time.monotonic()
+    # Keep only answers that have not run out, so the cache holds the callers of the last moment
+    for stale in [k for k, (expires, _) in _catalogue.items() if expires <= now]:
+        del _catalogue[stale]
+    _catalogue[key] = (now + _CATALOGUE_SECONDS, rows)
     return rows
 
 

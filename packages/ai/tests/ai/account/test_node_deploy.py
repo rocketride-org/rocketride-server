@@ -480,6 +480,48 @@ async def test_a_registry_that_does_not_answer_refuses_a_published_node_but_not_
 
 
 @pytest.mark.asyncio
+async def test_a_binding_serves_by_the_app_rails_rule(rail, monkeypatch):
+    """The caller's own rung wins over a team's, and a version whose build is not ok does not serve."""
+
+    def row(rung, version, build='ok'):
+        audience = {'type': rung, 'id': 'u1' if rung == 'user' else 't1'}
+        return {
+            'appId': 'acme.echo',
+            'orgId': 'org1',
+            'version': version,
+            'state': 'enabled',
+            'audience': audience,
+            'artifactState': 'private',
+            'artifactBuild': build,
+        }
+
+    async def listed(rows):
+        async def publish_list(*args):
+            return rows
+
+        monkeypatch.setattr(account, 'publish_list', publish_list)
+        return await node_deploy.entitled_nodes('org1', 'u1', ['t1'])
+
+    assert (await listed([row('user', 1), row('team', 2)]))['acme.echo']['version'] == 1
+    assert (await listed([row('team', 2), row('user', 1)]))['acme.echo']['version'] == 1
+    assert (await listed([row('user', 1, build='failed'), row('team', 2)]))['acme.echo']['version'] == 2
+    assert await listed([row('team', 2, build='building')]) == {}
+
+
+@pytest.mark.asyncio
+async def test_the_catalogue_cache_drops_the_answers_that_ran_out(rail, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(node_deploy.time, 'monotonic', lambda: clock[0])
+    node_deploy._catalogue.clear()
+
+    await node_deploy.visible_nodes(_Conn())
+    clock[0] += node_deploy._CATALOGUE_SECONDS + 1
+    await node_deploy.visible_nodes(_Conn(user_id='u2'))
+
+    assert [key[1] for key in node_deploy._catalogue] == ['u2']
+
+
+@pytest.mark.asyncio
 async def test_switching_the_rail_off_leaves_only_the_release_nodes(rail, monkeypatch):
     await _published('@me')
     monkeypatch.setenv('RR_NODE_RAIL_ENABLED', '0')
