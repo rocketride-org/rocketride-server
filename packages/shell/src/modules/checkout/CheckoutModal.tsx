@@ -660,15 +660,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 					// ends up with plans or a retry control. Needs no replay support.
 					if (!retryCheckout) setPlanFetchRetry((count) => count + 1);
 				}
-			} else if (isServerRejection(err)) {
-				// The server refused this attempt, so nothing is pending: show its
-				// message and let the next Continue send a fresh attempt ID (reusing
-				// the ID would replay the same refusal from Stripe's idempotency cache).
-				if (attempt) {
-					checkoutAttempts.current.delete(JSON.stringify([attempt.priceId, attempt.promotionCode]));
-				}
+			} else if (!canReplay && isServerRejection(err)) {
+				// The server answered with an error (already subscribed, checkout in
+				// progress, a Stripe failure): show it and keep the picker. The
+				// attempt stays cached, so Continue with the same plan and code
+				// resends the SAME attempt ID, which the server dedupes in case the
+				// first request acted before failing. A lost response (no answer at
+				// all) still ends below as unconfirmed.
 				if (mounted.current) {
-					setRetryCheckout(null);
 					setError(err.message || 'Failed to start checkout. Please try again.');
 					// A catalog read that raced this checkout was discarded.
 					if (plans.length === 0) setPlanFetchRetry((count) => count + 1);
@@ -741,9 +740,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 						unresolvedGrant.current = codeKey;
 						setPromoError('The server did not confirm redemption. Please try again.');
 					} else {
-						// An explicit refusal from a server without replay: nothing is pending.
-						promoAttempts.current.delete(codeKey);
-						unresolvedGrant.current = null;
+						// An explicit refusal from a server without replay.
 						setPromoError('This code could not be redeemed.');
 					}
 					return;
@@ -774,10 +771,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				if (mounted.current) {
 					setPromoError(unresolvedGrant.current ? 'Redemption recovery is unavailable. Check your credits before starting again.' : err.message);
 				}
-			} else if (redeeming && isServerRejection(err)) {
-				// The server refused the redemption: show why and allow a fresh attempt.
-				promoAttempts.current.delete(codeKey);
-				unresolvedGrant.current = null;
+			} else if (redeeming && !canReplay && isServerRejection(err)) {
+				// The server answered with an error: show it. The cached attempt makes
+				// a retry of this code resend the same attempt ID, and a repeat of a
+				// redemption that did land answers 'already_redeemed'.
 				if (mounted.current) setPromoError(err.message || 'Could not apply this code. Please try again.');
 			} else if (redeeming && !canReplay) {
 				finishCheckout('pending');

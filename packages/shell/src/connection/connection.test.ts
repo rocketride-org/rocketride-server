@@ -2035,10 +2035,12 @@ test('a mirrored org switch ends its workspace transition when the root reconnec
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	assert.equal(getAccountTransition(cm).disconnecting, true);
 
-	cm.publish('shell:account', { ...authenticatedResult, organization: { id: 'org-b' } });
+	// The VS Code host pushes status before the account (busHost.ts).
 	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });
+	cm.publish('shell:account', { ...authenticatedResult, organization: { id: 'org-b' } });
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	assert.deepEqual({ ...getAccountTransition(cm) }, { changingWorkspace: false, disconnecting: false });
+	assert.equal(cm.getAccountInfo()?.organization?.id, 'org-b');
 });
 
 test('a root disconnect moves the realm client with it', async () => {

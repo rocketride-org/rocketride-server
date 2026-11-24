@@ -243,7 +243,13 @@ export interface CheckoutModalBaseProps {
 	 */
 	onConfirmPending: (subscriptionId: string, priceId: string) => Promise<void>;
 
-	/** Whether the checkout still belongs to the host's current session and modal. */
+	/**
+	 * Whether the checkout still belongs to the host's current session and modal.
+	 * It gates new requests. Once a result is final (payment confirmed, or a
+	 * no-payment subscription or grant accepted), `onConfirmPending` and
+	 * `onSuccess` still run, so a dropped connection cannot strand the customer:
+	 * hosts check their own scope there.
+	 */
 	isCheckoutCurrent?: () => boolean;
 
 	/** The server confirmed it can safely resolve an already-used attempt ID. */
@@ -252,7 +258,10 @@ export interface CheckoutModalBaseProps {
 	/** Require explicit server status before accepting a no-payment response. */
 	requireCheckoutStatus?: boolean;
 
-	/** Called after a successful payment or a grant that subscribes the org to the app — host should close the modal. */
+	/**
+	 * Called after a successful payment or a grant that subscribes the org to the app — host should close the modal.
+	 * Runs even if `isCheckoutCurrent` now returns false; ignore it for a different account.
+	 */
 	onSuccess: () => void;
 
 	/** Called when the user dismisses the modal without completing checkout. */

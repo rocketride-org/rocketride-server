@@ -95,7 +95,7 @@ async function renderModal(t: { after: (fn: () => void) => void }, props: Partia
 	return { text, button, click, type };
 }
 
-test('a server refusal shows its message and the next Continue sends a fresh attempt', async (t) => {
+test('a server error shows its message and Continue retries with the same attempt', async (t) => {
 	const attempts: Array<string | undefined> = [];
 	const responses: Array<() => Promise<CheckoutResult>> = [
 		async () => { throw serverRejection("Another checkout for 'app-a' is already in progress for this organization"); },
@@ -118,7 +118,7 @@ test('a server refusal shows its message and the next Continue sends a fresh att
 	await ui.click('Continue');
 	assert.equal(attempts.length, 2);
 	assert.ok(attempts[0] && attempts[1]);
-	assert.notEqual(attempts[0], attempts[1], 'a refused attempt is not replayed');
+	assert.equal(attempts[0], attempts[1], 'the server dedupes the retry by its attempt ID');
 	assert.match(ui.text(), /Checkout complete/);
 	assert.equal(successes, 1);
 });
@@ -149,6 +149,30 @@ test('a lost response retries the same attempt when the server supports replay',
 	await ui.click('Retry checkout');
 	assert.equal(attempts.length, 2);
 	assert.equal(attempts[0], attempts[1]);
+	assert.match(ui.text(), /Checkout complete/);
+});
+
+test('a server error on a replay retry keeps the unresolved attempt', async (t) => {
+	const attempts: Array<string | undefined> = [];
+	const responses: Array<() => Promise<CheckoutResult>> = [
+		async () => { throw new Error('Request timed out after 30000ms'); },
+		async () => { throw serverRejection("Another checkout for 'app-a' is already in progress for this organization"); },
+		async () => ({ clientSecret: null, subscriptionId: 'sub_1', status: 'active' }),
+	];
+	const ui = await renderModal(t, {
+		supportsCheckoutReplay: true,
+		onCreateCheckout: (_priceId, _promotionCode, attemptId) => {
+			attempts.push(attemptId);
+			return responses.shift()!();
+		},
+	});
+	await ui.click('Continue');
+	await ui.click('Retry checkout');
+	assert.match(ui.text(), /already in progress/);
+	// The first attempt may still be completing: the retry control stays, with its ID.
+	await ui.click('Retry checkout');
+	assert.equal(new Set(attempts).size, 1);
+	assert.equal(attempts.length, 3);
 	assert.match(ui.text(), /Checkout complete/);
 });
 
@@ -197,7 +221,7 @@ test('an already-redeemed grant code is a success, not an unconfirmed result', a
 	assert.equal(successes, 1);
 });
 
-test('a refused redemption shows the server message and retries with a fresh attempt', async (t) => {
+test('a redemption error shows the server message and retries with the same attempt', async (t) => {
 	const attempts: Array<string | undefined> = [];
 	const responses: Array<() => Promise<PromoRedemption>> = [
 		async () => { throw serverRejection('This code has reached its redemption limit'); },
@@ -214,7 +238,7 @@ test('a refused redemption shows the server message and retries with a fresh att
 
 	await ui.click('Apply');
 	assert.equal(attempts.length, 2);
-	assert.notEqual(attempts[0], attempts[1]);
+	assert.equal(attempts[0], attempts[1]);
 	assert.match(ui.text(), /Code redeemed/);
 });
 
