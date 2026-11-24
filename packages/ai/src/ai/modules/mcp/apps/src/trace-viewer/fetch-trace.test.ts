@@ -40,6 +40,12 @@ describe('makeFetchTrace', () => {
 
 	it('surfaces retention errors with friendly copy', async () => {
 		const call = vi.fn().mockResolvedValue(textResult({ ok: false, error_type: 'TraceExpired', message: 'below horizon' }));
-		await expect(makeFetchTrace(call, CONTEXT)(7)).rejects.toThrow(/retention window/);
+		await expect(makeFetchTrace(call, CONTEXT)(7)).rejects.toThrow(/has expired/);
+	});
+
+	it('surfaces the friendly copy when the server marks the failure with isError too', async () => {
+		const failure = { ...(textResult({ ok: false, error_type: 'TraceExpired', message: 'trace 7 is below the retention horizon' }) as object), isError: true };
+		const call = vi.fn().mockResolvedValue(failure);
+		await expect(makeFetchTrace(call, CONTEXT)(7)).rejects.toThrow(/^This trace has expired\./);
 	});
 });

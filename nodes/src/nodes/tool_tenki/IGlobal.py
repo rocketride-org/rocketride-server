@@ -23,11 +23,12 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Tenki Sandbox tool node: config, and the one session every call of the pipeline shares, with its recovery."""
+"""Luxor Sandbox tool node: config, and the one session every call of the pipeline shares, with its recovery."""
 
 from __future__ import annotations
 
 import re
+import socket
 import threading
 import time
 import urllib.parse
@@ -37,13 +38,14 @@ from ai.common.config import Config
 from ai.common.utils import config_int
 from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 
-from tenki import (
+from luxor_ai import (
     Client,
     CommandTimeoutError,
     FileNotFoundError as TenkiFileNotFoundError,
     InvalidStateError,
     PermissionDeniedError,
     QuotaExceededError,
+    ResumeWaitTimeoutError,
     Sandbox,
     SandboxError,
     SessionNotFoundError,
@@ -52,12 +54,12 @@ from tenki import (
     WaitReadyFailedError,
 )
 
-from .sdk_shims import bound_file_calls, stop_keeping_output
+from .sdk_shims import bound_file_calls, reset_data_plane, stop_keeping_output
 
 # The deadline of every control-plane and file call; git clones share it, so it never drops below the exec timeout.
 _MIN_RPC_TIMEOUT_SECS = 60
 _READY_WAIT_SECS = 180  # the SDK's own readiness budget
-# Measured 2026-10-05 and 2026-10-09: after a pause Tenki refuses a resume for up to about 48 s ("paused source is still
+# Measured 2026-10-05 and 2026-10-09: after a pause Luxor refuses a resume for up to about 48 s ("paused source is still
 # being torn down", "snapshot not yet durable"), so a refused resume is asked again while the session still waits.
 _RESUME_RETRY_SECS = 120
 _RESUME_RETRY_PAUSE_SECS = 5
@@ -65,9 +67,12 @@ _WARM_UP_TIMEOUT_SECS = 10
 _WARM_UP_WAIT_SECS = 40
 # How long endGlobal waits for a call holding the session lock before it closes the session anyway.
 _END_LOCK_WAIT_SECS = 10
-# Given an empty endpoint the SDK reads TENKI_API_ENDPOINT / TENKI_API_URL, so the default is passed explicitly.
-_DEFAULT_BASE_URL = 'https://api.tenki.cloud'
-# USER_SHUTDOWN is not in Tenki's documented lifecycle, but it is in the protocol.
+# Given an empty endpoint the SDK reads LUXORAI_API_ENDPOINT, TENKI_API_ENDPOINT and the like, so the default is passed
+# explicitly.
+_DEFAULT_BASE_URL = 'https://api.luxor.ai'
+# Tenki's API host, which Luxor serves as api.luxor.ai until it stops answering on 2027-01-01.
+_TENKI_API_HOST = 'api.tenki.cloud'
+# USER_SHUTDOWN is not in Luxor's documented lifecycle, but it is in the protocol.
 _GONE_STATES = frozenset({'TERMINATING', 'TERMINATED', 'USER_SHUTDOWN'})
 _SHUTTING_DOWN = 'tool_tenki: the pipeline is shutting down, so no sandbox session is used'
 TOOL_GROUPS = frozenset({'execution', 'filesystem', 'git'})
@@ -97,7 +102,7 @@ _VM_LINK_DOWN = re.compile(r'failed to (?:connect to|read) vsock')
 
 
 def about_the_vm_link(error: Exception) -> bool:
-    """Whether a "no such file" error is about Tenki's socket to the VM rather than a path inside it."""
+    """Whether a "no such file" error is about Luxor's socket to the VM rather than a path inside it."""
     return isinstance(error, TenkiFileNotFoundError) and _VM_LINK_DOWN.search(str(error)) is not None
 
 
@@ -134,15 +139,26 @@ def _names(raw, field: str) -> list[str]:
     return names
 
 
-# Tenki's rule (measured 2026-10-09): RFC 1123 hostname labels, optionally after one leading "*.".
+# Luxor's rule (measured 2026-10-09): RFC 1123 hostname labels, optionally after one leading "*.".
 _DOMAIN = re.compile(r'^(\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$')
 _MAX_DOMAINS = 256
 _MAX_DOMAIN_CHARS = 253
 
 
+def _is_ip_address(host: str) -> bool:
+    """Whether host is an IPv4 address in any form inet_aton reads (0x7f000001, 127.1), or ends in an all-digit label."""
+    if host.rsplit('.', 1)[-1].isdigit():
+        return True
+    try:
+        socket.inet_aton(host)
+    except OSError:
+        return False
+    return True
+
+
 def _allowed_domains(raw) -> list[str]:
-    """The outbound allowlist, lowercase and without a trailing dot as Tenki stores it; any refused entry raises."""
-    domains, refused, positions = [], [], []
+    """The outbound allowlist, lowercase and without a trailing dot as Luxor stores it; any refused entry raises."""
+    domains, refused, positions, addresses, address_positions = [], [], [], [], []
     for position, name in enumerate(_names(raw, 'allow_domains'), 1):
         domain = name.lower().rstrip('.')
         # ASCII is checked before lowercasing could make it so (the Kelvin sign lowercases to "k").
@@ -150,19 +166,40 @@ def _allowed_domains(raw) -> list[str]:
             # An entry with an "@" may be a URL that carries credentials: say where it is, not what it says.
             refused.append(f'entry {position} (not shown: it may hold a credential)' if '@' in name else name)
             positions.append(str(position))
+        elif _is_ip_address(domain.removeprefix('*.')):  # the wildcard label hides an address from inet_aton
+            addresses.append(domain)  # passes the label rule and the API takes it, but never matches any traffic
+            address_positions.append(str(position))
         elif domain not in domains:
             domains.append(domain)
+    # One error names every kind of refusal, every rule before any entry: the engine cuts a startup error at its
+    # first asterisk, and entries of both kinds may hold one.
+    rules, lists = [], []
     if refused:
-        # The rule before any entry: the engine cuts a startup error at its first asterisk.
         one = len(positions) == 1
-        raise ValueError(
-            f'tenki.allow_domains has {"an entry" if one else "entries"} Tenki refuses '
+        rules.append(
+            f'tenki.allow_domains has {"an entry" if one else "entries"} Luxor refuses '
             f'({"entry" if one else "entries"} {", ".join(positions)}). Use bare hostnames such as pypi.org, '
-            'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port. '
-            f'Refused: {", ".join(refused)}'
+            'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port.'
         )
+        lists.append(f'Refused: {", ".join(refused)}')
+    if addresses:
+        if len(addresses) > 1:
+            noun, entry, label = 'IP addresses', 'entries', 'IP addresses'
+        else:
+            noun, entry, label = 'an IP address', 'entry', 'IP address'
+        if refused:
+            opening = 'It also lists'
+        else:
+            opening, label = 'tenki.allow_domains lists', 'Refused'
+        rules.append(
+            f"{opening} {noun} ({entry} {', '.join(address_positions)}), which the sandbox's egress filter never "
+            'matches: it matches hostnames only, so list the hostname instead.'
+        )
+        lists.append(f'{label}: {", ".join(addresses)}')
+    if rules:
+        raise ValueError(f'{" ".join(rules)} {"; ".join(lists)}')
     if len(domains) > _MAX_DOMAINS:
-        raise ValueError(f'tenki.allow_domains lists {len(domains)} hosts, and Tenki accepts up to {_MAX_DOMAINS}')
+        raise ValueError(f'tenki.allow_domains lists {len(domains)} hosts, and Luxor accepts up to {_MAX_DOMAINS}')
     return domains
 
 
@@ -179,12 +216,13 @@ def _secret_settings(cfg) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return policies, domains
 
 
-# The name Tenki reads after "secrets://" (tenki 1.4.1); any other name would never be substituted.
+# The name Luxor reads after "secrets://" (luxor-ai 1.5.2); any other name would never be substituted.
 _SECRET_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_-]{0,127}')
 # How GitHub, GitLab and Slack tokens begin: no secret's name does.
 _TOKEN_PREFIXES = ('ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_', 'github_pat_', 'glpat-', 'xoxb-', 'xoxp-')
-# How Tenki, Anthropic, OpenAI and AWS keys begin, but names can too (tk_github_basic), so length and a digit decide.
-_SHARED_PREFIXES = ('tk_', 'sk-', 'AKIA')
+# How Luxor, Tenki, Anthropic, OpenAI and AWS keys begin, but names can too (lx_github_basic), so length and a digit
+# decide.
+_SHARED_PREFIXES = ('lx_', 'tk_', 'sk-', 'AKIA')
 
 
 def _looks_like_a_credential(value: str) -> bool:
@@ -230,23 +268,28 @@ def _git_auth_url(raw: str) -> str:
             'https://github.com/acme/, with no credentials, port, query or fragment (the value is not shown: '
             'it may hold a credential)'
         )
+    if _is_ip_address(host):
+        raise ValueError(
+            f"tenki.git_auth_url is on {host}, an IP address, which tenki.allow_domains cannot list: the sandbox's "
+            "egress filter matches hostnames only, so use the git server's hostname"
+        )
     return f'https://{host}{path if path.endswith("/") else path + "/"}'
 
 
 def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...]) -> tuple[str, str]:
-    """The URL prefix git_clone authenticates under and the Tenki secret it names, or ('', '') when off."""
+    """The URL prefix git_clone authenticates under and the Luxor secret it names, or ('', '') when off."""
     secret = cfg.get('git_auth_secret')
     if secret is None or (isinstance(secret, str) and not secret.strip()):
         return '', ''
     if isinstance(secret, str) and _looks_like_a_credential(secret.strip()):
         raise ValueError(
             'tenki.git_auth_secret looks like a credential value (it begins the way issued tokens do), not the name '
-            'of a Tenki secret. The node never holds a secret value: create the secret in Tenki '
+            'of a Luxor secret. The node never holds a secret value: create the secret in Luxor '
             'and put its name here. If this is the name of a secret, rename the secret.'
         )
     if not isinstance(secret, str) or not _SECRET_NAME.fullmatch(secret.strip()):
         raise ValueError(
-            'tenki.git_auth_secret must be the name of a Tenki secret, as a placeholder names it: a letter or '
+            'tenki.git_auth_secret must be the name of a Luxor secret, as a placeholder names it: a letter or '
             'underscore, then up to 127 letters, digits, underscores and hyphens'
         )
     raw = cfg.get('git_auth_url')
@@ -255,12 +298,12 @@ def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...])
     prefix = _git_auth_url((raw or '').strip() or _DEFAULT_GIT_AUTH_URL)
     if not policies:
         raise ValueError(
-            'tenki.git_auth_secret is set but tenki.secret_policies is empty. Tenki adds the secret only to '
+            'tenki.git_auth_secret is set but tenki.secret_policies is empty. Luxor adds the secret only to '
             'requests an attached policy allows: name the policy that covers the repositories under '
             f'{prefix} in tenki.secret_policies.'
         )
     host = urllib.parse.urlsplit(prefix).hostname
-    # Tenki documents that a wildcard entry matches exactly one label: *.example.com covers api.example.com only.
+    # Luxor documents that a wildcard entry matches exactly one label: *.example.com covers api.example.com only.
     if not any(
         domain == host or (domain.startswith('*.') and host.partition('.')[2] == domain[2:]) for domain in domains
     ):
@@ -271,13 +314,56 @@ def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...])
     return prefix, secret.strip()
 
 
+def _host_of(base_url: str) -> str:
+    """base_url's host in lower case, or '' when it is not a URL (building the SDK's client reports that)."""
+    url = base_url
+    if '://' not in url:
+        url = f'https://{url}'
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:  # a stray [ or ], or a bracketed host that is not an IP address
+        return ''
+    return parts.hostname or ''  # hostname is already lower case
+
+
+def _effective_base_url(base_url: str) -> str:
+    """The URL the node connects to: Tenki's API host is read as Luxor's, the same service, which outlives it."""
+    if _host_of(base_url) == _TENKI_API_HOST:
+        return _DEFAULT_BASE_URL
+    return base_url
+
+
+def _retired_names(apikey: str, base_url: str) -> list[str]:
+    """A warning for each Tenki-era name configured: Luxor retires tk_ keys and tenki.cloud hosts on 2027-01-01."""
+    # TODO(#3411): once 2027-01-01 has passed, drop the tk_ handling and the dated warnings. Keep
+    # _effective_base_url's swap: pipelines saved with api.tenki.cloud need it most once that host stops answering.
+    retired = []
+    if apikey.startswith('tk_'):
+        retired.append(
+            'apikey is a Tenki key (tk_), which stops working on 2027-01-01: create a Luxor key (lx_) in the Luxor '
+            'dashboard and use it instead'
+        )
+    host = _host_of(base_url)
+    effective = _effective_base_url(base_url)
+    if effective != base_url:
+        retired.append(
+            f'tenki.base_url points at {host}, which stops working on 2027-01-01, so the node connects to '
+            f'{effective}, the same service, instead: clear tenki.base_url to drop this warning'
+        )
+    elif host == 'tenki.cloud' or host.endswith('.tenki.cloud'):
+        retired.append(
+            f'tenki.base_url points at {host}, which stops working on 2027-01-01: clear it to use {_DEFAULT_BASE_URL}'
+        )
+    return retired
+
+
 def _outlives_the_session(exec_timeout_secs: int, max_duration_minutes: int) -> str | None:
     """The warning for a command allowed to run as long as the session lives, or None."""
     if exec_timeout_secs < max_duration_minutes * 60:
         return None
     return (
         f'tool_tenki: exec_timeout_secs ({exec_timeout_secs}s) is not shorter than max_duration_minutes '
-        f'({max_duration_minutes} min). Tenki pauses the session at max_duration and the pause cuts a running '
+        f'({max_duration_minutes} min). Luxor pauses the session at max_duration and the pause cuts a running '
         'command off, so a command that needs the full execution timeout can never finish. Raise '
         'max_duration_minutes or lower exec_timeout_secs.'
     )
@@ -315,7 +401,7 @@ def _tool_groups(raw) -> tuple[frozenset, list[str]]:
 
 
 def _size(cfg, key: str, lo: int, hi: int) -> int:
-    """A sizing field clamped to the SDK's range, or 0 when unset, which leaves it to Tenki or the image."""
+    """A sizing field clamped to the SDK's range, or 0 when unset, which leaves it to Luxor or the image."""
     value = config_int(cfg, key, 0)
     return min(max(value, lo), hi) if value else 0
 
@@ -382,7 +468,7 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         apikey = str(cfg.get('apikey') or '').strip()
-        # Given an empty key the SDK falls back to TENKI_AUTH_TOKEN / TENKI_API_KEY, letting the engine host's
+        # Given an empty key the SDK falls back to LUXORAI_API_KEY, TENKI_API_KEY and the like, letting the engine host's
         # environment decide which workspace is billed.
         if not apikey:
             raise Exception('tool_tenki: apikey is required')
@@ -398,10 +484,10 @@ class IGlobal(IGlobalBase):
         self.git_auth_url, self.git_auth_secret = _git_auth_settings(cfg, self.secret_policies, self.allow_domains)
         self.cpu_cores = _size(cfg, 'cpu_cores', 1, 16)
         memory_mb = _size(cfg, 'memory_mb', 512, 65536)
-        self.memory_mb = memory_mb - memory_mb % 2  # Tenki requires an even size; both bounds are even
+        self.memory_mb = memory_mb - memory_mb % 2  # Luxor requires an even size; both bounds are even
         self.disk_size_gb = _size(cfg, 'disk_size_gb', 5, 100)
         self.exec_timeout_secs, self.max_duration_minutes = _exec_limits(cfg)
-        # Tenki refuses 0 and accepted a minute to a year (measured 2026-10-09); its own default is seven days.
+        # Luxor refuses 0 and accepted a minute to a year (measured 2026-10-09); its own default is seven days.
         self.pause_retention_hours = config_int(cfg, 'pause_retention_hours', 24, min_value=1, max_value=8760)
         self.max_output_chars = config_int(cfg, 'max_output_chars', 50000, min_value=1000, max_value=1000000)
         outlives = _outlives_the_session(self.exec_timeout_secs, self.max_duration_minutes)
@@ -409,6 +495,10 @@ class IGlobal(IGlobalBase):
             warning(outlives)
         self.rpc_timeout_secs = max(self.exec_timeout_secs, _MIN_RPC_TIMEOUT_SECS)
         base_url = str(cfg.get('base_url') or '').strip() or _DEFAULT_BASE_URL
+        for retired in _retired_names(apikey, base_url):
+            warning(f'tool_tenki: {retired}')
+        # Swapped, not only warned about: a deployed pipeline shows nobody the warning, and would break on 2027-01-01.
+        base_url = _effective_base_url(base_url)
         self.client = Client(auth_token=apikey, base_url=base_url, timeout=self.rpc_timeout_secs)
 
     def validateConfig(self) -> None:
@@ -417,8 +507,10 @@ class IGlobal(IGlobalBase):
             apikey = str(cfg.get('apikey') or '').strip()
             if not apikey:
                 warning('apikey is required')
-            elif not apikey.startswith('tk_'):
-                warning('apikey must be a Tenki workspace API key, which starts with tk_')
+            elif not apikey.startswith(('lx_', 'tk_')):
+                warning('apikey must be a Luxor workspace API key, which starts with lx_')
+            for retired in _retired_names(apikey, str(cfg.get('base_url') or '').strip()):
+                warning(retired)
             outlives = _outlives_the_session(*_exec_limits(cfg))
             if outlives:
                 warning(outlives)
@@ -446,7 +538,7 @@ class IGlobal(IGlobalBase):
         try:
             return self._call(fn, events, replace, once)
         except SandboxError:
-            raise  # including the SDK errors that are also a plain RuntimeError or TimeoutError (tenki 1.4.1)
+            raise  # including the SDK errors that are also a plain RuntimeError or TimeoutError (luxor-ai 1.5.2)
         except (RuntimeError, TimeoutError) as e:
             # A few SDK failures are plain exceptions (Sandbox.start when the data plane is unreachable).
             warning(f'tool_tenki: sandbox call failed with {type(e).__name__}: {e}')
@@ -470,8 +562,8 @@ class IGlobal(IGlobalBase):
             except (SandboxError, RuntimeError, TimeoutError) as failure:
                 if once is not None and once.done:
                     raise once.error(failure) from failure
-                if isinstance(failure, CommandTimeoutError):
-                    # The look at the session ran past its deadline: not this call's own timeout.
+                if isinstance(failure, (CommandTimeoutError, ResumeWaitTimeoutError)):
+                    # The look at the session, or its resume, ran past its deadline: not this call's own timeout.
                     raise SessionUnavailableError(
                         f'the call failed, and recovering the sandbox ran past the deadline: {failure}'
                     ) from failure
@@ -562,7 +654,7 @@ class IGlobal(IGlobalBase):
             return None
 
     def _resume(self, session: Sandbox, budget: float) -> str | None:
-        """Ask Tenki to resume ``session`` until it takes; return 'RUNNING', or the gone state (None: unknown)."""
+        """Ask Luxor to resume ``session`` until it takes; return 'RUNNING', or the gone state (None: unknown)."""
         self._warm_id = None  # a resume replaces the SDK's data-plane connection
         deadline = time.monotonic() + budget
         while True:
@@ -573,6 +665,8 @@ class IGlobal(IGlobalBase):
                 return 'RUNNING'
             except SandboxError as e:
                 refusal = e
+                if isinstance(e, ResumeWaitTimeoutError):
+                    reset_data_plane(session)  # the resume may still land, and the SDK skipped its own reset
             # A refusal does not say whether it is temporary, so the state decides.
             try:
                 state = self._state(session)
@@ -609,7 +703,7 @@ class IGlobal(IGlobalBase):
 
     @staticmethod
     def _state(session: Sandbox) -> str | None:
-        """The session's state now, or None if Tenki no longer knows it."""
+        """The session's state now, or None if Luxor no longer knows it."""
         try:
             return session.refresh().state
         except SessionNotFoundError:
@@ -642,14 +736,14 @@ class IGlobal(IGlobalBase):
     def _create_session(self) -> Sandbox:
         sizing = {'cpu_cores': self.cpu_cores, 'memory_mb': self.memory_mb, 'disk_size_gb': self.disk_size_gb}
         create_kwargs = {
-            # Only what was set: with an image Tenki keeps the image's disk unless one is sent (tenki 1.4.1).
+            # Only what was set: with an image Luxor keeps the image's disk unless one is sent (luxor-ai 1.5.2).
             **{key: value for key, value in sizing.items() if value},
-            # Tenki has no idle timeout, so this is what stops a session nothing closes (an engine crash): Tenki
+            # Luxor has no idle timeout, so this is what stops a session nothing closes (an engine crash): Luxor
             # pauses it then. sticky stays False: a sticky session discards max_duration.
             'max_duration': self.max_duration_minutes * 60,
             'pause_retention': self.pause_retention_hours * 3600,
             'allow_inbound': False,
-            # Explicit: with outbound off Tenki ignores allow_domains, so a changed SDK default would change both.
+            # Explicit: with outbound off Luxor ignores allow_domains, so a changed SDK default would change both.
             'allow_outbound': True,
             'name': f'rocketride-tool-tenki-{self.label + "-" if self.label else ""}{uuid.uuid4().hex[:8]}',
             'tags': ['rocketride', self._run_tag],
@@ -676,11 +770,11 @@ class IGlobal(IGlobalBase):
             if not self._secrets_refusal_logged:
                 self._secrets_refusal_logged = True
                 warning(
-                    'tool_tenki: Tenki refused to attach tenki.secret_policies: the API key needs Secrets access, '
+                    'tool_tenki: Luxor refused to attach tenki.secret_policies: the API key needs Secrets access, '
                     f'which is chosen when the key is created ({e})'
                 )
             raise SessionUnavailableError(
-                f'Tenki refused to attach the secret policies named in tenki.secret_policies: {e}. The Tenki '
+                f'Luxor refused to attach the secret policies named in tenki.secret_policies: {e}. The Luxor '
                 'API key this pipeline uses needs Secrets access, which only its operator can grant; '
                 'repeating the call will not help.'
             ) from e
@@ -689,13 +783,13 @@ class IGlobal(IGlobalBase):
             if not self._quota_refusal_logged:
                 self._quota_refusal_logged = True
                 warning(
-                    f"tool_tenki: Tenki refused to create a sandbox session at the workspace's limit ({e}). Every "
+                    f"tool_tenki: Luxor refused to create a sandbox session at the workspace's limit ({e}). Every "
                     'running session in the workspace counts against it, whichever pipeline started it.'
                 )
             raise SessionUnavailableError(
-                f'Tenki refused to create a sandbox session: {e}. That is a limit of the Tenki workspace this '
+                f'Luxor refused to create a sandbox session: {e}. That is a limit of the Luxor workspace this '
                 'pipeline uses, not of this call: a call works again once another session in the workspace has '
-                'ended, and the operator can raise the limit with Tenki.'
+                'ended, and the operator can raise the limit with Luxor.'
             ) from e
         except (WaitReadyFailedError, TemplateRuntimeFailedError) as e:
             self._close_left_running(e)
@@ -710,7 +804,7 @@ class IGlobal(IGlobalBase):
         except AttributeError as e:
             # An SDK whose file API changed shape: its file calls could hang for good, so the session is not used.
             message = (
-                'tool_tenki cannot put a deadline on file calls with this version of the Tenki SDK, '
+                'tool_tenki cannot put a deadline on file calls with this version of the Luxor SDK, '
                 'so the new sandbox session was closed without being used'
             )
             warning(f'tool_tenki: {message} ({e})')

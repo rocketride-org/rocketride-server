@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Build, test and publish durable agents that scale in production.
+  RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
 </p>
 
 <p align="center">
@@ -29,8 +29,7 @@
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
-Build, test and publish durable agents that scale in production.
+[RocketRide](https://rocketride.ai) is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
 
 You build your `.pipe` - and you run it against the fastest AI runtime available.
 
@@ -123,7 +122,7 @@ Additional commands are available via the sidebar and context menus:
 
 ## Links
 
-- [Documentation](https://docs.rocketride.org/)
+- [Documentation](https://docs.rocketride.ai/)
 - [Discord](https://discord.gg/PMXrtenMsY)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)

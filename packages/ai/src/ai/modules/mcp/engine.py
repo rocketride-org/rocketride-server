@@ -103,6 +103,8 @@ class EngineClient(Protocol):
         self, project_id: str, source: str, team_id: str = '', *, begin_seq: int = 0
     ) -> Dict[str, Any]: ...
     async def get_environment_keys(self) -> List[str]: ...
+    async def get_capabilities(self) -> List[str]: ...
+    async def deploy_artifact(self, project_id: str, version: int) -> Dict[str, Any]: ...
     async def close(self) -> None: ...
 
 
@@ -310,6 +312,10 @@ class WsEngineClient:
             lambda: self._client.deploy.deploy(project_id=project_id, version=version, team_id=team_id)
         )
 
+    async def deploy_artifact(self, project_id: str, version: int) -> Dict[str, Any]:
+        """The pipeline a registered version holds."""
+        return await self._guarded(lambda: self._client.deploy.artifact(project_id=project_id, version=version))
+
     async def deploy_set_schedule(
         self, project_id: str, source_id: str, schedule: Optional[str], team_id: str, *, ttl: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -431,6 +437,13 @@ class WsEngineClient:
 
     async def get_environment_keys(self) -> List[str]:
         return await self._guarded(lambda: self._client.account.get_environment_keys())
+
+    async def get_capabilities(self) -> List[str]:
+        """The capability tags of the engine's sign-in result, as the SDK kept them."""
+        await self._ensure_connected()
+        info = self._client.get_account_info() or {}
+        capabilities = info.get('capabilities') if isinstance(info, dict) else None
+        return [c for c in capabilities if isinstance(c, str)] if isinstance(capabilities, (list, tuple)) else []
 
 
 def make_engine_client(config: Dict[str, Any]) -> EngineClient:

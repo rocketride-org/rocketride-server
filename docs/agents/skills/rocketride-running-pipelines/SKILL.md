@@ -97,5 +97,5 @@ Saving / publishing is billable / public — treat like an irreversible action (
 
 ## Supporting files
 - **deep docs** — for exact SDK semantics (use/send/chat/get_task_status, async patterns), fetch
-  ONE page: `../rocketride-building-pipelines/tools/fetch-doc.py "python"` (→ `/develop/python.md`)
-  or `… "use method"` (→ `/develop/typescript/methods/use.md`). Never `llms-full.txt`.
+  ONE page: `../rocketride-building-pipelines/tools/fetch-doc.py /clients/python.md` (Python SDK)
+  or `… /clients/typescript/pipelines.md` (TypeScript `use()` and running pipelines). Never `llms-full.txt`.

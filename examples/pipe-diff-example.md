@@ -191,7 +191,7 @@ heading around it when it assembles the comment.
 
 There's also `--json`, a single stable, sorted document (`nodes`, `edges`, and a
 `summary` block) for feeding other tooling. See the
-[CLI reference](https://docs.rocketride.org/connect/cli#diff)
+[CLI reference](https://docs.rocketride.ai/connect/cli#diff)
 for every flag and exit code.
 
 ## Use it in CI (the pipe-diff GitHub Action)

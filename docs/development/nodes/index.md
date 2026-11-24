@@ -15,7 +15,7 @@ thing.
 > regenerates its parameter tables from `services*.json`. `docs:gather` publishes
 > those READMEs to the site's Nodes section, grouped by `classType`. A second list
 > kept by hand drifts the moment a node is added — the one that used to live here
-> did. Browse the nodes at <https://docs.rocketride.org/nodes>, or read
+> did. Browse the nodes at <https://docs.rocketride.ai/nodes>, or read
 > `nodes/src/nodes/<node>/README.md` directly.
 >
 > For the file format, see [Node Service Definitions](services-schema.md); for the
