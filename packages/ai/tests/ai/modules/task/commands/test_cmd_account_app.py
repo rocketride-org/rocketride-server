@@ -203,6 +203,19 @@ async def test_account_status_ignores_a_dev_team_the_caller_cannot_run_on(monkey
 
 
 @pytest.mark.asyncio
+async def test_account_status_cannot_run_when_the_dev_team_org_lookup_is_refused(monkeypatch):
+    """An admin passes task.control on any team, but execute refuses when the team's org can't be resolved."""
+    conn, reads = _status_conn(monkeypatch, devTeam='team-x')
+    conn.resolve_org_for_team = AsyncMock(side_effect=PermissionError('no org'))
+
+    body = (await AccountCommands.on_rrext_account_status(conn, {'arguments': {}}))['body']
+
+    assert body['devTeam'] == {'selected': True, 'name': '', 'canRun': False}
+    reads.check_spend.assert_awaited_once_with('org-1')
+    reads.get_merged_env.assert_awaited_once_with(user_id='user-1', org_id='org-1', team_id=None)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ('identity', 'credit_error', 'credits', 'env_keys'),
     [

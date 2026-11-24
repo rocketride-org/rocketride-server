@@ -138,7 +138,8 @@ class AccountCommands(DAPConn):
                 try:
                     org_id = await self.resolve_org_for_team(team_id) or org_id
                 except PermissionError:
-                    pass
+                    # execute refuses the run when this lookup fails, so it can't run.
+                    can_run = False
 
         # Compute tokens exist only on the hosted backend. A waitlisted account,
         # or one with no org, has no balance to read; ``reason`` says which, so
