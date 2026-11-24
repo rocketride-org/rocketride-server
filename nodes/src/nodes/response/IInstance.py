@@ -22,6 +22,7 @@
 # =============================================================================
 
 from typing import Any, Dict, List, Optional
+import math
 import os
 import base64
 
@@ -35,6 +36,24 @@ from .IValidator import TOKENS_RESULT_KEY, configured_keys, reserved_key_error
 # The four disjoint billing counts report_llm_tokens writes (llm_adapter.py); `model`, `calls` and
 # `breakdown` are left out, so one answer and several sum to the same shape.
 _BILLING_COUNTS = ('input', 'output', 'cache_read', 'cache_creation')
+
+
+def _count(value: Any) -> int:
+    """One billing count as a whole number; a value that is not a finite number counts as none.
+
+    An answer written from outside is parsed without a check on its counts (``Answer.tokens`` is a
+    dict of anything), and its text is in the result by the time the counts are summed: a count
+    such as ``"unknown"`` must not fail the write after it.
+
+    Args:
+        value: The count as the answer carries it.
+
+    Returns:
+        The count, or 0 for None, a bool, a string, NaN or an infinity.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return 0
+    return int(value)
 
 
 class IInstance(IInstanceBase):
@@ -264,7 +283,7 @@ class IInstance(IInstanceBase):
             return
         response = self.instance.currentObject.response
         total = response.get(TOKENS_RESULT_KEY) or {}
-        response[TOKENS_RESULT_KEY] = {k: int(total.get(k, 0)) + int(tokens.get(k) or 0) for k in _BILLING_COUNTS}
+        response[TOKENS_RESULT_KEY] = {k: _count(total.get(k)) + _count(tokens.get(k)) for k in _BILLING_COUNTS}
 
     def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
         """Shared handler for the image/audio/video stream lanes.

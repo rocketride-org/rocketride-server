@@ -89,6 +89,23 @@ def test_text_answers_keep_their_tokens_beside_them():
     assert 'tokens' not in response['result_types']
 
 
+def test_a_count_that_is_not_a_number_does_not_fail_the_answer():
+    """An answer written from outside may carry anything as a count; its text is kept and the real counts are summed."""
+    node = _response_node()
+    good, odd = Answer(), Answer()
+    good.setAnswer('one')
+    good.tokens = {'input': 5, 'output': 2, 'cache_read': 0, 'cache_creation': 0}
+    odd.setAnswer('two')
+    odd.tokens = {'input': 'unknown', 'output': 3.0, 'cache_read': float('nan'), 'cache_creation': True}
+
+    for answer in (good, odd):
+        node.writeAnswers(answer)
+
+    response = node.instance.currentObject.response
+    assert response['answers'] == ['one', 'two']
+    assert response['tokens'] == {'input': 5, 'output': 5, 'cache_read': 0, 'cache_creation': 0}
+
+
 def _anthropic_chat(monkeypatch, bodies):
     pytest.importorskip('langchain_anthropic')
     import langchain_anthropic.chat_models as lca
