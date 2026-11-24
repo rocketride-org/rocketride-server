@@ -603,8 +603,11 @@ function declarationTexts(bundleText) {
  * the name comparison. Other declarations inlined from the SDK (its exported
  * interfaces and types) are body-compared like the shell's own, so a change to
  * one of them needs a shell:freeze.
+ *
+ * SDK_VERSION is inlined the same way and changes on every SDK release; its
+ * name is still checked, only its value is not.
  */
-const BODY_COMPARE_EXEMPT = new Set(['ClassDeclaration:RocketRideClient']);
+const BODY_COMPARE_EXEMPT = new Set(['ClassDeclaration:RocketRideClient', 'VariableStatement:SDK_VERSION']);
 
 /**
  * List the ACTIONABLE changes vs the newest frozen version: a declaration that
