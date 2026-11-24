@@ -23,6 +23,14 @@ is not offered (see its entry). This page is the full reference; the
   tools), `Unavailable` (a local-engine-only tool called on a deployed engine),
   `UnknownTool`. Hard failures (lost engine connection, auth) surface
   as MCP protocol errors with the original message preserved.
+- **One size limit.** The JSON text of a result is at most 40,000 characters,
+  or the value of `MCP_RESULT_MAX_CHARS` on a
+  [self-hosted engine](/connect/mcp/http/self-hosting#configuration). A tool
+  that can shorten its own result does so and adds a `truncated` object: one
+  entry per shortened key, with counts, and a `hint` where there is a next step.
+  The entries below say how each tool shortens. Any other result over the limit
+  is replaced by `{ok: false, error_type: 'ResultTooLarge', message, hint}`,
+  with `isError` set. The run tools always keep `task_token`.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
   `send_files`, `terminate`) get 120 seconds per engine call.
@@ -57,6 +65,8 @@ setup).
   (the engine reports the `hosted-models:openai` capability), `llm_openai` is
   listed even when you saved no key, with an empty `wiring`: leave `apikey`
   empty. A key you saved still wires as usual.
+- **Size limit:** a list over the limit keeps its leading rows, and
+  `truncated.components` gives `{returned, total}`.
 
 ### describe_component
 
@@ -69,6 +79,13 @@ integration.
 - **Returns:** the engine's whole service definition at top level, plus
   `ok: true` and, for integrations, `credentials: {status, missing, candidates,
   wiring | setup}`.
+- **Size limit:** a definition over the limit first loses each config section's
+  `ui` block, which lays out the visual editor's form, so `truncated` holds
+  `{"Pipe.ui": {dropped: true}}`. If it is still too large, the profile branches
+  in `<section>.schema.dependencies.profile.oneOf` are cut from the end, with
+  `{returned, total}` and a hint. Every profile name stays in
+  `<section>.schema.properties.profile.enum`, and `resolve_config` shows what
+  one profile resolves to.
 
 ### resolve_config
 
@@ -133,6 +150,8 @@ configured database. Validate whole pipelines unless you want that probe.
 - **Returns:** `{ok, errors: [], warnings: []}` — `ok` is true only when there
   are no errors. A rejection (`ok: false`) sets the MCP `isError` flag but is
   not the shared error envelope.
+- **Size limit:** `warnings` loses rows first and `errors` second, and
+  `truncated` gives `{returned, total}` for each. `ok` still counts every error.
 
 ### describe_pipeline
 
@@ -202,6 +221,12 @@ optionally send data in the same call and get the result back synchronously.
   [replay tools](#replay-past-runs).
 - **Notable:** if the initial send times out, the error hint still reports the
   token so you can `monitor` the task instead of losing it.
+- **Size limit:** output over the limit comes back as the first part of its
+  text, and `truncated.result` gives `{returned_chars, total_chars}`. If the
+  reply is still too large (a very long `projectId` or `source` taken from the
+  pipeline), every key but `ok` and `task_token` is `null` and
+  `truncated.dropped` names them. `send_data` and `send_files` shorten
+  `result` the same way.
 
 ### run_dropper_pipe
 
@@ -264,6 +289,8 @@ always returns within the timeout.
 - **Returns:** `{ok, task_token, state, state_label, completed, terminal,
   status, counts: {completedCount, failedCount, totalCount}, errors, warnings,
   polls, poll_timed_out?}`.
+- **Size limit:** a snapshot over the limit sends `status` as `{}` first, then
+  shortens `warnings` and last `errors`. `truncated` says which.
 - **Notable:** `state` is an integer enum (0 none, 1 starting,
   2 initializing, 3 running, 4 stopping, 5 completed, 6 cancelled);
   `state_label` is the readable form. Long-lived pipelines (webhook sources)
@@ -461,6 +488,10 @@ Read raw run-log events, cursor-paged.
   only).
 - **Returns:** `{ok, events, nextCursor, truncatedAtSeq}`.
 - **Notable:** pages are additionally capped at 1 MiB.
+- **Size limit:** a page over the limit ends early, and `nextCursor` is the
+  number of the first event left out. An event too large to send alone comes
+  back as a stub, `{event, body: {logSeq, eventTime}, truncated: {chars}}`,
+  with the start of its name, and `nextCursor` moves past it.
 
 ### log_traces
 
@@ -474,6 +505,8 @@ pipeline — for the latest run or a specific past run.
   journeys, `open` are still in flight; each summary carries `beginSeq`, the
   permanent trace id. In MCP Apps hosts the result renders in the
   [trace-viewer widget](/connect/mcp/http/resources-and-widgets#widgets).
+- **Size limit:** `traces` loses rows first and `open` second, with
+  `{returned, total}` in `truncated` and a hint to ask for a smaller `n`.
 
 ### log_trace
 
@@ -483,6 +516,8 @@ lane data, plus node narration.
 - **Parameters:** the key parameters; `beginSeq` (integer, required — a trace
   id from `log_traces`).
 - **Returns:** `{ok, beginSeq, summary, events, context}`.
+- **Size limit:** `events` keeps its leading rows, with `{returned, total}` in
+  `truncated` and a hint to read the rest with `log_read` from `beginSeq`.
 - **Errors:** a trace below the retention horizon returns
   `{ok: false, error_type: 'TraceExpired', ...}`.
 

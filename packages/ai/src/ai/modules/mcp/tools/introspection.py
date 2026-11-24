@@ -13,6 +13,7 @@ import time
 from typing import Any, Dict
 
 from .. import credentials as credentials_mod
+from .. import result_size
 from ..errors import _bad
 from ..tooling import ToolHints, ToolRegistry
 from ._common import engine_call
@@ -23,6 +24,15 @@ from ._common import load_pipeline
 # holds the tool call open for providers x per-call timeout. Providers left
 # unresolved when the budget elapses fall back to the pipeline's own metadata.
 DESCRIBE_LOOKUP_BUDGET_SECONDS = 30
+
+# Sent in `truncated` when list_components is cut to fit the result size limit.
+_COMPONENTS_HINT = (
+    "Not every component fits in one reply. Call describe_component with a component's name to read about one "
+    'that is not listed.'
+)
+_COMPONENTS_STEPS = (result_size.rows('components'),)
+# Where a service definition lists one schema branch per profile.
+_PROFILE_BRANCHES = ('schema', 'dependencies', 'profile', 'oneOf')
 
 _PIPELINE_SCHEMA = {
     'type': 'object',
@@ -74,7 +84,38 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
     result = {'ok': True, 'components': components}
     if skipped:
         result['note'] = f'{skipped} integrations need setup - call list_integrations.'
+    result_size.fit(result, _COMPONENTS_STEPS, hint=_COMPONENTS_HINT)
     return result
+
+
+def _profiles_note(section: str):
+    """Note how many of a section's profile branches were kept, and how to read the rest."""
+    name = '.'.join((section, *_PROFILE_BRANCHES))
+
+    def note(payload: dict, notes: Dict[str, Any], kept: int, full: list) -> None:
+        notes[name] = {'returned': kept, 'total': len(full)}
+        notes['hint'] = (
+            f'{section}.schema shows the settings of the first {kept} of {len(full)} profiles. Every profile name '
+            f'is still in {section}.schema.properties.profile.enum. To see what one profile resolves to, call '
+            'resolve_config with config {profile: <name>}.'
+        )
+
+    return note
+
+
+def _describe_steps(service: Dict[str, Any]) -> list:
+    """How a service definition over the size limit shrinks, in order.
+
+    First every config section's ``ui`` block, which lays out the visual
+    editor's form, then each section's profile branches from the end.
+    """
+    sections = [
+        key for key, value in service.items() if isinstance(value, dict) and 'schema' in value and 'ui' in value
+    ]
+    steps = [result_size.drop((section, 'ui'), {}) for section in sections]
+    for section in sections:
+        steps.append(result_size.rows((section, *_PROFILE_BRANCHES), note=_profiles_note(section)))
+    return steps
 
 
 async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
@@ -102,6 +143,7 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
         )
         state = credentials_mod.evaluate(spec, env_keys, hosted_models)
         result['credentials'] = credentials_mod.describe_state(spec, state)
+    result_size.fit(result, _describe_steps(result))
     return result
 
 
@@ -120,7 +162,10 @@ async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     result = validated or {}
     errors = result.get('errors') or []
     warnings = result.get('warnings') or []
-    return {'ok': not errors, 'errors': errors, 'warnings': warnings}
+    payload = {'ok': not errors, 'errors': errors, 'warnings': warnings}
+    # Warnings go first: the errors are what has to be fixed.
+    result_size.fit(payload, (result_size.rows('warnings'), result_size.rows('errors')))
+    return payload
 
 
 async def _resolve_config(client, tasks, args: Dict[str, Any]) -> dict:

@@ -30,6 +30,7 @@ import asyncio
 from typing import Any, Dict
 from urllib.parse import urlencode
 
+from .. import result_size
 from ..apps import DROPPER_URI
 from ..errors import _bad, _timeout
 from ..tooling import ToolHints, ToolRegistry
@@ -40,6 +41,13 @@ from ..tooling import ToolHints, ToolRegistry
 DEFAULT_TIMEOUT_SECONDS = 120
 
 _OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads', 'pipelineTraceLevel')
+
+# Sent in `truncated` when a run's output is cut to fit the result size limit.
+_OUTPUT_HINT = (
+    'The output was too large to return whole. To read all of it, have the pipeline write its output to the '
+    'file store and read it with store_read.'
+)
+_OUTPUT_STEPS = (result_size.text('result'),)
 
 _RUN_PIPELINE_SCHEMA = {
     'type': 'object',
@@ -174,6 +182,8 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
         # registry for the life of the process (see registry.py).
         tasks.remove(token)
 
+    # The run has happened: whatever else is cut, the caller keeps the token.
+    result_size.fit(result_payload, _OUTPUT_STEPS, hint=_OUTPUT_HINT, keep=('ok', 'task_token'))
     return result_payload
 
 
@@ -223,6 +233,7 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
         'source': started.get('source'),
     }
 
+    result_size.fit(result_payload, (), keep=('ok', 'task_token', 'upload_url', 'dropper_url'))
     return result_payload
 
 
@@ -251,7 +262,9 @@ async def _send_data(client, tasks, args: Dict[str, Any]) -> dict:
             'the task may still be processing; retry send_data or call monitor',
         )
 
-    return {'ok': True, 'result': result}
+    payload = {'ok': True, 'result': result}
+    result_size.fit(payload, _OUTPUT_STEPS, hint=_OUTPUT_HINT)
+    return payload
 
 
 async def _terminate(client, tasks, args: Dict[str, Any]) -> dict:
@@ -288,7 +301,9 @@ async def _send_files(client, tasks, args: Dict[str, Any]) -> dict:
             'the upload may still be in progress; retry send_files or call monitor',
         )
 
-    return {'ok': True, 'result': result}
+    payload = {'ok': True, 'result': result}
+    result_size.fit(payload, _OUTPUT_STEPS, hint=_OUTPUT_HINT)
+    return payload
 
 
 def register(registry: ToolRegistry) -> None:

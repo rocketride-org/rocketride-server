@@ -1,0 +1,111 @@
+# Copyright 2026 Aparavi Software AG. MIT License.
+"""The result size limit: `fit` and its three steps, the envelope, and the setting."""
+
+import logging
+
+import pytest
+
+from ai.modules.mcp import result_size
+from ai.modules.mcp import tools as tools_pkg
+from ai.modules.mcp.result_size import drop, fit, rows, size_of, text
+from ai.modules.mcp.tooling import ToolRegistry
+
+
+def test_fit_changes_nothing_that_fits_or_when_the_limit_is_off(result_limit):
+    result_limit(1000)
+    small = {'ok': True, 'rows': [1, 2, 3]}
+    fit(small, [rows('rows')])
+    result_limit(0)
+    large = {'ok': True, 'rows': ['x' * 100] * 100}
+    fit(large, [rows('rows')])
+    assert (small, large) == ({'ok': True, 'rows': [1, 2, 3]}, {'ok': True, 'rows': ['x' * 100] * 100})
+
+
+@pytest.mark.parametrize('output', ['a' * 5000, '"' * 5000, '\\' * 5000, '中' * 5000])
+def test_text_keeps_the_longest_lead_that_fits(result_limit, output):
+    result_limit(1000)
+    payload = {'ok': True, 'task_token': 'tk_1', 'result': output}
+    fit(payload, [text('result')], hint='Read on.')
+
+    kept = payload['result']
+    assert size_of(payload) <= 1000
+    assert payload['task_token'] == 'tk_1'
+    assert output.startswith(kept)
+    assert payload['truncated'] == {'result': {'returned_chars': len(kept), 'total_chars': 5000}, 'hint': 'Read on.'}
+    # One more character would not fit.
+    assert size_of({**payload, 'result': output[: len(kept) + 1]}) > 1000
+
+
+def test_steps_carry_on_across_keys(result_limit):
+    result_limit(1000)
+    payload = {'ok': True, 'warnings': ['w' * 50] * 100, 'errors': ['e' * 50] * 100}
+    fit(payload, [rows('warnings'), rows('errors')])
+
+    assert size_of(payload) <= 1000
+    assert payload['warnings'] == []
+    assert 0 < len(payload['errors']) < 100
+    assert payload['truncated'] == {
+        'warnings': {'returned': 0, 'total': 100},
+        'errors': {'returned': len(payload['errors']), 'total': 100},
+    }
+
+
+def test_text_with_a_cap_cuts_once_and_drop_writes_the_empty_value(result_limit):
+    result_limit(1000)
+    payload = {'ok': True, 'error': 'e' * 5000, 'section': {'ui': {'layout': 'x' * 5000}, 'schema': {}}}
+    fit(payload, [text('error', cap=300), drop(('section', 'ui'), {})])
+
+    assert payload['error'] == 'e' * 300
+    assert payload['section'] == {'ui': {}, 'schema': {}}
+    assert payload['truncated'] == {
+        'error': {'returned_chars': 300, 'total_chars': 5000},
+        'section.ui': {'dropped': True},
+    }
+
+
+def test_keep_nulls_every_other_key_when_the_steps_are_not_enough(result_limit):
+    result_limit(1000)
+    payload = {'ok': True, 'task_token': 'tk_1', 'projectId': 'p' * 5000, 'source': 's', 'result': 'r' * 5000}
+    fit(payload, [text('result')], hint='H', keep=('ok', 'task_token'))
+
+    assert payload == {
+        'ok': True,
+        'task_token': 'tk_1',
+        'projectId': None,
+        'source': None,
+        'result': None,
+        'truncated': {'dropped': ['projectId', 'source', 'result'], 'hint': 'H'},
+    }
+    assert size_of(payload) < 1000
+
+
+def test_the_envelope_fits_the_smallest_limit_for_every_tool(result_limit):
+    result_limit(result_size.MIN_MAX_CHARS)
+    registry = ToolRegistry(local_engine=True)
+    tools_pkg.register_all(registry)
+    for name in [*registry.names(), None]:
+        envelope = result_size.too_large(name, 10**12)
+        assert envelope['ok'] is False
+        assert envelope['error_type'] == 'ResultTooLarge'
+        assert size_of(envelope) < result_size.MIN_MAX_CHARS
+
+
+@pytest.mark.parametrize(
+    'raw, expected, warns',
+    [
+        (None, 40000, False),
+        ('0', 0, False),
+        ('80000', 80000, False),
+        ('999', 40000, True),
+        ('-1', 40000, True),
+        ('1.5', 40000, True),
+    ],
+)
+def test_the_setting(caplog, raw, expected, warns):
+    with caplog.at_level(logging.WARNING, logger='ai.modules.mcp.result_size'):
+        assert result_size.parse(raw) == expected
+    messages = [record.getMessage() for record in caplog.records]
+    assert len(messages) == int(warns)
+    if warns:
+        assert 'MCP_RESULT_MAX_CHARS' in messages[0]
+        assert raw not in messages[0]

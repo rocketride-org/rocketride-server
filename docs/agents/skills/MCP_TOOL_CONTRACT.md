@@ -17,6 +17,12 @@ Every result is a JSON object with `ok`. `ok: false` carries `error_type`, `mess
 the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JSON.
 **Check `ok` — a successful tool *call* is not a successful *result*.**
 
+Size limit: a result's JSON text is at most 40,000 characters by default (`MCP_RESULT_MAX_CHARS`). A tool that
+can shorten its result adds `truncated: {<key>: {returned, total} | {returned_chars, total_chars} | {dropped: true},
+hint?}`; a run tool that still cannot fit sets every key but `ok` and `task_token` to `null` and names them in
+`truncated.dropped`. `log_read` instead ends the page early and sets `nextCursor`. Any other result over the limit
+becomes `{ok: false, error_type: 'ResultTooLarge', message, hint}`: ask for less, never repeat the same call.
+
 ## Introspection
 
 | Tool | Input | Result (key fields) |

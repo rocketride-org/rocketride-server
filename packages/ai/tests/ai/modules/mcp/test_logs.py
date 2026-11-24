@@ -4,6 +4,7 @@ import asyncio
 import pytest
 
 from ai.modules.mcp.engine import LogNotFound
+from ai.modules.mcp.result_size import size_of
 from ai.modules.mcp.tooling import ToolRegistry
 from ai.modules.mcp.tools import logs
 
@@ -304,3 +305,43 @@ def test_trace_tools_link_the_trace_viewer_widget():
     # The list/read tools stay plain JSON.
     assert tools['log_chapters'].meta is None
     assert tools['log_read'].meta is None
+
+
+def _event(seq, text):
+    return {'type': 'event', 'event': 'apaevt_output', 'body': {'logSeq': seq, 'eventTime': 1.5, 'text': text}}
+
+
+@pytest.mark.asyncio
+async def test_log_read_shortens_a_page_over_the_size_limit(fake_engine, result_limit):
+    result_limit(2000)
+    key = {'projectId': 'p1', 'source': 's1'}
+    # Two events that fit only without the two characters between them.
+    first = _event(1, 'a' * 500)
+    base = size_of({'ok': True, 'events': [], 'nextCursor': None, 'truncatedAtSeq': None})
+    second = _event(2, 'b' * (2000 - base - size_of(first) - size_of(_event(2, ''))))
+    fake_engine.log_read_result = {'events': [first, second]}
+    page = await logs._log_read(fake_engine, None, key)
+    assert (page['events'], page['nextCursor'], size_of(page) <= 2000) == ([first], 2, True)
+    assert 'truncated' not in page
+
+    # One event too large to send alone comes back as a stub, and the cursor moves past it.
+    result_limit(1000)
+    big = {'event': '\U0001f600' * 200, 'body': {'logSeq': 7, 'eventTime': 1.5, 'text': 'x' * 5000}}
+    fake_engine.log_read_result = {'events': [big, _event(8, 'y')], 'nextSeq': 9}
+    page = await logs._log_read(fake_engine, None, key)
+    stub = page['events'][0]
+    assert (len(page['events']), page['nextCursor'], size_of(page) <= 1000) == (1, 8, True)
+    assert stub == {
+        'event': '\U0001f600' * 60,
+        'body': {'logSeq': 7, 'eventTime': 1.5},
+        'truncated': {'chars': size_of(big)},
+    }
+
+
+@pytest.mark.asyncio
+async def test_log_trace_shortens_events_over_the_size_limit(fake_engine, result_limit):
+    result_limit(1000)
+    fake_engine.log_trace_result = {'summary': None, 'events': [{'seq': i, 'text': 'x' * 50} for i in range(100)]}
+    result = await logs._log_trace(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'beginSeq': 3})
+    assert result['truncated']['events'] == {'returned': len(result['events']), 'total': 100}
+    assert 'log_read' in result['truncated']['hint'] and size_of(result) <= 1000

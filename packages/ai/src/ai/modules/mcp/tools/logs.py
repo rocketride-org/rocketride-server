@@ -12,6 +12,7 @@ and console still exist, but traces come back empty.
 import asyncio
 from typing import Any, Dict
 
+from .. import result_size
 from ..apps import TRACE_VIEWER_URI
 from ..engine import LogNotFound
 from ..errors import _bad, _timeout
@@ -31,6 +32,15 @@ _LOG_READ_CONCURRENCY = asyncio.Semaphore(4)
 LOG_TRACES_MIN_N = 1
 LOG_TRACES_MAX_N = 100
 LOG_TRACES_DEFAULT_N = 20
+
+# Sent in `truncated` when a trace list is cut to fit the result size limit.
+_TRACE_HINT = (
+    'Only the first events of this trace fit in one reply. To read the rest, call log_read with fromSeq set to '
+    'beginSeq.'
+)
+_TRACES_HINT = 'Not every trace fits in one reply. Call log_traces again with a smaller n.'
+# The longest event name a stub keeps, so a stub page always fits the smallest limit.
+_STUB_EVENT_CHARS = 60
 
 _RETENTION_HINT = (
     'runs are evicted after 7 days (dev) / 30 days (deploy), or earlier under '
@@ -135,11 +145,43 @@ async def _log_read(client, tasks, args: Dict[str, Any]) -> dict:
             'hint': _RETENTION_HINT,
         }
     result = result or {}
-    return {
+    events = result.get('events') or []
+    page = {
         'ok': True,
-        'events': result.get('events') or [],
+        'events': events,
         'nextCursor': result.get('nextSeq'),
         'truncatedAtSeq': result.get('truncatedAtSeq'),
+    }
+    # A page over the size limit loses events from the end, and nextCursor
+    # points at the first one left out. One event too large to send alone
+    # becomes a stub, so every page moves the cursor forward.
+    result_size.fit(page, (result_size.rows('events', note=_next_cursor),))
+    if events and not page['events']:
+        page['events'] = [_stub(events[0])]
+        page['nextCursor'] = _log_seq(events[0]) + 1
+    return page
+
+
+def _log_seq(event: Dict[str, Any]) -> int:
+    body = event.get('body')
+    if not isinstance(body, dict):
+        return 0
+    return int(body.get('logSeq') or 0)
+
+
+def _next_cursor(page: dict, notes: Dict[str, Any], kept: int, events: list) -> None:
+    page['nextCursor'] = _log_seq(events[kept])
+
+
+def _stub(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Stand in for one event too large to send: its name, number, time and size."""
+    body = event.get('body')
+    if not isinstance(body, dict):
+        body = {}
+    return {
+        'event': str(event.get('event') or '')[:_STUB_EVENT_CHARS],
+        'body': {'logSeq': body.get('logSeq'), 'eventTime': body.get('eventTime')},
+        'truncated': {'chars': result_size.size_of(event)},
     }
 
 
@@ -184,6 +226,7 @@ async def _log_traces(client, tasks, args: Dict[str, Any]) -> dict:
             'no traces recorded — the run may have been submitted with '
             "pipelineTraceLevel 'none' (MCP run tools default to 'summary')"
         )
+    result_size.fit(payload, (result_size.rows('traces'), result_size.rows('open')), hint=_TRACES_HINT)
     return payload
 
 
@@ -214,13 +257,15 @@ async def _log_trace(client, tasks, args: Dict[str, Any]) -> dict:
             'hint': _RETENTION_HINT,
         }
     result = result or {}
-    return {
+    payload = {
         'ok': True,
         'beginSeq': int(begin_seq),
         'summary': result.get('summary'),
         'events': result.get('events') or [],
         'context': _context(project_id, source, team_id),
     }
+    result_size.fit(payload, (result_size.rows('events'),), hint=_TRACE_HINT)
+    return payload
 
 
 def register(registry: ToolRegistry) -> None:
