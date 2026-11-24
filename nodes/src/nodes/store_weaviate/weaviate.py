@@ -60,7 +60,9 @@ _REPEAT_PAUSE_SECONDS = 1.0
 # How many such pages in a row a trash update tolerates before it fails.
 _MAX_STALLS = 2
 
-# A query rejected for asking for too many objects names the server's limit
+# A query rejected for asking for too many objects names the server's limit.
+# This matches Weaviate's error text: if Weaviate rewords it, render on a server
+# with a lower QUERY_MAXIMUM_RESULTS raises on the first page instead of retrying.
 _QUERY_MAXIMUM_RESULTS = re.compile(r"QUERY_MAXIMUM_RESULTS '(\d+)'")
 
 
