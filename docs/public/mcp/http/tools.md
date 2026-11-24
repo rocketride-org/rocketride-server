@@ -1,12 +1,12 @@
 ---
 title: Tools
 sidebar_position: 2
-description: The RocketRide MCP server exposes 33 tools, 32 on a deployed engine where send_files is not offered. This page is the full tool reference.
+description: The RocketRide MCP server exposes 34 tools, 33 on a deployed engine where send_files is not offered. This page is the full tool reference.
 ---
 
 # Tools
 
-The server exposes **33 tools** — 32 on a deployed engine, where `send_files`
+The server exposes **34 tools** — 33 on a deployed engine, where `send_files`
 is not offered (see its entry). This page is the full reference; the
 [overview](/connect/mcp/http/) has the one-table summary.
 
@@ -32,12 +32,12 @@ is not offered (see its entry). This page is the full reference; the
   JSON itself (a `{"pipeline": {...}}` wrapper is auto-unwrapped). File paths
   are rejected — the client reads its own `.pipe` file and sends the contents.
 - **Every tool carries annotations.** `readOnlyHint`, `destructiveHint` and
-  `openWorldHint` are explicit on all 33 tools (32 on a deployed engine,
+  `openWorldHint` are explicit on all 34 tools (33 on a deployed engine,
   where `send_files` is not offered); the table under
   [Annotations](#annotations) gives each value and its reason. Five tools are
   open-world: the four execution tools, because a pipeline's nodes run whatever
-  the pipeline defines, and `validate_pipeline`, because its single-component
-  form runs the provider's configuration probe.
+  the pipeline defines, and `probe_component`, because it runs the provider's
+  configuration probe.
 
 ## Discover components
 
@@ -114,25 +114,50 @@ node on the connected engine are listed.
 
 ### validate_pipeline
 
-Validate an inline pipeline with the engine's validator. It checks what `use()`
-checks, then checks a whole pipeline against the services it names: every
+Validate a whole inline pipeline with the engine's validator. It checks what
+`use()` checks, then checks the pipeline against the services it names: every
 provider is a service on this engine, every control entry names a class of the
 node it calls, and every input lane is one the upstream node produces and this
 node takes. A node with no lanes, such as a tool, is not checked for the lanes it
 takes, and a `"*"` in a node's lanes matches any lane. `use()` does not run
 those last checks, so a pipeline that fails them can still start.
 
-The single-component form `{version, component}` that the node editor sends is
-accepted too. It checks the component's provider but skips the control and lane
-checks, which need the whole pipeline. It is not static: the engine instantiates
-the provider and runs its configuration probe, which for LLM nodes sends a small
-completion request to the configured endpoint and for stores connects to the
-configured database. Validate whole pipelines unless you want that probe.
+The check is static. It runs no component code and contacts no provider. To
+test one component's settings against its provider, use
+[`probe_component`](#probe_component).
 
-- **Parameters:** `pipeline` (object, required).
+- **Parameters:** `pipeline` (object, required). A `{"pipeline": {...}}`
+  wrapper is unwrapped, up to eight levels deep.
 - **Returns:** `{ok, errors: [], warnings: []}` — `ok` is true only when there
   are no errors. A rejection (`ok: false`) sets the MCP `isError` flag but is
   not the shared error envelope.
+- **Refused:** these come back as `BadRequest` before the engine sees them: the
+  single-component form `{version, component}` (the hint names
+  `probe_component`), a pipeline nested more than eight levels deep, a pipeline
+  with a `${...}` placeholder in a top-level key, and a pipeline with a `${`
+  that has no `}` after it in the same string. A placeholder such as
+  `${ROCKETRIDE_OPENAI_KEY}` inside a component's settings is checked as usual.
+
+### probe_component
+
+Test one component's settings against its provider. The tool sends the engine
+the single-component form `{version, component}`, the same check the node
+editor runs when it saves a node. The engine instantiates the provider and runs
+its own configuration check. Depending on the provider, that sends a small
+request to the configured model endpoint or API, connects to the configured
+database, or runs only local checks. A request to a model endpoint or API may
+be billed, so call it only when the user asks to test a component. It skips the
+control and lane checks, which need the whole pipeline.
+
+- **Parameters:** `component` (object, required): one component as it appears
+  in a pipeline's `components` list. `version` (integer, optional, default 1).
+- **Returns:** `{ok, errors: [], warnings: []}`, the same shape as
+  `validate_pipeline`. Nothing else from the engine's reply is returned. `ok`
+  is false only when `errors` is non-empty. A problem the provider reports,
+  such as a rejected key or a failed connection, can come back in `warnings`
+  with `ok: true`; report either one as a failed test. Some providers check
+  settings only locally, so `ok: true` with no warnings does not always mean a
+  key works.
 
 ### describe_pipeline
 
@@ -498,7 +523,7 @@ does.
 | `list_components` | true | false | false | Reads the engine catalog and the caller's variable names; writes nothing; bounded to this engine and account. |
 | `describe_component` | true | false | false | Reads one service definition and its credential readiness; writes nothing. |
 | `resolve_config` | true | false | false | Computes the merged config the engine would load for a component; nothing is saved. |
-| `validate_pipeline` | false | true | true | Whole-pipeline validation is a static engine check, but the accepted single-component form `{version, component}` runs that provider's own configuration probe inside the engine: LLM nodes send a small completion request to the configured endpoint, a charge that cannot be undone, and store nodes connect to the configured database with the supplied credentials. Destinations are caller-configured, so the tool is open-world. No run is started and nothing is saved. |
+| `validate_pipeline` | true | false | false | Checks a whole pipeline statically against this engine's catalog; runs no node code, starts no run and saves nothing. |
 | `describe_pipeline` | true | false | false | Parses caller-supplied pipeline JSON with best-effort catalog lookups; nothing is saved or run. |
 | `run_pipeline` | false | true | true | Starts a billable task whose nodes run caller-defined logic that can write, delete or send data to any service the pipeline names. |
 | `run_dropper_pipe` | false | true | true | Starts a billable task and returns public upload URLs; the pipeline's nodes can reach any external service it names. |
@@ -520,6 +545,7 @@ does.
 | `deploy_enable` | false | true | false | Re-arms the deployment's unpaused schedules, which start metered runs that cannot be undone; private registry. |
 | `deploy_disable` | false | true | false | Cancels every future scheduled run of the deployment (the kill switch); private registry. |
 | `deploy_remove` | false | true | false | Soft-removes the deployment and cancels its scheduled runs; versions and history are kept; private registry. |
+| `probe_component` | false | true | true | Runs the provider's own configuration probe inside the engine: LLM nodes send a small completion request to the configured endpoint, a charge that cannot be undone, and store nodes connect to the configured database with the supplied credentials. Destinations are caller-configured, so the tool is open-world. No run is started and nothing is saved. |
 | `monitor` | true | false | false | Polls task status; only the server's in-memory token bookkeeping changes when the task completes. |
 | `list_running_pipelines` | true | false | false | Lists the running tasks the caller is permitted to see on this engine. |
 | `log_chapters` | true | false | false | Reads persisted run-log metadata. |

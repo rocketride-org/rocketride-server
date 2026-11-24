@@ -11,6 +11,7 @@ import pytest
 from ai.modules.mcp import credentials as credentials_mod
 from ai.modules.mcp.tooling import ToolRegistry
 from ai.modules.mcp.tools import introspection
+from ai.modules.mcp.tools import probe
 from ai.modules.mcp.tools import register_all
 
 
@@ -348,21 +349,74 @@ async def test_validate_pipeline_keeps_explicit_version(fake_engine):
     assert fake_engine.validate_calls == [{'pipeline': {'pipeline': flat}, 'source': None}]
 
 
+def _wrapped(value, depth):
+    for _ in range(depth):
+        value = {'pipeline': value}
+    return value
+
+
+_COMPONENT_FORM = {'version': 1, 'component': {'id': 'c1', 'provider': 'llm_openai', 'config': {}}}
+
+
 @pytest.mark.asyncio
-async def test_validate_pipeline_passes_the_component_form_through_wrapped_once(fake_engine):
-    """This is the payload the engine routes to the provider probe; the hints and instructions describe that mode."""
-    component = {'id': 'c1', 'provider': 'llm_openai_api', 'config': {}}
+@pytest.mark.parametrize('depth', [0, 1, 2, 3, 8])
+async def test_validate_pipeline_refuses_the_component_form_at_any_accepted_depth(fake_engine, depth):
     registry = ToolRegistry()
     introspection.register(registry)
 
     result = await registry.handler('validate_pipeline')(
-        fake_engine, None, {'pipeline': {'version': 1, 'component': component}}
+        fake_engine, None, {'pipeline': _wrapped(_COMPONENT_FORM, depth)}
     )
 
-    assert fake_engine.validate_calls == [
-        {'pipeline': {'pipeline': {'version': 1, 'component': component}}, 'source': None}
-    ]
-    assert result['ok'] is True
+    assert result['error_type'] == 'BadRequest'
+    assert result['message'] == 'validate_pipeline takes a whole pipeline, not one component'
+    assert 'probe_component' in result['hint']
+    assert fake_engine.validate_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('flat', [{'components': []}, {'components': [], 'component': {'id': 'c1'}}])
+async def test_validate_pipeline_sends_a_whole_pipeline_nested_three_deep_once(fake_engine, flat):
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': _wrapped(flat, 3)})
+
+    assert fake_engine.validate_calls == [{'pipeline': {'pipeline': {**flat, 'version': 1}}, 'source': None}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('pipeline', 'refused'),
+    [
+        (_wrapped(_COMPONENT_FORM, 9), 'nested too deep'),
+        (_wrapped({'components': []}, 9), 'nested too deep'),
+        ({'version': 1, '${ROCKETRIDE_X}': {'id': 'c1'}}, 'placeholder in a top-level key'),
+        ({'x': '${A', 'components': [], 'y': '}', 'component': {'id': 'c1'}}, 'not closed'),
+    ],
+    ids=['component-nested-nine', 'pipeline-nested-nine', 'placeholder-in-top-level-key', 'placeholder-not-closed'],
+)
+async def test_validate_pipeline_refuses_before_any_engine_call(fake_engine, pipeline, refused):
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
+
+    assert result['error_type'] == 'BadRequest'
+    assert refused in result['message']
+    assert fake_engine.validate_calls == []
+
+
+@pytest.mark.asyncio
+async def test_validate_pipeline_sends_a_closed_placeholder_in_settings_unchanged(fake_engine):
+    config = {'apikey': '${ROCKETRIDE_OPENAI_KEY}'}
+    flat = {'version': 1, 'components': [{'id': 'llm_1', 'provider': 'llm_openai', 'config': config}]}
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': flat})
+
+    assert fake_engine.validate_calls == [{'pipeline': {'pipeline': flat}, 'source': None}]
 
 
 @pytest.mark.asyncio
@@ -655,3 +709,32 @@ async def test_validate_pipeline_reports_an_unknown_provider_once(fake_engine):
     result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
 
     assert result == {'ok': False, 'errors': [error], 'warnings': []}
+
+
+# --- probe_component -------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_probe_component_sends_the_component_form_and_returns_only_diagnostics(fake_engine):
+    error = {'type': 'x', 'message': 'bad key', 'id': 'c1'}
+    fake_engine._validate_result = {'errors': [error], 'warnings': [], 'component': {'id': 'c1'}}
+    component = {'id': 'c1', 'provider': 'llm_openai', 'config': {}}
+    registry = ToolRegistry()
+    probe.register(registry)
+
+    result = await registry.handler('probe_component')(fake_engine, None, {'component': component, 'version': 2})
+
+    assert fake_engine.validate_calls == [{'pipeline': {'version': 2, 'component': component}, 'source': None}]
+    assert result == {'ok': False, 'errors': [error], 'warnings': []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('args', [{}, {'component': 'llm_openai'}, {'component': {}, 'version': '1'}])
+async def test_probe_component_refuses_bad_arguments_before_any_engine_call(fake_engine, args):
+    registry = ToolRegistry()
+    probe.register(registry)
+
+    result = await registry.handler('probe_component')(fake_engine, None, args)
+
+    assert result['error_type'] == 'BadRequest'
+    assert fake_engine.validate_calls == []

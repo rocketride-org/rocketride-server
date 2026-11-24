@@ -21,9 +21,13 @@ reason, and `packages/ai/tests/ai/modules/mcp/test_tool_contract.py` pins the
 values. A new tool fails that test until it has hints and a row in
 `EXPECTED_HINTS`; add the same row to the Annotations table in
 `docs/public/mcp/http/tools.md`. A hint must cover every input form the tool
-accepts, including optional modes: `validate_pipeline` is a destructive,
-open-world write because of its single-component form, even though the whole
-pipeline form is static.
+accepts, including optional modes. That is why the single-component provider
+probe is its own destructive, open-world tool, `probe_component`, and
+`validate_pipeline` refuses that form and stays read-only. Its checks in
+`tools/introspection.py` decide on the form the engine will see: they unwrap
+nested `{"pipeline": ...}` envelopes the way the engine does, and refuse a
+pipeline with a `${...}` placeholder in a top-level key or one that is not
+closed.
 
 `always_load=True` (`_meta["anthropic/alwaysLoad"]`) is reserved for the core
 workflow tools. Name any other tool in `SERVER_INSTRUCTIONS` in `handlers.py`, so

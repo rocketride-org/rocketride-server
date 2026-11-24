@@ -2,12 +2,12 @@
 
 The tool-name/result-shape contract between these skills and the RocketRide HTTP MCP server.
 Derived from the registrations in `rocketride-server`'s `packages/ai/src/ai/modules/mcp/tools/*.py`
-on `develop` (merged in PR #2315), where `register_all` wires **33 tools** — every
+on `develop` (merged in PR #2315), where `register_all` wires **34 tools** — every
 one of them listed below. Deploy tools are on the deploy-2 SDK API.
 **Maintainer note:** this file is regenerated from the registrations, not pinned to a commit. The
 previous `origin/develop @ eb67ddea` pin was already inaccurate; if a pin is wanted, use the
 PR #2315 merge commit or a later one. The check that actually matters is `register_all` still
-registering exactly these 33 names.
+registering exactly these 34 names.
 The skills reference **only** names and shapes in this file; anything not listed here does not
 exist — never invent a tool.
 
@@ -24,7 +24,8 @@ the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JS
 | `list_components` | — | `{ok, components: [{name, category, summary, wiring?}], note?}`. **No `lanes`/`invoke`** — wire from the bundled L1 index. Components whose integration isn't configured are **hidden**, with `note` pointing at `list_integrations`. |
 | `describe_component` | `{name}` | Full service definition (the L2 schema). |
 | `resolve_config` | `{provider, config?}` | `{ok, ...engine resolution, hint?}` — what a component config actually becomes at load, after profile and default merging; omit `config` for defaults. Discarded keys come back as `dropped` plus a `hint` naming the profile they belong inside. |
-| `validate_pipeline` | `{pipeline}` (inline object) | `{ok, errors, warnings}` — the compiler. Zero errors before any run. |
+| `validate_pipeline` | `{pipeline}` (inline object, a whole pipeline) | `{ok, errors, warnings}`. The compiler: zero errors before any run. Static, contacts no provider. Refuses the single-component form with a hint to use `probe_component`. |
+| `probe_component` | `{component, version?}` | `{ok, errors, warnings}`. Runs one provider's configuration check, which can send a small request to the configured model endpoint or database. A rejected key or failed connection can come back in `warnings` with `ok: true`, so read both. Only when the user asks to test a component. |
 | `describe_pipeline` | `{pipeline}` | Static per-node summary (preflight aid, not a gate). |
 
 ## Execution
