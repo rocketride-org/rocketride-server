@@ -206,3 +206,6 @@ class AuthzRecheck:
         for notice in notices:
             notice.cancel()
         await asyncio.gather(*notices, return_exceptions=True)
+        # A notice that had already finished may still have its discard
+        # callback queued (gather of done tasks does not yield): drop it here.
+        self._notices.difference_update(notices)

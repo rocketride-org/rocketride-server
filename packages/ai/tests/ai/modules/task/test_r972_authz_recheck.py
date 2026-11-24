@@ -189,7 +189,9 @@ async def test_r972_1b_sweep_revokes_deleted_row(monkeypatch):
 
     conn._transport.disconnect.assert_called_once()
     assert conn._revoked is True
-    assert events(conn, 'apaext_account')[-1]['body']['sysPermissions'] == []
+    # Signed out, not waitlisted: no placeholder identity is pushed.
+    assert events(conn, 'apaext_account') == []
+    assert conn._account_info.userId == '' and conn._account_info.waitlisted is False
 
 
 @pytest.mark.asyncio
@@ -582,9 +584,6 @@ async def test_r972_1b_denied_warning_once_per_connection_per_minute(monkeypatch
 @pytest.mark.asyncio
 async def test_r972_1b_stop_ends_pending_notices(monkeypatch):
     """Shutdown leaves no orphaned revoke-notice task; each socket is still disconnected."""
-    from ai.modules.task import task_conn as task_conn_module
-
-    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 60.0)
     account, server, clock = _setup(monkeypatch, {})
     stuck = _admin(server, clock, 'gone')
     stuck._transport.send = never_returns
