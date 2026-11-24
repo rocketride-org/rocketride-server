@@ -27,9 +27,10 @@ is not offered (see its entry). This page is the full reference; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
   `send_files`, `terminate`) get 120 seconds per engine call. One tool call
   waits 200 seconds at most in all, which keeps it under the 240 seconds
-  Claude allows a call. When `run_pipeline` or `run_dropper_pipe` makes a
-  second engine call, that call gets only the time the first one left. The
-  cleanup that stops a dropper task with no upload link still gets 5 seconds.
+  Claude allows a call. `monitor` can add one second for its last poll.
+  When `run_pipeline` or `run_dropper_pipe` makes a second engine call, that
+  call gets only the time the first one left. The cleanup that stops a
+  dropper task with no upload link still gets 5 seconds.
 - **Per-caller identity.** Tools act as the account behind your credential —
   your store, your deployments, your environment variables, your run logs.
 - **Pipelines are inline-only.** Every `pipeline` parameter takes the pipeline
