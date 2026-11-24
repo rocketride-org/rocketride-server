@@ -22,17 +22,22 @@ import re
 from ai.web.access_log import REDACTED, is_sensitive_param, redact_text
 
 # A quoted value after a name. redact_text splits words at quotes, so it would
-# redact only the empty ``name=`` and keep the value after it. ``before`` is the
-# character in front of the name: when it is the same quote, that quote closes
-# an outer quote around ``name=``, and the text after it is not a value.
-_QUOTED = re.compile(r'(?P<before>^|[^\w.-])(?P<name>[\w.-]+)=(?P<value>"[^"]*"|\'[^\']*\')')
+# redact only the empty ``name=`` and keep the value after it. ``before`` and
+# ``after`` are the characters around the match. When ``name=`` sits inside a
+# quote of the same kind as the value's, the value must end right before that
+# outer quote closes (``'password='x''``). Otherwise the quote after ``name=``
+# closes the outer quote, and what follows is prose, not a value.
+_QUOTED = re.compile(r'(?P<before>^|[^\w.-])(?P<name>[\w.-]+)=(?P<value>"[^"]*"|\'[^\']*\')(?=(?P<after>.?))')
 _KEY = re.compile(r'\b(?:rr|rrr|rrmg)_[A-Za-z0-9_-]{20,}')
 _JWT = re.compile(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*')
 
 
 def _drop_quoted_credential(match: re.Match) -> str:
     """Leave ``name=`` for a credential name, so redact_text redacts it whole; keep anything else."""
-    if match['before'] == match['value'][0] or not is_sensitive_param(match['name']):
+    quote = match['value'][0]
+    if match['before'] == quote and match['after'] != quote:
+        return match.group(0)
+    if not is_sensitive_param(match['name']):
         return match.group(0)
     return match['before'] + match['name'] + '='
 
