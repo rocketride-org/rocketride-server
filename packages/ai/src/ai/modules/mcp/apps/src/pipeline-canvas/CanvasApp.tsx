@@ -761,10 +761,13 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 	// Once the browser has measured every node, place it again with the real
 	// sizes and the real frame, so nothing overlaps and a long flow wraps to
 	// suit the frame.
-	// A layout the widget made suits its frame, so it is made again for full screen and back.
-	const placedFor = useRef(active);
-	if (model.laidOut && placedFor.current !== active) {
-		placedFor.current = active;
+	// A layout the widget made suits its frame, so it is made again for full
+	// screen and back, and whenever the full-screen frame changes size: the
+	// mode can switch before the frame has its full-screen size.
+	const frameKey = active ? `${frameWidth}x${frameHeight}` : 'inline';
+	const placedFor = useRef(frameKey);
+	if (model.laidOut && placedFor.current !== frameKey) {
+		placedFor.current = frameKey;
 		placed.current = false;
 	}
 	useEffect(() => {
