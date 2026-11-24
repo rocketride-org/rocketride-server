@@ -485,6 +485,16 @@ class TestLiveUvicorn:
             _optional_backend('wsproto', 'wsproto'),
         ],
     )
+    # The `websockets` case runs uvicorn's legacy backend on purpose: a server
+    # started with `--ws websockets` must hide credentials too. uvicorn and
+    # the websockets package both announce that backend as deprecated; that
+    # is theirs to say and nothing this test can change. When uvicorn drops
+    # the backend, the case goes and these three filters with it.
+    @pytest.mark.filterwarnings(
+        'ignore:websockets.legacy is deprecated:DeprecationWarning',
+        'ignore:The `websockets` implementation is deprecated',
+        'ignore:remove second argument of ws_handler:DeprecationWarning',
+    )
     def test_websocket_lines_hide_credentials(self, ws):
         uvicorn = pytest.importorskip('uvicorn')
 

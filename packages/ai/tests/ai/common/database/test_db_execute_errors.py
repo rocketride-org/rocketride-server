@@ -43,7 +43,7 @@ import threading
 import pytest
 from sqlalchemy import MetaData, Table as SQLTable, Text, create_engine, event, insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
-from sqlalchemy.exc import DBAPIError, NoSuchTableError
+from sqlalchemy.exc import DBAPIError, NoSuchTableError, SAWarning
 from sqlalchemy.pool import StaticPool
 
 import ai.common.database.db_global_base as db_global_base_module
@@ -1508,8 +1508,13 @@ def test_insert_surfaces_the_drivers_refusal_of_an_ungenerated_primary_key(insta
     instance.execute({'sql': 'CREATE TABLE codes (code TEXT NOT NULL PRIMARY KEY, label TEXT)'})
     iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')}
 
-    with pytest.raises(RuntimeError) as excinfo:
-        instance._insertData([{'code': 'kept', 'label': 'first'}, {'label': 'second'}])
+    # SQLAlchemy announces the same condition before the database refuses it: a
+    # primary key column with no default and no value. That announcement is
+    # part of what this case provokes, so it is expected here, not left to
+    # surface in the run's warnings.
+    with pytest.warns(SAWarning, match="marked as a member of the primary key for table 'codes'"):
+        with pytest.raises(RuntimeError) as excinfo:
+            instance._insertData([{'code': 'kept', 'label': 'first'}, {'label': 'second'}])
 
     message = str(excinfo.value)
     assert 'NOT NULL constraint failed: codes.code' in message
