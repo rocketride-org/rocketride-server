@@ -1,0 +1,15 @@
+{
+  "name": "rocketride",
+  "displayName": "RocketRide",
+  "version": "1.0.0",
+  "description": "Build, check and run RocketRide data and AI pipelines from the Cursor agent, and read each run's logs and traces. Sign in with your RocketRide account.",
+  "author": {
+    "name": "RocketRide"
+  },
+  "homepage": "https://docs.rocketride.ai/",
+  "repository": "https://github.com/rocketride-org/rocketride-server",
+  "license": "MIT",
+  "logo": "assets/logo.png",
+  "keywords": ["rocketride", "pipelines", "data", "ai", "workflows", "mcp"],
+  "category": "developer-tools"
+}

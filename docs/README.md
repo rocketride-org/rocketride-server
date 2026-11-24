@@ -1,8 +1,9 @@
 # docs/
 
-Four folders, split by **audience**: `public/` is for people outside the repo,
+Five folders, split by **audience**: `public/` is for people outside the repo,
 `docusaurus/` is the docs site itself plus the pages that only exist for it,
-`development/` is for contributors, `agents/` is for AI assistants.
+`development/` is for contributors, `agents/` is for AI assistants, and
+`cursor/` is the plugin for Cursor's Marketplace.
 
 ## `public/` — humans outside the repo
 
@@ -82,6 +83,13 @@ outside-the-repo page that stays out of the site: they live in `apps/<app>/`
 - **`skills/`** — hand-curated pipeline-building skills. Not in the bundle.
 
 See `agents/README.md`.
+
+## `cursor/`
+
+The RocketRide plugin for Cursor, staged in `cursor/plugin/` until it moves to
+a repository of its own. It holds the manifest, the hosted server's URL, a logo
+and a README. It is not published to the site and not part of any bundle. See
+`cursor/README.md`.
 
 ## Rules
 
