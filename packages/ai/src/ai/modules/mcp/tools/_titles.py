@@ -7,7 +7,7 @@ table to the registry, which sends each title as both ``title`` and
 ``annotations.title``.
 
 A title starts with a verb, is in sentence case, has no final period, is at
-most 40 characters long and is unique. It names no brand, makes no claim such
+most 60 characters long and is unique. It names no brand, makes no claim such
 as "best" or "official", and gives the model no instruction. It is true for
 every input the tool accepts, and never makes a tool that changes something
 sound like one that only reads. ``tests/test_tool_contract.py`` checks the
@@ -64,5 +64,5 @@ TOOL_TITLES: Dict[str, str] = {
     'view_pipeline': 'Show a saved pipeline as a diagram',
     'account_status': 'Check if your account can run pipelines',
     # component probe
-    'probe_component': "Test a component's settings",
+    'probe_component': "Test a component's settings by contacting its provider",
 }

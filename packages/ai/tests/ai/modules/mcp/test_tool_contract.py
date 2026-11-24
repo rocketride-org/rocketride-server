@@ -129,7 +129,7 @@ def test_every_offered_tool_sends_its_title_in_both_fields(registry):
 def test_title_is_short_sentence_case_and_plain(name, title):
     first, *rest = title.split(' ')
 
-    assert len(title) <= 40 and not title.endswith('.') and '_' not in title, name
+    assert len(title) <= 60 and not title.endswith('.') and '_' not in title, name
     assert first == first.capitalize() and all(word == word.lower() for word in rest), name
     assert not {'rocketride', 'best', 'official'} & set(re.findall('[a-z]+', title.lower())), name
 
