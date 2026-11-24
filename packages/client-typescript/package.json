@@ -3,7 +3,7 @@
 	"version": "1.6.0",
 	"author": "RocketRide, Inc.",
 	"license": "MIT",
-	"description": "RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. TypeScript SDK and CLI.",
+	"description": "RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. TypeScript SDK and CLI.",
 	"type": "commonjs",
 	"main": "./dist/cjs/client/index.js",
 	"module": "./dist/esm/client/index.js",

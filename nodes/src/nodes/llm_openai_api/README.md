@@ -92,6 +92,13 @@ For `custom`, provide the API key expected by the configured endpoint. Nebius na
 profiles use `${ROCKETRIDE_NEBIUS_KEY}` by default; replace it only when the credential
 must be supplied directly in the node configuration.
 
+On a hosted engine that offers RocketRide-hosted models, a `custom` node with neither an API
+key nor a base URL runs on those models, the same way `llm_openai` does with an empty key (see
+the `llm_openai` README for the run's limits and team deployments). A node with its own base URL
+never uses them; on a hosted engine, such a node with no key stops before it sends a request and
+asks for the API key of its endpoint. Presets on this node, such as Nebius, always use their own
+settings.
+
 ## Notes
 
 ### Error handling and retries

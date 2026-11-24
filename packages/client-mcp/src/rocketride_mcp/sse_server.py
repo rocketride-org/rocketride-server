@@ -182,7 +182,7 @@ def main():
     logger.warning(
         'rocketride-mcp is deprecated: the RocketRide engine ships a built-in HTTP MCP server '
         'at https://api.rocketride.ai/mcp (self-hosted: http://<host>:5565/mcp). '
-        'See https://docs.rocketride.org/connect/mcp/http'
+        'See https://docs.rocketride.ai/connect/mcp/http'
     )
     parser = argparse.ArgumentParser(description='RocketRide MCP SSE Server')
     parser.add_argument('--host', default='localhost', help='Bind host (use 0.0.0.0 for all interfaces)')

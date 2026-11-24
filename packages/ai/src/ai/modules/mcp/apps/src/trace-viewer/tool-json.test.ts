@@ -17,7 +17,8 @@ describe('parseToolJson', () => {
 	});
 
 	it('throws on host-level isError', () => {
-		expect(() => parseToolJson({ isError: true, content: [{ type: 'text', text: 'boom' }] })).toThrow('boom');
+		const failed = { isError: true, content: [{ type: 'text', text: '{"error": "bridge failed"}' }] };
+		expect(() => parseToolJson(failed)).toThrow('The trace could not be read. Try again.');
 	});
 
 	it('throws on missing text content', () => {
@@ -37,13 +38,30 @@ describe('parseToolJson', () => {
 		}
 		expect(caught).toBeInstanceOf(ToolError);
 		expect((caught as ToolError).errorType).toBe('TraceExpired');
-		expect((caught as ToolError).message).toMatch(/retention window/);
+		expect((caught as ToolError).message).toMatch(/has expired/);
+	});
+
+	it('reads the plain message from an ok: false envelope that also has isError', () => {
+		// The server sets isError on every in-band failure, so this is the shape the widget gets.
+		const body = { ok: false, error_type: 'TraceExpired', message: 'trace 5 is below the retention horizon', hint: 'runs are evicted' };
+		let caught: unknown;
+		try {
+			parseToolJson({ ...(textResult(body) as object), isError: true });
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).toBeInstanceOf(ToolError);
+		expect((caught as ToolError).errorType).toBe('TraceExpired');
+		expect((caught as ToolError).message).toBe(
+			'This trace has expired. Run the pipeline again to record a new one.',
+		);
+		expect((caught as ToolError).message).not.toMatch(/[{}]/);
 	});
 });
 
 describe('friendlyToolError', () => {
 	it('translates TraceExpired', () => {
-		expect(friendlyToolError({ error_type: 'TraceExpired' })).toMatch(/retention window \(7 days dev \/ 30 days deploy\)/);
+		expect(friendlyToolError({ error_type: 'TraceExpired' })).toBe('This trace has expired. Run the pipeline again to record a new one.');
 	});
 	it('translates NotFound', () => {
 		expect(friendlyToolError({ error_type: 'NotFound' })).toMatch(/No recorded trace/);

@@ -461,7 +461,7 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 							<button style={iconBtn(`ex-${activeTab}`)} onClick={() => handleCopy(examples[activeTab], `ex-${activeTab}`)}>
 								{copyFeedback === `ex-${activeTab}` ? 'Copied!' : 'Copy'}
 							</button>
-							<button style={styles.iconBtn} onClick={() => onOpenLink?.('https://docs.rocketride.org/', 'RocketRide docs')}>
+							<button style={styles.iconBtn} onClick={() => onOpenLink?.('https://docs.rocketride.ai/', 'RocketRide docs')}>
 								Docs
 							</button>
 						</div>
