@@ -27,9 +27,17 @@ DEFAULT_MAX_CHARS = 40_000
 # with its nulled keys, and a log_read stub page all fit under it.
 MIN_MAX_CHARS = 1_000
 
-_DEFAULT_HINT = 'Ask for less: a smaller page, a narrower path, or fewer rows.'
+# One next step per tool that has an input to ask for less, and a default for the rest.
+_DEFAULT_HINT = (
+    'Calling this tool again with the same input returns this same error. Tell the user the result is too large '
+    'to show here.'
+)
 _HINTS = {
-    'store_read': 'To give the user the whole file, call store_get_url for a download link.',
+    'store_read': 'Calling store_read again returns this same error. To give the user the whole file, call '
+    'store_get_url for a download link.',
+    'store_list': 'Call store_list again on a folder inside this path.',
+    'deploy_list': 'Call deploy_list again with a smaller page_size, or narrow it with search.',
+    'deploy_versions': 'Call deploy_versions again with a smaller page_size.',
 }
 
 _max_chars = DEFAULT_MAX_CHARS
@@ -87,11 +95,14 @@ def too_large(tool: Optional[str], size: int) -> dict:
     ``tool`` must be a registered tool name or None: the envelope carries no
     caller text, so it always fits under the smallest accepted limit.
     """
+    sent = f'This server sends at most {_max_chars:,} characters in one reply, so none of the result was sent.'
+    message = f'The result of this call is {size:,} characters. {sent}'
+    if tool:
+        message = f'{tool} ran, but its result is {size:,} characters. {sent}'
     return {
         'ok': False,
         'error_type': 'ResultTooLarge',
-        'message': f'The result of {tool or "this tool"} is {size} characters, more than this server returns '
-        f'in one call ({_max_chars}).',
+        'message': message,
         'hint': _HINTS.get(tool or '', _DEFAULT_HINT),
     }
 

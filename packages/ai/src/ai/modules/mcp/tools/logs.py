@@ -35,10 +35,12 @@ LOG_TRACES_DEFAULT_N = 20
 
 # Sent in `truncated` when a trace list is cut to fit the result size limit.
 _TRACE_HINT = (
-    'Only the first events of this trace fit in one reply. To read the rest, call log_read with fromSeq set to '
-    'beginSeq.'
+    'Only the first events of this trace fit in one reply, and calling log_trace again returns the same events. '
+    'To read on, call log_read with fromSeq set to beginSeq and the keys in context. log_read returns every '
+    "object's events from that point, not only this trace's."
 )
-_TRACES_HINT = 'Not every trace fits in one reply. Call log_traces again with a smaller n.'
+# The engine lists traces oldest first, so the newest are the ones left out.
+_TRACES_HINT = 'Only the older traces fit in one reply. To see the newest ones, call log_traces again with a smaller n.'
 # The longest event name a stub keeps, so a stub page always fits the smallest limit.
 _STUB_EVENT_CHARS = 60
 

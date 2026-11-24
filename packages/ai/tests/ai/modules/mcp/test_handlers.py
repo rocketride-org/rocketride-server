@@ -361,6 +361,6 @@ async def test_a_result_over_the_size_limit_becomes_result_too_large(monkeypatch
     assert too_large.is_error is True
     assert json.loads(too_large.content[0].text) == too_large.structured_content
     assert too_large.structured_content['error_type'] == 'ResultTooLarge'
-    assert too_large.structured_content['message'].startswith('The result of big_tool is 500')
+    assert too_large.structured_content['message'].startswith('big_tool ran, but its result is 50,0')
     assert len(unknown.content[0].text) < 1000 and 'nnn' not in unknown.content[0].text
     assert whole.is_error is False and len(whole.structured_content['blob']) == 50_003

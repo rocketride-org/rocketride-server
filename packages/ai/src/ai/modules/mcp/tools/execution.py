@@ -44,8 +44,9 @@ _OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads', 'pipelineTra
 
 # Sent in `truncated` when a run's output is cut to fit the result size limit.
 _OUTPUT_HINT = (
-    'The output was too large to return whole. To read all of it, have the pipeline write its output to the '
-    'file store and read it with store_read.'
+    'The pipeline ran. Only the start of its output fits in one reply, and running it again will not return more. '
+    'To give the user all of it, have the pipeline write its output to the file store, then call store_get_url for '
+    'a download link.'
 )
 _OUTPUT_STEPS = (result_size.text('result'),)
 

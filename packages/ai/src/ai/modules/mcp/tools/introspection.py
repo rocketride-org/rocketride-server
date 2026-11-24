@@ -27,8 +27,8 @@ DESCRIBE_LOOKUP_BUDGET_SECONDS = 30
 
 # Sent in `truncated` when list_components is cut to fit the result size limit.
 _COMPONENTS_HINT = (
-    "Not every component fits in one reply. Call describe_component with a component's name to read about one "
-    'that is not listed.'
+    'Only the first components fit in one reply, and calling list_components again returns the same list. If the '
+    'user names a component that is not listed, call describe_component with that name.'
 )
 _COMPONENTS_STEPS = (result_size.rows('components'),)
 # Where a service definition lists one schema branch per profile.
@@ -95,9 +95,10 @@ def _profiles_note(section: str):
     def note(payload: dict, notes: Dict[str, Any], kept: int, full: list) -> None:
         notes[name] = {'returned': kept, 'total': len(full)}
         notes['hint'] = (
-            f'{section}.schema shows the settings of the first {kept} of {len(full)} profiles. Every profile name '
-            f'is still in {section}.schema.properties.profile.enum. To see what one profile resolves to, call '
-            'resolve_config with config {profile: <name>}.'
+            f'{section}.schema has the settings of only the first {kept} of {len(full)} profiles, and calling '
+            'describe_component again returns the same result. Every profile name is still in '
+            f'{section}.schema.properties.profile.enum. To see what one profile resolves to, call resolve_config '
+            'with this component as provider and config {"profile": "<name>"}.'
         )
 
     return note
