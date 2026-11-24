@@ -58,7 +58,7 @@
 	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "baidu-qianfan.svg",
-	"documentation": "https://docs.rocketride.org/nodes/llm_baidu_qianfan",
+	"documentation": "https://docs.rocketride.ai/nodes/llm_baidu_qianfan",
 	//
 	// Optional:
 	//		Rendering hints to the UI which indicate which fields of

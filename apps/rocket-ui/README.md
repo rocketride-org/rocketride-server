@@ -38,4 +38,4 @@ pipeline runs against your connected engine and every node reports back live.
 Rocket Builder is one app on the RocketRide platform. For the platform
 itself — engine, SDKs, cloud — see the
 [RocketRide repository](https://github.com/rocketride-org/rocketride-server)
-and [docs.rocketride.org](https://docs.rocketride.org/).
+and [docs.rocketride.ai](https://docs.rocketride.ai/).

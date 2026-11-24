@@ -234,7 +234,7 @@ def legacy_page_manifest() -> Dict[str, Any]:
                 'Build, run, and harness AI at rocket speed. From prototype to production. '
                 'Fully managed, predictable costs, true portability.'
             ),
-            'docsUrl': 'https://docs.rocketride.org/llms.txt',
+            'docsUrl': 'https://docs.rocketride.ai/llms.txt',
             'redirects': [{'from': source, 'to': target} for source, target in _LEGACY_REDIRECTS],
         },
     }

@@ -59,7 +59,7 @@
 	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "perplexity.svg",
-	"documentation": "https://docs.rocketride.org/nodes/llm_perplexity",
+	"documentation": "https://docs.rocketride.ai/nodes/llm_perplexity",
 	//
 	// Optional:
 	//		Rendering hints to the UI which indicate which fields of

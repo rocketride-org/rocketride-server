@@ -17,7 +17,7 @@
 		"use cases, from general-purpose entity recognition to specialized domains."
 	],
 	"icon": "util-text.svg",
-	"documentation": "https://docs.rocketride.org/nodes/ner",
+	"documentation": "https://docs.rocketride.ai/nodes/ner",
 	"lanes": {
 		"text": ["text"],
 		"documents": ["documents"]

@@ -13,7 +13,7 @@
 		"Markdown it produces and emitting the extracted key-value data."
 	],
 	"icon": "landing_ai.svg",
-	"documentation": "https://docs.rocketride.org/nodes/landing_ai/extract",
+	"documentation": "https://docs.rocketride.ai/nodes/landing_ai/extract",
 	"lanes": {
 		"text": ["answers", "documents"]
 	},

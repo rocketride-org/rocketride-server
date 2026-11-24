@@ -13,7 +13,7 @@
 		"path": "nodes.tool_github",
 		"prefix": "github",
 		"icon": "github.svg",
-		"documentation": "https://docs.rocketride.org/nodes/tool_github",
+		"documentation": "https://docs.rocketride.ai/nodes/tool_github",
 		"description": [
 			"Exposes GitHub repository operations as agent tools.",
 			"Covers files, issues, pull requests, reviews, releases, workflows, orgs, users,",

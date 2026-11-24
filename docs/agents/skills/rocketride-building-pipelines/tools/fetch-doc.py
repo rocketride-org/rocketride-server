@@ -33,15 +33,16 @@ resolves a topic to the single relevant page and fetches only that. It will NEVE
 llms-full.txt (~257K tokens) and caps any response so the context window is safe.
 
 Usage:
-  python3 fetch-doc.py "<topic>"        # e.g. "llm_openai", "use method", "error handling"
+  python3 fetch-doc.py "<topic>"        # e.g. "llm_openai", "error handling"
   python3 fetch-doc.py /nodes/llm_openai.md   # explicit path (fetched as-given; may 404 if unmapped)
+  python3 fetch-doc.py /clients/typescript/pipelines.md   # TypeScript use() and running pipelines
   python3 fetch-doc.py --list "<topic>"       # just list matching pages, don't fetch
 
-Live-first (fetches the fresh page from docs.rocketride.org); on no-network / non-200 it falls
+Live-first (fetches the fresh page from docs.rocketride.ai); on no-network / non-200 it falls
 back to the mapped bundled snapshot and tells you which file to read. Topic lookups resolve URLs
 from the bundled doc-map only — the tool does not invent paths. An explicit /path.md argument is
 the exception: it is fetched as-given even when unmapped, and an unmapped path may simply 404
-(e.g. /develop/use.md is a 404; the real path is /develop/typescript/methods/use.md).
+(e.g. /develop/use.md is a 404; the TypeScript use() page is /clients/typescript/pipelines.md).
 """
 
 import sys
@@ -51,7 +52,7 @@ import json
 import urllib.request
 import urllib.error
 
-BASE = 'https://docs.rocketride.org'
+BASE = 'https://docs.rocketride.ai'
 SIZE_CAP = 80_000  # bytes; a single doc page is ~1.5-8KB. Truncate anything larger.
 TIMEOUT = 20
 

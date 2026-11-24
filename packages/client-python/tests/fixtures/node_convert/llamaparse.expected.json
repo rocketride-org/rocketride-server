@@ -23,7 +23,7 @@
 			"structure-preserving parsing with page and coordinate data."
 		],
 		"icon": "llamaindex_icon.svg",
-		"documentation": "https://docs.rocketride.org/nodes/llamaparse",
+		"documentation": "https://docs.rocketride.ai/nodes/llamaparse",
 		"tile": [],
 		"lanes": {
 			"tags": [

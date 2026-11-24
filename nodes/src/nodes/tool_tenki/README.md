@@ -105,7 +105,8 @@ That access can change every secret and policy in the workspace, so give the nod
 > - A session paused and resumed from outside the node can leave it unreachable until the pipeline
 >   restarts.
 > - Secret injection needs an image with Luxor's managed HTTPS trust.
-> - IPv4 ranges in **Allowed outbound domains** are refused.
+> - IP addresses and ranges are refused in **Allowed outbound domains** and in the private
+>   repositories' URL prefix: the egress filter matches hostnames only.
 > - **Tool groups** are not a security boundary.
 
 ## Upstream docs
