@@ -73,9 +73,10 @@ def _check_wire_value(label: str, value: str) -> None:
 def _pattern_pins_https_host(source: str) -> bool:
     """Whether a whitelist pattern starts with a literal https scheme and one exact host.
 
-    Mirrors the head of the request-time authority grammar in IInstance: an
-    optional anchor, ``https://``, then a literal (escaped) DNS or IPv4 host or
-    a bracketed IPv6 literal, followed by a port, path, query, group, or end.
+    Mirrors the head of the request-time authority grammar in
+    ``ai.common.utils.url_policy``: an optional anchor, ``https://``, then a
+    literal (escaped) DNS or IPv4 host or a bracketed IPv6 literal, followed
+    by a port, path, query, group, or end.
     Anything that can widen the host (an unescaped dot, class, group,
     alternation, or quantifier) does not pin it.
     """

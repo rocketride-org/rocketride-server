@@ -346,18 +346,40 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
     return frozenset(names), tuple(prefixes)
 
 
+# Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
+# in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The
+# datacore grant key would let pipeline code mint a grant for any tenant's
+# database, and the broker token is the provisioner's bearer under the name
+# production sets today (ROCKETRIDE_DB_BROKER_TOKEN, also popped in
+# _build_subprocess_env) and the operator-only name it is moving to
+# (RR_DB_BROKER_TOKEN). rocketride-saas #975. The server's own API key and its
+# MCP credential are what every client presents to this server: pipeline code
+# holding them could act as the server's operator.
+CONST_SUBPROCESS_ENV_NEVER = frozenset(
+    {
+        'RR_DATACORE_GRANT_KEY',
+        'RR_DB_BROKER_TOKEN',
+        'ROCKETRIDE_DB_BROKER_TOKEN',
+        'RR_APIKEY',
+        'RR_MCP_ENGINE_AUTH',
+    }
+)
+
+
 def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
     """Return the subset of ``environ`` a task subprocess may inherit.
 
     Names are matched case-insensitively: Windows treats them that way, and the
     POSIX proxy variables are conventionally lowercase. Original spelling is
-    kept in the result.
+    kept in the result. Names in CONST_SUBPROCESS_ENV_NEVER are never passed.
     """
     opt_names, opt_prefixes = _subprocess_env_opt_in(environ)
     prefixes = CONST_SUBPROCESS_ENV_PREFIXES + opt_prefixes
     allowed: Dict[str, str] = {}
     for name, value in environ.items():
         key = name.upper()
+        if key in CONST_SUBPROCESS_ENV_NEVER:
+            continue
         if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
             allowed[name] = value
     return allowed

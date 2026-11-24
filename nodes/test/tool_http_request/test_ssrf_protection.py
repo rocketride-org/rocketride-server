@@ -3,7 +3,13 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Regression tests for HTTP-tool SSRF protections."""
+"""Regression tests for HTTP-tool SSRF protections.
+
+The address rules and the pinned transport live in
+``ai.common.utils.pinned_http`` (tested in packages/ai); these tests pin the
+node's contract on top of them: URL checks, error types, and that every
+request goes through the validated addresses.
+"""
 
 from __future__ import annotations
 
@@ -32,35 +38,8 @@ def _dns_result(address: str) -> tuple:
 
 def _mock_dns(monkeypatch: pytest.MonkeyPatch, *addresses: str) -> Mock:
     resolver = Mock(return_value=[_dns_result(address) for address in addresses])
-    monkeypatch.setattr(http_client.socket, 'getaddrinfo', resolver)
+    monkeypatch.setattr(socket, 'getaddrinfo', resolver)
     return resolver
-
-
-def test_requests_exposes_secure_adapter_hook():
-    """The installed Requests API must support the pinned connection adapter."""
-    assert hasattr(http_client.HTTPAdapter, 'get_connection_with_tls_context')
-    assert hasattr(http_client.HTTPAdapter, 'build_connection_pool_key_attributes')
-    assert http_client.HTTPConnectionPool.ConnectionCls is http_client.HTTPConnection
-    assert http_client.HTTPSConnectionPool.ConnectionCls is http_client.HTTPSConnection
-    assert hasattr(http_client.HTTPConnection, '_new_conn')
-    assert hasattr(http_client.HTTPSConnection, '_new_conn')
-
-
-@pytest.mark.parametrize(
-    'version_info,expected',
-    [
-        ((3, 10, 14), False),
-        ((3, 10, 15), True),
-        ((3, 11, 9), False),
-        ((3, 11, 10), True),
-        ((3, 12, 3), False),
-        ((3, 12, 4), True),
-        ((3, 13, 0), True),
-    ],
-)
-def test_ipaddress_runtime_security_patch_floor(version_info, expected):
-    """Known-vulnerable Python patch levels fail closed before URL validation."""
-    assert http_client._has_safe_ipaddress_runtime(version_info) is expected
 
 
 @pytest.mark.parametrize(
@@ -94,7 +73,7 @@ def test_validate_public_url_rejects_non_public_addresses(monkeypatch, address):
     """Loopback, private, link-local, shared, unspecified, and multicast addresses are blocked."""
     _mock_dns(monkeypatch, address)
 
-    with pytest.raises(ValueError, match='non-public network address'):
+    with pytest.raises(ValueError, match='non-public'):
         http_client._validate_public_url('https://service.example/data')
 
 
@@ -102,17 +81,17 @@ def test_validate_public_url_rejects_mixed_public_and_private_dns(monkeypatch):
     """One unsafe DNS answer blocks the host even when another answer is public."""
     _mock_dns(monkeypatch, '93.184.216.34', '10.0.0.8')
 
-    with pytest.raises(ValueError, match='non-public network address'):
+    with pytest.raises(ValueError, match='non-public'):
         http_client._validate_public_url('https://service.example/data')
 
 
 @pytest.mark.parametrize(
     'url,error',
     [
-        ('http://2130706433/', 'non-public network address'),
-        ('http://0x7f000001/', 'non-public network address'),
+        ('http://2130706433/', 'non-public'),
+        ('http://0x7f000001/', 'non-public'),
         ('http://public.example@127.0.0.1/', 'userinfo'),
-        ('http://[::ffff:127.0.0.1]/', 'non-public network address'),
+        ('http://[::ffff:127.0.0.1]/', 'non-public'),
     ],
 )
 def test_validate_public_url_rejects_disguised_loopback_hosts(monkeypatch, url, error):
@@ -170,101 +149,27 @@ def test_validate_public_url_rejects_malformed_or_unsupported_urls(url, error):
 def test_validate_public_url_rejects_dns_failure(monkeypatch):
     """An unresolved host fails closed instead of reaching requests for a second lookup."""
     resolver = Mock(side_effect=socket.gaierror('not found'))
-    monkeypatch.setattr(http_client.socket, 'getaddrinfo', resolver)
+    monkeypatch.setattr(socket, 'getaddrinfo', resolver)
 
-    with pytest.raises(http_client.requests.ConnectionError, match='could not be resolved'):
+    with pytest.raises(http_client.requests.ConnectionError, match='Unresolved'):
         http_client._validate_public_url('https://missing.example/data')
 
 
 def test_validate_public_url_rejects_empty_dns_answer(monkeypatch):
     """A resolver response without usable addresses fails closed."""
-    monkeypatch.setattr(http_client.socket, 'getaddrinfo', Mock(return_value=[]))
+    monkeypatch.setattr(socket, 'getaddrinfo', Mock(return_value=[]))
 
-    with pytest.raises(http_client.requests.ConnectionError, match='could not be resolved'):
+    with pytest.raises(http_client.requests.ConnectionError, match='Unresolved'):
         http_client._validate_public_url('https://missing.example/data')
 
 
 def test_validate_public_url_rejects_invalid_resolver_address(monkeypatch):
     """Unexpected resolver output cannot bypass address classification."""
     result = (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('not-an-address', 443))
-    monkeypatch.setattr(http_client.socket, 'getaddrinfo', Mock(return_value=[result]))
+    monkeypatch.setattr(socket, 'getaddrinfo', Mock(return_value=[result]))
 
-    with pytest.raises(http_client.requests.ConnectionError, match='invalid network address'):
+    with pytest.raises(http_client.requests.ConnectionError, match='invalid address'):
         http_client._validate_public_url('https://service.example/data')
-
-
-def test_pinned_connection_reuses_validated_dns_address(monkeypatch):
-    """A later private DNS answer cannot replace the public address that was validated."""
-    resolver = Mock(
-        side_effect=[
-            [_dns_result('93.184.216.34')],
-            [_dns_result('127.0.0.1')],
-        ]
-    )
-    monkeypatch.setattr(http_client.socket, 'getaddrinfo', resolver)
-    validated = http_client._validate_public_url('https://service.example/data')
-
-    class FakeSocket:
-        def __init__(self):
-            self.connected_to = None
-
-        def setsockopt(self, *_args):
-            pass
-
-        def settimeout(self, _timeout):
-            pass
-
-        def bind(self, _source_address):
-            pass
-
-        def connect(self, sockaddr):
-            self.connected_to = sockaddr
-
-        def close(self):
-            pass
-
-    fake_socket = FakeSocket()
-    monkeypatch.setattr(http_client.socket, 'socket', Mock(return_value=fake_socket))
-    connection = http_client._PinnedHTTPSConnection(
-        'service.example',
-        443,
-        timeout=1,
-        validated_addresses=validated,
-    )
-
-    assert connection._new_conn() is fake_socket
-    assert resolver.call_count == 1
-    assert fake_socket.connected_to == ('93.184.216.34', 443)
-    assert connection.host == 'service.example'
-
-
-def test_pinned_adapter_keeps_original_https_hostname():
-    """The pinned pool retains the original host for Host, SNI, and certificate verification."""
-    addresses = ((socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, ('93.184.216.34', 443)),)
-    adapter = http_client._PinnedAddressAdapter(addresses)
-    request = http_client.requests.Request('GET', 'https://service.example/data').prepare()
-
-    pool = adapter.get_connection_with_tls_context(request, verify=True, proxies={})
-
-    assert isinstance(pool, http_client._PinnedHTTPSConnectionPool)
-    assert pool.host == 'service.example'
-    assert pool.conn_kw['validated_addresses'] == addresses
-    adapter.close()
-
-
-def test_pinned_adapter_builds_plain_http_connection_without_tls_options():
-    """TLS-only kwargs never reach urllib3's plain HTTP connection class."""
-    addresses = ((socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, ('93.184.216.34', 80)),)
-    adapter = http_client._PinnedAddressAdapter(addresses)
-    request = http_client.requests.Request('GET', 'http://service.example/data').prepare()
-
-    pool = adapter.get_connection_with_tls_context(request, verify=True, proxies={})
-    connection = pool._new_conn()
-
-    assert isinstance(pool, http_client._PinnedHTTPConnectionPool)
-    assert isinstance(connection, http_client._PinnedHTTPConnection)
-    assert not set(http_client.SSL_KEYWORDS).intersection(pool.conn_kw)
-    adapter.close()
 
 
 def test_execute_plain_http_request_through_pinned_transport(monkeypatch):
@@ -304,88 +209,13 @@ def test_execute_plain_http_request_through_pinned_transport(monkeypatch):
     assert server.received_host == f'service.example:{port}'
 
 
-def test_pinned_adapter_rejects_explicit_proxy():
-    """A proxy cannot take over destination resolution after validation."""
-    addresses = ((socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, ('93.184.216.34', 443)),)
-    adapter = http_client._PinnedAddressAdapter(addresses)
-    request = http_client.requests.Request('GET', 'https://service.example/data').prepare()
-
-    with pytest.raises(http_client.ProxyError, match='Proxies are not supported'):
-        adapter.get_connection_with_tls_context(
-            request,
-            verify=True,
-            proxies={'https': 'http://proxy.example:8080'},
-        )
-
-    adapter.close()
-
-
-def test_pinned_transport_ignores_environment_proxies(monkeypatch):
-    """Environment proxy settings cannot move DNS and connection control outside the node."""
-    session = Mock()
-    session.trust_env = True
-    session.__enter__ = Mock(return_value=session)
-    session.__exit__ = Mock(return_value=False)
-    session.request = Mock(return_value=Mock())
-    monkeypatch.setattr(http_client.requests, 'Session', Mock(return_value=session))
-    addresses = ((socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, ('93.184.216.34', 443)),)
-
-    http_client._request_with_validated_addresses(
-        {'url': 'https://service.example/data', 'method': 'GET'},
-        addresses,
-    )
-
-    assert session.trust_env is False
-    session.mount.assert_called_once()
-
-
-@pytest.mark.parametrize(
-    'environment,expected',
-    [
-        ({}, True),
-        ({'REQUESTS_CA_BUNDLE': '/custom/requests-ca.pem'}, '/custom/requests-ca.pem'),
-        ({'CURL_CA_BUNDLE': '/custom/curl-ca.pem'}, '/custom/curl-ca.pem'),
-        (
-            {
-                'REQUESTS_CA_BUNDLE': '/custom/requests-ca.pem',
-                'CURL_CA_BUNDLE': '/custom/curl-ca.pem',
-            },
-            '/custom/requests-ca.pem',
-        ),
-    ],
-)
-def test_pinned_transport_preserves_custom_ca_bundle(monkeypatch, environment, expected):
-    """Custom CA files remain usable without re-enabling proxies or netrc."""
-    monkeypatch.delenv('REQUESTS_CA_BUNDLE', raising=False)
-    monkeypatch.delenv('CURL_CA_BUNDLE', raising=False)
-    for name, value in environment.items():
-        monkeypatch.setenv(name, value)
-
-    session = Mock()
-    session.trust_env = True
-    session.verify = True
-    session.__enter__ = Mock(return_value=session)
-    session.__exit__ = Mock(return_value=False)
-    session.request = Mock(return_value=Mock())
-    monkeypatch.setattr(http_client.requests, 'Session', Mock(return_value=session))
-    addresses = ((socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, ('93.184.216.34', 443)),)
-
-    http_client._request_with_validated_addresses(
-        {'url': 'https://service.example/data', 'method': 'GET'},
-        addresses,
-    )
-
-    assert session.trust_env is False
-    assert session.verify == expected
-
-
 def test_execute_request_blocks_private_destination_before_network(monkeypatch):
     """A direct request to an unsafe destination never reaches requests."""
     _mock_dns(monkeypatch, '169.254.169.254')
     request = Mock()
     monkeypatch.setattr(http_client, '_request_with_validated_addresses', request)
 
-    with pytest.raises(ValueError, match='non-public network address'):
+    with pytest.raises(ValueError, match='non-public'):
         http_client.execute_request(url='http://169.254.169.254/latest/meta-data/', method='GET')
 
     request.assert_not_called()
@@ -485,6 +315,20 @@ def test_execute_request_rejects_encoded_path_param_traversal(monkeypatch):
             path_params={'id': '../admin'},
         )
 
+    request.assert_not_called()
+
+
+@pytest.mark.parametrize('query_params', [None, {'page': '2'}])
+def test_execute_request_rejects_port_zero_before_requests_drops_it(monkeypatch, query_params):
+    """Requests drops an explicit ":0" while preparing; the URL as given is refused instead of reaching port 443."""
+    resolver = _mock_dns(monkeypatch, '93.184.216.34')
+    request = Mock()
+    monkeypatch.setattr(http_client, '_request_with_validated_addresses', request)
+
+    with pytest.raises(ValueError, match='port'):
+        http_client.execute_request(url='https://service.example:0/data', method='GET', query_params=query_params)
+
+    resolver.assert_not_called()
     request.assert_not_called()
 
 

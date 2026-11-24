@@ -21,7 +21,7 @@
 </p>
 
 <p>
- RocketRide gives you one place to compose, debug, observe, and deploy AI runtimes from the tools you already use: your IDE, your terminal or your coding agent. Use any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It harnesses the whole stack behind your AI applications, not only the agents.</strong>
+ RocketRide gives you one place to compose, debug, observe, and deploy AI runtimes from the tools you already use: your IDE, your terminal, your coding agent or MCP. Use any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It harnesses the whole stack behind your AI applications, not only the agents.</strong>
 </p>
 
 <p>
@@ -80,7 +80,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 | **Pipeline Nodes**                | LLM providers, vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, build and publish your own.                                                          |
 | **Multi-Agent Workflows**         | Built-in CrewAI and LangChain support. Chain agents, share memory across pipeline runs, and manage multi-step reasoning at scale.                                                                                                    |
 | **Coding Agent Ready**            | RocketRide auto-detects your coding agent: Claude, Cursor, and more. Build, modify, and deploy pipelines through natural language.                                                                                                  |
-| **TypeScript, Python & MCP SDKs** | Integrate pipelines into native apps, expose them as callable tools for AI assistants, or build programmatic workflows into your existing codebase.                                                                                  |
+| **TypeScript & Python SDKs, MCP Server** | Integrate pipelines into native apps, drive the engine through the built-in MCP server, or build programmatic workflows into your existing codebase.                                                                                 |
 | **Zero Dependency Headaches**     | Python environments, C++ toolchains, Java/Tika, and all node dependencies managed automatically. Clone, build, run, no manual setup.                                                                                                |
 | **One-Click Deploy**              | Run on Docker, on-prem, or [RocketRide Cloud](https://cloud.rocketride.ai/). Production-ready architecture from day one, not retrofitted from a demo.                                                                               |
 

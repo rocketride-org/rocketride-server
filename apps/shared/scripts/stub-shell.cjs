@@ -43,11 +43,18 @@ const stub = {
 	// An open dialog, drawn in place (the real one portals): title, body, footer.
 	Modal: ({ title, children, footer }) =>
 		React.createElement('div', { role: 'dialog' }, React.createElement('h2', null, title), children, footer),
+	// registerBuiltinTool contributes settings for builtins that declare a
+	// configuration; the test runner has no settings registry to receive them.
+	registerSettings: () => () => {},
 };
 
 // step: intercept CJS loads of the shell specifier before tsx resolves it
 const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
 	if (request === 'shell') return stub;
+	// Bundler `?url` asset imports (tool icons) stand in as their own request
+	// string — the URL the bundler would emit. A require.extensions hook can't
+	// do this: tsx claims unknown extensions as JS after the preload runs.
+	if (request.endsWith('?url')) return request;
 	return origLoad.call(this, request, parent, isMain);
 };

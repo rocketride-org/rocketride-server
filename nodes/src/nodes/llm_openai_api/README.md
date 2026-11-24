@@ -11,7 +11,8 @@ LM Studio, and others) but do not have a dedicated RocketRide node. Used primari
 directly via lanes.
 
 Built on **langchain-openai** (`ChatOpenAI`) over the official **openai** SDK. The chat
-client is created with `temperature: 0` for deterministic output, and `max_tokens` is set
+client sends `temperature: 0` for deterministic output unless the node sets another value
+(see Temperature under Configuration), and `max_tokens` is set
 from the shared LLM base's output-token budget (default 4096, minimum 1024). When
 `base_url` is empty, the SDK falls back to the default OpenAI endpoint.
 
@@ -33,7 +34,7 @@ then set its context limit, output limit, API key and base URL. Choose the Nebiu
 when using Token Factory; it offers a **Model** selector whose listed models pin the model
 id and context limit.
 
-The model and its token limits are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and base URL and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call.
+The model, its token limits and the temperature are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and base URL and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call, though it may set the temperature.
 
 ### Generic OpenAI-compatible endpoints
 
@@ -41,6 +42,24 @@ Set `base_url` to the provider's OpenAI-compatible API root and `model` to its e
 model identifier. When `base_url` is empty, the OpenAI SDK uses its default endpoint.
 Use a positive `modelTotalTokens` value that matches the selected model; it starts at
 32,768 tokens. Leave `modelOutputTokens` empty to keep the 4,096-token default.
+
+### Temperature
+
+`temperature` (0 to 2, default 0) is sent with every request.
+
+Some models run only at their own default and reject any other value: newer Claude
+models (Opus 4.7 and 4.8, and the Claude 5 models), OpenAI's reasoning models such as
+`o3`, and a gateway deployment in front of one, where the node only sees the deployment
+name. When the endpoint answers HTTP 400 or 422 and names `temperature`, the node sends
+the same request once more without a temperature. If that request goes through, the node
+writes a warning and leaves the temperature out of that model's requests for the rest of
+the run, so the model runs at its own default; the first request of such a run is
+therefore refused once. A call that names another model still sends that model its
+temperature. If the second request is refused as well, the node keeps its value and
+reports that second refusal, which names what the endpoint still does not accept. This
+retry does not send a request again for any other refusal.
+
+The Nebius preset does not show the field. It sends 0 and recovers the same way.
 
 ### Nebius preset
 
@@ -92,6 +111,10 @@ the shared LLM base's default retry and mapping logic.
 server with a mocked `langchain_openai`, so no real API key is required.
 `RR_MOCK` must point to `nodes/test/mocks`.
 
+`nodes/test/llm_openai_api/test_openai_api_temperature.py` runs the real driver and the
+real `langchain-openai` client against a local HTTP server that refuses a temperature the
+way OpenAI, Anthropic and LiteLLM do, and checks the request bodies. It needs no key.
+
 ---
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
@@ -108,6 +131,7 @@ server with a mocked `langchain_openai`, so no real API key is required.
 | `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai_api.profile` | `string` | **Model**<br/>Profile selection | `"custom"` |
+| `temperature` | `number` | **Temperature**<br/>Sampling temperature: 0 is generally more deterministic, higher values increase variety. Some models run only at their own default and reject any other value (newer Claude models, OpenAI's reasoning models, and gateways in front of them). The node then sends the request again without a temperature and, if that goes through, warns and leaves it out of that model's requests for the rest of the run. | `0` |
 
 ### Nebius (`services.nebius.json`)
 

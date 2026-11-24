@@ -1450,6 +1450,54 @@ def test_filter_subprocess_env_passes_the_mocks_and_not_the_servers_own_keys():
     assert env == {'RR_MOCK': '/mocks'}
 
 
+_OPT_INS = ['', 'RR_*', '*', 'ROCKETRIDE_*']
+
+
+@pytest.mark.parametrize('opt_in', _OPT_INS + ['RR_DATACORE_GRANT_KEY,RR_DB_BROKER_TOKEN,ROCKETRIDE_DB_BROKER_TOKEN'])
+def test_no_opt_in_forwards_a_datacore_credential(opt_in):
+    """The datacore grant key mints a grant for ANY tenant and the broker
+    token is the provisioner's bearer (rocketride-saas #975): no operator
+    opt-in hands either to pipeline code.
+    """
+    secrets = {'RR_DATACORE_GRANT_KEY', 'RR_DB_BROKER_TOKEN', 'ROCKETRIDE_DB_BROKER_TOKEN'}
+    env = filter_subprocess_env(
+        {
+            'RR_DATACORE_GRANT_KEY': 'grant-key',
+            'RR_DB_BROKER_TOKEN': 'broker-token',
+            'ROCKETRIDE_DB_BROKER_TOKEN': 'broker-token',
+            'rocketride_db_broker_token': 'broker-token',
+            'ROCKETRIDE_X': '1',
+            'RR_OTHER': 'x',
+            'RR_SUBPROCESS_ENV': opt_in,
+        }
+    )
+    assert not {name.upper() for name in env} & secrets
+    # The ROCKETRIDE_* namespace still reaches the child, minus the token.
+    assert env.get('ROCKETRIDE_X') == '1'
+
+
+@pytest.mark.parametrize('opt_in', _OPT_INS + ['RR_APIKEY,RR_MCP_ENGINE_AUTH'])
+def test_no_opt_in_forwards_the_servers_own_credentials(opt_in):
+    """The server's API key and its MCP credential are what a client presents
+    to this server: no operator opt-in hands either to pipeline code, a bare
+    '*' included.
+    """
+    env = filter_subprocess_env(
+        {
+            'RR_APIKEY': 'server-key',
+            'rr_apikey': 'server-key',
+            'RR_MCP_ENGINE_AUTH': 'mcp-key',
+            'RR_OTHER': 'x',
+            'PATH': '/usr/bin',
+            'RR_SUBPROCESS_ENV': opt_in,
+        }
+    )
+    assert not {name.upper() for name in env} & {'RR_APIKEY', 'RR_MCP_ENGINE_AUTH'}
+    assert env.get('PATH') == '/usr/bin'
+    # What the opt-in asked for beyond the two still passes
+    assert ('RR_OTHER' in env) == (opt_in in ('RR_*', '*'))
+
+
 # ---------------------------------------------------------------------------
 # resolve_parameter_tokens — the child gets values, not tokens it cannot read
 # ---------------------------------------------------------------------------

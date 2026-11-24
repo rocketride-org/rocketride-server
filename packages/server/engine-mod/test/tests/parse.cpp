@@ -223,6 +223,103 @@ TEST_CASE("store::parse") {
         REQUIRE(!table.empty());
         REQUIRE(table.contains("TableFallbackTest"));
     }
+
+    //-----------------------------------------------------------------
+    // Ends the filters while an object is still open and its data is
+    // incomplete: the end stops the tika thread and returns. If it does
+    // not, this section hangs in disconnect(): these tests have no watchdog
+    //-----------------------------------------------------------------
+    SECTION("end with an object open") {
+        ParseFilterTest filter;
+
+        // Build and connect the endpoint
+        REQUIRE_NO_ERROR(filter.connect());
+
+        // Get a source pipe, open a dummy object on it
+        auto pipe = filter.openObject("test.txt"_tv, Entry::FLAGS::INDEX);
+        REQUIRE_NO_ERROR(pipe);
+
+        // Begin a stream and leave it open, so the tika thread waits for
+        // more data
+        const char *pText = "This object is never closed";
+        REQUIRE_NO_ERROR(filter.writeTagBeginStream(*pipe));
+        REQUIRE_NO_ERROR(
+            filter.writeTagData(*pipe, strlen(pText), (void *)pText));
+
+        // The end returns although the object was never closed
+        REQUIRE_NO_ERROR(filter.disconnect());
+    }
+
+    //-----------------------------------------------------------------
+    // Data that reaches parse after its end fails instead of being
+    // dropped: the end completed the buffer, so nothing parses it. An
+    // instance lives one binding here, so the ended instance is on no pipe
+    // and the binder refuses the touch (InvalidCommand) before parse's own
+    // Cancelled, which a caller still inside the binding gets
+    //-----------------------------------------------------------------
+    SECTION("write after the end") {
+        ParseFilterTest filter;
+        REQUIRE_NO_ERROR(filter.connect());
+
+        auto pipe = filter.openObject("test.txt"_tv, Entry::FLAGS::INDEX);
+        REQUIRE_NO_ERROR(pipe);
+
+        // Write part of the data, then end the filters
+        const char *pText = "Part of the data";
+        REQUIRE_NO_ERROR(filter.writeTagBeginStream(*pipe));
+        REQUIRE_NO_ERROR(
+            filter.writeTagData(*pipe, strlen(pText), (void *)pText));
+        REQUIRE_NO_ERROR(filter.endFilters(*pipe));
+
+        REQUIRE_ERROR(filter.writeTagData(*pipe, strlen(pText), (void *)pText),
+                      Ec::InvalidCommand);
+
+        REQUIRE_NO_ERROR(filter.disconnect());
+    }
+
+    //-----------------------------------------------------------------
+    // Opening an object on a pipe whose parse has ended fails: the binder
+    // refuses it, as above
+    //-----------------------------------------------------------------
+    SECTION("open after the end") {
+        ParseFilterTest filter;
+        REQUIRE_NO_ERROR(filter.connect());
+
+        // Take a pipe and an entry, then end the filters
+        auto pipe = filter.getPipe();
+        REQUIRE_NO_ERROR(pipe);
+        auto entry = filter.getDummyEntry("test.txt"_tv);
+        REQUIRE_NO_ERROR(filter.endFilters(*pipe));
+
+        REQUIRE_ERROR(pipe->open(entry), Ec::InvalidCommand);
+
+        REQUIRE_NO_ERROR(filter.disconnect());
+    }
+
+    //-----------------------------------------------------------------
+    // A data tag after the object was closed, once parse has ended, fails
+    // although parse has no current object: the binder refuses it, as above
+    //-----------------------------------------------------------------
+    SECTION("data after close at the end") {
+        ParseFilterTest filter;
+        REQUIRE_NO_ERROR(filter.connect());
+
+        auto pipe = filter.openObject("test.txt"_tv, Entry::FLAGS::INDEX);
+        REQUIRE_NO_ERROR(pipe);
+
+        // Parse the object to its close, then end the filters
+        const char *pText = "This object is closed";
+        REQUIRE_NO_ERROR(filter.writeTagBeginStream(*pipe));
+        REQUIRE_NO_ERROR(
+            filter.writeTagData(*pipe, strlen(pText), (void *)pText));
+        REQUIRE_NO_ERROR(filter.closeObject(*pipe));
+        REQUIRE_NO_ERROR(filter.endFilters(*pipe));
+
+        REQUIRE_ERROR(filter.writeTagData(*pipe, strlen(pText), (void *)pText),
+                      Ec::InvalidCommand);
+
+        REQUIRE_NO_ERROR(filter.disconnect());
+    }
 }
 
 /*------------------------------------------------------------------

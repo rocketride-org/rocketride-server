@@ -108,6 +108,15 @@
 			"title": "Output Tokens",
 			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
 			"minimum": 1024
+		},
+		"llm_openai_api.temperature": {
+			"param": true,
+			"type": "number",
+			"title": "Temperature",
+			"description": "Sampling temperature: 0 is generally more deterministic, higher values increase variety. Some models run only at their own default and reject any other value (newer Claude models, OpenAI's reasoning models, and gateways in front of them). The node then sends the request again without a temperature and, if that goes through, warns and leaves it out of that model's requests for the rest of the run.",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 2
 		}
 	},
 	//
@@ -119,7 +128,8 @@
 		"llm_openai_api.modelTotalTokens",
 		"llm_openai_api.modelOutputTokens",
 		"llm_openai_api.apikey",
-		"llm_openai_api.base_url"
+		"llm_openai_api.base_url",
+		"llm_openai_api.temperature"
 	],
 	//
 	// Optional:
