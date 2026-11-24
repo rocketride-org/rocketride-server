@@ -4,7 +4,7 @@
   "title": "RocketRide",
   "description": "Open source AI meta-harness with an enterprise-grade C++ runtime. Build and run pipelines over MCP.",
   "version": "3.7.0",
-  "websiteUrl": "https://docs.rocketride.org/",
+  "websiteUrl": "https://docs.rocketride.ai/",
   "repository": {
     "url": "https://github.com/rocketride-org/rocketride-server",
     "source": "github"
