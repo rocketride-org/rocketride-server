@@ -1,0 +1,129 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Confluence",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_confluence://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		"experimental" marks this node as not yet production-ready — the request
+	//		and response shapes here are read from Atlassian's API reference, but no
+	//		live Confluence site has exercised it end-to-end.
+	//
+	"capabilities": ["invoke", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_confluence",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "confluence",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "confluence.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_confluence",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes Confluence Cloud (CQL search, pages) as agent tools.", "Search with CQL, read a page as plain text, and create or update pages using an Atlassian account email and API token."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Confluence",
+				"base_url": "",
+				"email": "",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"tool_confluence.base_url": {
+			"type": "string",
+			"title": "Site URL",
+			"description": "Confluence Cloud base URL including /wiki, e.g. https://your-site.atlassian.net/wiki",
+			"default": ""
+		},
+		"tool_confluence.email": {
+			"type": "string",
+			"title": "Account Email",
+			"description": "Email of the Atlassian account that owns the API token",
+			"default": ""
+		},
+		"tool_confluence.apikey": {
+			"type": "string",
+			"title": "API Token",
+			"description": "Atlassian API token (from https://id.atlassian.com/manage-profile/security/api-tokens)",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	//
+	//	Test configuration for automated node testing.
+	//	Credentials are placeholders, config validation is tested here, not live
+	//	API calls (no verified Confluence site to test against).
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder key",
+				"text": "test query"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Confluence",
+			"properties": ["type", "tool_confluence.base_url", "tool_confluence.email", "tool_confluence.apikey"]
+		}
+	]
+}
