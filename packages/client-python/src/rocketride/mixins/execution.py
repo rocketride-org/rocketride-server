@@ -58,7 +58,7 @@ import json
 import copy
 import os
 from typing import Dict, Any, List, Optional, Union
-from ..core import DAPClient
+from ..core import CommandException, DAPClient
 from ..core.constants import SUBMIT_INLINE_MAX
 from ..core.exceptions import PipeException
 from ..types.pipeline import SUBMIT_RESULT, PipelineConfig, PipelineTraceLevel
@@ -585,7 +585,7 @@ class ExecutionMixin(DAPClient):
         )
         response = await self.request(request)
         if self.did_fail(response):
-            raise RuntimeError(response.get('message', 'Restart failed'))
+            raise CommandException({**response, 'message': response.get('message') or 'Restart failed'})
 
     async def get_task_status(self, token: str) -> TASK_STATUS:
         """

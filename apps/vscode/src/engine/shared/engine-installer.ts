@@ -22,6 +22,7 @@
  *   <parentDir>/engine/
  *     engine.exe | engine           — engine binary
  *     ai/eaas.py                    — Python entrypoint
+ *   <parentDir>/nodes/rocketride-nodes-v*.zip — the node archive the server's nodes/index.json names
  *   <parentDir>/version.*.json        — { tag, publishedAt } installed version
  *     install.lock                  — cross-process lockfile
  *     engine-<pid>.pid              — written by EngineManager per running process
@@ -37,6 +38,7 @@ import * as lockfile from 'proper-lockfile';
 import { execFile, execFileSync } from 'child_process';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
+import { commitStagedRelease, fetchNodeArchive, missingNodeArchive, nodeArchiveOf } from './node-archive';
 
 // =============================================================================
 // TYPES
@@ -151,6 +153,11 @@ export class EngineInstaller {
 		return path.join(path.dirname(this.engineDir), '.installing');
 	}
 
+	/** The nodes/ directory beside engine/, which holds the release's node archive. */
+	private nodesDir(): string {
+		return path.join(this.parentDir, 'nodes');
+	}
+
 	/** Path to the version tracking file in the parent directory. */
 	private versionJsonPath(): string {
 		return path.join(this.parentDir, this.versionFileName);
@@ -260,6 +267,7 @@ export class EngineInstaller {
 		try {
 			if (fs.existsSync(this.engineDir)) {
 				fs.rmSync(this.engineDir, { recursive: true, force: true });
+				fs.rmSync(this.nodesDir(), { recursive: true, force: true });
 				this.logger.output(`${icons.info} Engine uninstalled from ${this.engineDir}`);
 			}
 		} finally {
@@ -276,8 +284,8 @@ export class EngineInstaller {
 	 *
 	 * 1. Fetch the target release from GitHub
 	 * 2. Compare tag against installed version file — skip if same
-	 * 3. Clear engine/ contents (preserve lockfile and PID files)
-	 * 4. Extract new archive into engine/
+	 * 3. Stage the new server and its node archive beside engine/
+	 * 4. Clear engine/ contents (preserve lockfile and PID files) and move the staged release in
 	 * 5. Write version file
 	 */
 	private async installUnderLock(
@@ -298,6 +306,11 @@ export class EngineInstaller {
 		} catch {
 			// GitHub unreachable — use what's already installed if we have it
 			if (installed && fs.existsSync(exePath)) {
+				// An engine installed by an extension that did not fetch the node archive cannot run its nodes
+				const missing = missingNodeArchive(this.engineDir, this.nodesDir());
+				if (missing) {
+					throw new Error(`The installed server reads ${missing}, which is not in ${this.nodesDir()}, and GitHub cannot be reached to download it`);
+				}
 				this.logger.output(`${icons.info} Could not check for updates, using installed version`);
 				return exePath;
 			}
@@ -306,6 +319,8 @@ export class EngineInstaller {
 
 		// --- Already up to date? ---
 		if (installed && installed.tag === releaseInfo.tag_name && fs.existsSync(exePath)) {
+			// An engine installed by an extension that did not fetch the node archive
+			await this.installNodeArchive(releaseInfo, progress, token, githubToken);
 			const displayTag = releaseInfo.tag_name.replace(/^server-/, '');
 			this.logger.output(`${icons.success} Engine ${displayTag} already installed`);
 			return exePath;
@@ -320,8 +335,8 @@ export class EngineInstaller {
 	// =========================================================================
 
 	/**
-	 * Downloads a release archive, clears the engine directory, extracts the
-	 * new version, writes version file, and returns the executable path.
+	 * Downloads a release archive and its node archive, then clears the engine
+	 * directory, moves the new version in, writes version file, and returns the executable path.
 	 */
 	private async downloadAndInstall(
 		release: ReleaseInfo,
@@ -335,6 +350,9 @@ export class EngineInstaller {
 		const asset = this.findPlatformAsset(release);
 		this.logger.output(`${icons.info} Found release ${displayVersion}: ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)`);
 
+		const staging = path.join(this.parentDir, '.staging');
+		const stagedEngine = path.join(staging, 'engine');
+
 		// Download to a temp file
 		const tmpPath = path.join(os.tmpdir(), `rocketride-engine-${Date.now()}${asset.name.endsWith('.zip') ? '.zip' : '.tar.gz'}`);
 
@@ -343,15 +361,24 @@ export class EngineInstaller {
 			await this.downloadAsset(asset, tmpPath, displayVersion, progress, token, githubToken);
 			this.throwIfCancelled(token);
 
+			// The server and its node archive are both staged beside engine/ before the installed ones are
+			// touched, so a failed download leaves a working install; the same volume, so they move by rename
+			await fs.promises.rm(staging, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 });
+			fs.mkdirSync(stagedEngine, { recursive: true });
+			progress?.report({ message: 'Extracting server...' });
+			await this.extractArchive(tmpPath, stagedEngine);
+			const archive = nodeArchiveOf(stagedEngine);
+			const stagedArchive = archive ? path.join(staging, archive) : null;
+			if (archive && stagedArchive) {
+				await this.downloadNodeArchive(release, archive, stagedArchive, progress, token, githubToken);
+			}
+			this.throwIfCancelled(token);
+
 			// Clear existing engine contents (preserve lockfile and PID files).
 			// FATAL on a locked survivor — never extract over a dirty tree.
 			fs.rmSync(this.versionJsonPath(), { force: true });
 			await this.clearEngineDir();
-
-			// Extract into engine/
-			fs.mkdirSync(this.engineDir, { recursive: true });
-			progress?.report({ message: 'Extracting server...' });
-			await this.extractArchive(tmpPath, this.engineDir);
+			await commitStagedRelease(stagedEngine, this.engineDir, stagedArchive, this.nodesDir());
 
 			// Set executable permissions on Unix
 			const exePath = this.getExecutablePath();
@@ -383,7 +410,43 @@ export class EngineInstaller {
 			} catch {
 				// Ignore cleanup errors
 			}
+			// Async with retries, as in clearEngineDir; a cleanup failure must not hide the install's own error
+			await fs.promises.rm(staging, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 }).catch(() => undefined);
 		}
+	}
+
+	/**
+	 * Puts the node archive the server's nodes/index.json names in <parentDir>/nodes, beside
+	 * engine/, where EaaS reads the nodes a run asks for. A server whose index names none needs nothing.
+	 */
+	private async installNodeArchive(
+		release: ReleaseInfo,
+		progress?: vscode.Progress<{ message?: string; increment?: number }>,
+		token?: vscode.CancellationToken,
+		githubToken?: string
+	): Promise<void> {
+		const archive = missingNodeArchive(this.engineDir, this.nodesDir());
+		if (!archive) return;
+
+		await fetchNodeArchive(this.nodesDir(), archive, (staging) => this.downloadNodeArchive(release, archive, staging, progress, token, githubToken));
+	}
+
+	/** Downloads the release's node archive to dest. */
+	private async downloadNodeArchive(
+		release: ReleaseInfo,
+		archive: string,
+		dest: string,
+		progress?: vscode.Progress<{ message?: string; increment?: number }>,
+		token?: vscode.CancellationToken,
+		githubToken?: string
+	): Promise<void> {
+		const asset = release.assets.find(a => a.name === archive);
+		if (!asset) throw new Error(`Release ${release.tag_name} has no ${archive}, the node archive its server reads`);
+
+		const displayVersion = release.tag_name.replace(/^server-/, '');
+		progress?.report({ message: `Downloading the nodes of ${displayVersion}...` });
+		await this.downloadAsset(asset, dest, displayVersion, progress, token, githubToken);
+		this.logger.output(`${icons.success} Nodes ${archive} downloaded`);
 	}
 
 	/**

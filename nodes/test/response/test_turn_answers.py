@@ -62,6 +62,89 @@ def test_text_and_json_answers_are_written_as_before():
     assert node.instance.currentObject.response['answers'] == ['hello', {'message': 'a JSON answer, not a turn'}]
 
 
+def test_text_answers_keep_their_tokens_beside_them():
+    """The entries stay plain strings, their counts are summed under `tokens`, and that key is not a lane."""
+    node = _response_node()
+    first, second, bare = Answer(), Answer(), Answer()
+    first.setAnswer('one')
+    first.tokens = {'input': 100, 'output': 10, 'cache_read': 50, 'cache_creation': 0, 'model': 'gpt-5.4'}
+    second.setAnswer('two')
+    second.tokens = {
+        'input': 7,
+        'output': 3,
+        'cache_read': 0,
+        'cache_creation': 20,
+        'model': 'gpt-5.4',
+        'calls': 2,
+        'breakdown': [],
+    }
+    bare.setAnswer('three')  # no counts: adds nothing
+
+    for answer in (first, second, bare):
+        node.writeAnswers(answer)
+
+    response = node.instance.currentObject.response
+    assert response['answers'] == ['one', 'two', 'three']
+    assert response['tokens'] == {'input': 107, 'output': 13, 'cache_read': 50, 'cache_creation': 20}
+    assert 'tokens' not in response['result_types']
+
+
+def test_a_count_that_is_not_a_number_does_not_fail_the_answer():
+    """An answer written from outside may carry anything as a count; its text is kept and the real counts are summed."""
+    node = _response_node()
+    good, odd = Answer(), Answer()
+    good.setAnswer('one')
+    good.tokens = {'input': 5, 'output': 2, 'cache_read': 0, 'cache_creation': 0}
+    odd.setAnswer('two')
+    odd.tokens = {'input': 'unknown', 'output': 3.0, 'cache_read': float('nan'), 'cache_creation': True}
+
+    for answer in (good, odd):
+        node.writeAnswers(answer)
+
+    response = node.instance.currentObject.response
+    assert response['answers'] == ['one', 'two']
+    assert response['tokens'] == {'input': 5, 'output': 5, 'cache_read': 0, 'cache_creation': 0}
+
+
+def test_a_count_too_large_to_be_one_does_not_fail_the_answer():
+    """The result object takes a whole number up to 2**31 - 1; a count beyond it is left out, not a failed write."""
+    node = _response_node()
+    answer = Answer()
+    answer.setAnswer('one')
+    answer.tokens = {'input': 10**400, 'output': 1, 'cache_read': 1e300, 'cache_creation': 2**31}
+
+    node.writeAnswers(answer)
+
+    response = node.instance.currentObject.response
+    assert response['answers'] == ['one']
+    assert response['tokens'] == {'input': 0, 'output': 1, 'cache_read': 0, 'cache_creation': 0}
+
+
+def test_the_sum_of_many_large_counts_stays_within_what_the_result_holds():
+    """Each count may be as large as a count can be; their sum is held at that bound."""
+    node = _response_node()
+    for text in ('one', 'two', 'three'):
+        answer = Answer()
+        answer.setAnswer(text)
+        answer.tokens = {'input': 2**31 - 1, 'output': 1}
+        node.writeAnswers(answer)
+
+    response = node.instance.currentObject.response
+    assert response['answers'] == ['one', 'two', 'three']
+    assert response['tokens'] == {'input': 2**31 - 1, 'output': 3, 'cache_read': 0, 'cache_creation': 0}
+
+
+def test_the_bound_is_what_the_engines_result_object_takes():
+    """The engine stores a whole number as a 32-bit int. If it comes to take more, the bound can move with it."""
+    from response.IInstance import _MAX_COUNT
+
+    result = rocketlib.IJson()
+    result['tokens'] = {'input': _MAX_COUNT}
+    assert result['tokens']['input'] == _MAX_COUNT
+    with pytest.raises(RuntimeError, match='Unable to cast'):
+        result['tokens'] = {'input': _MAX_COUNT + 1}
+
+
 def _anthropic_chat(monkeypatch, bodies):
     pytest.importorskip('langchain_anthropic')
     import langchain_anthropic.chat_models as lca

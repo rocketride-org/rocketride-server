@@ -88,7 +88,7 @@ export interface ShellConnectionState {
  * // surface in its disconnected/empty state instead.
  * const { client, isConnected } = useShellConnection();
  * const ready = isConnected && client !== null;
- * return <Toolbar onRun={ready ? () => client!.restart({ token }) : undefined} />;
+ * return <Toolbar onRun={ready ? () => client!.restart({ token, projectId, source, pipeline }) : undefined} />;
  * ```
  */
 export function useShellConnection(): ShellConnectionState {

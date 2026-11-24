@@ -569,7 +569,12 @@ async def _serve_versioned(request: Request, kind: str, artifact_id: str, versio
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
     media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
-    return Response(content=data, media_type=media_type, headers={'Cache-Control': _BUNDLE_CACHE})
+    headers = {'Cache-Control': _BUNDLE_CACHE}
+    if media_type == 'text/html':
+        # Pages reach search through the shell; an HTML file of the build (a snapshot's raw template, wherever
+        # the manifest put it, .htm or any case included) is never one to index.
+        headers['X-Robots-Tag'] = 'noindex'
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 async def artifacts_session(request: Request):

@@ -68,7 +68,7 @@ Choose the generic HTTP Results service when one response needs several lane typ
 
 For HTTP Results, each `lanes` entry maps a lane identifier to a result key of one to 32 characters. Use distinct keys when a client needs to distinguish returned types without consulting `result_types`; leave a lane unmapped to use its lane type as the key. In a single-lane service, the top-level `laneName` takes precedence over the `lanes` mapping, so set it only when every arriving result should use the same key.
 
-A result key cannot be `result_types`, `name`, `path`, `metadata`, `objectId`, `error` or `status`: the result object already holds those, so lane data under one of them would be overwritten or break the node. Validating the configuration warns about such a key, and the node refuses to start with one.
+A result key cannot be `result_types`, `name`, `path`, `metadata`, `objectId`, `error`, `status` or `tokens`: the result object already holds those, so lane data under one of them would be overwritten or break the node. Validating the configuration warns about such a key, and the node refuses to start with one.
 
 ---
 
@@ -84,11 +84,14 @@ The JSON object returned to the client has the following structure:
   "path": "/some/directory",
   "metadata": { "...": "..." },
   "your_key": [ "...data..." ],
-  "result_types": { "your_key": "answers" }
+  "result_types": { "your_key": "answers" },
+  "tokens": { "input": 107, "output": 13, "cache_read": 50, "cache_creation": 20 }
 }
 ```
 
 Each configured result key holds an array: one element per result produced for the object. `result_types` maps each configured key back to its original lane type, so clients can identify the kind of data each key contains even when custom key names are used. The `name`, `path`, and `metadata` fields are only present when the processed object carries those attributes; `metadata` excludes all Tika-derived keys.
+
+`tokens` holds the token counts of the text and JSON answers in this result, summed over them: `input`, `output`, `cache_read` and `cache_creation`. It is absent when no such answer reported counts (a cached answer, a model that reports none), so a missing key means "not known", not zero. A count that is not a number, or is larger than 2,147,483,647 (the largest whole number the result holds), is left out of the sum. An answer that is a turn (an entry with `message`, `stopReason` or `error`) carries its own `tokens` inside the entry and is not part of this sum. `tokens` is not a lane, so it has no entry in `result_types`.
 
 For the multimedia lanes (`image`, `audio`, `video`) each array element is a media entry with the same shape — the base64 stream under the lane key plus the stream descriptor:
 

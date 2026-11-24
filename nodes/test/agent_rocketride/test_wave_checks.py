@@ -403,6 +403,107 @@ def test_a_checking_agent_whose_run_failed_is_not_a_pass(wave, monkeypatch):
     assert answer == 'synthesized', 'the run must not finish on an unchecked change'
 
 
+WORKER = 'worker.run_agent'
+
+
+def _agent_result(**meta):
+    """What an agent called as a tool returns: a normal answer, with its stop reason in meta if it has one."""
+    return {
+        'content': 'Half a brief: Acme exists.',
+        'meta': {'agent_id': 'worker', **meta},
+        'stack': [{'kind': 'RocketRide.agent.raw.v1', 'payload': {}}],
+    }
+
+
+def _worker_entry(wave, result):
+    """The parent's result entry for one call to a worker that returns *result*."""
+    host = SimpleNamespace(call_tool=lambda context, tool, args: result)
+    context = SimpleNamespace(memory=SimpleNamespace(put=lambda key, value: {'ok': True}))
+    entries = wave.executor.execute_wave(
+        [_call(WORKER, query='brief')],
+        agent_base=host,
+        context=context,
+        wave_name='wave-0',
+        state=wave.run_state.RunState(),
+    )
+    return entries[0]
+
+
+@pytest.mark.parametrize('reason', ['max_waves', 'empty_plan', 'max_iterations', 'max_tokens', 'a_future_reason'])
+def test_a_worker_that_did_not_finish_is_marked_failed(wave, reason):
+    """Its best-effort text reads like an answer, so only the stop reason says the work is incomplete."""
+    entry = _worker_entry(wave, _agent_result(stop_reason=reason))
+
+    assert entry['failed'] is True
+    assert 'error' not in entry, 'the call returned: it failed by its result, it did not raise'
+
+
+@pytest.mark.parametrize('meta', [{'stop_reason': 'done'}, {}], ids=['done', 'no-reason'])
+def test_a_worker_that_finished_or_reports_nothing_is_not_failed(wave, meta):
+    """Not every driver reports a stop reason, so a missing one must not read as a failure."""
+    assert 'failed' not in _worker_entry(wave, _agent_result(**meta))
+
+
+def _run_parent(wave, monkeypatch, replies, **config):
+    """Run the parent's wave loop over planner *replies*, with every worker call out of waves."""
+    planned = iter(replies)
+    monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: dict(next(planned), remove=[]))
+    driver = _driver(wave)
+    results = {WORKER: _agent_result(stop_reason='max_waves')}
+    driver.call_tool = lambda context, tool, args: results.get(tool, {'ok': True})
+    driver.sendSSE = lambda *a, **kw: None
+    driver._synthesize = lambda **kw: 'synthesized'
+    memory = SimpleNamespace(put=lambda key, value: {'ok': True})
+    # The wave limit and the check tool are the call's settings, so they ride on its context
+    context = _context(wave, WORKER, 'workspace.write', memory=memory, max_waves=len(replies), **config)
+    return driver._run(context=context, question=None)
+
+
+def test_a_checking_agent_that_ran_out_of_waves_is_not_a_pass(wave, monkeypatch):
+    """It reached no verdict, so the change before it is still unchecked and done is sent back."""
+    answer, trace = _run_parent(
+        wave,
+        monkeypatch,
+        [
+            {'done': False, 'asked_done': False, 'tool_calls': [_call('workspace.write', path='a')]},
+            {'done': False, 'asked_done': False, 'tool_calls': [_call(WORKER)]},
+            {'done': True, 'asked_done': True, 'answer': 'Done.', 'tool_calls': []},
+        ],
+        verify_tool=WORKER,
+    )
+
+    assert trace['waves'][1]['results'][0]['failed'] is True
+    assert trace['waves'][2]['results'][-1]['error'].startswith(f'Not finished: call {WORKER} on its own')
+    assert answer == 'synthesized', 'the run must not finish on an unchecked change'
+
+
+def test_a_done_reply_is_sent_back_when_its_worker_did_not_finish(wave, monkeypatch):
+    """A reply that sets done beside a call stands only if the call worked."""
+    answer, trace = _run_parent(
+        wave,
+        monkeypatch,
+        [{'done': True, 'asked_done': True, 'answer': 'The brief is ready.', 'tool_calls': [_call(WORKER)]}],
+    )
+
+    assert trace['waves'][0]['results'][0]['failed'] is True
+    assert answer == 'synthesized'
+    assert trace['stop_reason'] == 'max_waves'
+
+
+def test_the_fallback_answer_is_told_the_worker_did_not_finish(wave):
+    """The last model call must not write up a worker's partial text as finished work."""
+    prompts = []
+    driver = object.__new__(wave.rocketride_agent.RocketRideDriver)
+    driver.call_llm = lambda context, prompt: prompts.append(prompt.getPrompt()) or 'fallback answer'
+    question = wave.rocketride_agent.Question()
+    question.addQuestion('Write the brief.')
+    entry = _worker_entry(wave, _agent_result(stop_reason='max_waves'))
+
+    driver._synthesize(question=question, waves=[{'results': [entry]}], context=SimpleNamespace())
+
+    assert f'- {WORKER}: FAILED (the result reports a failure)' in prompts[0]
+
+
 class _Engine:
     """The engine side of the host's tool catalog: one tool node, whose tool list can grow."""
 

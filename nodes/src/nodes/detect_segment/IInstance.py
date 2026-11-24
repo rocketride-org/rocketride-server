@@ -229,6 +229,12 @@ class IInstance(IInstanceBase):
 
         Returns:
             preventDefault() on END to suppress default forwarding; None otherwise.
+
+        Raises:
+            RuntimeError: On END, the frame could not be decoded, processed or written;
+                the message names the cause.
+            Exception: An engine error raised through a lane write, for example by a
+                downstream node, re-raised unchanged with its own code, text and location.
         """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor (provenance), not image bytes.
@@ -249,7 +255,11 @@ class IInstance(IInstanceBase):
                 debug(f'segment: infer={(time.perf_counter() - t0) * 1000:.0f}ms')
                 self._emit(image, result)
             except Exception as exc:
-                warning(f'detect_segment: dropping frame due to inference error: {exc}')
+                # A downstream node's engine error: keep its own code, text and location
+                if hasattr(exc, '__formatted'):
+                    raise
+                cause = str(exc) or type(exc).__name__
+                raise RuntimeError(f'detect_segment failed to process the input frame: {cause}') from exc
             finally:
                 self._image_data = None
             return self.preventDefault()

@@ -206,7 +206,8 @@ public:
         const Text &type) noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr>
     getServiceDefinitionFromService(const json::Value &service) noexcept;
-    static ErrorOr<json::Value> getServiceSchemas() noexcept;
+    static ErrorOr<json::Value> getServiceSchemas(
+        bool includeInternal = false) noexcept;
 
     //-----------------------------------------------------------------
     ///	@details

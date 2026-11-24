@@ -15,7 +15,9 @@ What the SDK throws, when, and how to catch it.
 | Transport loss and connection failures (including during login) | `ConnectionException` |
 | Data-pipe errors (open / write / close) | `PipeException` |
 | A login superseded, logged out, or detached mid-flight | `LoginAttemptCancelledError` |
-| Most argument and server-rejection errors (`use()`, `getService()`, DAP failures) | plain `Error` |
+| A command the server refuses: `use()`, `validate()`, `convert()`, `restart()`, or any `call()` | `CommandException`; `code` says why, when the server sends one |
+| A `submit()` the server refuses | `PipeException`, with the server's `code` |
+| Argument errors, and a refused `terminate()` or `getTaskStatus()` | plain `Error` |
 | `sendFiles` with a non-positive `maxConcurrent` | `RangeError` |
 | `Answer.getJson()` on non-JSON content | throws |
 
@@ -60,6 +62,7 @@ DAPException                    # Base DAP protocol error
 └── RocketRideException         # Base for all RocketRide errors
     ├── ConnectionException     # Connection/network issues
     │   └── AuthenticationException  # Bad API key or credentials
+    ├── CommandException        # The server refused a command
     ├── PipeException           # Data pipe errors
     ├── ExecutionException      # Reserved: defined but not currently thrown
     └── ValidationException     # Reserved: defined but not currently thrown
@@ -94,8 +97,8 @@ try {
 }
 ```
 
-In practice most failures outside the connection/pipe paths surface as plain
-`Error` with a descriptive message — write handlers that catch the specific
-classes above first and fall back to `Error`. `ExecutionException` and
+A command the server refuses throws `CommandException`, and a refused `submit()`
+a `PipeException`; argument errors are plain `Error` — write handlers that catch
+the specific classes above first and fall back to `Error`. `ExecutionException` and
 `ValidationException` exist and are exported but the SDK does not currently throw
 them; don't write handlers that rely on them.

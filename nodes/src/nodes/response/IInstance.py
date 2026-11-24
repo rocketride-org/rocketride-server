@@ -21,7 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import List
+from typing import Any, Dict, List, Optional
+import math
 import os
 import base64
 
@@ -30,7 +31,46 @@ from ai.common.schema import Doc, Question, Answer
 from ai.common.avi.descriptor import descriptor_from_payload, source_media_detail
 from rocketlib import AVI_ACTION, Entry
 
-from .IValidator import configured_keys, reserved_key_error
+from .IValidator import TOKENS_RESULT_KEY, configured_keys, reserved_key_error
+
+# The four disjoint billing counts report_llm_tokens writes (llm_adapter.py); `model`, `calls` and
+# `breakdown` are left out, so one answer and several sum to the same shape.
+_BILLING_COUNTS = ('input', 'output', 'cache_read', 'cache_creation')
+
+
+# The largest whole number the result object takes: the engine stores one as a 32-bit int
+# (IJson.cpp), and assigning a larger one raises. Measured: 2**31 - 1 is stored, 2**31 is refused.
+_MAX_COUNT = 2**31 - 1
+
+
+def _count(value: Any) -> int:
+    """One billing count as a whole number; a value that is not a usable number counts as none.
+
+    An answer written from outside is parsed without a check on its counts (``Answer.tokens`` is a
+    dict of anything), and its text is in the result by the time the counts are summed: a count
+    such as ``"unknown"`` or ``10**400`` must not fail the write after it.
+
+    Args:
+        value: The count as the answer carries it.
+
+    Returns:
+        The count, or 0 for None, a bool, a string, NaN, an infinity or a number beyond ``_MAX_COUNT``.
+    """
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, float):
+        # Checked on a float only: math.isfinite() overflows on a whole number too large for one
+        if not math.isfinite(value):
+            return 0
+        value = int(value)
+    if not isinstance(value, int) or abs(value) > _MAX_COUNT:
+        return 0
+    return value
+
+
+def _sum(total: Any, count: Any) -> int:
+    """Two counts added, kept within what the result object holds however many answers are summed."""
+    return max(-_MAX_COUNT, min(_MAX_COUNT, _count(total) + _count(count)))
 
 
 class IInstance(IInstanceBase):
@@ -238,11 +278,29 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key].append({k: v for k, v in turn.items() if v is not None})
             return
 
-        # Add the documents
+        # A text or JSON answer stays a plain entry: chat-ui keeps only strings. Its tokens go beside it.
         if answer.isJson():
             self.instance.currentObject.response[key].append(answer.getJson())
         else:
             self.instance.currentObject.response[key].append(answer.getText())
+        self._add_tokens(answer.tokens)
+
+    def _add_tokens(self, tokens: Optional[Dict[str, Any]]) -> None:
+        """Add one text or JSON answer's token counts to the result's TOKENS_RESULT_KEY.
+
+        Summed, since one result object can hold several answers. Nothing is written when the
+        answer has no counts (a cached or short-circuited answer, an LLM that reports none), so a
+        reader that finds no key knows the counts are missing, not zero. The `**LLM error**` answer
+        carries what the failed call billed (llm_base.py), and that is added too.
+
+        Args:
+            tokens: ``Answer.tokens``: ``{input, output, cache_read, cache_creation, model, ...}`` or None.
+        """
+        if not tokens:
+            return
+        response = self.instance.currentObject.response
+        total = response.get(TOKENS_RESULT_KEY) or {}
+        response[TOKENS_RESULT_KEY] = {k: _sum(total.get(k), tokens.get(k)) for k in _BILLING_COUNTS}
 
     def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
         """Shared handler for the image/audio/video stream lanes.

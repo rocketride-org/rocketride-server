@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://docs.rocketride.org/connect/mcp/stdio/"
+Homepage = "https://docs.rocketride.ai/connect/mcp/stdio/"
 Repository = "https://github.com/rocketride-org/rocketride-server"
 
 [project.scripts]

@@ -154,7 +154,12 @@ def _drive(instance, image: bytes) -> None:
     descriptor = build_stream_descriptor(None, 'image', objectId='o1', parent='/in/a.png', permissionId=0, name='a.png')
     instance.writeImage(AVI_ACTION.BEGIN, 'image/png', descriptor_to_payload(descriptor))
     instance.writeImage(AVI_ACTION.WRITE, 'image/png', image)
-    instance.writeImage(AVI_ACTION.END, 'image/png', b'')
+    try:
+        instance.writeImage(AVI_ACTION.END, 'image/png', b'')
+    except RuntimeError as exc:
+        # A recording model raises once it has the call; the node fails the frame with that cause
+        if not str(exc).endswith(': recorded'):
+            raise
 
 
 class _Recorder:
@@ -165,7 +170,7 @@ class _Recorder:
 
     def _record(self, image, **kwargs):
         self.calls.append((image.size, kwargs))
-        raise RuntimeError('recorded')  # the node drops the frame with a warning; the call is what matters
+        raise RuntimeError('recorded')  # the node fails the frame, which _drive expects; the call is what matters
 
     estimate = _record
     remove = _record

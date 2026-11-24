@@ -18,6 +18,9 @@
 packages/client-typescript/contract/versions/*.d.ts text eol=lf
 packages/shell/contract/versions/*.d.ts text eol=lf
 
+# Node sources go into the node archive: LF on every checkout keeps their digests equal
+nodes/src/nodes/** text=auto eol=lf
+
 # Windows batch files should use CRLF
 *.cmd text eol=crlf
 *.bat text eol=crlf

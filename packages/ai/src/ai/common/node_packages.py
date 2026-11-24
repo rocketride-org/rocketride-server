@@ -50,6 +50,24 @@ _STAGING = '.rrnode-staging-'
 # Written into an unpacked node: the digest of the package it came from
 DIGEST_FILE = '.rrnode.sha256'
 
+# How often a rename is tried, and the pause between tries. On Windows a virus scanner or the
+# indexer can still hold a file that was just written, and renaming its folder is refused
+# (WinError 5) until it lets go, which takes a moment. Elsewhere a rename is tried once.
+_MOVE_TRIES = 10 if os.name == 'nt' else 1
+_MOVE_PAUSE_SECS = 0.1
+
+
+def _move(src: str, dst: str) -> None:
+    """os.replace, tried again while the system refuses it with a permission error (see _MOVE_TRIES)."""
+    for remaining in range(_MOVE_TRIES - 1, -1, -1):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if not remaining:
+                raise
+            time.sleep(_MOVE_PAUSE_SECS)
+
 
 def _sweep(nodes_dir: str) -> None:
     """Drop the staging folders an unpack that was killed left behind an hour ago or more."""
@@ -143,14 +161,14 @@ def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
         if os.path.isdir(node_dir):
             # Another digest's copy: move it out of nodes/ first, a folder cannot be replaced in one step
             replaced = os.path.join(staging, 'replaced')
-            os.replace(node_dir, replaced)
+            _move(node_dir, replaced)
         try:
-            os.replace(os.path.join(staging, name), node_dir)
+            _move(os.path.join(staging, name), node_dir)
         except OSError as e:
             if replaced is not None:
                 # Put the previous copy back; one that cannot go back is not deleted here
                 try:
-                    os.replace(replaced, node_dir)
+                    _move(replaced, node_dir)
                 except OSError as restore_error:
                     keep = True
                     raise OSError(

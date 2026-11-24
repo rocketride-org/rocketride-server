@@ -8,6 +8,7 @@
 import hashlib
 import io
 import os
+import pathlib
 import time
 import zipfile
 
@@ -102,6 +103,11 @@ def test_the_digest_is_each_path_with_the_sha256_of_its_file_in_order():
     lines = ''.join(f'{path}\0{hashlib.sha256(files[path]).hexdigest()}\n' for path in ('a/c.json', 'b.py'))
 
     assert node_packages.content_digest(files) == hashlib.sha256(lines.encode()).hexdigest()
+    # The vector nodes/scripts/tasks.test.js checks against the build's contentDigest
+    assert node_packages.content_digest(files) == 'cbd358a9e4e48458634a275f10ca7085f3576d2eba9f9a3d28f224f8d477c200'
+    # Paths sort by code point: JavaScript's default sort puts the emoji first
+    unicode = {'\U0001f600.txt': b'a', '\uff21.txt': b'b'}
+    assert node_packages.content_digest(unicode) == '306af2aa83b510e1390ea95c959bf150bd7a6ee619097c8e84ee5e17035ad997'
 
 
 def test_the_same_files_in_another_zip_match_the_digest(nodes):
@@ -157,8 +163,11 @@ def test_an_unpack_that_was_killed_is_swept_once_it_is_old(nodes):
     assert not os.path.exists(old) and os.path.exists(fresh)
 
 
-def _failing_replace(monkeypatch, *failing_calls):
-    """Make os.replace raise on the given calls (1-based) and pass the rest through."""
+def _failing_replace(monkeypatch, *failing_calls, tries=1):
+    """Make os.replace raise on the given calls (1-based) and pass the rest through.
+
+    Each rename is tried ``tries`` times without a pause (one by default, so a call number names one rename).
+    """
     replace = os.replace
     calls = []
 
@@ -169,6 +178,8 @@ def _failing_replace(monkeypatch, *failing_calls):
         return replace(src, dst)
 
     monkeypatch.setattr(node_packages.os, 'replace', flaky)
+    monkeypatch.setattr(node_packages, '_MOVE_TRIES', tries)
+    monkeypatch.setattr(node_packages, '_MOVE_PAUSE_SECS', 0)
     return calls
 
 
@@ -215,6 +226,49 @@ def test_a_replacement_leaves_no_backup_behind(nodes):
     assert node_packages.digest_of(os.path.join(nodes, 'railnode')) == new_sha
 
 
+def test_a_rename_refused_for_a_moment_is_tried_again(nodes, monkeypatch):
+    # Windows refuses the rename of a folder while a scanner still holds a file just written into it
+    data, sha256 = _package()
+    calls = _failing_replace(monkeypatch, 1, 2, tries=3)
+
+    node_dir = node_packages.unpack('railnode', data, sha256, nodes)
+
+    assert len(calls) == 3 and node_packages.digest_of(node_dir) == sha256
+    assert os.listdir(nodes) == ['railnode']
+
+
+def test_a_rename_that_stays_refused_fails_after_the_last_try(nodes, monkeypatch):
+    data, sha256 = _package()
+    calls = _failing_replace(monkeypatch, 1, 2, 3, tries=3)
+
+    with pytest.raises(PermissionError):
+        node_packages.unpack('railnode', data, sha256, nodes)
+
+    assert len(calls) == 3 and os.listdir(nodes) == []
+
+
+def test_only_a_permission_error_is_tried_again(nodes, monkeypatch):
+    data, sha256 = _package()
+    calls = []
+
+    def full(src, dst):
+        calls.append(dst)
+        raise OSError(28, 'No space left on device', dst)
+
+    monkeypatch.setattr(node_packages.os, 'replace', full)
+    monkeypatch.setattr(node_packages, '_MOVE_TRIES', 3)
+    monkeypatch.setattr(node_packages, '_MOVE_PAUSE_SECS', 0)
+
+    with pytest.raises(OSError, match='No space left'):
+        node_packages.unpack('railnode', data, sha256, nodes)
+
+    assert len(calls) == 1
+
+
+def test_a_rename_is_tried_once_except_on_windows():
+    assert node_packages._MOVE_TRIES == (10 if os.name == 'nt' else 1)
+
+
 def test_a_package_unpacks_when_only_nodes_is_writable(nodes, monkeypatch):
     # A read-only root with nodes/ mounted writable, as the Helm chart runs it
     mkdtemp = node_packages.tempfile.mkdtemp
@@ -231,3 +285,8 @@ def test_a_package_unpacks_when_only_nodes_is_writable(nodes, monkeypatch):
 
     assert node_packages.digest_of(node_dir) == sha256
     assert os.listdir(nodes) == ['railnode']
+
+
+def test_depends_leaves_out_the_nodes_this_marks_as_unpacked():
+    depends = pathlib.Path(__file__).parents[5] / 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
+    assert f"_UNPACKED_MARKER = '{node_packages.DIGEST_FILE}'" in depends.read_text(encoding='utf-8')

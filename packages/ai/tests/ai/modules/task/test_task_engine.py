@@ -2760,3 +2760,62 @@ async def test_start_task_clears_the_previous_runs_crash_state(monkeypatch):
 
     assert t._crash is None
     assert t._process_killed is False
+
+
+async def test_an_engine_that_ends_while_the_run_log_opens_ends_the_start(monkeypatch):
+    """An engine that exits at once closes its stdout while start_task waits on a
+    holder's run log, and the stdout reader starts _terminated(). The start leaves
+    the state to it: no metrics, no status loop, no INITIALIZING update, no begin event.
+    """
+    import ai.account
+    from ai.modules.task import task_engine
+
+    t, _ = _startable_task(monkeypatch)
+    t._status.name = ''
+    # The control holding the engine: the start opens its continuum (one per control)
+    control = SimpleNamespace(
+        owner='=user/user-1',
+        owner_id='user-1',
+        project_id='proj-test',
+        source='src-id',
+        run_kind='dev',
+        teamId='team-1',
+        orgId='org-1',
+        pinned_version=None,
+        trigger='manual',
+        userId='user-1',
+        pipeline={},
+        trace_level=None,
+    )
+    t._server.control_by_key = lambda key: control
+    t._forward_task_event = AsyncMock()
+    t._status_update_loop = AsyncMock()
+    sent = []
+    t._send_status_update = AsyncMock(side_effect=lambda: sent.append(t._status.state))
+    spawn = AsyncMock(return_value=SimpleNamespace(pid=4321))
+    monkeypatch.setattr(task_engine.asyncio, 'create_subprocess_exec', spawn)
+    monkeypatch.setattr(TaskEngine, 'TaskDbgStdio', MagicMock(return_value=SimpleNamespace(connect=AsyncMock())))
+    monkeypatch.setattr(ai.account.Store, 'file_store', MagicMock())
+    opened = []
+
+    async def open_while_the_engine_ends(**_):
+        # what the stdout reader's _terminated() sets first when the engine exits now
+        opened.append(t._status.state)
+        t._terminated_called = True
+        t._status.state = TASK_STATE.STOPPING.value
+
+    run_log = SimpleNamespace(open=open_while_the_engine_ends, chapter_begin_seq=1)
+    monkeypatch.setattr(task_engine, 'RunLogWriter', MagicMock(return_value=run_log))
+    metrics = MagicMock()
+    monkeypatch.setattr(task_engine, 'TaskMetrics', metrics)
+
+    await TaskEngine.start_task(t)
+
+    # The engine ended inside the open of the holder's run log, after the launch
+    assert opened == [TASK_STATE.STARTING.value]
+    spawn.assert_awaited_once()
+    assert t._status.state == TASK_STATE.STOPPING.value
+    metrics.assert_not_called()
+    t._status_update_loop.assert_not_called()
+    t._forward_task_event.assert_not_awaited()
+    assert sent == [TASK_STATE.STARTING.value]
