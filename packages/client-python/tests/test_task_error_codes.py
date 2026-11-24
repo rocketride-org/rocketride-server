@@ -174,6 +174,19 @@ async def test_a_refused_restart_keeps_the_code():
     assert [m['command'] for m in client.sent] == ['restart']
 
 
+async def test_a_restart_without_the_control_id_is_refused_before_anything_is_sent():
+    """``token`` is optional in the signature (SDK 1.x code still calls) and required to run."""
+    for missing in ({}, {'token': None}, {'token': ''}):
+        client = _refusing_client()
+        try:
+            await client.restart(project_id='p', source='s', pipeline={}, **missing)
+        except ValueError as e:
+            assert 'get_task_token' in str(e)
+        else:
+            raise AssertionError(f'restart({missing}) did not raise')
+        assert client.sent == []
+
+
 def test_a_refusal_crosses_a_process_boundary():
     import pickle
 

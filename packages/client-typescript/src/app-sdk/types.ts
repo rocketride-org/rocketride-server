@@ -542,7 +542,13 @@ export interface ShellEventMap {
 	 */
 	'shell:telemetry': TelemetryFact;
 	'shell:logoutRequest': Record<string, never>;
-	'shell:switchApp': { appId: string };
+	/**
+	 * Optional `params` are query parameters the app reads from its location
+	 * at mount: the shell writes them into the URL before it mounts the app.
+	 * Keys a previous switch wrote are dropped. An app already on screen is
+	 * not remounted: the URL changes, the app does not.
+	 */
+	'shell:switchApp': { appId: string; params?: Record<string, string> };
 	'shell:subscribe': { app: AppManifestEntry; plan?: CheckoutPlan };
 	'shell:myApps': Record<string, never>;
 	'shell:accountUpdate': ConnectResult;

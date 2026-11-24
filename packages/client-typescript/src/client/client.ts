@@ -1940,13 +1940,20 @@ export class RocketRideClient extends DAPClient {
 	 * under that project/source, which the successor is at that moment. The
 	 * IDEs' Restart action is this call (Play is `use()`).
 	 *
-	 * @param options.token - The existing control id (required; resolve it with `getTaskToken()` first when you hold only project/source).
+	 * @param options.token - The existing control id. Optional in the type, as it was in SDK 1.x, where the server looked the run up; a restart now needs it, so a call without one throws before anything is sent. Resolve it with `getTaskToken()` first when you hold only project/source.
 	 * @param options.projectId - The project identifier.
 	 * @param options.source - The source component identifier.
 	 * @param options.pipeline - The pipeline configuration to restart with.
 	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
+	 * @throws Error when `options.token` is missing or empty.
 	 */
-	async restart(options: { token: string; projectId: string; source: string; pipeline: Record<string, unknown>; teamId?: string }): Promise<void> {
+	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown>; teamId?: string }): Promise<void> {
+		// The type keeps `token` optional so code written for SDK 1.x compiles;
+		// the server no longer resolves the run from project/source, so a
+		// missing id is refused here with the way to get one
+		if (!options.token) {
+			throw new Error('restart() needs the control id in options.token: read it with getTaskToken({ projectId, source }) first');
+		}
 		try {
 			await this.call('restart', {
 				token: options.token,

@@ -131,8 +131,10 @@ export interface IWorkspaceContext {
 	/**
 	 * Writes the workspace's pending debounced state to disk NOW.
 	 *
-	 * Hand this to Documents as `WorkspaceBinding.flushNow` so a page
-	 * teardown cannot strand the last change in a timer that never fires.
+	 * Hand this to Documents as `WorkspaceBinding.flushNow` so a teardown
+	 * the page outlives (an app switch, a view that unmounts) cannot strand
+	 * the last change in a timer that never fires. For a live page only:
+	 * never call it from `pagehide`/`beforeunload` (see that binding's doc).
 	 */
 	flushWorkspaceNow: () => void;
 	/** ID of the currently active app. */

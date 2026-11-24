@@ -215,4 +215,21 @@ describe('RocketRideClient.validate() and restart() failure', () => {
 		expect(caught).toBeInstanceOf(CommandException);
 		expect((caught as CommandException).code).toBe('NODE_NOT_ENTITLED');
 	});
+
+	it.each([[{}], [{ token: undefined }], [{ token: '' }]])('restart() without the control id (%j) is refused before anything is sent', async (missing) => {
+		// `token` is optional in the type (SDK 1.x code still compiles) and required to run
+		const client = refusingClient();
+		let sent = 0;
+		(client as unknown as Record<string, unknown>).request = async () => {
+			sent += 1;
+			return notEntitled;
+		};
+
+		const caught = await client.restart({ projectId: 'p', source: 's', pipeline: {}, ...missing }).catch((e: unknown) => e);
+
+		expect(caught).toBeInstanceOf(Error);
+		expect(caught).not.toBeInstanceOf(CommandException);
+		expect((caught as Error).message).toContain('getTaskToken');
+		expect(sent).toBe(0);
+	});
 });

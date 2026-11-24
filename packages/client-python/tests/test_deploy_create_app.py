@@ -69,6 +69,14 @@ async def test_create_app_never_hands_a_developer_id_to_the_scaffold(captured, a
     assert created['appId'] == 'clock'
 
 
+async def test_create_app_accepts_and_ignores_a_typed_developer_id(captured):
+    """``developer_id`` is the SDK 1.x argument: old callers still run, and nothing they type reaches the files."""
+    created = await DeployApi(_FakeClient({})).create_app('clock', developer_id='acme', install=False)
+
+    assert 'developer_id' not in captured['kwargs']
+    assert created['appId'] == 'clock'
+
+
 def _write_app(ws, manifest, legacy_marker=None):
     """Write a minimal app folder under ws/apps/clock."""
     folder = os.path.join(ws, 'apps', 'clock')

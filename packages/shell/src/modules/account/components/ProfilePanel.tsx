@@ -249,9 +249,10 @@ export interface ProfilePanelProps {
 	/**
 	 * Persists the user's TEAM ORDER in the active organization (B39): the
 	 * `@team` resolution order, the first entry being the HOME team. Resolves
-	 * on success; a rejection is shown in the Teams card.
+	 * on success; a rejection is shown in the Teams card. Without it the card
+	 * shows the order and offers no way to change it.
 	 */
-	onSetTeamOrder: (order: string[]) => Promise<void>;
+	onSetTeamOrder?: (order: string[]) => Promise<void>;
 	/** Switches the user's active organization by its ID. */
 	onSetDefaultOrg: (orgId: string) => void;
 	/** Render ONLY the identity card (+ its edit panel) — the collapsed
@@ -276,8 +277,11 @@ export interface TeamOrderCardProps {
 	teams: TeamInfo[];
 	/** The member's team order; empty falls back to the listing order. */
 	order: readonly string[];
-	/** Persists a new order; rejects with the server's message. */
-	onSetTeamOrder: (order: string[]) => Promise<void>;
+	/**
+	 * Persists a new order; rejects with the server's message. Without it the
+	 * card is read-only: the order and the Home marker, no grips and no arrows.
+	 */
+	onSetTeamOrder?: (order: string[]) => Promise<void>;
 }
 
 /**
@@ -298,7 +302,9 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 	const [overId, setOverId] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const rows = pending ?? ordered;
-	const canReorder = rows.length > 1 && pending == null;
+	// A host that passes no `onSetTeamOrder` gets the order to read only
+	const editable = onSetTeamOrder != null && rows.length > 1;
+	const canReorder = editable && pending == null;
 	// The save in flight: the ids it sent and whether the call has resolved.
 	const saveRef = useRef<PendingSave | null>(null);
 
@@ -321,7 +327,7 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 	 * refusal restores the server's order and names the reason.
 	 */
 	const commitMove = async (from: number, to: number): Promise<void> => {
-		if (!canReorder || from < 0 || to < 0 || to >= rows.length || from === to) return;
+		if (!onSetTeamOrder || !canReorder || from < 0 || to < 0 || to >= rows.length || from === to) return;
 		const next = moveItem(rows, from, to);
 		const ids = next.map((t) => t.id);
 		saveRef.current = { ids, resolved: false };
@@ -381,7 +387,7 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 			header={
 				<>
 					Teams
-					<span style={styles.cardHint}>{rows.length > 1 ? 'drag or use the arrows to order · the first team is your home team' : 'your home team'}</span>
+					<span style={styles.cardHint}>{rows.length > 1 ? (editable ? 'drag or use the arrows to order · the first team is your home team' : 'the first team is your home team') : 'your home team'}</span>
 				</>
 			}
 		>
@@ -420,7 +426,7 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 								</div>
 							</div>
 							{home && <StatusBadge variant="success">Home</StatusBadge>}
-							{rows.length > 1 && (
+							{editable && (
 								<div style={styles.moveButtons}>
 									<Button variant="ghost" small disabled={!canReorder || i === 0} title={`Move ${t.name} up`} onClick={() => void commitMove(i, i - 1)}>
 										<ChevronUp size={14} aria-hidden="true" />

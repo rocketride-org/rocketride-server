@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 9abba4ca7c50d26e5ce46c3d99ef4cc8aa08acfe
+// Source commit: 2dcfeb8bb6286a263ff65fdb2e706073c046f3be
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -5119,13 +5119,19 @@ declare class DeployApi {
      * @param options - Template, display name,
      *   frame options, install toggle, `onProgress`, and
      *   `workspaceRoot` (default `process.cwd()`). The server base URL for
-     *   vendoring defaults to this client's own connection.
+     *   vendoring defaults to this client's own connection. `developerId`
+     *   is deprecated and ignored: it was the namespace an SDK 1.x caller
+     *   typed, and the namespace now comes from the organization that
+     *   deploys the app. The option stays so that code written for 1.x
+     *   compiles and runs.
      * @returns The created app's identity and a report of what ran.
      */
     createApp(slug: string, options?: {
         workspaceRoot?: string;
         template?: "Blank" | "Dashboard";
         displayName?: string;
+        /** @deprecated Ignored. The organization that deploys the app attaches its developer id. */
+        developerId?: string;
         sidebar?: boolean;
         statusFooter?: boolean;
         docTabs?: boolean;
@@ -6219,14 +6225,15 @@ export declare class RocketRideClient extends DAPClient {
      * under that project/source, which the successor is at that moment. The
      * IDEs' Restart action is this call (Play is `use()`).
      *
-     * @param options.token - The existing control id (required; resolve it with `getTaskToken()` first when you hold only project/source).
+     * @param options.token - The existing control id. Optional in the type, as it was in SDK 1.x, where the server looked the run up; a restart now needs it, so a call without one throws before anything is sent. Resolve it with `getTaskToken()` first when you hold only project/source.
      * @param options.projectId - The project identifier.
      * @param options.source - The source component identifier.
      * @param options.pipeline - The pipeline configuration to restart with.
      * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
+     * @throws Error when `options.token` is missing or empty.
      */
     restart(options: {
-        token: string;
+        token?: string;
         projectId: string;
         source: string;
         pipeline: Record<string, unknown>;
