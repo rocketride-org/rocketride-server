@@ -109,7 +109,7 @@ is this node's own. The parallel `tool_calls` form is not taken:
   reply ends with its closing `"}`, with or without a markdown fence around
   it. A JSON document pasted in unescaped is delivered exactly as written. An
   envelope that was cut off, has more text after it, has other members after
-  `content` (`","note":"z"}`), has a second envelope after it, or has a
+  `content` (`","note":"z"}`, even when that string also has broken escaping), has a second envelope after it, or has a
   `FINAL>>>` line inside it is retried:
   where the answer ended cannot be told. One cut-off cannot be told from a
   finished answer and is delivered: a reply that stops exactly after a `"}`
@@ -159,8 +159,14 @@ hides nothing after it. With no word before it on its line, a tool call's
 `type` right after the brace is also read with no quotes or in single quotes.
 When a quote out of place or a missing closing kept the members from being
 read, a `type` named in the text after the object decides, or `args` for an
-object that has a name. Whitespace around a reply is trimmed before it is
-read, as it always was.
+object that has a name. This fallback also applies when the first key lost
+either quote, gained an extra quote, or a missing opening brace made the
+object appear to close before its remaining members. It is conservative:
+an unreadable object followed by text naming a tool-call type may be retried
+even when the model intended an example. A standalone `final` with unquoted
+or single-quoted keys is retried, including in a fence or after `FINAL>>>`;
+its raw envelope is not delivered as prose. Whitespace around a reply is
+trimmed before it is read, as it always was.
 
 ## Upstream docs
 

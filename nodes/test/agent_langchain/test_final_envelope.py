@@ -151,6 +151,21 @@ FAILED = {
     ),
     'broken_tool_call_inside_a_sentence': ('Looking it up: ' + BROKEN_TOOL_CALL, 'not valid JSON'),
     'member_after_the_content_of_a_broken_final': ('{"type":"final","content":"a "b"","note":"z"}', 'not valid JSON'),
+    'broken_member_after_the_content_of_a_broken_final': (
+        '{"type":"final","content":"a "b"","note":"z "w""}',
+        'not valid JSON',
+    ),
+    'claim_after_a_tool_call_whose_first_key_lost_its_quote': (
+        '{"name: "crm.get_deal", "type":"tool_call", "args":{"deal_id":42}}\nFINAL>>> Deal 42 is won.',
+        'not valid JSON',
+    ),
+    'claim_after_a_tool_call_whose_type_has_an_extra_quote': (
+        '{""type": "tool_call", "name":"crm.get_deal", "args":{"deal_id":42}}\nFINAL>>> Deal 42 is won.',
+        'not valid JSON',
+    ),
+    'final_with_unquoted_keys': ('{type: "final", content: "Answer"}', 'not valid JSON'),
+    'fenced_final_with_unquoted_keys': ('```json\n{type: "final", content: "Answer"}\n```', 'not valid JSON'),
+    'final_with_unquoted_keys_after_the_marker': ('FINAL>>> {type: "final", content: "Answer"}', 'not valid JSON'),
     'cut_off_envelope_with_a_marker_line_in_it': (
         '{"type":"final","content":"Example:\nFINAL>>> partial',
         'not valid JSON',

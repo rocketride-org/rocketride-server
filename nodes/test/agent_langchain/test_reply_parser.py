@@ -354,8 +354,6 @@ class TestSentinel:
             '{"name": "crm.create"}',
             # Arguments named after an object are a tool call's only when the object has a name.
             '{"note": "a "quoted" word"}\nThe "args": member was empty.',
-            # An unquoted type counts only when it is a tool call's: an unquoted `final` is not an envelope.
-            '{type: "final", content: "old"}',
             # A block of code with its brace on a line of its own is not an envelope, whatever it holds
             # further in or is followed by.
             'if (x)\n{\n    call(args);\n}',
@@ -382,7 +380,6 @@ class TestSentinel:
             # A type with no quotes makes a tool call only with no word before it on its line, and only a tool call's does.
             'In JavaScript the call is {type: "tool_call", name: "s"} and it returned 5.',
             "call = {'type': 'tool_call', 'name': 'search', 'args': {}}",
-            "{'type': 'final', 'content': 'old'}",
             # A brace that opens no object is prose, whatever is named after it.
             'Use {curly} braces. A call has "type": "tool_call" in it.',
             # A tool call that parses inside a sentence is quoted, also when it runs over several lines.
@@ -837,6 +834,8 @@ class TestSalvage:
         [
             '{"type":"final","content":"a "b"","note":"z"}',
             '{"type":"final","content":"a "b" c", "confidence": "high"}',
+            '{"type":"final","content":"a "b"","note":"z "w""}',
+            '{"type":"final","content":"a "b"","note":"z "w"","extra":"other"}',
         ],
     )
     def test_a_member_after_the_content_is_not_delivered_with_the_answer(self, raw):
@@ -1030,7 +1029,7 @@ class TestRetryHint:
             ('{name: "crm.get_deal", args: {deal_id: 42}}', None),
             # An unquoted type that names no envelope, and the word args in a sentence, are prose.
             ('{type: "object"} is the JSON Schema root.', None),
-            ('{type: "final", content: "cut off', None),
+            ('{type: "final", content: "cut off', 'final'),
             ('{x} is a set. Its args: none.', None),
             ('{x} is a set, args: none.', None),
             # An unquoted type that is no tool call's does not hide the broken call after it.
@@ -1283,6 +1282,47 @@ def test_an_envelope_is_recognised_inside_a_markdown_fence():
 # ---------------------------------------------------------------------------
 # One model turn: the retry loop and what it ends on
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('prefix, suffix', [('', ''), ('Working.\n', ''), ('Calling: ', ''), ('```json\n', '\n```')])
+@pytest.mark.parametrize(
+    'broken',
+    [
+        '{"name: "crm.get_deal", "type":"tool_call", "args":{"deal_id":42}}',
+        '{name": "crm.get_deal", "type":"tool_call", "args":{"deal_id":42}}',
+        '{""type": "tool_call", "name":"crm.get_deal", "args":{"deal_id":42}}',
+        '{"args": "deal_id": 42}, "type":"tool_call", "name":"crm.get_deal"}',
+        '{args": {"note":"a \\"quoted\\" word"}, "type":"tool_call", "name":"crm.get_deal"}',
+        '{"args: {"note":"a \\"quoted\\" word"}, "type":"tool_call", "name":"crm.get_deal"}',
+    ],
+)
+def test_a_damaged_first_key_or_early_closing_cannot_turn_a_call_into_a_claim(broken, prefix, suffix):
+    """The adapter requests the same call again, then either run the repaired call or fail without its claim."""
+    raw = prefix + broken + suffix + '\nFINAL>>> Deal 42 is won.'
+    assert reply._parse_tool_call_envelope(raw) is None
+    ask, feedback = scripted(raw)
+    with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts'):
+        reply._run_model_turn(ask)
+    assert len(feedback) == 3
+    assert 'SAME tool call again' in feedback[1]
+    repaired = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}'
+    ask, feedback = scripted(raw, repaired)
+    turn = reply._run_model_turn(ask)
+    assert turn.content == ''
+    assert [(call['name'], call['args']) for call in turn.tool_calls] == [('crm.get_deal', {'deal_id': 42})]
+    assert len(feedback) == 2
+
+
+@pytest.mark.parametrize('raw', ['{type: "final", content: "Answer"}', "{'type': 'final', 'content': 'Answer'}"])
+@pytest.mark.parametrize(
+    'prefix, suffix', [('', ''), ('```json\n', '\n```'), ('FINAL>>> ', ''), ('', '\nFINAL>>> Done.')]
+)
+def test_a_final_with_unquoted_or_single_quoted_keys_is_retried(raw, prefix, suffix):
+    """An invalid final is protocol, including after a marker; its raw envelope is not prose to deliver."""
+    ask, feedback = scripted(prefix + raw + suffix)
+    with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts'):
+        reply._run_model_turn(ask)
+    assert len(feedback) == 3
 
 
 class TestRunModelTurn:

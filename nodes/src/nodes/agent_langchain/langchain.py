@@ -377,6 +377,12 @@ _ENVELOPE_OPEN = re.compile(r"""^\s*(?:```[A-Za-z]*\s*)?\{\s*(?:\}|\Z|(?:"(?:[^"
 #: An object's opening brace.
 _OBJECT_OPENING = re.compile(r'\{')
 
+#: An opening key may have lost either quote, putting the member walk out of step.
+_DAMAGED_OBJECT_OPEN = re.compile(r'\{\s*(?:"|[A-Za-z_]\w*"\s*:)')
+
+#: A final envelope written as a JavaScript object is still protocol, not an answer to deliver.
+_LOOSE_FINAL_OPEN = re.compile(r"""\{\s*(?:type|'type')\s*:\s*["']final["']""")
+
 #: A word: a letter or a digit. Punctuation, a brace and an underscore are not words.
 _WORD = re.compile(r'[^\W_]')
 
@@ -427,6 +433,12 @@ _FINAL_ENVELOPE_CLOSE = re.compile(r'"\s*\}\s*(?:```\s*)?$')
 
 #: A quote in unescaped content with what may be another member after it: a comma, a key and its colon. Group 1 starts at the key.
 _MEMBER_AFTER = re.compile(r'"\s*,\s*("(?:[^"\\]|\\.)*"\s*:)')
+
+#: The start of a string value after a member's colon.
+_STRING_VALUE = re.compile(r'\s*"')
+
+#: More object members after an early closing brace in a malformed object.
+_MEMBER_CONTINUATION = re.compile(r'\s*,\s*"')
 
 #: A markdown fence that encloses all of a text. Group 1 is what is inside it.
 _ENCLOSING_FENCE = re.compile(r'```[A-Za-z]*\s*(.*)```', re.S)
@@ -622,18 +634,28 @@ def _unfinished_envelope(text: str) -> Optional[str]:
         miswritten = None if 'type' in members else _MISWRITTEN_TYPE.match(text, at)
         if miswritten:
             return miswritten.group(1)
+        if no_word_before and _LOOSE_FINAL_OPEN.match(text, at):
+            return 'final'
         if not members:
             loose = _TYPE_FIRST.match(text, at) if no_word_before else None
             if loose and (loose.group(1) or loose.group(2) or loose.group(3)) in _TOOL_CALL_KINDS:
                 return loose.group(1) or loose.group(2) or loose.group(3)
+            # A damaged first key can put every later string out of step. A literal envelope type
+            # still counts; braces in code and sets do not acquire a type from unrelated later text.
+            if _DAMAGED_OBJECT_OPEN.match(text, at):
+                mentions = mentions or _mentions(text)
+                closed = end is not None and not stray and not _MEMBER_CONTINUATION.match(text, end)
+                kind, _args = _named(mentions, at, end if closed else len(text))
+                if kind in _TOOL_CALL_KINDS or (kind == 'final' and no_word_before):
+                    return kind
             continue
         stands = no_word_before or end is None or not _WORD_AFTER.match(text, end)
         # Read to its closing, with every quote in its place.
-        read = end is not None and not stray
         try:
             parsed = json.loads(text[at:end]) if end else None
         except Exception:
             parsed = None
+        read = end is not None and not stray and not (parsed is None and _MEMBER_CONTINUATION.match(text, end))
         own = members.get('type')
         # Where a name and arguments with no type make a tool call. Elsewhere they are data or code.
         may_lack_type = no_word_before or at == first
@@ -822,6 +844,22 @@ def _salvage_final_content(raw: Any) -> Optional[str]:
     # The envelope's other members after the content: the reply, from the last such key on, reads as its end.
     members = list(_MEMBER_AFTER.finditer(content))
     if members:
+        # A trailing string member may have the same bad escaping as content. It need not be valid
+        # JSON to be metadata. Keep members inside JSON examples in the answer, and ordinary prose
+        # such as `Either "yes", "no": pick one.` which does not start a string value.
+        tokens = iter(_TOKEN.finditer(content))
+        token = next(tokens, None)
+        depth = 0
+        for member in members:
+            while token is not None and token.start() < member.start():
+                written = token.group()
+                if written in ('{', '['):
+                    depth += 1
+                elif written in ('}', ']'):
+                    depth = max(0, depth - 1)
+                token = next(tokens, None)
+            if depth == 0 and _STRING_VALUE.match(content, member.end()):
+                return None
         try:
             json.loads('{' + content[members[-1].start(1) :] + '"}')
             return None
@@ -837,7 +875,7 @@ def _looks_like_envelope(raw: Any) -> bool:
     One that never parsed into a tool call or an answer is not prose to deliver. Prose that
     merely starts with a brace is not one.
     """
-    return isinstance(raw, str) and bool(_ENVELOPE_OPEN.match(raw))
+    return isinstance(raw, str) and bool(_ENVELOPE_OPEN.match(raw) or _LOOSE_FINAL_OPEN.match(_without_fence(raw)))
 
 
 def _sentinel(raw: str) -> Optional['re.Match[str]']:
