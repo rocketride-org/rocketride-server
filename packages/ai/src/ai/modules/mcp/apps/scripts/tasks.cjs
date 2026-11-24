@@ -34,14 +34,16 @@ const DIST_DIR = path.join(APP_ROOT, 'dist');
 // config-only change must not reuse stale widget HTML.
 // The widgets also bundle code from outside this workspace: the trace viewer's
 // shared components (apps/shared/src), the shell's theme CSS and the token
-// files every widget applies (packages/shell/src, packages/shell/public/themes).
-// A change there must rebuild the widgets too.
+// files every widget applies (packages/shell/src, packages/shell/public/themes),
+// and the SDK types the shell's project types re-export (resolve.ts aliases
+// 'rocketride' to their source). A change there must rebuild the widgets too.
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const REPO_ROOT = path.join(APP_ROOT, '..', '..', '..', '..', '..', '..', '..');
 const SHARED_DIRS = [
 	path.join(REPO_ROOT, 'apps', 'shared', 'src'),
 	path.join(REPO_ROOT, 'packages', 'shell', 'src'),
 	path.join(REPO_ROOT, 'packages', 'shell', 'public', 'themes'),
+	path.join(REPO_ROOT, 'packages', 'client-typescript', 'src', 'client', 'types'),
 ];
 const PKG_JSON = path.join(APP_ROOT, 'package.json');
 const VITE_CONFIG = path.join(APP_ROOT, 'vite.config.ts');
