@@ -2164,6 +2164,8 @@ def _exit_task(exit_event_seen=False):
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
     t._stop_reason = None
+    t._crash = None
+    t._process_killed = False
     return t
 
 
@@ -2257,6 +2259,101 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await TaskEngine._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+    # The server's own kill is not a crash
+    TaskEngine._apply_process_exit_code(t, -9)
+    assert t._crash is None
+
+
+# ---------------------------------------------------------------------------
+# A crash the engine reported with >EXIT*Crash
+# ---------------------------------------------------------------------------
+
+_SEGV = {'exitCode': 1, 'message': 'Application received system signal: SIGSEGV', 'crash': True}
+
+
+def _ending_task(process_exit_code, *, was_running=True):
+    """An engine whose output has closed, for running the real _terminated()."""
+    t = _exit_task()
+    t._terminated_called = False
+    t._teardown_done = asyncio.Event()
+    t._is_terminating = False
+    t.state = EngineState.RUNNING if was_running else EngineState.STARTING
+    t._debug_stdio = t._data_client = t._task_metrics = t._tmpfile = t._data_port = None
+    t._status_update_task = None
+    t._final_events_sent = True
+    t._stop_reason = None
+    t._run_trigger = None
+    t._bindings = {}
+    t.files = None
+    t._server.engine_crashed = MagicMock()
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=process_exit_code)
+    return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'stop_reason, status, outcome',
+    [
+        (None, 'Stopped unexpectedly', 'error'),
+        # A crash during a requested stop is part of the stop
+        ('user', 'Stopped', 'cancelled'),
+    ],
+)
+async def test_a_reported_crash_ends_the_task(stop_reason, status, outcome):
+    t = _ending_task(-6)
+    t._stop_reason = stop_reason
+    run_log = AsyncMock()
+    # Two holding controls on one continuum: it completes once
+    t._run_logs = {'dev.user-1.acme.proj-test.src-id': run_log, 'dev.user-2.acme.proj-test.src-id': run_log}
+    await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
+    await TaskEngine._terminated(t)
+    assert t._status.status == status
+    run_log.end_run.assert_awaited_once()
+    assert run_log.end_run.await_args.args[0] == outcome
+
+
+@pytest.mark.asyncio
+async def test_a_crash_after_running_leaves_the_holders_dormant():
+    """A reported crash takes the same path as any abnormal exit: the engine is dormant and its holders restart it (plan 7.2)."""
+    t = _ending_task(-6)
+    await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
+    await TaskEngine._terminated(t)
+    assert t._status.status == 'Stopped unexpectedly'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+    assert t.state is EngineState.STOPPED
+    assert t.dormant_reason == 'crash'
+    t._server.engine_crashed.assert_called_once_with(t)
+
+
+@pytest.mark.asyncio
+async def test_a_crash_before_running_is_a_failed_start():
+    """An engine that crashed before it confirmed running failed its start and is not retried."""
+    t = _ending_task(-6, was_running=False)
+    await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
+    await TaskEngine._terminated(t)
+    assert t._status.status == 'Stopped unexpectedly'
+    assert t.state is EngineState.FAILED
+    assert t.dormant_reason is None
+    t._server.engine_crashed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_crash_the_engine_did_not_report_reaches_the_console():
+    """A process ended by a crash signal with no >EXIT gets its console line from the server, through the engine-level route."""
+    import signal as signal_module
+
+    t = _ending_task(-int(signal_module.SIGSEGV))
+    await TaskEngine._terminated(t)
+    assert t._status.status == 'Stopped unexpectedly'
+    outputs = [
+        call.args[1]['body']['output']
+        for call in t._forward_task_event.await_args_list
+        if call.args[1].get('event') == 'output'
+    ]
+    assert outputs == [f'Unexpected termination: SIGSEGV (code {int(signal_module.SIGSEGV)})\n']
 
 
 # ---------------------------------------------------------------------------
@@ -2498,3 +2595,20 @@ async def test_start_task_retries_a_run_log_open_that_failed_in_the_previous_run
         await TaskEngine.start_task(t)
 
     assert t._run_log_failed == set()
+
+
+async def test_start_task_clears_the_previous_runs_crash_state(monkeypatch):
+    """A crash and a kill by the server belong to the run they happened in: the next launch starts without them.
+
+    A relaunch reuses the engine object. A crash left on it would refuse the next run its `Completed`
+    and record `error`; a kill flag left on it would hide the next run's own crash.
+    """
+    t, _ = _startable_task(monkeypatch)
+    t._crash = 'SIGSEGV (code 11)'
+    t._process_killed = True
+
+    with pytest.raises(_LaunchStop):
+        await TaskEngine.start_task(t)
+
+    assert t._crash is None
+    assert t._process_killed is False

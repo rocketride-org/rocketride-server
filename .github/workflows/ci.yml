@@ -111,8 +111,8 @@ jobs:
           OUTSIDE: ${{ steps.typescript.outputs.outside }}
         run: |
           if [ "$CODE" = "true" ] && [ "$OUTSIDE" = "false" ]; then
-            echo "tests=shell:test shared:test client-typescript:test" >> "$GITHUB_OUTPUT"
-            echo "Only TypeScript areas changed: running the shell, shared and client-typescript suites. Pushes to develop still run every suite." >> "$GITHUB_STEP_SUMMARY"
+            echo "tests=shell:test shared:test rocket-ui:test client-typescript:test" >> "$GITHUB_OUTPUT"
+            echo "Only TypeScript areas changed: running the shell, shared, rocket-ui and client-typescript suites. Pushes to develop still run every suite." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "tests=test" >> "$GITHUB_OUTPUT"
           fi

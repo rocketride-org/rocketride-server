@@ -34,6 +34,7 @@ The transport recognizes and parses various message types:
 - SVC: Service status ('>SVC*1_or_0')
 - JOB: Job status ('>JOB*status_message')
 - DBG: Pipeline trace ('>DBG*operation*pipeId*componentId*traceId*trace')
+- DUMP: Crash dump written ('>DUMP*file_name')
 - EXIT: Process exit ('>EXIT*exit_code_hex*exit_message')
 
 Usage Patterns:
@@ -567,7 +568,8 @@ class TransportStdio(TransportBase):
         - '>DL*json_data' - pip install info
         - '>USR**json' - User data for prompting
         - '>SSE*json' - Real-time node-to-UI message (pipe_id + traceId + type + optional data)
-        - '>EXIT*exit_code_hex*exit_message' - Process exit
+        - '>DUMP*file_name' - Crash dump written
+        - '>EXIT*exit_code_hex*exit_message' - Process exit (code Crash: the engine caught a crash)
         """
         if message is None:
             return
@@ -904,13 +906,22 @@ class TransportStdio(TransportBase):
                         exitCode = int(s_exitCode, 16)
                     except ValueError:
                         exitCode = 0 if s_exitCode == 'CANCELLED' else 1
+                    crash = s_exitCode == 'Crash'
                     await self._transport_receive(
                         {
                             'type': 'event',
                             'event': 'apaevt_exit',
-                            'body': {'exitCode': exitCode, 'message': exitMessage},
+                            'body': {'exitCode': exitCode, 'message': exitMessage, 'crash': crash},
                         }
                     )
+                    if crash:
+                        await self._transport_receive(
+                            {
+                                'type': 'event',
+                                'event': 'output',
+                                'body': {'category': 'console', 'output': f'Unexpected termination: {exitMessage}\n'},
+                            }
+                        )
 
                     # TRIGGER ON_DISCONNECTED CALLBACK (process exit)
                     await self._transport_disconnected(
@@ -957,6 +968,16 @@ class TransportStdio(TransportBase):
                 )
                 # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
                 await self._transport_disconnected('Process exited with malformed exit message', has_error=True)
+
+        # Parse crash dump notices: '>DUMP*file_name' (the name may hold '*')
+        elif message.startswith('>DUMP*'):
+            await self._transport_receive(
+                {
+                    'type': 'event',
+                    'event': 'output',
+                    'body': {'category': 'console', 'output': f'Crash dump: {message.split("*", 1)[1]}\n'},
+                }
+            )
 
         # Parse SSE messages: '>SSE*{"pipeId": N, "traceId": N, "type": "...", "data": {...}}'
         elif message.startswith('>SSE*'):

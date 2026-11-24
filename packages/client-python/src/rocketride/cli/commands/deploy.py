@@ -40,7 +40,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from ..utils.common import connect_client, prompt_line, run_cli_command
-from ..utils.env import NO_DEPLOY_TARGET_MESSAGE
+from ..utils.env import NO_DEPLOY_APIKEY_MESSAGE, NO_DEPLOY_TARGET_MESSAGE
 from ..utils.output import Output
 
 
@@ -109,6 +109,9 @@ async def _connect_deploy(args, out: Output):
     """
     if not args.uri:
         out.fail(NO_DEPLOY_TARGET_MESSAGE)
+        return None
+    if not (args.apikey or '').strip():
+        out.fail(NO_DEPLOY_APIKEY_MESSAGE)
         return None
     return await connect_client(args.uri, args.apikey)
 

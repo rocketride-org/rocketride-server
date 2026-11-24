@@ -63,6 +63,7 @@ import hashlib
 import secrets
 import shlex
 import shutil
+import signal
 from collections import deque
 from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
@@ -413,6 +414,19 @@ CONST_SHARED_ENGINE_LABEL = 'engine'
 
 # How many characters of its key a shared engine's label carries
 CONST_SHARED_ENGINE_LABEL_HASH = 16
+# Signals that end a task process as a crash: the engine's crash signals and an OOM kill
+CONST_CRASH_SIGNALS = ('SIGSEGV', 'SIGBUS', 'SIGFPE', 'SIGILL', 'SIGABRT', 'SIGKILL')
+
+# Windows exception codes that end a task process as a crash
+CONST_CRASH_EXCEPTIONS = {
+    0xC0000005: 'STATUS_ACCESS_VIOLATION',
+    0xC000001D: 'STATUS_ILLEGAL_INSTRUCTION',
+    0xC0000094: 'STATUS_INTEGER_DIVIDE_BY_ZERO',
+    0xC00000FD: 'STATUS_STACK_OVERFLOW',
+    0xC0000374: 'STATUS_HEAP_CORRUPTION',
+    0xC0000409: 'STATUS_STACK_BUFFER_OVERRUN',
+    0xC0000602: 'STATUS_FAIL_FAST_EXCEPTION',
+}
 
 
 def _service_capabilities(service: Any) -> List[str]:
@@ -1092,6 +1106,10 @@ class TaskEngine(DAPBase):
         # Whether the task sent its own >EXIT event this run. Without one,
         # _terminated() falls back to the process exit code.
         self._exit_event_seen = False
+
+        # This run's crash, as the console shows it, and whether the server killed the process
+        self._crash: Optional[str] = None
+        self._process_killed = False
 
         # Server reference
         self._server = server
@@ -2049,6 +2067,7 @@ class TaskEngine(DAPBase):
             except asyncio.TimeoutError:
                 # Output closed but the process is still alive: end it rather
                 # than leave it running behind a task recorded as finished.
+                self._process_killed = True
                 try:
                     engine.kill()
                     await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)
@@ -2064,10 +2083,25 @@ class TaskEngine(DAPBase):
         (a task refusing to start) as completed. An exit code that is still
         unknown is not a success either, so it records 1. A requested stop
         keeps its existing exit code: the kill signal is not a task failure.
+
+        A process that reported no crash but ended by a crash signal, an OOM
+        kill or, on Windows, a crash exception code crashed before its handlers
+        could say so, unless the server killed it.
         """
         if not self._exit_event_seen and self._stop_reason is None:
             self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
+            if exit_code is None or self._process_killed:
+                return
+            if exit_code < 0:
+                try:
+                    name = signal.Signals(-exit_code).name
+                except ValueError:
+                    return
+                if name in CONST_CRASH_SIGNALS:
+                    self._crash = f'{name} (code {-exit_code})'
+            elif exit_code in CONST_CRASH_EXCEPTIONS:
+                self._crash = f'{CONST_CRASH_EXCEPTIONS[exit_code]} (code 0x{exit_code:08x})'
 
     async def _terminated(self) -> None:
         """
@@ -2117,7 +2151,17 @@ class TaskEngine(DAPBase):
 
         self.debug_message(f'Subprocess for task exited with code {exit_code}')
 
+        reported = self._crash
         self._apply_process_exit_code(exit_code)
+
+        # The engine reported nothing: the console still shows the crash. It is
+        # engine-level output, so it reaches the holders of a private engine
+        # and the ops stream of a shared one (plan 7.5)
+        if self._crash and not reported:
+            output = f'Unexpected termination: {self._crash}\n'
+            await self._forward_task_event(
+                EVENT_TYPE.OUTPUT, self.build_event('output', body={'category': 'console', 'output': output})
+            )
 
         self._status.completed = True
         self._status.endTime = time.time()
@@ -2240,15 +2284,21 @@ class TaskEngine(DAPBase):
             self._status.state = TASK_STATE.CANCELLED.value
             self.state = EngineState.STOPPED
             self.debug_task_message('stopped', reason=self._stop_reason)
-        elif self._status.exitCode == 0:
+        elif self._status.exitCode == 0 and not self._crash:
             self._status.status = 'Completed'
             self._status.state = TASK_STATE.COMPLETED.value
             self.state = EngineState.STOPPED
             self.debug_task_message('completed successfully')
         else:
-            self._status.status = 'Stopped'
+            if self._crash:
+                # The crash's detail is in the console
+                self._status.status = 'Stopped unexpectedly'
+                self._status.exitMessage = self._status.status
+                self.debug_task_message('crashed', reason=self._crash)
+            else:
+                self._status.status = 'Stopped'
+                self.debug_task_message(f'terminated abnormally with exit code {exit_code}')
             self._status.state = TASK_STATE.CANCELLED.value
-            self.debug_task_message(f'terminated abnormally with exit code {exit_code}')
 
             # A crash after the run confirmed running leaves the holders
             # dormant: the next request through any of them starts the engine
@@ -2365,8 +2415,10 @@ class TaskEngine(DAPBase):
         if self._run_logs:
             # A ttl-window expiry is SUCCESS: the run stayed up exactly as
             # configured, then shut down. Only a real stop (or abnormal exit)
-            # reads as cancelled.
-            if self._status.state == TASK_STATE.CANCELLED.value:
+            # reads as cancelled; a crash is an error.
+            if self._crash and self._stop_reason is None:
+                outcome = 'error'
+            elif self._status.state == TASK_STATE.CANCELLED.value:
                 outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
             elif self._status.exitCode == 0:
                 outcome = 'ok'
@@ -3123,6 +3175,10 @@ class TaskEngine(DAPBase):
             self._status.exitMessage = exit_message
             self._exit_event_seen = True
 
+            # The engine's handlers caught a crash: its >EXIT code is Crash
+            if body.get('crash'):
+                self._crash = exit_message
+
             # Send out a status update when needed
             self._status_updated = True
 
@@ -3610,6 +3666,11 @@ class TaskEngine(DAPBase):
             self._terminated_called = False
             self._teardown_done = asyncio.Event()
             self._exit_event_seen = False
+            # A crash, and a kill by the server, belong to the run they
+            # happened in: a relaunch that exits cleanly must read Completed,
+            # and one that crashes must be classified on its own exit
+            self._crash = None
+            self._process_killed = False
             self._stop_reason = None
             self.dormant_reason = None
             self.db_approved = {}
@@ -3741,12 +3802,12 @@ class TaskEngine(DAPBase):
                 if arg.split('=', 1)[0].lower() != '--dumps':
                     child_args.append(arg)
 
-            # The engine's own options: --dumps always, trace and node path unless the caller set one
+            # The engine's own options: --dumps always, trace unless the caller set one
             for arg in startup_args():
                 option = arg.split('=', 1)[0] + '='
                 if option == '--dumps=':
                     child_args.append(arg)
-                elif option in ('--trace=', '--node_path=') and not any(a.startswith(option) for a in child_args):
+                elif option == '--trace=' and not any(a.startswith(option) for a in child_args):
                     child_args.append(arg)
 
             await self._send_status_update()

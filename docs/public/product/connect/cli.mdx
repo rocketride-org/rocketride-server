@@ -34,12 +34,12 @@ Install either SDK to get `rocketride` on your path:
 
 <div className="rr-card-grid">
 
-<a className="rr-side-card" href="/clients/python">
+<a className="rr-side-card" href="/clients/python/">
   <span className="rr-side-card__head"><SiPython className="rr-card-icon" /><span className="rr-side-card__title">Python SDK</span></span>
   <span className="rr-side-card__body"><code>pip install rocketride</code> — installs the CLI alongside the Python client.</span>
 </a>
 
-<a className="rr-side-card" href="/clients/typescript">
+<a className="rr-side-card" href="/clients/typescript/">
   <span className="rr-side-card__head"><SiTypescript className="rr-card-icon" /><span className="rr-side-card__title">TypeScript SDK</span></span>
   <span className="rr-side-card__body"><code>npm install rocketride</code> — installs the CLI alongside the Node.js client.</span>
 </a>
@@ -73,7 +73,8 @@ connection is encrypted.
 The `deploy` commands, and every `app` command except `create`, `dev`, and
 `verify`, connect to the deployment target instead: `ROCKETRIDE_DEPLOY_URI` and
 `ROCKETRIDE_DEPLOY_APIKEY`, which `init` and `login` write to `.env`. They
-refuse to run when no deployment target is set.
+refuse to run when no deployment target is set, and when no deployment API key
+is set: set `ROCKETRIDE_DEPLOY_APIKEY` or pass `--apikey`.
 
 ## Commands
 

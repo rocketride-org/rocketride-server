@@ -15,6 +15,7 @@ These warnings are suppressed:
 - transformers deprecation warnings - upstream, not our code
 """
 
+import importlib.util
 import os
 import sys
 import warnings
@@ -107,3 +108,22 @@ CONST_AI_NODE_SCRIPT = join(CONST_AI_ROOT, 'node.py')
 CONST_AI_REQUIREMENTS = join(CONST_AI_ROOT, 'requirements.txt')
 
 depends(CONST_AI_REQUIREMENTS)
+
+
+def install_node_baseline() -> None:
+    """Install the baseline every node assumes (numpy, requests, ...) from each `nodes` root.
+
+    `nodes` is a namespace package, so it may have more than one root (the server's
+    nodes and the ones a run unpacks); a root without a `requirements.txt` is skipped.
+
+    `node.py` calls this on the engine's run path, before the pipeline loads. It never
+    runs on `import ai`: installing packages is run-path work, and the server imports a
+    node's `IValidator` in CONFIG mode, which must resolve no pip. The engine run directly
+    on a task file does not go through `node.py`; there a node finds the baseline only if
+    it is already installed (the Docker image installs it at build time).
+    """
+    spec = importlib.util.find_spec('nodes')
+    for root in (spec.submodule_search_locations if spec else None) or ():
+        requirements = join(root, 'requirements.txt')
+        if os.path.exists(requirements):
+            depends(requirements)

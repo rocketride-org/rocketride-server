@@ -84,6 +84,37 @@ LANE_BINDER_METHODS = {'tag': 'tags', 'raw': 'tags'}
 # out of any "lanes you could send to" list.
 LANE_LIFECYCLE_METHODS = frozenset({'open', 'closing', 'close'})
 
+# Structured formats that are still plain text. When no component reads the
+# format's own lane, a body in one of these goes to the text lane if some
+# component reads text, instead of falling through to raw where an agent behind
+# a text lane never sees it. `+json` and `+xml` suffix types count too.
+TEXT_LANE_FALLBACK_TYPES = frozenset(
+    {'application/json', 'application/xml', 'application/x-ndjson', 'application/yaml', 'application/x-yaml'}
+)
+
+
+def _is_text_format(mime_base: str) -> bool:
+    """
+    Tell whether a MIME type without parameters is a structured text format.
+
+    Args:
+        mime_base: Lower-case MIME type with any ``;`` parameters removed.
+
+    Returns:
+        bool: True for the types in ``TEXT_LANE_FALLBACK_TYPES`` and any
+        ``application/*+json`` or ``application/*+xml`` type.
+    """
+    if mime_base in TEXT_LANE_FALLBACK_TYPES:
+        return True
+    return mime_base.startswith('application/') and mime_base.endswith(('+json', '+xml'))
+
+
+# The text lane holds a body until the pipe closes so it arrives as one text.
+# Past this many bytes it stops holding: the text so far is written and the rest
+# goes through chunk by chunk, as every text body did before, so a large upload
+# costs no more memory than it used to.
+TEXT_LANE_HOLD_BYTES = 8 * 1024 * 1024
+
 
 def _trim_tool_data(value: Any) -> Any:
     """
@@ -160,8 +191,9 @@ class DataConnPipe:
     correlation_id: str = None  # The server-minted request id this pipe was opened for (ALB seam 7)
     caller: Optional[Dict[str, Any]] = None  # The server-set caller context stamped on the pipe (plan 5.3)
     hold_started: float = None  # perf_counter at getPipe(): the billable hold starts after admission (plan 8.1)
-    # Text lane: holds the bytes of a character that a write cut in half
-    text_decoder: codecs.IncrementalDecoder = field(default_factory=codecs.getincrementaldecoder('utf-8'))
+    text_decoder: Any = None  # Incremental UTF-8 decoder for the text lane, created on the first write
+    text_parts: Any = None  # Text-lane body decoded so far, written as one text when the pipe closes
+    text_bytes: int = 0  # Text-lane bytes received so far, checked against TEXT_LANE_HOLD_BYTES
 
 
 class DataConn(DAPConn):
@@ -223,6 +255,11 @@ class DataConn(DAPConn):
         # The server-minted correlationId of each open pipe -> its pipe id, so
         # an open repeated for one request finds its binding in O(1) (ALB seam 7)
         self._open_by_correlation: Dict[str, int] = {}
+
+        # Bindings whose close is in flight, by pipe id. A close takes its
+        # binding out of the map above at once, and a text body's pipeline work
+        # runs inside that close, so cancel looks here to reach it (see _close)
+        self._closing: Dict[int, DataConnPipe] = {}
 
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
@@ -457,20 +494,34 @@ class DataConn(DAPConn):
         # Get the listeners on this pipe
         listeners = pipe_instance.getListeners()
 
+        # The MIME type without parameters such as charset
+        mime_base = mime_type.split(';', 1)[0].strip().lower()
+
         # If this is rocketlib tag data, we can send it out directly on the tag lane
         if mime_type == 'application/rocketlib-tag':
             return 'tag'
 
         # If this is question and we have a question listener
-        elif mime_type.startswith('application/rocketride-question') and 'questions' in listeners:
+        elif mime_base.startswith('application/rocketride-question') and 'questions' in listeners:
             return 'questions'
 
         # If this is json content and we have a json listener
-        elif mime_type.split(';', 1)[0].strip() == 'application/json' and 'json' in listeners:
+        elif mime_base == 'application/json' and 'json' in listeners:
             return 'json'
 
         # If this is text content and we have a text listener
-        elif mime_type.startswith('text/') and 'text' in listeners:
+        elif mime_base.startswith('text/') and 'text' in listeners:
+            return 'text'
+
+        # If this is structured text (JSON, XML, ...) that would otherwise reach
+        # nobody: no reader on its own lane and none on raw (tags, e.g. parse),
+        # but a text listener. A question keeps its own path.
+        elif (
+            _is_text_format(mime_base)
+            and not mime_base.startswith('application/rocketride-question')
+            and 'text' in listeners
+            and 'tags' not in listeners
+        ):
             return 'text'
 
         # If this is image content and we have an image listener
@@ -583,6 +634,11 @@ class DataConn(DAPConn):
             pipe.writeTagEndStream()
             pipe.writeTagEndObject()
 
+        elif lane == 'text':
+            # _close has normally written the text already; this covers any
+            # other path that ends a text pipe. Idempotent.
+            self._flush_text(pipe_conn)
+
         else:
             # Other lanes don't need framing
             pass
@@ -608,7 +664,7 @@ class DataConn(DAPConn):
             self._open_by_correlation.pop(conn_pipe.correlation_id, None)
         return conn_pipe
 
-    def _binding_for(self, pipe_id: Any, args: Dict[str, Any], verb: str) -> DataConnPipe:
+    def _binding_for(self, pipe_id: Any, args: Dict[str, Any], verb: str, *, closing: bool = False) -> DataConnPipe:
         """
         The open binding a write/close/tool frame names, checked against the frame's request.
 
@@ -625,6 +681,10 @@ class DataConn(DAPConn):
             pipe_id: The slot the frame names.
             args: The frame's arguments (``_caller`` as the server stamped it).
             verb: The frame's verb, for the message.
+            closing: Also accept a binding whose close is in flight. Only
+                cancel asks for it: a text body's work runs inside its close
+                (see ``_flush_text``), and the request must stay cancellable
+                for as long as it runs.
 
         Returns:
             The binding on that slot.
@@ -633,6 +693,8 @@ class DataConn(DAPConn):
             ValueError: The slot is not open, or is open for another request.
         """
         conn_pipe = self._pipe_map.get(pipe_id, None)
+        if not conn_pipe and closing:
+            conn_pipe = self._closing.get(pipe_id, None)
         if not conn_pipe:
             raise ValueError(f'{verb} pipe with id {pipe_id} not found')
         caller = args.get('_caller')
@@ -707,6 +769,75 @@ class DataConn(DAPConn):
             return work()
         finally:
             metrics.set_current_trace(previous)
+
+    def _write_text(self, conn_pipe: DataConnPipe, data: bytes) -> None:
+        """
+        Decode one text-lane chunk and keep it until the body is complete.
+
+        The text lane gets the body as ONE text (see _flush_text): a node such as
+        `question` turns every writeText into its own question, so a body that
+        arrives in two chunks would otherwise become two half-questions. The
+        decoder keeps a UTF-8 character split between chunks intact, and invalid
+        bytes still fail this write.
+
+        A body larger than TEXT_LANE_HOLD_BYTES is not held whole: the chunk that
+        crosses the limit writes everything held so far, and each later chunk is
+        written as it arrives.
+
+        Args:
+            conn_pipe: The pipe being written. Holds the decoder and the text so far.
+            data: The raw bytes of this chunk.
+        """
+        if conn_pipe.text_decoder is None:
+            conn_pipe.text_decoder = codecs.getincrementaldecoder('utf-8')()
+            conn_pipe.text_parts = []
+            conn_pipe.text_bytes = 0
+        text = conn_pipe.text_decoder.decode(data)
+        conn_pipe.text_bytes += len(data)
+        if conn_pipe.text_bytes > TEXT_LANE_HOLD_BYTES:
+            conn_pipe.text_parts.append(text)
+            text = ''.join(conn_pipe.text_parts)
+            conn_pipe.text_parts.clear()
+            if text:
+                conn_pipe.pipe.writeText(text)
+        elif text:
+            conn_pipe.text_parts.append(text)
+
+    def _flush_text(self, conn_pipe: DataConnPipe) -> None:
+        """
+        Write the whole text-lane body as one text. Idempotent.
+
+        A pipe whose write already failed has reported its error, so it writes
+        nothing and raises nothing here. A request cancelled before its close
+        (``pipe.cancel()``) drops the held body the same way: the binder would
+        refuse it at the first node. What a body over ``TEXT_LANE_HOLD_BYTES``
+        already sent on is not undone: that text reached the pipeline when the
+        limit was crossed.
+
+        This write is where a text request's pipeline work happens, so the
+        caller runs it bound to the request tree (``_in_trace``) and keeps the
+        binding reachable for cancel while it runs (``_closing``).
+
+        Raises:
+            UnicodeDecodeError: The body ends inside a UTF-8 character.
+        """
+        decoder = conn_pipe.text_decoder
+        if decoder is None:
+            return
+        parts = conn_pipe.text_parts or []
+        conn_pipe.text_decoder = None
+        conn_pipe.text_parts = None
+        if conn_pipe.has_failed or conn_pipe.cancelled:
+            return
+        try:
+            parts.append(decoder.decode(b'', final=True))
+        except UnicodeDecodeError as e:
+            raise UnicodeDecodeError(
+                e.encoding, e.object, e.start, e.end, 'the text body ends inside a character'
+            ) from e
+        text = ''.join(parts)
+        if text:
+            conn_pipe.pipe.writeText(text)
 
     def _cleanup_pipe(self, conn_pipe: DataConnPipe) -> None:
         """
@@ -1038,6 +1169,14 @@ class DataConn(DAPConn):
         if not conn_pipe.is_open:
             raise ValueError(f'Write pipe with id {pipe_id} is not open')
 
+        # A cancelled request takes no more data, and says so with its own
+        # code. The binder would refuse the write at the first node, but a
+        # text write never reaches the binder: it is held until the close, so
+        # without this check it would be accepted and then dropped unseen.
+        # Refused before dispatch, so the pipe is not marked failed by it
+        if conn_pipe.cancelled:
+            raise RequestCancelled(f'Pipe {pipe_id}: the request was cancelled')
+
         if conn_pipe.has_failed:
             raise ValueError(f'Write pipe with id {pipe_id} has failed')
 
@@ -1067,10 +1206,7 @@ class DataConn(DAPConn):
 
                 # Handle different lane types with appropriate data writing
                 if lane == 'text':
-                    # Writes are cut at any byte (an HTTP body arrives in stream chunks)
-                    string_data = conn_pipe.text_decoder.decode(data)
-                    if string_data:
-                        pipe.writeText(string_data)
+                    self._write_text(conn_pipe, data)
 
                 elif lane == 'json':
                     # Only the parse is converted: an error from the write keeps
@@ -1168,8 +1304,9 @@ class DataConn(DAPConn):
         NOT removed. The write in flight fails with ``TASK_CANCELLED`` when the
         binder next crosses a node, and the client's close then runs as
         usual and releases the slot. A pipe with no write in flight is
-        flagged all the same: its next write fails at once. Cancel is
-        activity for the zombie timer.
+        flagged all the same: its next write fails at once, on every lane
+        (``_write`` refuses it before dispatch, so a text write is not
+        held for the close). Cancel is activity for the zombie timer.
 
         Args:
             request: The DAP request.
@@ -1186,8 +1323,9 @@ class DataConn(DAPConn):
         if pipe_id is None:
             raise ValueError('No pipe_id specified')
 
-        # The frame's own binding, checked like a write's
-        conn_pipe = self._binding_for(pipe_id, args, 'Cancel')
+        # The frame's own binding, checked like a write's. A binding that is
+        # closing counts too: a text body's work runs inside its close
+        conn_pipe = self._binding_for(pipe_id, args, 'Cancel', closing=True)
         if not conn_pipe.is_open:
             raise ValueError(f'Cancel pipe with id {pipe_id} is not open')
 
@@ -1215,27 +1353,37 @@ class DataConn(DAPConn):
         if pipe_id is None:
             raise ValueError('No pipe_id specified')
 
-        # The frame's own binding, then removed from our mapping immediately
+        # The frame's own binding, then removed from our mapping immediately.
+        # It stays reachable for cancel, and only for cancel, until this close
+        # ends: the slot is still held, so no other binding can take its id
         self._binding_for(pipe_id, args, 'Close')
         conn_pipe = self._pop_binding(pipe_id)
+        self._closing[pipe_id] = conn_pipe
 
         try:
             # Reset activity timer since close is considered activity
             self._reset_pipe_activity(conn_pipe)
+
+            # Write the text lane's body as one text now, outside close_sync's
+            # catch-all, so a body that ends inside a UTF-8 character reaches
+            # the client as an error, as it did when each write decoded its own
+            # chunk. This is the request's pipeline work: it runs bound to the
+            # request tree like a write frame, so what it books lands in the
+            # tree's bucket (plan 8.1), and a cancel that arrives while it runs
+            # ends the close with the request's own code.
+            if conn_pipe.lane == 'text':
+                try:
+                    await asyncio.to_thread(self._in_trace, conn_pipe.trace_id, lambda: self._flush_text(conn_pipe))
+                except Exception as exc:
+                    _raise_if_cancelled(exc, pipe_id)
+                    raise
 
             def close_sync():
                 """End and close the pipe, then collect the pipeline's results (runs in a worker thread).
 
                 Returns:
                     The object's response with its objectId, and its error when the object failed.
-
-                Raises:
-                    UnicodeDecodeError: The text-lane data ended inside a character.
                 """
-                # Text that ends inside a character is truncated; a failed pipe already reported its error
-                if conn_pipe.lane == 'text' and not conn_pipe.has_failed:
-                    conn_pipe.text_decoder.decode(b'', final=True)
-
                 # End the pipe and close it.  If either step throws (e.g. a
                 # node's writeText/writeAudio raised during closing flush),
                 # we still need to extract whatever results and error info
@@ -1293,6 +1441,10 @@ class DataConn(DAPConn):
             raise
 
         finally:
+            # No longer reachable for cancel, before the slot goes back
+            if self._closing.get(pipe_id) is conn_pipe:
+                del self._closing[pipe_id]
+
             # Always clean up and release semaphore
             await asyncio.to_thread(self._cleanup_pipe, conn_pipe)
 

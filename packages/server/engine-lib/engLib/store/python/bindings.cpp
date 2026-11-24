@@ -1520,7 +1520,8 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYENUM(Lz4Inflate, Ec::Lz4Inflate)
         .PYENUM(Lz4Deflate, Ec::Lz4Deflate)
         .PYENUM(LicenseLimit, Ec::LicenseLimit)
-        .PYENUM(InvalidFilename, Ec::InvalidFilename);
+        .PYENUM(InvalidFilename, Ec::InvalidFilename)
+        .PYENUM(Crash, Ec::Crash);
 
     //-------------------------------------------------------------
     /// @details

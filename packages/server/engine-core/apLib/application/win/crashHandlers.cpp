@@ -51,7 +51,7 @@ unhandledExceptionFilter(::PEXCEPTION_POINTERS pExceptionInfo) noexcept {
     if (dev::dumpsEnabled()) plat::createMinidump(pExceptionInfo);
 
     // Report the error and exit
-    dev::fatality(_location, APERR(Ec::Fatality, errorStr));
+    dev::fatality(_location, APERR(Ec::Crash, errorStr));
 }
 
 void abortHandler(int signal) noexcept {
@@ -74,7 +74,7 @@ void abortHandler(int signal) noexcept {
     if (dev::dumpsEnabled()) plat::createMinidump(signal);
 
     // Report the error and exit
-    dev::fatality(_location, APERR(Ec::Fatality, errorStr));
+    dev::fatality(_location, APERR(Ec::Crash, errorStr));
 }
 
 }  // namespace

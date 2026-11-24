@@ -197,7 +197,7 @@ public:
     ///		Walks one directory of service definitions: every
     ///		services.*json under it (recursively) is parsed, refused
     ///		if still in the old format, resolved and registered.
-    ///		init() runs it over the nodes tree and --node_path; public
+    ///		init() runs it over the nodes tree; public
     ///		so a fixture directory can be loaded in a test
     //-----------------------------------------------------------------
     static Error loadServices(const Path &path, const Text &mask) noexcept;

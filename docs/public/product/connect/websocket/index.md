@@ -279,12 +279,32 @@ reads that lane; anything unmatched falls through to the raw/tags lane.
 | --- | --- |
 | `application/json` | `json` |
 | `text/*` | `text` |
+| `application/json`, `application/xml`, `application/x-ndjson`, `application/yaml`, `application/*+json`, `application/*+xml`, when nothing reads their own lane or raw (`tags`) | `text` |
 | `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
-| `application/rocketride-question+json` | `questions` |
+| `application/rocketride-question+json` | `questions`; with no `questions` reader it goes to raw, never `text` |
 | `application/rocketlib-tag` | `tags` |
 | anything else, or no reader above | raw, delivered on `tags` |
 
 The prefix `lane/<name>` bypasses detection and targets a lane directly.
+
+On the `text` lane the body is decoded as UTF-8 and delivered as **one** text when
+the pipe closes, however many `write` calls carried it. A node such as `question`
+makes one question per text, so a webhook body that arrives in two chunks still
+makes one question. A body over 8 MiB is not held whole: what has arrived is
+written as one text when the limit is crossed, and each later chunk as its own
+text. Invalid UTF-8, including a body that ends inside a character, fails the
+request.
+
+A text request therefore does its work while its `close` is in flight, and a
+`cancel` reaches the request until that close returns. Cancellation is
+cooperative: a cancel that arrives while the pipeline is still working on the
+text stops it at the next node, and the close fails with `TASK_CANCELLED`;
+once the pipeline has taken the whole text, a cancel no longer changes how the
+close answers, and it returns its result as usual. A request cancelled before
+its close takes no more data (a later `write` fails with `TASK_CANCELLED`) and
+the text still held for it is never run. A cancel does not undo work already
+dispatched: the text a body over 8 MiB sent on when it crossed the limit has
+reached the pipeline.
 
 ### When nothing reads the chosen lane
 
@@ -303,11 +323,13 @@ warning is the only signal that separates the two.
 Read the warnings from `get_task_status(token)['warnings']`, or subscribe to
 `apaevt_status_warning` (see [Observability](/connect/websocket/observability)).
 
-Note that the mismatch is symmetric: `text/plain` into a pipeline whose first
-component reads `json` fails exactly the way `application/json` fails into a
-`text`-first one. There is no single header that is correct for every pipeline,
-which is why the endpoint panel offers one example per lane and preselects the
-one the running pipeline reads.
+The fallback in the table covers one direction only. `application/json` into a
+pipeline that reads `text` and neither `json` nor raw is delivered on `text`.
+`text/plain` is never parsed into the `json` lane: with no `text` reader it
+falls through to raw, so it reaches a component only if one reads `tags`, and
+a pipeline that reads `json` alone receives nothing. There is no single header
+that is correct for every pipeline, which is why the endpoint panel offers one
+example per lane and preselects the one the running pipeline reads.
 
 ## Keepalive & timeouts
 

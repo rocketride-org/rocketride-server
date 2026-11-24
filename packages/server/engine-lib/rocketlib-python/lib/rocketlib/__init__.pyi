@@ -109,6 +109,7 @@ class Ec:
     LicenseLimit: int
     Retry: int
     InvalidFilename: int
+    Crash: int
 
 class APERR(Exception):
     """Raised when an engine error occurs."""
