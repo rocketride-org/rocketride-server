@@ -570,6 +570,29 @@ function surfaceNames(bundleText) {
 }
 
 /**
+ * An import declaration with the names of its named imports sorted by their
+ * local name, so the same imports listed in another order print the same.
+ *
+ * @param {import('typescript').ImportDeclaration} declaration - A statement of a bundle.
+ * @returns {import('typescript').ImportDeclaration} The declaration, its named imports sorted.
+ */
+function sortNamedImports(declaration) {
+	const byLocalName = (a, b) => (a.name.text < b.name.text ? -1 : a.name.text > b.name.text ? 1 : 0);
+	const result = ts.transform(declaration, [
+		(context) => (root) => {
+			const visit = (node) =>
+				ts.isNamedImports(node)
+					? ts.factory.updateNamedImports(node, [...node.elements].sort(byLocalName))
+					: ts.visitEachChild(node, visit, context);
+			return ts.visitNode(root, visit);
+		},
+	]);
+	const [sorted] = result.transformed;
+	result.dispose();
+	return sorted;
+}
+
+/**
  * Map every top-level statement of a bundle to its normalized declaration text,
  * keyed by declaration (kind + name), so two bundles can be compared one
  * declaration at a time. Keying by name makes the comparison order-independent:
@@ -581,7 +604,9 @@ function surfaceNames(bundleText) {
  * quoted property name) is kept exactly. Declarations that share a key
  * (function overloads, an interface declared twice) are joined in source
  * order, not sorted: overload order decides which signature TypeScript picks,
- * so swapping two overloads is a real change.
+ * so swapping two overloads is a real change. The one order that IS sorted is
+ * that of the names inside a named import (sortNamedImports): it changes
+ * nothing the bundle declares.
  *
  * @param {string} bundleText - A generated/frozen bundle body.
  * @returns {Map<string, string>} declaration key -> normalized text.
@@ -606,6 +631,11 @@ function declarationTexts(bundleText) {
 			for (const el of st.exportClause.elements) {
 				add(`Export:${el.name.text}`, printer.printNode(ts.EmitHint.Unspecified, el, sf).trim());
 			}
+		} else if (ts.isImportDeclaration(st)) {
+			// The order of the names in `import { A, B }` is cosmetic (the
+			// printer keeps it), so it is keyed by its text with the names sorted.
+			const sorted = printer.printNode(ts.EmitHint.Unspecified, sortNamedImports(st), sf).trim();
+			add(`Import:${sorted}`, sorted);
 		} else {
 			// Anything else (`export {}`, side-effect statements) is keyed by
 			// its own text: a new or changed one shows up as a new key.
@@ -1216,4 +1246,8 @@ function main() {
 	log('Changes left uncommitted.');
 }
 
-main();
+// The builder runs this file with node; its test (freeze-shell-api.test.js)
+// requires it for the declaration comparison alone, without running a freeze.
+if (require.main === module) main();
+
+module.exports = { declarationTexts };
