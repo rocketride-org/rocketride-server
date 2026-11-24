@@ -795,25 +795,29 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 	// the sources at a readable zoom when the whole drawing would be too small
 	// there, and keeps the user's place once they move. Closing full screen
 	// brings back the inline view as it was.
-	const mode = useRef<{ active: boolean; inlineView: Viewport | null; inlineMoved: boolean }>({ active: false, inlineView: null, inlineMoved: false });
+	const mode = useRef<{ active: boolean; inlineView: Viewport | null; inlineMoved: boolean; restore: boolean }>({ active: false, inlineView: null, inlineMoved: false, restore: false });
 	useEffect(() => {
 		if (!ready || !frameWidth || !frameHeight) return;
 		const state = mode.current;
-		const leaving = !active && state.active;
 		if (active && !state.active) {
 			state.inlineView = getViewport();
 			state.inlineMoved = moved.current;
+			state.restore = false;
 			moved.current = false;
-		} else if (leaving) {
+		} else if (!active && state.active) {
 			moved.current = state.inlineMoved;
+			// Pending until a frame applies it: the inline placement and the frame's
+			// resize re-run this effect, and the re-run cancels the frame below.
+			state.restore = state.inlineMoved;
 		}
 		state.active = active;
 		const frame = requestAnimationFrame(() => {
-			if (moved.current && !leaving) return;
-			if (leaving && state.inlineMoved && state.inlineView) {
+			if (state.restore && state.inlineView) {
+				state.restore = false;
 				setViewport(state.inlineView);
 				return;
 			}
+			if (moved.current) return;
 			if (active) {
 				// Fit while nodes stay readable-sized; otherwise open at a reading
 				// zoom on the drawing's top-left corner (where the flow starts).
