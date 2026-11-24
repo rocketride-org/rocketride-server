@@ -1,6 +1,6 @@
 {
 	"name": "rocketride",
-	"version": "1.6.0",
+	"version": "1.7.0",
 	"author": "RocketRide, Inc.",
 	"license": "MIT",
 	"description": "RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. TypeScript SDK and CLI.",

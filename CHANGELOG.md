@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — since 2026-11-04
+## [Unreleased] — since 2026-11-24
+
+## [3.7.0] - 2026-11-24
 
 ### Added
 - **builder**: `--cmake-config=Sanitize` (Linux only) builds the engine, its C++ test programs and the C++ nodes with ASan and UBSan in one build (#3338)
@@ -47,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ai**: a run's cloud databases are authorized with the credential of the connection that started it, or of the one that restarted it: `TaskServer.start_task` and `restart_task` pass `AccountInfo.auth` down as a call argument to `AccountBase.authorize_db_target(identity, target, *, credential=None)`, so an account implementation can limit what a restricted key may reach. The credential is not stored on the task, written to the task file, logged, or added to the identity, and the default account ignores it. An account implementation without the keyword is still called as before, with a warning. Reusing a running task (`useExisting`) now authorizes the requesting connection's credential for the databases the run holds, waiting for a run that is still starting to report them, and is refused if any is denied, so on that path a restricted key cannot attach to a wider run of the same owner
 
 ### Fixed
+- **shell**: billing links (Stripe portal and checkout) open on the cloud shell: `host.openExternal` is registered there (#3460, stage #3466)
 - **server**: factory lookups (monitors, endpoints, filters, tasks) called each object's constructor through a function pointer of another type (a derived interface's constructor called as the root interface's), which UBSan reports as `function-type-mismatch` in every engine process. Every interface that shares a factory registry now names its root (`FactoryRoot`), and stored constructors and lookups both use the root's type (#3369)
 - **server**: `engtest` and `nodetest` handed Catch2 the program path in a string that was already freed, an ASan `heap-use-after-free` at start (#3369)
 - **server**: the indexer's word DB memory pool freed memory from `new[]` with `delete`, an ASan `alloc-dealloc-mismatch` when the word DB closes (#3369)
