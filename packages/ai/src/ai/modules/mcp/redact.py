@@ -8,7 +8,7 @@ turns such a value into a string and replaces each of these with
 * what the request log cleaner finds (``ai.web.access_log.redact_text``): the
   ``user:password@`` part of a URL, the token of a ``/task/fetch/<token>``
   path, and the value of a credential-named query parameter or bare
-  ``name=value`` word;
+  ``name=value`` word, quoted values (``password="..."``) included;
 * a RocketRide key: ``rr_`` (API keys), ``rrr_`` (MCP refresh tokens) or
   ``rrmg_`` (hosted-model passes) followed by 20 or more URL-safe characters;
 * a JWT: three base64url parts, the first starting with ``eyJ``.
@@ -19,14 +19,27 @@ successful tool result never does.
 
 import re
 
-from ai.web.access_log import REDACTED, redact_text
+from ai.web.access_log import REDACTED, is_sensitive_param, redact_text
 
+# A quoted value after a name. redact_text splits words at quotes, so it would
+# redact only the empty ``name=`` and keep the value after it. ``before`` is the
+# character in front of the name: when it is the same quote, that quote closes
+# an outer quote around ``name=``, and the text after it is not a value.
+_QUOTED = re.compile(r'(?P<before>^|[^\w.-])(?P<name>[\w.-]+)=(?P<value>"[^"]*"|\'[^\']*\')')
 _KEY = re.compile(r'\b(?:rr|rrr|rrmg)_[A-Za-z0-9_-]{20,}')
 _JWT = re.compile(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*')
 
 
+def _drop_quoted_credential(match: re.Match) -> str:
+    """Leave ``name=`` for a credential name, so redact_text redacts it whole; keep anything else."""
+    if match['before'] == match['value'][0] or not is_sensitive_param(match['name']):
+        return match.group(0)
+    return match['before'] + match['name'] + '='
+
+
 def clean_text(value: object) -> str:
     """Return ``value`` as a string with credential-shaped text replaced by ``[redacted]``."""
-    text = redact_text(str(value))
+    text = _QUOTED.sub(_drop_quoted_credential, str(value))
+    text = redact_text(text)
     text = _KEY.sub(REDACTED, text)
     return _JWT.sub(REDACTED, text)
