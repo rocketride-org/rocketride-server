@@ -108,6 +108,22 @@ jobs:
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
         run: find release-assets -type f | sort
 
+      # Only the Ubuntu build uploads the node archive: every platform's server must name its digests.
+      # Digests, not bytes: the index's key order follows each file system's readdir order
+      - name: Check every server names the node archive's digests
+        if: matrix.type == 'server' && (inputs.prerelease || steps.tag_check.outputs.exists == 'false')
+        run: |
+          [ -f release-assets/index.json ] || exit 0
+          shopt -s nullglob
+          digests() { jq -S '{archive, nodes: (.nodes | map_values(.sha256))}'; }
+          want=$(digests < release-assets/index.json)
+          for a in release-assets/rocketride-server-*.tar.gz; do
+            [ "$(tar -xzOf "$a" nodes/index.json | digests)" = "$want" ] || { echo "::error::$a names other node digests"; exit 1; }
+          done
+          for a in release-assets/rocketride-server-*.zip; do
+            [ "$(unzip -p "$a" nodes/index.json | digests)" = "$want" ] || { echo "::error::$a names other node digests"; exit 1; }
+          done
+
       # --- GPG-sign server tarballs/zips ---
       #
       # Produces detached ASCII-armored signatures (.asc) attached to the
@@ -170,6 +186,10 @@ jobs:
             echo "::error::No server archives (.tar.gz/.zip) found in release-assets/ to sign"
             ls -la release-assets/ || true
             exit 1
+          fi
+          # And the node index: it holds the digest of each node in the node archive
+          if [ -f release-assets/index.json ]; then
+            files+=(release-assets/index.json)
           fi
           for f in "${files[@]}"; do
             echo "$GPG_SIGNING_PASSPHRASE" | gpg --batch --yes \

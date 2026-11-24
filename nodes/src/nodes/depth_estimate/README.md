@@ -33,7 +33,7 @@ With a model server configured, inference runs there. Otherwise it runs locally 
 
 ### Output and failures
 
-The colorized map is encoded as JPEG after the depth result is restored to the original image size. The emitted statistics are calculated from that restored depth array. If image decoding or depth inference fails, the node logs a warning, drops the frame, and does not emit image or text output for it.
+The colorized map is encoded as JPEG after the depth result is restored to the original image size. The emitted statistics are calculated from that restored depth array. If a frame cannot be decoded, or depth estimation or writing the outputs fails, the node raises an error that names the cause, and the engine marks the object as failed: the image, or the whole video the frame came from. The task goes on with the next object. Output already written is not withdrawn, such as the depth statistics when only the depth map fails, or other frames of the same video.
 
 ## Upstream docs
 

@@ -42,8 +42,9 @@ import secrets
 import shlex
 import shutil
 import signal
+import uuid
 from collections import deque
-from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple, Union
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
@@ -70,6 +71,7 @@ from ai.constants import (
 from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
+from ai.common.model_gateway import GATEWAY_ENV, PASS_RENEW_INTERVAL_S, no_pass_marker, wants_hosted_openai
 from ai.common.rocketride_db import db_target, dsn_key, exposes_public_endpoint, is_db_provider, scrub_db_env
 from ai.modules.task import node_store
 from ai.modules.task.pipeflow import apply_pipeflow_event
@@ -320,6 +322,10 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
     return frozenset(names), tuple(prefixes)
 
 
+# The hosted backend's own model provider key. A task reaches hosted models
+# only through its per-run pass (ROCKETRIDE_MODEL_GATEWAY).
+CONST_MODEL_GATEWAY_KEY_ENV = 'RR_MODEL_GATEWAY_OPENAI_KEY'
+
 # Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
 # token key would let pipeline code mint any run's private token. The datacore
@@ -327,12 +333,14 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
 # token is the provisioner's bearer under the name production sets today
 # (ROCKETRIDE_DB_BROKER_TOKEN, also popped in _build_subprocess_env) and the
 # operator-only name it is moving to (RR_DB_BROKER_TOKEN). rocketride-saas #975.
+# The hosted backend's model key would let it call the models on the platform's account.
 CONST_SUBPROCESS_ENV_NEVER = frozenset(
     {
         CONST_TASK_TOKEN_KEY_ENV,
         'RR_DATACORE_GRANT_KEY',
         'RR_DB_BROKER_TOKEN',
         'ROCKETRIDE_DB_BROKER_TOKEN',
+        CONST_MODEL_GATEWAY_KEY_ENV,
     }
 )
 
@@ -566,6 +574,11 @@ class Task(DAPBase):
         _is_terminating (bool): Termination state flag
         _termination_lock (asyncio.Lock): Atomic termination operations
     """
+
+    # The run ID this run's hosted models pass was issued for; None when it has none
+    _model_run_id: Optional[str] = None
+    # Renews that pass while the task runs; cancelled with the pass
+    _model_pass_renewal: Optional[asyncio.Task] = None
 
     class TaskDbgStdio(DbgStdio):
         """DAP client for stdio communication with subprocess."""
@@ -805,6 +818,8 @@ class Task(DAPBase):
         # Per-run credential for the child's /task/data, separate from self.token
         self._data_token: Optional[str] = None
         self._reset_channel_state()
+        self._model_run_id = None
+        self._model_pass_renewal = None
 
         # Status broadcasting
         self._status_update_task: Optional[asyncio.Task] = None
@@ -1321,7 +1336,12 @@ class Task(DAPBase):
         return {dsn_key(scope, target): dsns[(scope, owner)] for scope, target, owner in wanted}
 
     async def _build_subprocess_env(
-        self, db_access: Tuple[List[Tuple[str, str]], bool], *, credential: Optional[str] = None
+        self,
+        db_access: Tuple[List[Tuple[str, str]], bool],
+        wants_hosted_openai: bool = False,
+        model_run_id: str = '',
+        *,
+        credential: Optional[str] = None,
     ) -> Dict[str, str]:
         """Build the environment for the task subprocess.
 
@@ -1330,6 +1350,9 @@ class Task(DAPBase):
         ``credential`` is the presenting connection's ``AccountInfo.auth``,
         passed straight to ``_authorize_db_targets`` and nowhere else: it never
         reaches the child's environment or the task file.
+        ``wants_hosted_openai`` is ``_wants_hosted_openai`` of the same
+        pipeline, and ``model_run_id`` the ID this run's hosted models pass is
+        asked for under ('' asks for none).
 
         The child never gets a copy of the engine's environment: it runs user
         pipeline code, so it only inherits the allowlist in
@@ -1361,6 +1384,19 @@ class Task(DAPBase):
         # the DSN delivery names and the database TLS settings, in any case:
         # RR_SUBPROCESS_ENV='*' or 'RR_*' would otherwise hand them over.
         scrub_db_env(subprocess_env)
+        # Only a pass issued below for this run reaches the task
+        subprocess_env.pop(GATEWAY_ENV, None)
+
+        if wants_hosted_openai and model_run_id and _is_saas_engine():
+            gateway = await self._issue_model_pass(model_run_id)
+            if isinstance(gateway, dict):
+                # The backend refused this run a pass (a team deployment, for one):
+                # the task learns why, so a node with no key can say so
+                self._model_run_id = None
+                subprocess_env[GATEWAY_ENV] = json.dumps(gateway)
+            elif gateway is not None:
+                subprocess_env[GATEWAY_ENV] = gateway
+                self._model_pass_renewal = asyncio.create_task(self._renew_model_pass(model_run_id))
 
         # Authorize and resolve every database the DB nodes use, server-side
         # (the SaaS account context exists only in this process), and hand
@@ -1392,6 +1428,83 @@ class Task(DAPBase):
                 subprocess_env['ROCKETRIDE_DB_DSNS'] = json.dumps(dsns)
 
         return subprocess_env
+
+    def _wants_hosted_openai(self, pipeline: Dict[str, Any]) -> bool:
+        """Whether this run should get a hosted models pass: a hosted engine, and
+        an OpenAI node in ``pipeline`` (the resolved one the task runs) with no key.
+        """
+        if not _is_saas_engine():
+            return False
+        try:
+            return wants_hosted_openai(pipeline, node_store.served)
+        except Exception as e:
+            self.debug_message(f'Hosted models check failed: {type(e).__name__}')
+            return False
+
+    async def _issue_model_pass(self, model_run_id: str) -> Union[str, Dict[str, Any], None]:
+        """Ask the account for this run's hosted models pass: its JSON; or, when the
+        backend refuses with a code, ``no_pass_marker`` of that code; or None.
+
+        A refusal or a failure is not an error: the task starts without a pass,
+        and a node with no key says that hosted models are not available (or why).
+        """
+        from ai.account import account
+
+        identity = {
+            'org_id': self.org_id or '',
+            'user_id': self.client_id or '',
+            'team_id': self.team_id or '',
+            'run_id': model_run_id,
+            'task_id': self.id or '',
+        }
+        try:
+            gateway = await account.issue_model_pass(identity)
+            if isinstance(gateway, dict) and 'error' in gateway:
+                marker = no_pass_marker(gateway)
+                self.debug_message(f'No hosted models pass for this run: {marker["error"]["code"] or "refused"}')
+                return marker
+            if isinstance(gateway, dict):
+                return json.dumps(gateway)
+            self.debug_message('No hosted models pass for this run')
+        except Exception as e:
+            self.debug_message(f'Hosted models pass not issued: {type(e).__name__}')
+        return None
+
+    async def _renew_model_pass(self, run_id: str) -> None:
+        """Renew this run's pass every PASS_RENEW_INTERVAL_S while the run keeps it.
+
+        Cancelled by ``_drop_model_pass``, so renewing stops wherever the pass is revoked.
+        """
+        from ai.account import account
+
+        while True:
+            await asyncio.sleep(PASS_RENEW_INTERVAL_S)
+            if self._model_run_id != run_id:
+                return
+            try:
+                renewed = await account.renew_model_pass(run_id)
+            except Exception as e:
+                self.debug_message(f'Hosted models pass not renewed: {type(e).__name__}')
+                continue
+            if renewed is None:
+                # The pass has ended for good; a later renewal cannot bring it back
+                self.debug_message('Hosted models pass not renewed: it has ended')
+                return
+
+    async def _drop_model_pass(self) -> None:
+        """End this run's hosted models pass, if it has one. Errors are ignored."""
+        renewal, self._model_pass_renewal = self._model_pass_renewal, None
+        if renewal is not None and not renewal.done() and renewal is not asyncio.current_task():
+            renewal.cancel()
+        run_id, self._model_run_id = self._model_run_id, None
+        if not run_id:
+            return
+        try:
+            from ai.account import account
+
+            await account.revoke_model_pass(run_id)
+        except Exception as e:
+            self.debug_message(f'Hosted models pass not revoked: {type(e).__name__}')
 
     def _shares_host(self) -> bool:
         """
@@ -2086,6 +2199,8 @@ class Task(DAPBase):
 
         # The token dies with the run; a restart mints a new one
         self._data_token = None
+        # So does the run's hosted models pass
+        await self._drop_model_pass()
 
         try:
             # Cancel status update task
@@ -3216,6 +3331,8 @@ class Task(DAPBase):
             self._stop_reason = None
             self._is_terminating = False
             self._reset_channel_state()
+            # A restart that begins before the last run's cleanup still ends its pass
+            await self._drop_model_pass()
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
@@ -3239,6 +3356,10 @@ class Task(DAPBase):
 
             # Decode parameter tokens the subprocess has no key for
             resolved = resolve_parameter_tokens(resolved)
+
+            # Whether an OpenAI node would run with no key, read while the
+            # resolved pipeline still exists. One boolean; the pipeline is not kept.
+            wants_hosted = self._wants_hosted_openai(resolved)
 
             # Write it out, then let `resolved` go out of scope
             self._tmpfile = await self._write_task_file(resolved)
@@ -3339,7 +3460,13 @@ class Task(DAPBase):
             # ROCKETRIDE_* env namespace is caller-influenced by design.
             # _build_subprocess_env additionally scrubs the RocketRide DB
             # broker credentials and injects the resolved per-tenant DSN.
-            subprocess_env = await self._build_subprocess_env(db_access, credential=credential)
+            # A run that wants hosted models gets a new run ID for its pass, kept
+            # on the task before the pass is asked for, so cleanup can revoke it
+            model_run_id = str(uuid.uuid4()) if wants_hosted else ''
+            self._model_run_id = model_run_id or None
+            subprocess_env = await self._build_subprocess_env(
+                db_access, wants_hosted, model_run_id, credential=credential
+            )
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
@@ -3434,6 +3561,11 @@ class Task(DAPBase):
                 self._run_log = None
                 self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
 
+            # The engine may end during the awaits above: its stdout reader
+            # then started _terminated(), which ends the run
+            if self._terminated_called:
+                return
+
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
                 # Resolve billing identity from task control
@@ -3515,6 +3647,12 @@ class Task(DAPBase):
             self._is_restarting = False
             await self._terminated()
             self.debug_message(f'Task startup failed: {e}')
+            raise
+        except asyncio.CancelledError:
+            # A cancelled start skips the handler above. Before the engine is
+            # launched nothing else ends this run's hosted models pass.
+            if self._engine_process is None:
+                await asyncio.shield(self._drop_model_pass())
             raise
 
     async def stop_task(self, reason: str = 'user') -> None:

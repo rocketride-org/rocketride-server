@@ -28,8 +28,8 @@ set -eu
 torch_allowed() {
     case "$1" in
         ai/common/models/*) return 0 ;;                # model loaders: local path only
-        nodes/audio_tts/requirements.txt) return 0 ;;  # depends() only without a model server
-        nodes/anonymize/requirements.txt) return 0 ;;  # never installed by the node: GLiNER comes through ai.common.models
+        nodes/node-requirements/audio_tts/requirements.txt) return 0 ;;  # depends() only without a model server
+        nodes/node-requirements/anonymize/requirements.txt) return 0 ;;  # never installed by the node: GLiNER comes through ai.common.models
     esac
     return 1
 }

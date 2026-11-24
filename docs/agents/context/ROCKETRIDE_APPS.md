@@ -1002,7 +1002,7 @@ belongs to, never to the app:
   are no storage, table or query-rate quotas. Backups cover the whole cluster
   only, and there is no export: read data out through the nodes.
 
-Full rules: https://docs.rocketride.org/operate/cloud-databases
+Full rules: https://docs.rocketride.ai/operate/cloud-databases
 
 ### The two-phase startup: `seeded` vs `loaded`
 

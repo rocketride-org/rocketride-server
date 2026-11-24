@@ -100,6 +100,10 @@ class DAPException(Exception):
         # Store complete DAP result for detailed error analysis
         self.dap_result = dap_result or {}
 
+    def __reduce__(self):
+        # Rebuilt from the DAP result its constructor takes, so it crosses a process boundary
+        return (self.__class__, (self.dap_result,), self.__dict__)
+
     @property
     def code(self) -> Optional[str]:
         """
@@ -180,6 +184,15 @@ class AuthenticationException(ConnectionException):
     """Raised when authentication fails (bad API key or credentials)."""
 
     pass
+
+
+class CommandException(RocketRideException, RuntimeError):
+    """
+    A command the server refused, such as starting or validating a pipeline.
+
+    ``code`` says why, e.g. ``NODE_NOT_ENTITLED``. Also a :class:`RuntimeError`,
+    which is what these failures raised before ``code`` reached the caller.
+    """
 
 
 class PipeException(RocketRideException, RuntimeError):

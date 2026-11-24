@@ -38,7 +38,7 @@ The RocketRide engine has a built-in MCP server, so there is nothing to
 install. The hosted server is at `https://api.rocketride.ai/mcp`. A
 self-hosted engine serves it on its own port: use `http://localhost:5565/mcp` on
 the same machine, or `https://<host>/mcp` behind a TLS proxy for any other host. See
-[MCP self-hosting](https://docs.rocketride.org/connect/mcp/http/self-hosting).
+[MCP self-hosting](https://docs.rocketride.ai/connect/mcp/http/self-hosting).
 
 The quickest example, with Claude Code:
 
@@ -47,9 +47,9 @@ claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
 ```
 
 For every other client and for sign-in details, see
-[Connect a client](https://docs.rocketride.org/connect/mcp/http/connect).
+[Connect a client](https://docs.rocketride.ai/connect/mcp/http/connect).
 To run the engine locally and connect a coding agent to it, start at the
-[coding-agents start page](https://docs.rocketride.org/quickstart/coding-agents/).
+[coding-agents start page](https://docs.rocketride.ai/quickstart/coding-agents/).
 
 The rest of this page is about the deprecated stdio package. If you must stay
 on it, the install and config commands are in the last section, "Only if you
@@ -77,8 +77,7 @@ Running pipelines are discovered automatically - start a pipeline in VS Code or 
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
-Build, test and publish durable agents that scale in production.
+[RocketRide](https://rocketride.ai) is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
 
 - **Ready-to-use nodes** - LLM providers, vector databases, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
@@ -393,7 +392,7 @@ SSE mode supports Bearer token authentication via the `MCP_API_KEY` environment 
 
 ## Links
 
-- [Documentation](https://docs.rocketride.org/)
+- [Documentation](https://docs.rocketride.ai/)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
 - [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)

@@ -30,7 +30,7 @@
       "config": {
         "agent_description": "Writes code, runs it in a disposable Linux sandbox, and reports what actually happened.",
         "instructions": [
-          "Use the Tenki sandbox tools to do the work: write files, run them, and read the real output.",
+          "Use the Luxor sandbox tools to do the work: write files, run them, and read the real output.",
           "Never guess what a script would print. Run it and report the output you got back.",
           "When steps are independent, issue their tool calls together so they run in parallel."
         ],
@@ -115,7 +115,7 @@
     {
       "id": "tool_tenki_1",
       "provider": "tool_tenki",
-      "name": "Tenki Sandbox",
+      "name": "Luxor Sandbox",
       "config": {
         "type": "tool_tenki",
         "apikey": "${ROCKETRIDE_TENKI_APIKEY}",

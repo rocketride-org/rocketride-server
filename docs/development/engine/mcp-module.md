@@ -48,6 +48,20 @@ upload/dropper links): explicit `rocketride_uri` / `ROCKETRIDE_URI` wins;
 otherwise a loopback bind uses this engine's own `ws://127.0.0.1:<port>`, and
 any other bind uses the `MCP_RESOURCE_IDENTIFIER` origin as `wss://`/`ws://`.
 
+Widget metadata comes from one function, `apps.ui_meta(spec, engine_origin,
+ui_domain)`, used for both the `resources/list` entry and the `resources/read`
+content item: a CSP for every widget (the dropper's `connectDomains` is the
+engine origin, reduced to a bare origin by `apps.origin_of`) and, when
+`MCP_UI_DOMAIN` is set, ChatGPT's `openai/widgetDomain`. The server never sends
+`ui.domain`: its format is host-specific, and choosing it per host would need
+the client's identity, which this stateless server sees only on `initialize`.
+`_resolve_ui_domain` reads `MCP_UI_DOMAIN` once in `initModule`; a value that
+is not an `https` origin (or `http` on loopback) is dropped with a warning that
+names the variable, not the value. On the widget side,
+`apps/src/shared/host-theme.ts` (`applyHostTheme(app)`, called before
+`app.connect()`) makes each widget follow the host theme and sets the
+RocketRide light or dark token set from `packages/shell/public/themes`.
+
 That URI must be encrypted **when it addresses a remote engine**: the caller's
 own credential rides the first DAP `auth` frame, so a `ws://`/`http://` URI
 pointing at a non-loopback host fails boot with a message naming the value and
