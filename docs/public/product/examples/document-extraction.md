@@ -147,6 +147,15 @@ Or via the Drag & Drop UI by using the `dropper` provider:
 { "id": "source_1", "provider": "dropper" }
 ```
 
+The run you started earlier still reads the `filesys` source: editing the file
+does not change it. Save the file, stop that run with the command `start`
+printed, and start the pipeline again:
+
+```bash
+rocketride stop --token <the token start printed>
+rocketride start --pipeline ./extract.pipe
+```
+
 `start` does not print an address. The drop page is the platform app
 `rocketride.dropper`: open it from the dropper node in the Builder, or by a
 signed-in deep link on the engine's own address:

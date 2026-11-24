@@ -113,7 +113,16 @@ unencrypted. Three rules apply:
 3. `RR_MCP_ENGINE_URI` and `MCP_RESOURCE_IDENTIFIER` are not interchangeable.
    `MCP_RESOURCE_IDENTIFIER` is the public URL of your `/mcp` endpoint. For OAuth sign-in on
    a self-hosted engine it must equal that URL exactly. `MCP_EXPECTED_AUDIENCE` is also
-   needed, but only when the engine is not bound to localhost. API key sign-in needs neither.
+   needed, but only when the engine is not bound to localhost. API key sign-in needs neither
+   to sign in.
+4. Upload links follow `MCP_RESOURCE_IDENTIFIER`, never `RR_MCP_ENGINE_URI`. The link a
+   file-drop tool returns (`upload_url`) names the MCP server's own address. With only
+   `RR_MCP_ENGINE_URI=wss://<public host>` set, tool calls reach the engine but the link
+   still names this machine (for the Docker image, `http://127.0.0.1:5565`), so a client
+   elsewhere sends its upload to itself. For clients on other machines also set
+   `MCP_RESOURCE_IDENTIFIER=https://<public host>/mcp`, whichever way they sign in, on an
+   engine that is not bound to localhost: an engine bound to localhost always names
+   `http://127.0.0.1:<port>`.
 
 A reverse proxy in front of an engine bound to localhost makes remote callers look local:
 `send_files`, which uploads files from the engine host's own disk, is then offered to anyone

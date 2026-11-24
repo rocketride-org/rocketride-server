@@ -25,9 +25,12 @@ keys are refused with 401.
 > for a `::` bind, `ws://<bind address>:<port>` for a bind to one specific IP address, and
 > `ws://127.0.0.1:<port>` for a bind host that is a name, which also logs a warning).
 > Upload links name the same address, so they work only for clients that can reach it.
-> For clients on other machines, set `MCP_RESOURCE_IDENTIFIER` to the public URL of
-> this engine's `/mcp` endpoint (an `https://` address they can reach): upload links
-> and the engine address then follow it.
+> For clients on other machines, run the engine on a bind host that is not localhost
+> and set `MCP_RESOURCE_IDENTIFIER` to the public URL of its `/mcp` endpoint (an
+> `https://` address they can reach): upload links and the engine address then follow
+> it. An engine bound to localhost names `http://127.0.0.1:<port>` in upload links
+> whatever `MCP_RESOURCE_IDENTIFIER` says, so setting the variable alone, on a
+> localhost-bound engine behind a TLS proxy, does not move them.
 >
 > Engine image 3.6.0 and earlier read `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` where
 > this version reads `RR_MCP_ENGINE_URI` and `RR_APIKEY`, and with nothing set they

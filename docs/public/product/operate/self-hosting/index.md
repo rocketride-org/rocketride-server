@@ -88,8 +88,8 @@ client must send a key. Use the key the engine was started with; an engine start
 without `RR_APIKEY` accepts any non-empty value:
 
 ```bash
-ROCKETRIDE_URI=ws://localhost:5565
-ROCKETRIDE_APIKEY=rr_local
+export ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_APIKEY=rr_local
 ```
 
 ```typescript
