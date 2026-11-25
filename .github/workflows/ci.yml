@@ -363,6 +363,8 @@ jobs:
         run: node --test nodes/scripts/tasks.test.js
       # Not in the hook: the unit tests of the builder's container checks
       - run: node --test nodes/scripts/container-checks.test.js
+      # Actions that run on some OSes only, and the global commands over them
+      - run: node --test scripts/lib/registry.test.js
 
   # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream

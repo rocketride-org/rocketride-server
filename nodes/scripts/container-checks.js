@@ -406,15 +406,43 @@ function isLocalContext(context) {
 	return LOCAL_CONTEXTS.some((pattern) => pattern.test(context));
 }
 
+/**
+ * The cluster entry `kubectl config view --minify -o jsonpath={.clusters[0]}`
+ * prints: its name, and its fields that say where requests go. Each is '' when
+ * the output holds no entry or it is not set.
+ * @param {string} text - Its output
+ * @returns {{clusterName: string, server: string, proxyUrl: string, tlsServerName: string}}
+ */
+function parseCluster(text) {
+	let entry = null;
+	try {
+		entry = JSON.parse(text);
+	} catch {
+		// Output that is not an entry names no server, and is refused for that
+	}
+	const cluster = entry?.cluster || {};
+	return {
+		clusterName: String(entry?.name || ''),
+		server: String(cluster.server || ''),
+		proxyUrl: String(cluster['proxy-url'] || ''),
+		tlsServerName: String(cluster['tls-server-name'] || ''),
+	};
+}
+
 // The names a local cluster's API server answers at: loopback, and Docker Desktop's own
 const LOCAL_SERVER_HOSTS = ['localhost', '0.0.0.0', '::1', 'kubernetes.docker.internal', 'host.docker.internal'];
 
 // minikube's VM drivers give its API server an address of a private network
 const PRIVATE_NETWORK = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
 
+// A server URL up to its host, as written: scheme://, any user:password@, then the host
+const SERVER_HOST = /^[a-z][a-z\d+.-]*:\/\/(?:[^/?#]*@)?(\[[^\]]*\]|[^:/?#]*)/i;
+
 /**
  * Whether a context's API server is on this machine: a context can be named
- * like a local one and point at a cluster elsewhere.
+ * like a local one and point at a cluster elsewhere. The host is judged as
+ * written: Node reads 127.1, 2130706433 or 0x7f.1 as 127.0.0.1, so only an
+ * address in its usual spelling counts.
  * @param {string} server - The server URL of the context's cluster
  * @param {string} context - The context's name
  * @returns {boolean}
@@ -422,14 +450,59 @@ const PRIVATE_NETWORK = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
 function isLocalServer(server, context) {
 	let host;
 	try {
-		host = new URL(server).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+		host = new URL(server).hostname;
 	} catch {
 		return false;
 	}
+	const written = SERVER_HOST.exec(server);
+	if (!written || written[1].toLowerCase() !== host) return false;
+	host = host.replace(/^\[|\]$/g, '');
 	if (LOCAL_SERVER_HOSTS.includes(host)) return true;
 	// Only an address is judged by its digits: 127.example.com is a name, and may be anywhere
 	if (!net.isIPv4(host)) return false;
 	return /^127\./.test(host) || (context === 'minikube' && PRIVATE_NETWORK.test(host));
+}
+
+// The variables kubectl takes a proxy from, by the scheme of the server; the first one set counts
+const PROXY_VARIABLES = { 'https:': ['HTTPS_PROXY', 'https_proxy'], 'http:': ['HTTP_PROXY', 'http_proxy'] };
+
+/**
+ * The variable whose proxy kubectl reaches a server through, or '' when it goes
+ * there directly. Like any Go program it goes directly to localhost (in lower
+ * case only), to a loopback address, and to a host NO_PROXY names: *, the host,
+ * or, for a host name, a domain it ends in (docker.internal, .docker.internal,
+ * *.docker.internal); an address is named only by itself or *.
+ * An entry not read here, such as a CIDR or one with a port, names no host.
+ * @param {string} server - A server URL isLocalServer accepts
+ * @param {Object<string, string>} env - The environment kubectl runs in
+ * @param {string} [platform] - os.platform(): on win32 a name counts in any case
+ * @returns {string}
+ */
+function proxyVariable(server, env, platform) {
+	const name = (key) => (platform === 'win32' ? key.toUpperCase() : key);
+	// The first of the names that is set, as kubectl reads them
+	const set = (names) => {
+		for (const wanted of names) {
+			const key = Object.keys(env).find((key) => name(key) === name(wanted) && env[key]);
+			if (key) return key;
+		}
+		return '';
+	};
+	const written = SERVER_HOST.exec(server)[1];
+	if (written === 'localhost' || written === '[::1]' || (net.isIPv4(written) && written.startsWith('127.')))
+		return '';
+	const variable = set(PROXY_VARIABLES[new URL(server).protocol] || []);
+	if (!variable) return '';
+	const host = written.toLowerCase();
+	const address = net.isIP(host.replace(/^\[|\]$/g, '')) !== 0;
+	const noProxy = set(['NO_PROXY', 'no_proxy']);
+	const named = (noProxy ? env[noProxy] : '').split(',').some((text) => {
+		const entry = text.trim().toLowerCase().replace(/^\*\./, '.');
+		if (entry === '*' || entry === host) return true;
+		// A domain names host names only, never an address
+		return !address && host.endsWith(entry.startsWith('.') ? entry : `.${entry}`);
+	});
+	return named ? '' : variable;
 }
 
 /**
@@ -454,18 +527,35 @@ function k8sLabelValue(text) {
 
 /**
  * The cluster `nodes:test --runtime=k8s` runs its tasks in: kubectl, a local
- * context whose API server is on this machine, then the namespace. The cluster
- * is asked about the namespace only once its context is known to be local, so
- * `server` and `found` are null on the first call, and `found` on the second.
+ * context whose API server is on this machine and reached with no proxy and no
+ * sign of a tunnel, then the namespace. The cluster is asked about the
+ * namespace only once its context is known to be local, so `server` and
+ * `found` are null on the first call, and `found` on the second.
  * @param {object} p
  * @param {string} [p.context] - RR_K8S_CONTEXT; empty for kubectl's current one
  * @param {{code: number, stdout?: string, stderr?: string}} p.current - `kubectl config current-context`
  * @param {string} p.namespace - The namespace tasks run in
+ * @param {string} [p.clusterName] - The name of the context's cluster in the kubeconfig
  * @param {string|null} [p.server] - The context's API server from the kubeconfig; '' when it could not be read
+ * @param {string} [p.proxyUrl] - The proxy-url of the context's cluster; any is refused
+ * @param {string} [p.tlsServerName] - The tls-server-name of the context's cluster; any is refused
+ * @param {Object<string, string>} [p.env] - The environment kubectl runs in; a proxy it gives is refused
+ * @param {string} [p.platform] - os.platform()
  * @param {{code: number, stdout?: string, stderr?: string}|null} [p.found] - `kubectl get namespace <namespace>`
  * @returns {{problem: string, fix: string[]}|null}
  */
-function diagnoseKubernetes({ context = '', current, namespace, server = null, found = null }) {
+function diagnoseKubernetes({
+	context = '',
+	current,
+	namespace,
+	clusterName = '',
+	server = null,
+	proxyUrl = '',
+	tlsServerName = '',
+	env = {},
+	platform,
+	found = null,
+}) {
 	if (current.code === -1 || /ENOENT/.test(current.stderr || '')) {
 		return {
 			problem: 'kubectl is not installed',
@@ -497,13 +587,45 @@ function diagnoseKubernetes({ context = '', current, namespace, server = null, f
 		};
 	}
 	if (server !== null && !isLocalServer(server, name)) {
-		const where = server ? `points at ${server}` : 'names no server kubectl could read';
+		// Shown without the user:password@ it can hold
+		const shown = server.replace(/^([a-z][a-z\d+.-]*:[/\\]*)[^/?#]*@/i, '$1');
+		const where = server ? `points at ${shown}` : 'names no server kubectl could read';
 		return {
 			problem:
 				`the kubectl context ${name} ${where}, ` +
 				'not a cluster on this machine, and the node tests run against no other',
 			fix: [
 				'Use the context of a cluster that runs here, or point this one at it',
+				'kubectl config use-context <context>, or set RR_K8S_CONTEXT',
+			],
+		};
+	}
+	// A proxy carries even a loopback server elsewhere; a TLS server name is the usual sign of a tunnel.
+	// The proxy URL itself is not shown: it can hold a password.
+	const via = proxyUrl ? 'proxy-url' : tlsServerName ? 'tls-server-name' : '';
+	if (server !== null && via) {
+		return {
+			problem:
+				`the kubectl context ${name} sets ${via} in its cluster: through a proxy or a tunnel ` +
+				'its server can be a cluster on another machine, and the node tests run against no other',
+			fix: [
+				`Remove ${via} from the cluster of ${name}: kubectl config unset clusters.${clusterName}.${via}`,
+				'or use the context of a cluster that runs here',
+				'kubectl config use-context <context>, or set RR_K8S_CONTEXT',
+			],
+		};
+	}
+	// So is a proxy kubectl takes from its environment; the variable is named, never its value
+	const variable = server !== null && proxyVariable(server, env, platform);
+	if (variable) {
+		const host = SERVER_HOST.exec(server)[1];
+		return {
+			problem:
+				`the kubectl context ${name} reaches ${host} through the proxy in ${variable}: ` +
+				'its server can be a cluster on another machine, and the node tests run against no other',
+			fix: [
+				`Add ${host} to NO_PROXY, or unset ${variable}: here or in dist/server/.env`,
+				'or use the context of a cluster that runs here',
 				'kubectl config use-context <context>, or set RR_K8S_CONTEXT',
 			],
 		};
@@ -584,6 +706,7 @@ module.exports = {
 	diagnoseTestTarget,
 	withDotenv,
 	isLocalContext,
+	parseCluster,
 	isLocalServer,
 	k8sLabelValue,
 	diagnoseKubernetes,

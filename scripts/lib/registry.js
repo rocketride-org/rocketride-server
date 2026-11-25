@@ -146,6 +146,33 @@ class ModuleRegistry {
 	}
 
 	/**
+	 * Expand global commands to all modules that support them
+	 *
+	 * Looks for actions like "moduleName:command" with descriptions (public actions)
+	 */
+	expandGlobalCommands(globalCommands, options) {
+		const requests = [];
+
+		for (const command of globalCommands) {
+			for (const moduleName of this.names()) {
+				const actionName = `${moduleName}:${command}`;
+				const actionDef = this.getAction(actionName);
+				// Actions that do not run on this OS, or only run by name, are left out, not failed
+				if (actionDef && this.inGlobalCommands(actionDef)) {
+					const actionObj =
+						typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
+					// Only expand to public actions (those with descriptions)
+					if (actionObj?.description) {
+						requests.push({ module: moduleName, command: actionName });
+					}
+				}
+			}
+		}
+
+		return requests;
+	}
+
+	/**
 	 * List all public actions (actions with descriptions)
 	 *
 	 * Actions with descriptions are shown in `builder --help`.

@@ -18,6 +18,7 @@ const {
 	diagnoseTestTarget,
 	withDotenv,
 	isLocalContext,
+	parseCluster,
 	isLocalServer,
 	k8sLabelValue,
 	diagnoseKubernetes,
@@ -317,6 +318,37 @@ test('a cluster on this machine is told by its context', () => {
 	for (const name of other) assert.strictEqual(isLocalContext(name), false, name);
 });
 
+// What `kubectl config view --minify -o jsonpath={.clusters[0]}` prints (kubectl v1.36) for a
+// kind cluster reached through a SOCKS proxy, with a TLS server name
+const TUNNELED =
+	'{"cluster":{"certificate-authority-data":"DATA+OMITTED",' +
+	'"proxy-url":"socks5://user:secret@bastion.example.com:1080","server":"https://127.0.0.1:6443",' +
+	'"tls-server-name":"api.example.com"},"name":"kind-dev-cluster"}';
+
+test('the cluster entry kubectl prints gives its name and where its requests go', () => {
+	assert.deepStrictEqual(parseCluster(TUNNELED), {
+		clusterName: 'kind-dev-cluster',
+		server: 'https://127.0.0.1:6443',
+		proxyUrl: 'socks5://user:secret@bastion.example.com:1080',
+		tlsServerName: 'api.example.com',
+	});
+	const none = { clusterName: '', server: '', proxyUrl: '', tlsServerName: '' };
+	const desktop =
+		'{"cluster":{"certificate-authority-data":"DATA+OMITTED",' +
+		'"server":"https://kubernetes.docker.internal:6443"},"name":"docker-desktop"}';
+	assert.deepStrictEqual(parseCluster(desktop), {
+		...none,
+		clusterName: 'docker-desktop',
+		server: 'https://kubernetes.docker.internal:6443',
+	});
+	// A cluster that sets none of the fields
+	const bare = '{"cluster":{"insecure-skip-tls-verify":true,"server":""},"name":"bare"}';
+	assert.deepStrictEqual(parseCluster(bare), { ...none, clusterName: 'bare' });
+	// A context with no cluster prints nothing; a failed or cut-off answer is no entry either
+	const unread = ['', 'error: cannot locate cluster gone', '{"cluster":{"server":"https://127.0.0.1:6443"', 'null'];
+	for (const text of unread) assert.deepStrictEqual(parseCluster(text), none, text);
+});
+
 test('a local context must point at a server on this machine', () => {
 	const here = [
 		['https://127.0.0.1:6443', 'kind-dev'],
@@ -327,6 +359,8 @@ test('a local context must point at a server on this machine', () => {
 		['https://host.docker.internal:6550', 'k3d-rr'],
 		['https://[::1]:6443', 'orbstack'],
 		['https://192.168.49.2:8443', 'minikube'],
+		['https://LOCALHOST:8443', 'rancher-desktop'],
+		['https://127.0.0.1', 'kind-dev'],
 	];
 	const elsewhere = [
 		['https://k8s.example.com:6443', 'kind-dev'],
@@ -337,6 +371,14 @@ test('a local context must point at a server on this machine', () => {
 		['https://192.168.example.com:8443', 'minikube'],
 		['', 'kind-dev'],
 		['not a url', 'kind-dev'],
+		// Node reads these as 127.0.0.1 or 192.168.49.2, so they are judged as written
+		['https://127.1:6443', 'kind-dev'],
+		['https://2130706433:6443', 'kind-dev'],
+		['https://0x7f.1:6443', 'kind-dev'],
+		['https://0177.0.0.1:6443', 'kind-dev'],
+		['https://127.0.0.01:6443', 'kind-dev'],
+		['https://2130706433/127.0.0.1', 'kind-dev'],
+		['https://3232248066:8443', 'minikube'],
 	];
 	for (const [server, name] of here) assert.strictEqual(isLocalServer(server, name), true, `${name} ${server}`);
 	for (const [server, name] of elsewhere) assert.strictEqual(isLocalServer(server, name), false, `${name} ${server}`);
@@ -346,6 +388,109 @@ test('a local context must point at a server on this machine', () => {
 	const unread = cluster({ current: context('kind-dev'), server: '', found: null });
 	assert.match(unread.problem, /kind-dev names no server kubectl could read/);
 	assert.strictEqual(cluster({ server: 'https://kubernetes.docker.internal:6443' }), null);
+
+	// A user:password@ in the URL is not shown, however it is written
+	const logins = [
+		['https://admin:s3cret@k8s.example.com:6443', 'https://k8s.example.com:6443'],
+		['https://admin@x:s3cret@k8s.example.com:6443', 'https://k8s.example.com:6443'],
+		['https://admin:s3cret@k8s.example.com:99999', 'https://k8s.example.com:99999'],
+		['https:admin:s3cret@k8s.example.com', 'https:k8s.example.com'],
+	];
+	for (const [server, shown] of logins) {
+		const said = formatDiagnosis('nodes:test --runtime=k8s', cluster({ current: context('kind-dev'), server }));
+		assert.ok(said.includes(`kind-dev points at ${shown}, not a cluster`), said);
+		assert.ok(!/admin|s3cret/.test(said), said);
+	}
+});
+
+test('a local server reached through a proxy or a tunnel is refused', () => {
+	const tunneled = { current: context('kind-dev'), ...parseCluster(TUNNELED), found: null };
+	const refused = [
+		[{}, 'proxy-url'],
+		// ssh -D: the proxy is local, the cluster behind it is not
+		[{ proxyUrl: 'socks5://localhost:1080' }, 'proxy-url'],
+		[{ proxyUrl: '' }, 'tls-server-name'],
+	];
+	for (const [fields, field] of refused) {
+		const d = cluster({ ...tunneled, ...fields });
+		assert.match(d.problem, new RegExp(`context kind-dev sets ${field} in its cluster`), field);
+		assert.strictEqual(d.fix[0].split(': ')[1], `kubectl config unset clusters.kind-dev-cluster.${field}`);
+	}
+	// The proxy URL can hold a password
+	const said = formatDiagnosis('nodes:test --runtime=k8s', cluster(tunneled));
+	assert.ok(!/secret|bastion/.test(said), said);
+	assert.strictEqual(cluster({ ...tunneled, proxyUrl: '', tlsServerName: '' }), null);
+});
+
+test("a proxy of kubectl's environment is refused, except where kubectl goes directly", () => {
+	const proxy = 'http://user:secret@proxy.example.com:3128';
+	const secure = { HTTPS_PROXY: proxy };
+	const desktop = 'https://kubernetes.docker.internal:6443';
+	const plain = 'http://kubernetes.docker.internal:6443';
+	// [server, context, environment, platform] that kubectl reaches directly
+	const direct = [
+		[desktop, 'docker-desktop', {}, 'linux'],
+		[desktop, 'docker-desktop', { HTTPS_PROXY: '' }, 'linux'],
+		// An https server is not reached through HTTP_PROXY, nor an http one through HTTPS_PROXY
+		[desktop, 'docker-desktop', { HTTP_PROXY: proxy }, 'linux'],
+		[plain, 'docker-desktop', secure, 'linux'],
+		// localhost in lower case, and a loopback address
+		['https://localhost:8443', 'rancher-desktop', secure, 'linux'],
+		['https://127.0.0.1:6443', 'kind-dev', secure, 'linux'],
+		['https://127.0.0.2:6443', 'kind-dev', secure, 'linux'],
+		['https://[::1]:6443', 'orbstack', secure, 'linux'],
+		// A host NO_PROXY names: *, the host, or a domain it ends in
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: '*' }, 'linux'],
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: ' example.com , * ' }, 'linux'],
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: 'kubernetes.docker.internal' }, 'linux'],
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: 'KUBERNETES.docker.internal' }, 'linux'],
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: 'docker.internal' }, 'linux'],
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: '.docker.internal' }, 'linux'],
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: '*.docker.internal' }, 'linux'],
+		[desktop, 'docker-desktop', { ...secure, no_proxy: 'docker.internal' }, 'linux'],
+		['https://192.168.49.2:8443', 'minikube', { ...secure, NO_PROXY: '192.168.49.2' }, 'linux'],
+		// Linux reads the two spellings of a name only, Windows any
+		[desktop, 'docker-desktop', { Https_Proxy: proxy }, 'linux'],
+		[desktop, 'docker-desktop', { ...secure, No_Proxy: 'docker.internal' }, 'win32'],
+	];
+	// [server, context, environment, platform, the variable named]
+	const refused = [
+		[desktop, 'docker-desktop', secure, 'linux', 'HTTPS_PROXY'],
+		[desktop, 'docker-desktop', { https_proxy: proxy }, 'linux', 'https_proxy'],
+		[desktop, 'docker-desktop', { HTTPS_PROXY: '', https_proxy: proxy }, 'linux', 'https_proxy'],
+		[desktop, 'docker-desktop', { Https_Proxy: proxy }, 'win32', 'Https_Proxy'],
+		[plain, 'docker-desktop', { HTTP_PROXY: proxy }, 'linux', 'HTTP_PROXY'],
+		['https://LOCALHOST:8443', 'rancher-desktop', secure, 'linux', 'HTTPS_PROXY'],
+		['https://0.0.0.0:6550', 'k3d-rr', secure, 'linux', 'HTTPS_PROXY'],
+		['https://host.docker.internal:6550', 'k3d-rr', secure, 'linux', 'HTTPS_PROXY'],
+		['https://192.168.49.2:8443', 'minikube', secure, 'linux', 'HTTPS_PROXY'],
+		// An entry not read here names no host: a part of a name, a CIDR, a port
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: 'cker.internal' }, 'linux', 'HTTPS_PROXY'],
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: '127.0.0.0/8' }, 'linux', 'HTTPS_PROXY'],
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: 'kubernetes.docker.internal:6443' }, 'linux', 'HTTPS_PROXY'],
+		// A domain names host names only, never the tail of an address
+		['https://192.168.49.2:8443', 'minikube', { ...secure, NO_PROXY: '168.49.2' }, 'linux', 'HTTPS_PROXY'],
+		['https://0.0.0.0:6550', 'k3d-rr', { ...secure, NO_PROXY: '.0.0' }, 'linux', 'HTTPS_PROXY'],
+		// no_proxy counts only when NO_PROXY is not set
+		[desktop, 'docker-desktop', { ...secure, NO_PROXY: 'example.com', no_proxy: '*' }, 'linux', 'HTTPS_PROXY'],
+	];
+	for (const [server, name, env, platform] of direct) {
+		const d = cluster({ current: context(name), server, env, platform, found: null });
+		assert.strictEqual(d, null, `${server} ${JSON.stringify(env)} ${platform}`);
+	}
+	for (const [server, name, env, platform, variable] of refused) {
+		const d = cluster({ current: context(name), server, env, platform, found: null });
+		assert.ok(d, `${server} ${JSON.stringify(env)} ${platform}`);
+		const said = formatDiagnosis('nodes:test --runtime=k8s', d);
+		assert.match(said, new RegExp(`context ${name} reaches \\S+ through the proxy in ${variable}:`), said);
+		// The variable is named, never its value
+		assert.ok(!/secret|proxy\.example/.test(said), said);
+	}
+	const login = 'https://admin:s3cret@kubernetes.docker.internal:6443';
+	const d = cluster({ server: login, env: secure, platform: 'linux', found: null });
+	const fix = 'Add kubernetes.docker.internal to NO_PROXY, or unset HTTPS_PROXY: here or in dist/server/.env';
+	assert.strictEqual(d.fix[0], fix);
+	assert.ok(!/admin|s3cret/.test(formatDiagnosis('nodes:test --runtime=k8s', d)));
 });
 
 test('a local cluster with its namespace misses nothing', () => {

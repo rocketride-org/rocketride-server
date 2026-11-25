@@ -8,8 +8,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 
 const registry = require('./registry');
+const { resolveAction } = require('./action-runner');
 
-// A registry of its own, with one module: everywhere, Linux only, Windows only
+// A registry of its own, with one module: everywhere, Linux only, Windows only, by name only
 function fixture() {
 	const r = new registry.constructor();
 	r.modules.set('m', {
@@ -56,6 +57,25 @@ test('a global command takes in what runs here, except actions asked for by name
 	assert.ok(!r.inGlobalCommands(r.getAction('m:linux'), 'win32'));
 	assert.ok(!r.inGlobalCommands(r.getAction('m:byname'), 'linux'));
 	assert.ok(r.isAvailable(r.getAction('m:byname'), 'linux'));
+});
+
+test('a global command expands to the action of that name it takes in', () => {
+	const r = fixture();
+	const expected = ['m:any', 'm:linux', 'm:windows'].filter((name) => r.isAvailable(r.getAction(name)));
+	assert.deepStrictEqual(
+		r.expandGlobalCommands(['any', 'linux', 'windows', 'byname'], {}),
+		expected.map((command) => ({ module: 'm', command }))
+	);
+});
+
+test('a step that names an action not available on this OS fails, naming the action', () => {
+	const other = process.platform === 'win32' ? 'linux' : 'win32';
+	registry.modules.set('elsewhere', { actions: [{ name: 'elsewhere:go', platforms: [other], action: {} }] });
+	try {
+		assert.throws(() => resolveAction('elsewhere:go', {}), /elsewhere:go is not available on/);
+	} finally {
+		registry.modules.delete('elsewhere');
+	}
 });
 
 test('--help lists only what runs on this OS; --list-actions lists all, marked', () => {

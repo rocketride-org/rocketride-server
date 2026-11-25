@@ -383,9 +383,9 @@ def resolve_parameter_tokens(pipeline: Dict[str, Any], environ: Mapping[str, str
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
 # `nosaas` services, but a pipeline can reach the engine without the canvas,
 # so the engine enforces the same rule itself. Any service built on the MCP
-# client node is refused in stdio mode while the task shares the engine's
-# host: that transport launches a command there. Its HTTP transports are
-# fine. Matching is on the node module, not the provider name: several
+# client node is refused in stdio mode while the task gets --shared-host
+# (Task._shares_host): that transport launches a command. Its HTTP transports
+# are fine. Matching is on the node module, not the provider name: several
 # services share the node (tool_butterbase is one) and provider lookup is
 # case-insensitive.
 CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
@@ -426,8 +426,8 @@ def saas_pipeline_violation(
     and ``Config.getNodeConfig`` in production. The MCP transport is resolved the
     way the node resolves it (profile defaults merged under the component config),
     because the default profile is itself stdio. Anything that cannot be resolved
-    is refused. ``shared_host`` says the task will share the engine's host (the
-    task's ``--shared-host``); only then is stdio MCP refused.
+    is refused. ``shared_host`` says the task gets ``--shared-host``; only then
+    is stdio MCP refused.
     """
     for component in pipeline.get('components', []) or []:
         provider = str(component.get('provider') or '')
@@ -1402,17 +1402,17 @@ class Task(DAPBase):
 
     def _shares_host(self) -> bool:
         """
-        Whether the task shares the engine's host, so it gets --shared-host.
+        Whether the task gets --shared-host.
 
-        A hosted engine's task does under spawn. In a container or a pod it
-        does not: the container is the boundary, and the task keeps only the
-        hosted rules (--hosted). The pre-launch check and the task's command
-        line both ask here, so they agree.
+        A hosted engine's task does, whatever the runtime, a container or a pod
+        included; #3524 tracks dropping it for the runtimes that isolate the
+        task. The pre-launch check and the task's command line both ask here,
+        so they agree.
 
         Returns:
-            True for a task of a hosted engine whose runtime does not isolate it.
+            True for a task of a hosted engine.
         """
-        return _is_saas_engine() and not self._launcher.isolated
+        return _is_saas_engine()
 
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
@@ -3333,7 +3333,7 @@ class Task(DAPBase):
                     env=subprocess_env,
                     args=child_args,
                     modelserver=self._server._config.get('modelserver'),
-                    # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
+                    # Tell the task it runs under a hosted engine, and which guards apply (see CONST_HOSTED_CHILD_FLAG)
                     hosted=_is_saas_engine(),
                     shared_host=self._shares_host(),
                     debug_attach=debug_attach,

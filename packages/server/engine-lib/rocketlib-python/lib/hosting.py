@@ -28,9 +28,10 @@ How a hosted engine started this task: the two flags on its command line.
 ``--hosted``: the task belongs to a hosted engine. Its rules hold wherever the
 task runs: a credit check before every pipe, no torch install or import.
 
-``--shared-host``: the task runs on the engine's own host (spawn), so the
-guards for a shared machine apply: the sandbox keeps to its default modules,
-``tool_python`` ignores ``allowed_modules``, stdio MCP is refused.
+``--shared-host``: the guards for a shared machine apply: the sandbox keeps to
+its default modules, ``tool_python`` ignores ``allowed_modules``, stdio MCP is
+refused. A hosted engine gives it to every task, whatever the runtime (see
+``Task._shares_host`` in ai.modules.task.task_engine).
 
 The engine passes them as it starts the task (ai.modules.task.launcher). A pipeline's own
 args can add one, which only makes the task stricter. Standard library only: nodes and ``_depends_hooks.py`` files import this,
@@ -49,5 +50,5 @@ def is_hosted() -> bool:
 
 
 def is_shared_host() -> bool:
-    """True when this task shares its host with the engine."""
+    """True when the guards for a shared host apply to this task."""
     return SHARED_HOST_FLAG in sys.argv
