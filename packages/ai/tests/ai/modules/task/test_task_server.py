@@ -954,14 +954,13 @@ async def test_push_account_update_skips_other_users(monkeypatch):
 @pytest.mark.asyncio
 async def test_push_account_update_swallows_send_errors(monkeypatch):
     """If account refresh raises, the loop logs and moves on (no propagation)."""
-    # push_account_update rebuilds through the facade's rebuild_account_info,
-    # whose default calls account._service.get_authentication_result: patch
-    # the real facade's service so the failing rebuild actually runs.
-    from ai.account import account as real_account
+    from ai.modules.task import task_server as ts_mod
 
     service = MagicMock()
     service.get_authentication_result = AsyncMock(side_effect=RuntimeError('refresh fail'))
-    monkeypatch.setattr(real_account, '_service', service, raising=False)
+    fake_account = SimpleNamespace(_service=service)
+    monkeypatch.setitem(sys.modules, 'ai.account.account', fake_account)
+    monkeypatch.setattr(ts_mod, 'account', fake_account, raising=False)
 
     ts = _make_server()
     target = MagicMock()
