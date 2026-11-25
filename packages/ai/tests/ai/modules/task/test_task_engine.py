@@ -1347,7 +1347,6 @@ async def test_an_isolated_task_of_a_hosted_engine_gets_shared_host(monkeypatch,
 
     _fake_db_account(monkeypatch)
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
-    monkeypatch.setattr(engine, 'pipeline_opens_store', lambda *a: False)
     monkeypatch.setattr(rocketlib, 'getServiceDefinition', _get_service)
     monkeypatch.setattr(engine, 'resolve_node_config', _mcp_node_config)
     checked = []
@@ -1385,45 +1384,6 @@ async def test_an_isolated_task_of_a_hosted_engine_gets_shared_host(monkeypatch,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('opens', [True, False])
-async def test_an_isolated_task_is_told_whether_it_opens_the_store(monkeypatch, opens):
-    """A container or pod task is told whether its pipeline opens the store,
-    and the task's storage anchor when it does: the runtime gives it that
-    subtree of the store or refuses the pipeline. The store node counts when
-    only EaaS serves it, as before the engine's first restart after it came.
-    """
-    import rocketlib
-    import ai.modules.task.task_engine as engine
-
-    _fake_db_account(monkeypatch)
-    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
-    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: None)
-    store = {'path': 'nodes.tool_filesystem'} if opens else None
-    monkeypatch.setattr(engine.node_store, 'served', lambda provider: store if provider == 'filestore' else None)
-    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'filestore'}]})
-    t.source = 'src'
-    t._restart_env = None
-    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
-    t._is_restarting = False
-    t._launch_args = {}
-    t._server = MagicMock(_config={})
-    t._is_debugging = lambda: False
-    t._task_file_bytes = MagicMock(return_value=b'{}')
-    t._send_status_update = AsyncMock()
-    t._terminated = AsyncMock()
-
-    class Launched(Exception):
-        pass
-
-    t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
-    with pytest.raises(Launched):
-        await TaskEngine.start_task(t)
-
-    spec = t._launcher.start.call_args.args[0]
-    assert (spec.uses_store, spec.storage_root) == ((True, 'users/client-env-test/files') if opens else (False, ''))
-
-
-@pytest.mark.asyncio
 async def test_the_runtime_is_given_the_folders_of_the_nodes_its_run_loads(monkeypatch, tmp_path):
     """The runtime is given the folder of each node place() names: a container
     or a pod cannot see the engine's nodes/, so its runtime copies them in.
@@ -1432,7 +1392,6 @@ async def test_the_runtime_is_given_the_folders_of_the_nodes_its_run_loads(monke
 
     _fake_db_account(monkeypatch)
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
-    monkeypatch.setattr(engine, 'pipeline_opens_store', lambda *a: False)
     monkeypatch.setattr(engine.node_store, 'place', lambda pipeline, isolated: ['embed_y', 'llm_x'] if isolated else [])
     monkeypatch.setattr(engine.node_release, 'nodes_dir', lambda: str(tmp_path))
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})

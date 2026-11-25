@@ -13,9 +13,9 @@ Each task container gets:
 
 - its own filesystem and network namespace
 - the engine's own user: the container runs with the engine's uid and gid, so
-  files a task writes into the store belong to the user who runs the engine.
-  Under a rootless daemon that user is the container's root; an engine that
-  runs as root, or on Windows, runs tasks as the image's user (see
+  it reads a directory mounted into it as the engine does. Under a rootless
+  daemon that user is the container's root; an engine that runs as root, or on
+  Windows, runs tasks as the image's user (see
   [Files and storage](#files-and-storage))
 - its own dependencies, installed into the container rather than shared
 - a memory and CPU limit (`2g` and one CPU unless you change them)
@@ -119,52 +119,19 @@ writes no copy to disk. The packaged nodes the run loads go in the same way,
 starts: the task loads the same copies a child process would.
 
 Pipelines that use the file-system tool (`tool_filesystem`), or the skills
-tool (`tool_skills`) with a skills folder, work on a
-filesystem store whatever user runs the engine: the engine mounts only the
-run's storage root into the container (the user's own files for a user's run,
-the project's task files for a team deploy), and the task writes there as the
-engine's user. Under a rootless daemon the container's root is that user, and
-the engine runs tasks as root inside the container for that reason. An engine
-that runs as root runs its tasks as the image's user instead, never as root,
-and gives that user (uid 1000) the directories they write into; on a host where
-uid 1000 is a login account, that account gets them too. A hosted engine (`--saas`)
-refuses these pipelines on a filesystem store, since its tenants share that
-store: use an S3 store there.
+tool (`tool_skills`) with a skills folder, reach the account's file store
+through the engine, over the task's own connection to it, as a child process
+does: nothing of the store is mounted into the container, and the store's
+address and `RR_STORE_SECRET_KEY` stay in the engine (see
+[Security](/operate/security)). A store with no key pair in
+`RR_STORE_SECRET_KEY` takes its keys from `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY`, and those reach every task, in a container as in a
+child process, since the `AWS_*` variables are passed on for the AWS nodes.
 
-Runs with the same root share it, as they do without containers. While a task
-runs, the engine refuses another whose storage root lies inside or around that
-task's root: one task could otherwise swap a path under the other's mount.
-Tasks on the same root, or on roots apart, run side by side.
-
-The engine checks, with a short probe container run as a task runs, that the
-container finds a marker the engine writes into the store, at the engine's own
-path, and that a file a task writes there comes back as the engine's own. The
-first check fails when the daemon sees other files than the engine: a
-Docker-in-Docker daemon, or the host's daemon driven by an engine that runs in
-a container through its socket, unless the store is at the same path on both
-sides. A daemon that remaps users (`userns-remap`) fails the second.
-Then, or when the store is S3 authenticated through a web-identity or EKS Pod
-Identity token file, the engine refuses such a pipeline before it starts rather
-than let it write into the container and lose the files. S3 with a key pair in
-the engine's environment (`access_key_id` and `secret_access_key` in
-`RR_STORE_SECRET_KEY`, or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`) works
-as it does for a child process.
-
-The answer holds until the engine restarts, for the directory the store's path
-leads to: when a link in that path is pointed elsewhere, the new directory gets
-a probe of its own. A probe that Docker itself could not run, before the image
-is built for one, says nothing about the store: the next pipeline that needs
-the store probes again.
-
-The probe looks at the store's own directory only, so the daemon's host must
-have the same files at the same paths everywhere under the store, for as long
-as the engine runs: a mount inside the store that only the engine's container
-has is not seen by tasks, which get what the host has at that path.
-
-The directories `RR_DOCKER_MOUNTS` names are not probed: the daemon must find
-them at the same paths, as it does when the engine runs on the daemon's host,
-which is how the node tests use them for their mocks. A directory the daemon
-does not find is created on its host, empty, and the task sees an empty mount.
+The daemon must find the directories `RR_DOCKER_MOUNTS` names at the same
+paths, as it does when the engine runs on the daemon's host, which is how the
+node tests use them for their mocks. A directory the daemon does not find is
+created on its host, empty, and the task sees an empty mount.
 
 A task reads them as the user it runs as (the image's user for an engine that
 runs as root, or on Windows), so that user must be able to read them. A
@@ -228,7 +195,9 @@ enforces the `restricted` Pod Security Standard.
   the engine itself runs in.
 - A namespace for the tasks, `rocketride-tasks` unless you name another. The
   engine does not create it. Give it to one engine: the engine knows its pods
-  by their labels, so whoever can create pods there can pose as a task's pod.
+  by their labels, so whoever can create pods there can pose as a task's pod,
+  and get what a task gets: its task file, its environment, and its requests,
+  with the files and state they reach through the engine.
 - The node image of the engine's own version where the cluster's nodes get
   their images from. `rocketride/node:<version>` is never pulled:
   no registry of the project publishes that name, so it has to be on the node
@@ -293,12 +262,8 @@ pods an IPv4 address.
   nothing is mounted into it: only the packaged nodes the run loads, 64 MiB at
   most, and the directories named in `RR_K8S_MOUNTS` are copied in, when the
   task starts; as under docker, a variable a child process would not get is
-  skipped unless `RR_SUBPROCESS_ENV` lists it. A
-  pipeline that uses the file-system tool (`tool_filesystem`), or the skills
-  tool (`tool_skills`) with a skills folder, on a filesystem
-  store, or on S3 authenticated through a web-identity or EKS Pod Identity
-  token file, is refused before it starts. S3 with a key pair in the engine's
-  environment works.
+  skipped unless `RR_SUBPROCESS_ENV` lists it. The file-system and skills
+  tools reach the store through the engine, as under docker.
 - **CPU and memory readings.** They come from the cluster's metrics API, about
   every 15 seconds. Without a metrics server they read zero.
 - **Task output.** It reaches the engine and its clients as it does today. The

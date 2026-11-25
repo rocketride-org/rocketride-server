@@ -42,13 +42,11 @@ import ipaddress
 import json
 import os
 import re
-import shutil
 import socket
 import stat
 import sys
 import tarfile
 import time
-import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit, urlunsplit
@@ -73,11 +71,6 @@ CONST_CLI_TIMEOUT = 60.0
 # Windows reaches the containers of a daemon in a VM through published ports alone
 ENGINE_ON_LINUX = sys.platform.startswith('linux')
 
-# The store subtrees the tasks of this engine have mounted: by the start's token hash (two runs
-# can share a task id) until the container exists, by container id after. No other task's root
-# may lie inside or around one of them
-_ROOTS_IN_USE: Dict[str, str] = {}
-
 # The engine's data directory inside the image (engine-base: mkdir /opt/data)
 CONST_CONTAINER_DATA_PATH = '/opt/data'
 
@@ -87,9 +80,6 @@ CONST_CONTAINER_NODES_PATH = '/opt/rocketride/nodes'
 # The most a run's packaged nodes may take, headers included: they are read into memory at every start.
 # Today's largest node is about 6 MiB, all of them together about 16 MiB
 CONST_NODES_SIZE_LIMIT = 64 * 1024 * 1024
-
-# Where a run's store subtree is mounted inside its container
-CONST_CONTAINER_STORE_ROOT = '/opt/store'
 
 # Where the host directories named in docker.mounts are mounted inside a container
 CONST_CONTAINER_MOUNT_ROOT = '/opt/mounts'
@@ -206,10 +196,6 @@ class DockerError(RuntimeError):
     """A docker CLI command failed, or the daemon cannot be used."""
 
 
-class StoreUnavailableError(RuntimeError):
-    """A pipeline opens the store itself, and this container cannot be given it."""
-
-
 def engine_version() -> str:
     """
     The engine version as images are tagged: ``major.minor.patch``.
@@ -274,32 +260,6 @@ def is_host_only(name: str) -> bool:
     return name in HOST_ONLY_ENV_NAMES or name.startswith(HOST_ONLY_ENV_PREFIXES)
 
 
-def web_identity_only(environ: Mapping[str, str]) -> bool:
-    """
-    Whether S3 would authenticate through a token file of the engine's host, which a task cannot read.
-
-    The file is a web-identity token's (IRSA) or an EKS Pod Identity token's.
-    A complete key pair, in the store's key or in ``AWS_*``, comes before it.
-
-    Args:
-        environ: The engine's environment.
-
-    Returns:
-        True when such a file is set and no complete key pair is.
-    """
-    if not (environ.get('AWS_WEB_IDENTITY_TOKEN_FILE') or environ.get('AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE')):
-        return False
-    # A static key pair comes first in boto3's chain, before the token file
-    if environ.get('AWS_ACCESS_KEY_ID') and environ.get('AWS_SECRET_ACCESS_KEY'):
-        return False
-    try:
-        key = json.loads(environ.get('RR_STORE_SECRET_KEY') or '{}')
-    except ValueError:
-        return True
-    # S3Store signs with the store key only as a pair: a region or an endpoint alone leaves boto3's chain
-    return not (isinstance(key, dict) and key.get('access_key_id') and key.get('secret_access_key'))
-
-
 def rootless_daemon(info: Mapping[str, Any]) -> bool:
     """
     Whether ``docker info`` describes a rootless daemon.
@@ -354,20 +314,6 @@ def is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return host.lower() == 'localhost'
-
-
-def overlaps(a: str, b: str) -> bool:
-    """
-    Whether one of two different paths lies inside the other.
-
-    Args:
-        a: A path.
-        b: Another path.
-
-    Returns:
-        True when they differ and one is an ancestor of the other.
-    """
-    return a != b and (a.startswith(b + os.sep) or b.startswith(a + os.sep))
 
 
 def _swap_loopback_host(netloc: str, gateway: str = HOST_GATEWAY) -> str:
@@ -883,7 +829,6 @@ class DockerLaunch(Launch):
         if result.returncode != 0 and 'no such container' not in said and 'already in progress' not in said:
             raise DockerError(f'docker rm failed (exit {result.returncode}): {result.stderr.strip()}')
         self._removed = True
-        _ROOTS_IN_USE.pop(self.container_id, None)
 
     def metrics(self) -> Dict[str, Any]:
         """CPU and memory from ``docker stats``; no local PID, so the GPU half reads zero."""
@@ -894,8 +839,7 @@ class DockerLaunch(Launch):
         Remove the container and give a published port back; safe to call twice.
 
         A container the daemon refused to remove may still run, so it keeps its
-        port and its storage root until the engine restarts; that start's sweep
-        removes it.
+        port until the engine restarts; that start's sweep removes it.
 
         Raises:
             DockerError: If the container could not be removed.
@@ -938,8 +882,6 @@ class DockerLauncher(Launcher):
         self.published: Optional[bool] = None
         # Decided by prepare(): the (uid, gid) tasks run as, or None for the image's own user
         self.user: Optional[Tuple[int, int]] = None
-        # Why a task cannot use this engine's store through a mount ('' when it can), per directory with a verdict
-        self._store_problems: Dict[str, str] = {}
 
     @property
     def task_data_path(self) -> str:
@@ -1011,9 +953,9 @@ class DockerLauncher(Launcher):
 
     def task_user(self, info: Mapping[str, Any]) -> Optional[Tuple[int, int]]:
         """
-        The user a task container runs as: the engine's own, so a mount keeps one owner.
+        The user a task container runs as: the engine's own, so it reads a mount as the engine does.
 
-        Files a task writes into a bind mount keep its uid on the host, so the
+        A bind mount keeps the owners and modes it has on the host, so the
         task runs as the engine's uid and gid and reaches the image's writable
         tree through the image's group (``--group-add``). Under a rootless
         daemon the container's root is the engine's user. With no uid at all
@@ -1034,34 +976,6 @@ class DockerLauncher(Launcher):
         if getuid is None or getgid is None or engine_is_root():
             return None
         return getuid(), getgid()
-
-    def give_to_tasks(self, path: str, tree: bool = False) -> None:
-        """
-        Hand a directory a task writes into to the image's user, when a root engine's tasks run as it.
-
-        With ``tree``, what is already in it goes too, at every start: files
-        that tasks running as root left there, or that the engine itself wrote
-        since (the store's own commands run as root), would stay out of reach.
-        Only what another user owns changes hands.
-
-        Args:
-            path: The directory.
-            tree: Hand over its contents as well.
-        """
-        if self.user is not None or not engine_is_root():
-            return
-        # Never through a link: the tree is the tasks' own, and root must not be led out of it
-        os.chown(path, CONST_IMAGE_UID, CONST_IMAGE_GID, follow_symlinks=False)
-        if tree:
-            for _, dirs, files, dir_fd in os.fwalk(path, follow_symlinks=False):
-                for name in dirs + files:
-                    # A task on the same root may delete what the walk just listed
-                    try:
-                        owner = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-                        if (owner.st_uid, owner.st_gid) != (CONST_IMAGE_UID, CONST_IMAGE_GID):
-                            os.chown(name, CONST_IMAGE_UID, CONST_IMAGE_GID, dir_fd=dir_fd, follow_symlinks=False)
-                    except FileNotFoundError:
-                        pass
 
     def user_args(self) -> List[str]:
         """
@@ -1155,7 +1069,7 @@ class DockerLauncher(Launcher):
         The task's environment as the container gets it.
 
         Host-only variables stay out, a loopback DSN moves to the host gateway,
-        and the runtime's own values (the store, the model cache) go on top.
+        and the runtime's own values (the mounted directories, the model cache) go on top.
 
         Args:
             spec: What to launch.
@@ -1287,110 +1201,13 @@ class DockerLauncher(Launcher):
         fix = 'run ./builder container:build' if default else 'pull or load it'
         return DockerError(f'Image {image} not found; {fix} (the runtime never pulls while a task starts)')
 
-    async def _store_problem_of(self, base: str) -> str:
+    def mounted_directories(self, spec: LaunchSpec) -> Tuple[List[Tuple[str, str, str]], Dict[str, str]]:
         """
-        Why a task cannot use this engine's store through a mount, or '' when it can; probed until there is a verdict.
+        The host directories a task is told about through a variable named in ``docker.mounts``.
 
-        Checked rather than guessed. ``DOCKER_HOST`` is no guide: a DinD daemon
-        on a shared socket passes for local and still sees other files. And the
-        owner a task's file gets on the host depends on the daemon (a
-        user-namespace remap, Docker Desktop's file sharing). So a short probe
-        container, run as a task runs, looks for a marker written here and
-        writes one back, which this engine must find as its own and remove.
-
-        Args:
-            base: The store's directory on this host, links resolved; each one gets a verdict of its own.
-
-        Returns:
-            The reason, or ''.
-
-        Raises:
-            DockerError: If the daemon has no image to run the probe from.
-        """
-        if base in self._store_problems:
-            return self._store_problems[base]
-        probe = os.path.join(base, f'.rocketride-probe-{uuid.uuid4().hex}')
-        os.makedirs(probe)
-        try:
-            try:
-                self.give_to_tasks(probe)
-            except OSError as e:
-                # A store that refuses chown (NFS with root_squash, say) cannot be the tasks' to write
-                self._store_problems[base] = f"the engine cannot give the store to the tasks' user: {e}"
-                return self._store_problems[base]
-            with open(os.path.join(probe, 'engine'), 'w', encoding='utf-8') as f:
-                f.write('probe\n')
-            result = await self._cli.run(
-                [
-                    'run',
-                    '--rm',
-                    '--pull',
-                    'never',
-                    '--network',
-                    'none',
-                    '--cap-drop',
-                    'ALL',
-                    '--security-opt',
-                    'no-new-privileges',
-                    *self.user_args(),
-                    '-v',
-                    f'{probe}:/probe',
-                    '--entrypoint',
-                    'sh',
-                    self.config['image'],
-                    '-c',
-                    'test -f /probe/engine || exit 3; touch /probe/task || exit 4',
-                ],
-                check=False,
-            )
-            written = os.path.join(probe, 'task')
-            getuid = getattr(os, 'getuid', None)
-            # Kept only as a verdict on the store; docker's own failure (no image yet, a daemon restart) is none
-            verdict = True
-            if result.returncode == 3 or (result.returncode == 0 and not os.path.exists(written)):
-                problem = (
-                    "the docker daemon does not see this engine's files (a remote daemon, or one in another container)"
-                )
-            elif result.returncode == 4:
-                problem = f'a task container cannot write the store: {result.stderr.strip() or result.returncode}'
-            elif result.returncode != 0:
-                missing = self.image_missing(result.stderr)
-                if missing:
-                    raise missing
-                problem = f'the store probe did not run (exit {result.returncode}): {result.stderr.strip()}'
-                verdict = False
-            # Root manages whatever a task writes
-            elif getuid is not None and not engine_is_root() and os.stat(written).st_uid != getuid():
-                problem = (
-                    f'a file a task writes into the store belongs to uid {os.stat(written).st_uid} on this host, '
-                    f'not to the engine (uid {getuid()}); a user-namespace remap on the daemon?'
-                )
-            else:
-                problem = ''
-        finally:
-            # Also proves the engine can remove what a task wrote
-            shutil.rmtree(probe, ignore_errors=True)
-        if not problem and os.path.exists(probe):
-            problem = 'the engine cannot remove what a task container writes into the store'
-        if verdict:
-            self._store_problems[base] = problem
-        debug(f'[docker] store at {base}: {problem or "a task can use it through a mount"}')
-        return problem
-
-    async def store_mounts(self, spec: LaunchSpec) -> Tuple[List[Tuple[str, str, str]], Dict[str, str]]:
-        """
-        Bind mounts and variables for what the task needs from the host's files.
-
-        A pipeline that opens the store (``tool_filesystem``, or ``tool_skills``
-        with a folder) on a filesystem store gets only its run's ``storage.root``
-        subtree, and its store points there. Where that cannot work the pipeline
-        is refused before anything starts, rather than left writing into the
-        container's own tree and losing it with ``rm -f``. A hosted engine
-        refuses it always: its tenants share the store.
-        Each variable named in ``docker.mounts`` has the host directory it names
-        mounted read-only at ``/opt/mounts/<NAME>``, and points there; one that
-        names no directory stops the task, since the host path would reach it
-        unchanged and mean nothing in the container.
+        Each is mounted read-only at ``/opt/mounts/<NAME>``, and the variable
+        points there; one that names no directory stops the task, since the
+        host path would reach it unchanged and mean nothing in the container.
 
         Args:
             spec: What to launch.
@@ -1399,15 +1216,10 @@ class DockerLauncher(Launcher):
             ``(mounts, overrides)``.
 
         Raises:
-            StoreUnavailableError: If the pipeline needs a store this container cannot have.
-            DockerError: If a variable named in ``docker.mounts`` names no directory on this host,
-                or the daemon has no image to run the store probe from.
+            DockerError: If a variable names no directory a mount can take, or describes the engine host.
         """
         mounts: List[Tuple[str, str, str]] = []
         overrides: Dict[str, str] = {}
-
-        # Host directories a task is told about through a variable: mounted read-only,
-        # and the variable follows them into the container
         for name in filter(None, (n.strip() for n in self.config['mounts'].split(','))):
             # docker create takes the CLI's own value of these, and the task would get it
             if name in CLI_ENV_NAMES or is_host_only(name):
@@ -1431,85 +1243,6 @@ class DockerLauncher(Launcher):
             target = f'{CONST_CONTAINER_MOUNT_ROOT}/{name}'
             mounts.append((path, target, 'ro'))
             overrides[name] = target
-
-        if not (spec.uses_store and spec.storage_root):
-            return mounts, overrides
-
-        from ai.account.store import Store
-
-        url = Store._expand_url_path(self._environ.get('RR_STORE_URL') or Store._get_default_storage_url())
-        scheme = url.split('://', 1)[0].lower()
-        if scheme != 'filesystem':
-            if scheme == 's3' and web_identity_only(self._environ):
-                raise StoreUnavailableError(
-                    'tool_filesystem is not available under --runtime=docker with an S3 store authenticated '
-                    'through a web-identity or EKS Pod Identity token file: the container cannot read the token'
-                )
-            # Credentials in the environment (a static key) reach the container as they are
-            return mounts, overrides
-
-        # The engine's store follows links, and a task's own code may leave one in its mounted
-        # tree: on a hosted engine that would lead into another tenant's files
-        if spec.hosted:
-            raise StoreUnavailableError(
-                'tool_filesystem is not available under --runtime=docker on a hosted engine with a filesystem '
-                'store: use an S3 store, or --runtime=spawn'
-            )
-
-        # What the task mount names: a link in the store's path resolves on this side only
-        base = os.path.realpath(url[len('filesystem://') :])
-        # docker -v splits its argument on ':', a Windows drive letter aside
-        colon = spec.storage_root if ':' in spec.storage_root else base if os.name != 'nt' and ':' in base else ''
-        if colon:
-            raise StoreUnavailableError(
-                f'tool_filesystem is not available under --runtime=docker: {colon} has a ":", '
-                'which a docker mount cannot take'
-            )
-        os.makedirs(base, exist_ok=True)
-        problem = await self._store_problem_of(base)
-        if problem:
-            raise StoreUnavailableError(f'tool_filesystem is not available under --runtime=docker: {problem}')
-        # The task names its storage root: a strict subdirectory of the store, reached through
-        # no link (one a task left could lead another root elsewhere), is the one path checked,
-        # created, handed over and mounted
-        lexical = os.path.normpath(os.path.join(base, spec.storage_root))
-        subtree = os.path.realpath(lexical)
-        try:
-            inside = os.path.commonpath([base, subtree]) == base
-        except ValueError:
-            inside = False
-        canonical = os.path.normcase(subtree) == os.path.normcase(lexical)
-        if not inside or not canonical or os.path.normcase(subtree) == os.path.normcase(base):
-            raise StoreUnavailableError(
-                f'tool_filesystem is not available under --runtime=docker: the storage root {spec.storage_root} '
-                'leads out of the store'
-            )
-        # Held at once, with nothing awaited since the path was checked: no other task's root may
-        # lie inside or around this one while both run, or one could swap a path under the other's
-        # mount before the daemon resolves it
-        key = os.path.normcase(subtree)
-        if any(holder != spec.token_sha256 and overlaps(key, root) for holder, root in _ROOTS_IN_USE.items()):
-            raise StoreUnavailableError(
-                f'tool_filesystem is not available under --runtime=docker: the storage root {spec.storage_root} '
-                'lies inside or around one that a running task uses'
-            )
-        _ROOTS_IN_USE[spec.token_sha256] = key
-        try:
-            # Created here, or the daemon would create it as root
-            os.makedirs(subtree, exist_ok=True)
-            # A root engine walks the whole tree the first time: off the event loop
-            try:
-                await asyncio.to_thread(self.give_to_tasks, subtree, True)
-            except OSError as e:
-                raise StoreUnavailableError(
-                    f'tool_filesystem is not available under --runtime=docker: the engine cannot give '
-                    f"{spec.storage_root} to the tasks' user: {e}"
-                ) from e
-        except BaseException:
-            _ROOTS_IN_USE.pop(spec.token_sha256, None)
-            raise
-        mounts.append((subtree, f'{CONST_CONTAINER_STORE_ROOT}/{spec.storage_root}', ''))
-        overrides['RR_STORE_URL'] = f'filesystem://{CONST_CONTAINER_STORE_ROOT}'
         return mounts, overrides
 
     async def _wait_started(self, container_id: str, process: asyncio.subprocess.Process) -> None:
@@ -1586,11 +1319,10 @@ class DockerLauncher(Launcher):
 
         Raises:
             DockerError: If the daemon or the image cannot be used.
-            StoreUnavailableError: If the pipeline needs a store this container cannot have.
             ValueError: If the run's nodes take more than ``CONST_NODES_SIZE_LIMIT``.
         """
         await self.prepare()
-        mounts, overrides = await self.store_mounts(spec)
+        mounts, overrides = self.mounted_directories(spec)
 
         port: Optional[int] = None
         container_id = ''
@@ -1607,9 +1339,6 @@ class DockerLauncher(Launcher):
                     raise missing from e
                 raise
             container_id = created.stdout.strip()
-            # The root the task holds goes by its container from here
-            if spec.token_sha256 in _ROOTS_IN_USE:
-                _ROOTS_IN_USE[container_id] = _ROOTS_IN_USE.pop(spec.token_sha256)
             owner = self.user or (CONST_IMAGE_UID, CONST_IMAGE_GID)
             await self._cli.run(
                 ['cp', '-', f'{container_id}:{CONST_CONTAINER_DATA_PATH}'],
@@ -1648,8 +1377,6 @@ class DockerLauncher(Launcher):
                     debug(
                         f'[docker] task {spec.task_id} before its start failed: {said.decode(errors="replace")[-4000:]}'
                     )
-            # A root held before create; one held by the container goes with its removal
-            _ROOTS_IN_USE.pop(spec.token_sha256, None)
             # The start's own failure is the one to report: what the rollback meets is logged
             removed = await self._remove_quietly(container_id) if container_id else True
             # A container docker start ran keeps its published port until it is gone, as in cleanup()
@@ -1673,9 +1400,8 @@ class DockerLauncher(Launcher):
         try:
             result = await self._cli.run(['rm', '-f', container_id], check=False)
             said = result.stderr.lower()
-            # Still there, the container still holds its root; one the daemon is removing (--rm) is going
+            # Gone, or one the daemon is already removing (--rm)
             if result.returncode == 0 or 'no such container' in said or 'already in progress' in said:
-                _ROOTS_IN_USE.pop(container_id, None)
                 return True
             debug(f'[docker] could not remove {container_id[:12]} after a failed start: {result.stderr.strip()}')
         except Exception as e:

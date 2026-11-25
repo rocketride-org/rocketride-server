@@ -32,7 +32,7 @@ environment value, every ``$`` doubled), the start stream, the order ``create``
 → ``Running`` → ``attach`` → the stream, a start refused by a waiting reason,
 the exit code from the watch and never from ``kubectl attach``, a lost pod,
 ``terminate`` and ``kill``, both address modes and the port's return, the
-refusals (store, a loopback address without an alias), the sweep at start and
+refusal of a loopback address without an alias, the sweep at start and
 the cleanup on a failure, and the metrics sampler.
 """
 
@@ -55,7 +55,7 @@ import pytest
 from ai.modules.task import launcher as launcher_pkg
 from ai.modules.task.launcher import LaunchSpec, create_launcher
 from ai.modules.task.launcher import k8s as k8
-from ai.modules.task.launcher.docker import CliResult, StoreUnavailableError
+from ai.modules.task.launcher.docker import CliResult
 from ai.modules.task.launcher.k8s import (
     BOOTSTRAP,
     K8sError,
@@ -1882,74 +1882,6 @@ async def test_a_start_that_is_cancelled_deletes_the_job():
 # ---------------------------------------------------------------------------
 # What is refused before anything is created
 # ---------------------------------------------------------------------------
-
-
-async def test_store_refused_on_a_filesystem_store(tmp_path):
-    cli = FakeKubectl()
-    environ = {'RR_STORE_URL': f'filesystem://{tmp_path}/store'}
-    with pytest.raises(StoreUnavailableError, match='^tool_filesystem is not available under --runtime=k8s'):
-        await _launcher(cli, environ=environ).start(_spec(uses_store=True, storage_root='users/u1/files'))
-    assert 'create' not in cli.commands()
-    assert not (tmp_path / 'store').exists()
-
-
-@pytest.mark.parametrize(
-    'credentials',
-    [
-        {'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token'},
-        # S3Store signs with the store key only as a pair: a region alone leaves the token file
-        {'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token', 'RR_STORE_SECRET_KEY': '{"region": "eu-west-1"}'},
-        {
-            'AWS_CONTAINER_CREDENTIALS_FULL_URI': 'http://169.254.170.23/v1/credentials',
-            'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE': '/var/run/secrets/eks-pod-identity-token',
-        },
-    ],
-    ids=['token-file', 'region-only-store-key', 'pod-identity'],
-)
-async def test_store_refused_for_s3_through_a_web_identity_token(credentials):
-    cli = FakeKubectl()
-    environ = {'RR_STORE_URL': 's3://bucket/prefix', **credentials}
-    with pytest.raises(
-        StoreUnavailableError, match='^tool_filesystem is not available under --runtime=k8s.*web-identity'
-    ):
-        await _launcher(cli, environ=environ).start(_spec(uses_store=True, storage_root='users/u1/files'))
-    assert 'create' not in cli.commands()
-
-
-STORE_KEY_PAIR = json.dumps({'access_key_id': 'AKIAEXAMPLE', 'secret_access_key': 'store-secret'})
-
-
-@pytest.mark.parametrize(
-    'environ',
-    [
-        {'RR_STORE_URL': 's3://bucket/prefix', 'RR_STORE_SECRET_KEY': STORE_KEY_PAIR},
-        {
-            'RR_STORE_URL': 's3://bucket/prefix',
-            'RR_STORE_SECRET_KEY': STORE_KEY_PAIR,
-            'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token',
-        },
-        {
-            'RR_STORE_URL': 's3://bucket/prefix',
-            'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token',
-            'AWS_ACCESS_KEY_ID': 'AKIAEXAMPLE',
-            'AWS_SECRET_ACCESS_KEY': 'aws-secret',
-        },
-    ],
-    ids=['store-key', 'store-key-beside-a-token-file', 'key-pair-beside-a-token-file'],
-)
-async def test_s3_with_a_static_key_passes_through_the_environment(environ):
-    cli = FakeKubectl()
-    spec = _spec(uses_store=True, storage_root='users/u1/files')
-    spec.env.update(environ)
-    await _launcher(cli, environ=environ).start(spec)
-    task_environment = cli.task_environment()
-    assert {name: task_environment[name] for name in environ} == environ
-
-
-async def test_a_pipeline_that_opens_no_store_is_not_asked_about_it(tmp_path):
-    cli = FakeKubectl()
-    await _launcher(cli, environ={'RR_STORE_URL': f'filesystem://{tmp_path}/store'}).start(_spec())
-    assert 'create' in cli.commands()
 
 
 async def test_loopback_addresses_move_to_the_host_alias():

@@ -68,10 +68,6 @@ class LaunchSpec:
     shared_host: bool = False
     # Attach the VS Code debugger to the task (subprocess runtime only)
     debug_attach: bool = False
-    # A component opens the store from inside the task (tool_filesystem, or tool_skills with a folder)
-    uses_store: bool = False
-    # The run's storage anchor (the task file's storage.root)
-    storage_root: str = ''
     # The folders of the packaged nodes the run loads (node_store.place), for a task that cannot see the engine's nodes/
     nodes: List[str] = field(default_factory=list)
 

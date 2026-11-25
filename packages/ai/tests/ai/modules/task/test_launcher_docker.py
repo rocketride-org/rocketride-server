@@ -29,7 +29,7 @@ command and returns canned output and exit codes; no daemon is needed. Pinned
 here: the five-command lifecycle, ``create -i`` and never ``-t``, the task file
 as a tar stream, the address in both modes, the environment as names only, the
 exit code from ``docker wait``, ``rm -f`` on a failure at any step, the startup
-sweep once per process, the store mount and its refusals, and the sampler.
+sweep once per process, the mounted directories, and the sampler.
 """
 
 from __future__ import annotations
@@ -52,7 +52,6 @@ from ai.modules.task.launcher.docker import (
     DockerError,
     DockerLauncher,
     DockerStatsSampler,
-    StoreUnavailableError,
     docker_config,
     is_host_only,
     parse_percent,
@@ -60,7 +59,6 @@ from ai.modules.task.launcher.docker import (
     rewrite_loopback,
     task_tar,
 )
-from ai.modules.task.task_engine import pipeline_opens_store
 
 LINUX_ENGINE = {'OSType': 'linux', 'OperatingSystem': 'Ubuntu 22.04.4 LTS'}
 DOCKER_DESKTOP = {'OSType': 'linux', 'OperatingSystem': 'Docker Desktop (containerized)'}
@@ -72,8 +70,6 @@ TOKEN_SHA = 'a' * 64
 def _engine_on_linux(monkeypatch):
     """Read the address mode as an engine on a Linux host would, whatever host runs the tests."""
     monkeypatch.setattr(dk, 'ENGINE_ON_LINUX', True)
-    # Every test starts with no store root held
-    monkeypatch.setattr(dk, '_ROOTS_IN_USE', {})
 
 
 class FakeProcess:
@@ -651,7 +647,7 @@ def _ids(monkeypatch, uid, gid):
 
 
 async def test_tasks_run_as_the_engines_user_in_the_images_group(monkeypatch):
-    """The engine's uid:gid, so a mount keeps one owner; the image's group to write what a run installs."""
+    """The engine's uid:gid, to read a mount as the engine does; the image's group, to write what a run installs."""
     _ids(monkeypatch, 1001, 1001)
     cli = FakeCli()
     await _launcher(cli).start(_spec())
@@ -1057,15 +1053,13 @@ async def test_a_container_the_daemon_did_not_remove_keeps_its_port_until_it_goe
 
 
 async def test_a_container_the_daemon_is_already_removing_counts_as_removed():
-    """--rm and rm -f meet as the task exits: "already in progress" gives the port and the root back at once."""
+    """--rm and rm -f meet as the task exits: "already in progress" gives the port back at once."""
     server = _server()
     cli = FakeCli(rm=CliResult(1, '', 'Error response from daemon: removal of container c0ffee is already in progress'))
     launch = await _launcher(cli, server=server, publish='true').start(_spec())
-    dk._ROOTS_IN_USE['c0ffee'] = 'teams/t1/files/tasks/foo'
 
     await launch.cleanup()
     server.release_port.assert_called_once_with(20009)
-    assert dk._ROOTS_IN_USE == {}
     await launch.cleanup()
     assert cli.commands().count('rm') == 1
 
@@ -1134,8 +1128,8 @@ async def test_missing_image_says_how_to_get_it_and_never_pulls(monkeypatch, ima
 
 @pytest.mark.parametrize('rm', [_hung, CliResult(1, '', 'Error response from daemon: removal failed')])
 @pytest.mark.parametrize('failing', ['cp', 'start'])
-async def test_a_rollback_that_fails_gives_the_port_back_only_before_docker_start(rm, failing, monkeypatch, tmp_path):
-    """The rollback's rm -f hangs or is refused: the container keeps the root its start took, it is logged.
+async def test_a_rollback_that_fails_gives_the_port_back_only_before_docker_start(rm, failing, monkeypatch):
+    """The rollback's rm -f hangs or is refused: it is logged, and the start's own failure is raised.
 
     Its port goes back only if docker start never ran: a container that started may hold it, as in cleanup().
     """
@@ -1143,20 +1137,18 @@ async def test_a_rollback_that_fails_gives_the_port_back_only_before_docker_star
     logged = []
     monkeypatch.setattr(dk, 'debug', logged.append)
     server = _server()
-    cli = FakeCli(run=_probe_writes, rm=rm)
+    cli = FakeCli(rm=rm)
     if failing == 'cp':
         cli.responses['cp'] = CliResult(1, '', 'cp refused')
     else:
         cli.states = ['created']
-    launcher = _launcher(cli, server=server, publish='true', environ=_store_environ(tmp_path))
+    launcher = _launcher(cli, server=server, publish='true')
     with pytest.raises(DockerError, match='cp refused' if failing == 'cp' else 'did not start'):
-        await launcher.start(_spec(uses_store=True, hosted=False, storage_root='teams/t1/files/tasks/foo'))
+        await launcher.start(_spec())
     if failing == 'cp':
         server.release_port.assert_called_once_with(20009)
     else:
         server.release_port.assert_not_called()
-    root = os.path.normcase(os.path.realpath(os.path.join(tmp_path, 'store', 'teams/t1/files/tasks/foo')))
-    assert dk._ROOTS_IN_USE == {'c0ffee': root}
     assert any('could not remove c0ffee after a failed start' in line for line in logged)
 
 
@@ -1224,474 +1216,8 @@ async def test_a_failure_after_create_removes_the_container(failing, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# The store (tool_filesystem) and the test mocks
+# The directories named in docker.mounts (the test mocks)
 # ---------------------------------------------------------------------------
-
-
-def _store_environ(tmp_path, **extra):
-    """An engine environment whose store is a filesystem under ``tmp_path``."""
-    environ = {'PATH': '/usr/bin', 'RR_STORE_URL': f'filesystem://{tmp_path}/store'}
-    environ.update(extra)
-    return environ
-
-
-def _probe_writes(args):
-    """The probe container as a working daemon runs it: it sees the marker and writes one back."""
-    mount = args[args.index('-v') + 1]
-    probe = mount[: -len(':/probe')]
-    assert os.path.isfile(os.path.join(probe, 'engine'))
-    with open(os.path.join(probe, 'task'), 'w') as f:
-        f.write('')
-    return CliResult(0, '', '')
-
-
-def _real_user():
-    """This test process's uid and gid, which a probe file really gets."""
-    return os.getuid(), os.getgid()
-
-
-# Windows has no uid: test_store_without_a_uid_keeps_the_image_user covers that case
-needs_uid = pytest.mark.skipif(not hasattr(os, 'getuid'), reason='no uid on Windows')
-
-# A root test process is a root engine, whose tasks run as the image user
-needs_a_user_uid = pytest.mark.skipif(
-    not hasattr(os, 'getuid') or os.getuid() == 0, reason='needs a uid other than root'
-)
-
-
-@pytest.mark.parametrize('link', [False, True], ids=['plain', 'through-a-link'])
-async def test_store_subtree_is_mounted_and_the_task_store_points_at_it(tmp_path, link):
-    """Only the run's storage root is mounted, and the task's RR_STORE_URL points at the mount.
-
-    A link in the store's path is followed first: the probe checks the directory the task mounts.
-    """
-    where = tmp_path / 'link' if link else tmp_path
-    if link:
-        (tmp_path / 'real').mkdir()
-        try:
-            os.symlink(tmp_path / 'real', where, target_is_directory=True)
-        except (OSError, NotImplementedError):
-            pytest.skip('this host cannot make a symlink')
-    cli = FakeCli(run=_probe_writes)
-    launcher = _launcher(cli, environ=_store_environ(where))
-    await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    create = cli.call('create')
-    mounts = [create.args[i + 1] for i, a in enumerate(create.args) if a == '-v']
-    assert mounts == [f'{os.path.realpath(os.path.join(where, "store", "users/u1/files"))}:/opt/store/users/u1/files']
-    assert create.env['RR_STORE_URL'] == 'filesystem:///opt/store'
-    assert (where / 'store' / 'users' / 'u1' / 'files').is_dir()
-    # The daemon was asked, once, as a task runs, and the probe left nothing behind
-    probe = cli.call('run').args
-    assert probe[:4] == ['run', '--rm', '--pull', 'never']
-    if hasattr(os, 'getuid') and os.getuid() != 0:
-        assert probe[probe.index('--user') + 1] == '%d:%d' % _real_user()
-    assert probe[probe.index('--cap-drop') + 1] == 'ALL'
-    assert probe[probe.index('-v') + 1].startswith(os.path.join(os.path.realpath(where), 'store', '.rocketride-probe-'))
-    assert not any(name.startswith('.rocketride-probe') for name in os.listdir(where / 'store'))
-
-
-@needs_a_user_uid
-async def test_store_works_whatever_uid_the_engine_runs_as(tmp_path):
-    """No uid 1000 rule: the task runs as the engine's own user, so the mount keeps one owner."""
-    cli = FakeCli(run=_probe_writes)
-    await _launcher(cli, environ=_store_environ(tmp_path)).start(
-        _spec(uses_store=True, hosted=False, storage_root='users/u1')
-    )
-    create = cli.call('create').args
-    assert create[create.index('--user') + 1] == '%d:%d' % _real_user()
-    assert any(a.endswith(':/opt/store/users/u1') for a in create)
-
-
-async def test_store_probe_runs_once_per_process(tmp_path):
-    """A probe that found the store usable is not run again for later pipelines."""
-    cli = FakeCli(run=_probe_writes)
-    launcher = _launcher(cli, environ=_store_environ(tmp_path))
-    for _ in range(3):
-        await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    assert cli.commands().count('run') == 1
-
-
-async def test_a_store_link_pointed_elsewhere_is_probed_again(tmp_path):
-    """The verdict is the directory's: a link in the store's path, pointed elsewhere, leads to a new probe."""
-    (tmp_path / 'real1').mkdir()
-    (tmp_path / 'real2').mkdir()
-    link = tmp_path / 'link'
-    try:
-        os.symlink(tmp_path / 'real1', link, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip('this host cannot make a symlink')
-    cli = FakeCli(run=_probe_writes)
-    launcher = _launcher(cli, environ=_store_environ(link))
-    await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    link.unlink()
-    os.symlink(tmp_path / 'real2', link, target_is_directory=True)
-    await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    probes = [c.args for c in cli.calls if c.args[0] == 'run']
-    assert len(probes) == 2
-    second = probes[1][probes[1].index('-v') + 1]
-    assert second.startswith(os.path.join(os.path.realpath(tmp_path / 'real2'), 'store', '.rocketride-probe-'))
-
-
-async def test_store_refused_when_the_daemon_does_not_see_it(tmp_path):
-    """A daemon that does not see the marker (exit 3) is refused, and the probe leaves nothing behind."""
-    cli = FakeCli(run=CliResult(3, '', ''))
-    with pytest.raises(StoreUnavailableError, match='does not see'):
-        await _launcher(cli, environ=_store_environ(tmp_path)).start(
-            _spec(uses_store=True, hosted=False, storage_root='users/u1/files')
-        )
-    assert 'create' not in cli.commands()
-    assert not any(name.startswith('.rocketride-probe') for name in os.listdir(tmp_path / 'store'))
-
-
-async def test_a_hosted_engine_refuses_a_filesystem_store(tmp_path):
-    """A hosted engine's tenants share the store: no tree of it is mounted, and the daemon is not asked."""
-    cli = FakeCli(run=_probe_writes)
-    with pytest.raises(StoreUnavailableError, match='on a hosted engine with a filesystem store'):
-        await _launcher(cli, environ=_store_environ(tmp_path)).start(
-            _spec(uses_store=True, storage_root='users/u1/files', hosted=True)
-        )
-    assert 'create' not in cli.commands() and 'run' not in cli.commands()
-    assert not (tmp_path / 'store').exists()
-
-
-async def test_store_refused_when_a_task_cannot_write_it(tmp_path):
-    """The probe could not write the marker back (exit 4): refused, and that verdict is kept."""
-    cli = FakeCli(run=CliResult(4, '', 'touch: cannot touch /probe/task: Permission denied'))
-    launcher = _launcher(cli, environ=_store_environ(tmp_path))
-    for _ in range(2):
-        with pytest.raises(StoreUnavailableError, match='cannot write the store'):
-            await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    assert 'create' not in cli.commands()
-    assert cli.commands().count('run') == 1
-
-
-@pytest.mark.parametrize(
-    ('said', 'error', 'message'),
-    [
-        # The probe runs before create: a missing image still says how to get it
-        (
-            'docker: Error response from daemon: No such image: rocketride/node:3.4.0',
-            DockerError,
-            'Image rocketride/node:3.4.0 not found; run ./builder container:build',
-        ),
-        ('docker: Error response from daemon: OCI runtime create failed', StoreUnavailableError, 'probe did not run'),
-    ],
-    ids=['no-image', 'other-failure'],
-)
-async def test_store_probe_that_docker_could_not_run_is_tried_again(tmp_path, monkeypatch, said, error, message):
-    """Docker's own failure (exit 125) says nothing about the store: the next pipeline probes again."""
-    monkeypatch.setattr(dk, 'engine_version', lambda: '3.4.0')
-    cli = FakeCli(run=CliResult(125, '', said))
-    launcher = _launcher(cli, environ=_store_environ(tmp_path))
-    with pytest.raises(error, match=message):
-        await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    assert not any(name.startswith('.rocketride-probe') for name in os.listdir(tmp_path / 'store'))
-
-    cli.responses['run'] = _probe_writes
-    await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    assert cli.commands().count('run') == 2
-    assert 'create' in cli.commands()
-
-
-@needs_uid
-async def test_store_refused_when_a_tasks_file_is_not_the_engines(tmp_path, monkeypatch):
-    """A daemon that remaps users: the file the probe wrote is someone else's on this host."""
-    real_uid = os.getuid()
-    monkeypatch.setattr(dk.os, 'getuid', lambda: real_uid + 1)
-    cli = FakeCli(run=_probe_writes)
-    with pytest.raises(StoreUnavailableError, match=f'belongs to uid {real_uid}'):
-        await _launcher(cli, environ=_store_environ(tmp_path)).start(
-            _spec(uses_store=True, hosted=False, storage_root='users/u1/files')
-        )
-    assert 'create' not in cli.commands()
-
-
-async def test_a_root_engine_gives_the_store_to_the_image_user(tmp_path, monkeypatch):
-    """Its tasks run as uid 1000, so the probe and the run's subtree become 1000's; root manages what they write."""
-    _ids(monkeypatch, 0, 0)
-    owners = {}
-    monkeypatch.setattr(
-        dk.os, 'chown', lambda p, uid, gid, **kw: owners.update({os.path.basename(p): (uid, gid)}), raising=False
-    )
-    monkeypatch.setattr(dk.os, 'fwalk', lambda *args, **kwargs: iter(()), raising=False)
-    cli = FakeCli(run=_probe_writes)
-    await _launcher(cli, environ=_store_environ(tmp_path)).start(
-        _spec(uses_store=True, hosted=False, storage_root='users/u1/files')
-    )
-    assert '--user' not in cli.call('run').args
-    assert '--user' not in cli.call('create').args
-    assert owners.pop('files') == (1000, 1000)
-    ((probe, ids),) = owners.items()
-    assert probe.startswith('.rocketride-probe-') and ids == (1000, 1000)
-
-
-async def test_a_root_engine_hands_over_what_root_owns_in_the_subtree_at_every_start(tmp_path, monkeypatch):
-    """Files root left or wrote since go to uid 1000 at every start: by descriptor, never through a link.
-
-    A file that a running task deletes while the walk goes is skipped.
-    """
-    _ids(monkeypatch, 0, 0)
-    walks, inside = [], []
-    real_stat = os.stat
-
-    def fake_fwalk(top, follow_symlinks=True):
-        """A subtree holding a root-owned directory, a file the tasks' user owns already, and two deleted meanwhile."""
-        walks.append((top, follow_symlinks))
-        yield top, ['old'], ['notes.txt', 'gone', 'went'], 7
-
-    def fake_stat(path, *args, dir_fd=None, follow_symlinks=True):
-        """The owners inside the walked tree; any other path as it is."""
-        if dir_fd == 7:
-            assert follow_symlinks is False
-            if path == 'gone':
-                raise FileNotFoundError(path)
-            root_owned = path in ('old', 'went')
-            return SimpleNamespace(st_uid=0, st_gid=0) if root_owned else SimpleNamespace(st_uid=1000, st_gid=1000)
-        return real_stat(path, *args, follow_symlinks=follow_symlinks)
-
-    def fake_chown(path, uid, gid, dir_fd=None, follow_symlinks=True):
-        """Record what is handed over inside the walked tree; ``went`` is deleted after its stat."""
-        assert follow_symlinks is False
-        if dir_fd is not None:
-            if path == 'went':
-                raise FileNotFoundError(path)
-            inside.append((path, uid, gid, dir_fd))
-
-    subtree = os.path.realpath(os.path.join(tmp_path, 'store', 'users/u1/files'))
-    monkeypatch.setattr(dk.os, 'fwalk', fake_fwalk, raising=False)
-    monkeypatch.setattr(dk.os, 'chown', fake_chown, raising=False)
-    monkeypatch.setattr(dk.os, 'stat', fake_stat)
-    launcher = _launcher(FakeCli(run=_probe_writes), environ=_store_environ(tmp_path))
-    for _ in range(2):
-        await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    assert walks == [(subtree, False)] * 2
-    assert inside == [('old', 1000, 1000, 7)] * 2
-
-
-@pytest.mark.parametrize('root', ['../elsewhere', 'users/../../elsewhere', '.', 'users/..'])
-async def test_a_storage_root_that_leads_out_of_the_store_is_refused(tmp_path, root):
-    """Whatever the task names, its mount stays inside the store: nothing outside is created or mounted."""
-    cli = FakeCli(run=_probe_writes)
-    with pytest.raises(StoreUnavailableError, match='leads out of the store'):
-        await _launcher(cli, environ=_store_environ(tmp_path)).start(
-            _spec(uses_store=True, hosted=False, storage_root=root)
-        )
-    assert 'create' not in cli.commands()
-    assert not (tmp_path / 'elsewhere').exists()
-
-
-@pytest.mark.skipif(os.name == 'nt', reason='no ":" in a Windows file name')
-async def test_a_store_whose_path_has_a_colon_is_refused(tmp_path):
-    """On Linux and macOS a ':' can be in the store's own path, which docker -v would split."""
-    cli = FakeCli(run=_probe_writes)
-    environ = {'PATH': '/usr/bin', 'RR_STORE_URL': f'filesystem://{tmp_path}/st:ore'}
-    with pytest.raises(StoreUnavailableError, match='has a ":"'):
-        await _launcher(cli, environ=environ).start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    assert 'run' not in cli.commands() and 'create' not in cli.commands()
-
-
-async def test_a_storage_root_through_a_link_is_refused(tmp_path):
-    """A link a task left in one root must not lead another root's mount elsewhere in the store."""
-    store = tmp_path / 'store'
-    (store / 'users' / 'u2' / 'files').mkdir(parents=True)
-    (store / 'users' / 'u1').mkdir(parents=True)
-    try:
-        os.symlink(store / 'users' / 'u2', store / 'users' / 'u1' / 'files', target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip('this host cannot make a symlink')
-    cli = FakeCli(run=_probe_writes)
-    with pytest.raises(StoreUnavailableError, match='leads out of the store'):
-        await _launcher(cli, environ=_store_environ(tmp_path)).start(
-            _spec(uses_store=True, hosted=False, storage_root='users/u1/files/x')
-        )
-    assert 'create' not in cli.commands()
-    assert not (store / 'users' / 'u2' / 'x').exists()
-
-
-async def test_nested_storage_roots_never_run_side_by_side(tmp_path):
-    """One task could swap a path under the other's mount: a root inside or around a running one waits for it."""
-    ids = iter(f'c{n}' for n in range(10))
-    cli = FakeCli(run=_probe_writes, create=lambda args: CliResult(0, f'{next(ids)}\n', ''))
-    launcher = _launcher(cli, environ=_store_environ(tmp_path))
-    outer = await launcher.start(
-        _spec(token_sha256='a' * 64, uses_store=True, hosted=False, storage_root='teams/t1/files/tasks/foo')
-    )
-    for root in ('teams/t1/files/tasks/foo/bar', 'teams/t1/files'):
-        with pytest.raises(StoreUnavailableError, match='inside or around'):
-            await launcher.start(_spec(token_sha256='b' * 64, uses_store=True, hosted=False, storage_root=root))
-    # The same root is no swap: every run of one user shares users/<id>/files
-    same = await launcher.start(
-        _spec(token_sha256='c' * 64, uses_store=True, hosted=False, storage_root='teams/t1/files/tasks/foo')
-    )
-    await outer.cleanup()
-    await same.cleanup()
-    await launcher.start(
-        _spec(token_sha256='d' * 64, uses_store=True, hosted=False, storage_root='teams/t1/files/tasks/foo/bar')
-    )
-
-
-async def test_a_storage_root_is_held_from_its_check_through_the_handover(tmp_path, monkeypatch):
-    """Held before makedirs and the handover's await, so no nested root starts meanwhile; let go if it fails."""
-    seen = []
-    launcher = _launcher(FakeCli(run=_probe_writes), environ=_store_environ(tmp_path))
-
-    async def handover(func, *args):
-        """The handover, which a store can refuse: the root is already held while it runs."""
-        seen.append(dict(dk._ROOTS_IN_USE))
-        # Another run under the same task id is another run all the same
-        if len(seen) == 1:
-            with pytest.raises(StoreUnavailableError, match='inside or around'):
-                await launcher.start(
-                    _spec(
-                        task_id='a',
-                        token_sha256='b' * 64,
-                        uses_store=True,
-                        hosted=False,
-                        storage_root='teams/t1/files/tasks/foo/bar',
-                    )
-                )
-        raise PermissionError(1, 'Operation not permitted')
-
-    monkeypatch.setattr(dk.asyncio, 'to_thread', handover)
-    with pytest.raises(StoreUnavailableError, match="cannot give teams/t1/files/tasks/foo to the tasks' user"):
-        await launcher.start(_spec(task_id='a', uses_store=True, hosted=False, storage_root='teams/t1/files/tasks/foo'))
-    assert seen and TOKEN_SHA in seen[0]
-    assert dk._ROOTS_IN_USE == {}
-
-
-async def test_a_failed_start_gives_its_storage_root_back(tmp_path):
-    """A start that fails before or after create holds no root afterwards."""
-    cli = FakeCli(run=_probe_writes, create=CliResult(1, '', 'Error response from daemon: boom'))
-    launcher = _launcher(cli, environ=_store_environ(tmp_path))
-    with pytest.raises(DockerError, match='boom'):
-        await launcher.start(_spec(task_id='a', uses_store=True, hosted=False, storage_root='teams/t1/files/tasks/foo'))
-    assert dk._ROOTS_IN_USE == {}
-    cli.responses['create'] = CliResult(0, 'c0ffee\n', '')
-    cli.responses['cp'] = CliResult(1, '', 'cp refused')
-    with pytest.raises(DockerError, match='cp refused'):
-        await launcher.start(_spec(task_id='a', uses_store=True, hosted=False, storage_root='teams/t1/files/tasks/foo'))
-    assert dk._ROOTS_IN_USE == {}
-
-
-async def test_a_failed_start_gives_its_root_back_when_the_daemon_is_already_removing_it(tmp_path):
-    """The rm -f after a failed start finds the daemon removing the container already: the root goes all the same."""
-    cli = FakeCli(
-        run=_probe_writes,
-        cp=CliResult(1, '', 'cp refused'),
-        rm=CliResult(1, '', 'Error response from daemon: removal of container c0ffee is already in progress'),
-    )
-    with pytest.raises(DockerError, match='cp refused'):
-        await _launcher(cli, environ=_store_environ(tmp_path)).start(
-            _spec(task_id='a', uses_store=True, hosted=False, storage_root='teams/t1/files/tasks/foo')
-        )
-    assert dk._ROOTS_IN_USE == {}
-
-
-async def test_a_store_that_refuses_chown_is_a_verdict(tmp_path, monkeypatch):
-    """NFS with root_squash, say: a root engine cannot give the store away, says so, keeps no probe, asks once."""
-    _ids(monkeypatch, 0, 0)
-    chowns = []
-
-    def refused(*args, **kwargs):
-        """Chown as root_squash answers it."""
-        chowns.append(args)
-        raise PermissionError(1, 'Operation not permitted')
-
-    monkeypatch.setattr(dk.os, 'chown', refused, raising=False)
-    cli = FakeCli(run=_probe_writes)
-    launcher = _launcher(cli, environ=_store_environ(tmp_path))
-    for _ in range(2):
-        with pytest.raises(StoreUnavailableError, match="cannot give the store to the tasks' user"):
-            await launcher.start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-    # The second start reuses the first verdict
-    assert len(chowns) == 1
-    assert 'run' not in cli.commands()
-    assert not any(name.startswith('.rocketride-probe') for name in os.listdir(tmp_path / 'store'))
-
-
-async def test_a_storage_root_with_a_colon_is_refused(tmp_path):
-    """Docker -v splits on ':': such a root is refused before anything is created."""
-    cli = FakeCli(run=_probe_writes)
-    with pytest.raises(StoreUnavailableError, match='has a ":"'):
-        await _launcher(cli, environ=_store_environ(tmp_path)).start(
-            _spec(uses_store=True, hosted=False, storage_root='users/u1:x/files')
-        )
-    assert 'run' not in cli.commands() and 'create' not in cli.commands()
-
-
-async def test_store_without_a_uid_keeps_the_image_user(tmp_path, monkeypatch):
-    """An engine with no uid (Windows): no --user, and no owner to compare."""
-    monkeypatch.delattr(dk.os, 'getuid', raising=False)
-    cli = FakeCli(run=_probe_writes)
-    await _launcher(cli, environ=_store_environ(tmp_path)).start(
-        _spec(uses_store=True, hosted=False, storage_root='users/u1')
-    )
-    assert '--user' not in cli.call('run').args
-    assert '--user' not in cli.call('create').args
-
-
-@pytest.mark.parametrize(
-    'credentials',
-    [
-        {'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token'},
-        # S3Store signs with the store key only as a pair: a region alone leaves the token file
-        {'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token', 'RR_STORE_SECRET_KEY': '{"region": "eu-west-1"}'},
-        {
-            'AWS_CONTAINER_CREDENTIALS_FULL_URI': 'http://169.254.170.23/v1/credentials',
-            'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE': '/var/run/secrets/eks-pod-identity-token',
-        },
-    ],
-    ids=['token-file', 'region-only-store-key', 'pod-identity'],
-)
-async def test_store_refused_for_s3_through_a_web_identity_token(credentials):
-    """S3 through a web-identity or Pod Identity token file is refused: the container cannot read the token."""
-    cli = FakeCli()
-    environ = {'RR_STORE_URL': 's3://bucket/prefix', **credentials}
-    with pytest.raises(StoreUnavailableError, match='web-identity'):
-        await _launcher(cli, environ=environ).start(_spec(uses_store=True, hosted=False, storage_root='users/u1/files'))
-
-
-STORE_KEY_PAIR = json.dumps({'access_key_id': 'AKIAEXAMPLE', 'secret_access_key': 'store-secret'})
-
-
-@pytest.mark.parametrize(
-    'environ',
-    [
-        {'RR_STORE_URL': 's3://bucket/prefix', 'RR_STORE_SECRET_KEY': STORE_KEY_PAIR},
-        {
-            'RR_STORE_URL': 's3://bucket/prefix',
-            'RR_STORE_SECRET_KEY': STORE_KEY_PAIR,
-            'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token',
-        },
-        {
-            'RR_STORE_URL': 's3://bucket/prefix',
-            'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token',
-            'AWS_ACCESS_KEY_ID': 'AKIAEXAMPLE',
-            'AWS_SECRET_ACCESS_KEY': 'aws-secret',
-        },
-    ],
-    ids=['store-key', 'store-key-beside-a-token-file', 'key-pair-beside-a-token-file'],
-)
-async def test_s3_with_a_static_key_needs_no_mount(environ):
-    """S3 with a key in the environment works as for a child process: its settings go in as names, with no mount."""
-    cli = FakeCli()
-    spec = _spec(uses_store=True, hosted=False, storage_root='users/u1/files')
-    spec.env.update(environ)
-    await _launcher(cli, environ=environ).start(spec)
-    create = cli.call('create')
-    names = [create.args[i + 1] for i, a in enumerate(create.args) if a == '-e']
-    assert set(environ) <= set(names)
-    assert {name: create.env[name] for name in environ} == environ
-    assert not any(value in a for value in environ.values() for a in create.args)
-    assert '-v' not in create.args
-
-
-async def test_no_store_mount_without_tool_filesystem(tmp_path):
-    """A pipeline that does not open the store gets no mount and no probe."""
-    cli = FakeCli()
-    await _launcher(cli, environ=_store_environ(tmp_path)).start(_spec())
-    assert '-v' not in cli.call('create').args
-    assert 'run' not in cli.commands()
 
 
 @pytest.mark.parametrize(
@@ -1704,7 +1230,7 @@ async def test_no_store_mount_without_tool_filesystem(tmp_path):
 )
 async def test_a_variable_named_in_mounts_is_mounted_and_points_at_the_mount(monkeypatch, path):
     """The same on Linux and Windows: a Windows path is no path in a Linux container."""
-    # As store_mounts reads it: from Python 3.13 a POSIX path is not absolute on Windows
+    # As mounted_directories reads it: from Python 3.13 a POSIX path is not absolute on Windows
     expected = path if os.path.isabs(path) else os.path.abspath(path)
     monkeypatch.setattr(dk.os.path, 'isdir', lambda p: p == expected)
     spec = _spec()
@@ -1773,40 +1299,6 @@ async def test_a_mount_whose_variable_is_unset_is_skipped():
     cli = FakeCli()
     await _launcher(cli, mounts='RR_MOCK').start(_spec())
     assert '-v' not in cli.call('create').args
-
-
-def test_pipeline_opens_store_finds_tool_filesystem_by_node_path():
-    """A component opens the store when its node is tool_filesystem, whatever the provider is called."""
-    services = {
-        'tool_filesystem': {'path': 'nodes.tool_filesystem'},
-        'filestore': {'path': 'nodes.tool_filesystem'},
-        'chat': {'path': 'nodes.chat'},
-    }
-
-    def opens(*providers):
-        components = [{'provider': p} for p in providers]
-        return pipeline_opens_store({'components': components}, services.get, lambda provider, config: config)
-
-    assert opens('chat', 'filestore')
-    assert not opens('chat', 'unknown')
-
-
-def test_pipeline_opens_store_counts_tool_skills_only_with_a_folder():
-    """tool_skills reads its skills folder through the store; with no folder it opens none."""
-    services = {'skills': {'path': 'nodes.tool_skills'}}
-
-    def opens(config, get_node_config=lambda provider, config: config):
-        return pipeline_opens_store(
-            {'components': [{'provider': 'skills', 'config': config}]}, services.get, get_node_config
-        )
-
-    def unresolved(provider, config):
-        raise ValueError('Profile x is not defined in skills')
-
-    assert opens({'folder': 'skills'})
-    assert not opens({'folder': '  '})
-    assert not opens({})
-    assert opens({}, unresolved)
 
 
 # ---------------------------------------------------------------------------

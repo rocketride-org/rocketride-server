@@ -75,7 +75,6 @@ from .docker import (
     LABEL_TASK,
     CliResult,
     DockerLauncher,
-    StoreUnavailableError,
     add_directory,
     add_nodes,
     engine_version,
@@ -83,7 +82,6 @@ from .docker import (
     rewrite_loopback,
     rewrite_loopback_dsns,
     tar_member,
-    web_identity_only,
 )
 
 if TYPE_CHECKING:
@@ -1402,39 +1400,6 @@ class K8sLauncher(Launcher):
         env.update(overrides)
         return env
 
-    def check_store(self, spec: LaunchSpec) -> None:
-        """
-        Refuse a pipeline that opens a store its pod cannot reach.
-
-        A pod sees none of this engine's files: neither a filesystem store nor
-        the token file S3 is authenticated through. Refused before anything
-        starts, rather than left writing into the pod's own tree and losing it
-        with the pod. S3 with a static key works: it is in the environment.
-
-        Args:
-            spec: What to launch.
-
-        Raises:
-            StoreUnavailableError: If the pipeline needs a store this pod cannot have.
-        """
-        if not (spec.uses_store and spec.storage_root):
-            return
-
-        from ai.account.store import Store
-
-        url = Store._expand_url_path(self._environ.get('RR_STORE_URL') or Store._get_default_storage_url())
-        scheme = url.split('://', 1)[0].lower()
-        if scheme == 'filesystem':
-            raise StoreUnavailableError(
-                'tool_filesystem is not available under --runtime=k8s with a filesystem store: '
-                "a pod does not see this engine's files"
-            )
-        if scheme == 's3' and web_identity_only(self._environ):
-            raise StoreUnavailableError(
-                'tool_filesystem is not available under --runtime=k8s with an S3 store authenticated '
-                'through a web-identity or EKS Pod Identity token file: the pod cannot read the token'
-            )
-
     def mounted_directories(self, spec: LaunchSpec) -> Tuple[Dict[str, str], Dict[str, str]]:
         """
         The host directories a task is told about through a variable named in ``k8s.mounts``.
@@ -1650,11 +1615,9 @@ class K8sLauncher(Launcher):
 
         Raises:
             K8sError: If the cluster or the image cannot be used, or an address of this host has no alias.
-            StoreUnavailableError: If the pipeline needs a store this pod cannot have.
             ValueError: If the run's nodes take more than ``CONST_NODES_SIZE_LIMIT``.
         """
         await self.prepare()
-        self.check_store(spec)
         # The docker runtime's command line, with this host by the name pods reach it by
         task_args = DockerLauncher.task_args(
             spec, spec.modelserver and self.host_address(spec.modelserver, '--modelserver')

@@ -241,9 +241,9 @@ For the Python, `ruff check` and `ruff format --check`, as in
 ./builder container:test                 # Linux only: container:build, the image probes, then --runtime=docker
 ```
 
-Expect the same counts as under spawn, apart from the tests in the table
-below. Unless `--taskserver` names one, the builder starts a test server of its
-own and prints `Server ready on port <port> (mocks enabled, runtime <name>)`.
+Expect the same counts as under spawn. Unless `--taskserver` names one, the
+builder starts a test server of its own and prints
+`Server ready on port <port> (mocks enabled, runtime <name>)`.
 
 Under `docker` and `k8s` the builder does three more things:
 
@@ -266,13 +266,9 @@ Under `docker` and `k8s` the builder does three more things:
   its task ends. Under `k8s` the last line reads
   `Server stopped, N task job(s) removed` and `N kubectl process(es) ended`.
 
-Two test files behave differently under a runtime, because a task there does
-not see the engine's files:
-
-| Test                                  | `docker`                                                                                                                            | `k8s`                                                                                    |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `tool_filesystem/test_live_anchor.py` | Runs as under spawn, through a mount of the run's storage root. Where the daemon cannot give one, it asserts the refusal and skips. | Asserts the refusal, then skips: `tool_filesystem is not available under --runtime=k8s`. |
-| `media_inspect/test_live.py`          | As under spawn.                                                                                                                     | Its pipeline saves through the store, so it skips on the same refusal.                   |
+The tests that use the store, such as `tool_filesystem/test_live_anchor.py`
+and `media_inspect/test_live.py` (its pipeline saves through it), run as under
+spawn: a task reaches the store through the engine, whatever the runtime.
 
 To run a few tests rather than all of them:
 
@@ -502,7 +498,6 @@ settings, secrets included, so delete them.
 | `the kubectl context <name> reaches <host> through the proxy in <variable>`               | The context rule: kubectl takes that proxy from its environment, and the cluster behind it can be on another machine. Add the host itself to `NO_PROXY` (a CIDR does not count), or unset the variable: in your environment or in `dist/server/.env`.                                                                                                |
 | `the namespace rocketride-tasks does not exist in <context>`                              | `kubectl --context <context> create namespace rocketride-tasks`.                                                                                                                                                                                                                                                                                     |
 | `... names this host by a loopback address ...`                                           | Under k8s, a model server or database at a loopback address needs `RR_K8S_HOST_ALIAS`.                                                                                                                                                                                                                                                               |
-| `tool_filesystem is not available under --runtime=...`                                    | The pipeline uses the store (`tool_filesystem`, or `tool_skills` with a folder) and the runtime cannot give it to the task. Under k8s, and under docker on a hosted engine, that is always so with a filesystem store.                                                                                                                               |
 | On Windows, a test run fails while installing, with access denied on a `.pyd` or a `.dll` | A running `engine.exe` holds the file. `Get-Process engine`, stop the one you started, and run again. If it still happens with no engine running, add `--pytest-parallel=off`.                                                                                                                                                                       |
 | `git status` shows files you did not edit after a builder run                             | The builder regenerates some tracked files: `packages/client-typescript/src/client/constants.ts`, `packages/ai/src/ai/modules/mcp/credentials.json`, sometimes `pnpm-lock.yaml`. Check with `git diff <file>` that the change is the builder's alone, then `git checkout -- <file>`: it discards every unstaged change to that file, yours included. |
 

@@ -556,9 +556,6 @@ function makeRunPytestAction(options = {}) {
 			const testEnv = {
 				...process.env,
 				RR_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks'),
-				// Tests whose outcome depends on the runtime (the store under docker and k8s)
-				// read it here
-				ROCKETRIDE_TEST_RUNTIME: options.runtime || 'spawn',
 			};
 			if (mode === 'run') {
 				const bracket = ctx.brackets?.['node-test-server'];
