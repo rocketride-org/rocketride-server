@@ -43,31 +43,216 @@
 			"gemini-2_5-flash": {
 				"title": "Gemini 2.5 Flash - Fast Vision (1M tokens)",
 				"model": "models/gemini-2.5-flash",
-				"modelTotalTokens": 1048576,
-				"apikey": ""
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2_5-pro": {
 				"title": "Gemini 2.5 Pro - High Quality Vision (1M tokens)",
 				"model": "models/gemini-2.5-pro",
-				"modelTotalTokens": 1048576,
-				"apikey": ""
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2_5-flash-lite": {
 				"title": "Gemini 2.5 Flash Lite - Fastest & Cheapest (1M tokens)",
 				"model": "models/gemini-2.5-flash-lite",
-				"modelTotalTokens": 1048576,
-				"apikey": ""
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-3_1-pro-preview": {
 				"title": "Gemini 3.1 Pro - Latest Vision (1M tokens)",
 				"model": "models/gemini-3.1-pro-preview",
-				"modelTotalTokens": 1048576,
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Gemini API. Please select a current model.",
 				"apikey": ""
 			},
 			"gemini-3_1-flash-image-preview": {
 				"title": "Gemini 3.1 Flash Image Preview (131k tokens)",
 				"model": "models/gemini-3.1-flash-image-preview",
-				"modelTotalTokens": 131072,
+				"modelSource": "manual",
+				"modelTotalTokens": 131072, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Gemini API. Please select a current model.",
+				"apikey": ""
+			},
+			"models-gemini-2-5-flash-image": {
+				"title": "Gemini 2.5 Flash Image",
+				"model": "models/gemini-2.5-flash-image",
+				"modelSource": "provider",
+				"modelTotalTokens": 32768, // provider API
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"models-gemini-3-1-flash-image": {
+				"title": "Gemini 3.1 Flash Image",
+				"model": "models/gemini-3.1-flash-image",
+				"modelSource": "provider",
+				"modelTotalTokens": 65536, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-3-1-flash-lite": {
+				"title": "Gemini 3.1 Flash Lite",
+				"model": "models/gemini-3.1-flash-lite",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-3-1-flash-lite-image": {
+				"title": "Gemini 3.1 Flash Lite Image",
+				"model": "models/gemini-3.1-flash-lite-image",
+				"modelSource": "provider",
+				"modelTotalTokens": 65536, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-3-5-flash": {
+				"title": "Gemini 3.5 Flash",
+				"model": "models/gemini-3.5-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-3-5-flash-lite": {
+				"title": "Gemini 3.5 Flash Lite",
+				"model": "models/gemini-3.5-flash-lite",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-3-6-flash": {
+				"title": "Gemini 3.6 Flash",
+				"model": "models/gemini-3.6-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-3-7-flash": {
+				"title": "Gemini 3.7 Flash",
+				"model": "models/gemini-3.7-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-3-8-flash": {
+				"title": "Gemini 3.8 Flash",
+				"model": "models/gemini-3.8-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-3-pro-image": {
+				"title": "Gemini 3 Pro Image",
+				"model": "models/gemini-3-pro-image",
+				"modelSource": "provider",
+				"modelTotalTokens": 131072, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-4-argon": {
+				"title": "Gemini 4 Argon",
+				"model": "models/gemini-4-argon",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-4-carbon": {
+				"title": "Gemini 4 Carbon",
+				"model": "models/gemini-4-carbon",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-4-hydrogen": {
+				"title": "Gemini 4 Hydrogen",
+				"model": "models/gemini-4-hydrogen",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-4-neon": {
+				"title": "Gemini 4 Neon",
+				"model": "models/gemini-4-neon",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"models-gemini-nano-banana-2-1": {
+				"title": "Gemini Nano Banana 2.1",
+				"model": "models/gemini-nano-banana-2.1",
+				"modelSource": "provider",
+				"modelTotalTokens": 65536, // provider API
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
 				"apikey": ""
 			}
 		}
@@ -106,51 +291,313 @@
 		},
 		"image_vision_gemini.gemini-2_5-flash": {
 			"object": "gemini-2_5-flash",
-			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_gemini.gemini-2_5-pro": {
 			"object": "gemini-2_5-pro",
-			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_gemini.gemini-2_5-flash-lite": {
 			"object": "gemini-2_5-flash-lite",
-			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_gemini.gemini-3_1-pro-preview": {
 			"object": "gemini-3_1-pro-preview",
-			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_gemini.gemini-3_1-flash-image-preview": {
 			"object": "gemini-3_1-flash-image-preview",
-			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_gemini.profile": {
 			"title": "Vision Model",
 			"description": "Select the Gemini vision model to use",
 			"type": "string",
 			"default": "gemini-2_5-flash",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "gemini-2_5-flash",
-					"properties": ["image_vision_gemini.gemini-2_5-flash"]
+					"properties": [
+						"image_vision_gemini.gemini-2_5-flash"
+					]
 				},
 				{
 					"value": "gemini-2_5-pro",
-					"properties": ["image_vision_gemini.gemini-2_5-pro"]
+					"properties": [
+						"image_vision_gemini.gemini-2_5-pro"
+					]
 				},
 				{
 					"value": "gemini-2_5-flash-lite",
-					"properties": ["image_vision_gemini.gemini-2_5-flash-lite"]
+					"properties": [
+						"image_vision_gemini.gemini-2_5-flash-lite"
+					]
 				},
 				{
 					"value": "gemini-3_1-pro-preview",
-					"properties": ["image_vision_gemini.gemini-3_1-pro-preview"]
+					"properties": [
+						"image_vision_gemini.gemini-3_1-pro-preview"
+					]
 				},
 				{
 					"value": "gemini-3_1-flash-image-preview",
-					"properties": ["image_vision_gemini.gemini-3_1-flash-image-preview"]
+					"properties": [
+						"image_vision_gemini.gemini-3_1-flash-image-preview"
+					]
+				},
+				{
+					"value": "models-gemini-2-5-flash-image",
+					"properties": [
+						"image_vision_gemini.models-gemini-2-5-flash-image"
+					]
+				},
+				{
+					"value": "models-gemini-3-1-flash-image",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-1-flash-image"
+					]
+				},
+				{
+					"value": "models-gemini-3-1-flash-lite",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-1-flash-lite"
+					]
+				},
+				{
+					"value": "models-gemini-3-1-flash-lite-image",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-1-flash-lite-image"
+					]
+				},
+				{
+					"value": "models-gemini-3-5-flash",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-5-flash"
+					]
+				},
+				{
+					"value": "models-gemini-3-5-flash-lite",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-5-flash-lite"
+					]
+				},
+				{
+					"value": "models-gemini-3-6-flash",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-6-flash"
+					]
+				},
+				{
+					"value": "models-gemini-3-7-flash",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-7-flash"
+					]
+				},
+				{
+					"value": "models-gemini-3-8-flash",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-8-flash"
+					]
+				},
+				{
+					"value": "models-gemini-3-pro-image",
+					"properties": [
+						"image_vision_gemini.models-gemini-3-pro-image"
+					]
+				},
+				{
+					"value": "models-gemini-4-argon",
+					"properties": [
+						"image_vision_gemini.models-gemini-4-argon"
+					]
+				},
+				{
+					"value": "models-gemini-4-carbon",
+					"properties": [
+						"image_vision_gemini.models-gemini-4-carbon"
+					]
+				},
+				{
+					"value": "models-gemini-4-hydrogen",
+					"properties": [
+						"image_vision_gemini.models-gemini-4-hydrogen"
+					]
+				},
+				{
+					"value": "models-gemini-4-neon",
+					"properties": [
+						"image_vision_gemini.models-gemini-4-neon"
+					]
+				},
+				{
+					"value": "models-gemini-nano-banana-2-1",
+					"properties": [
+						"image_vision_gemini.models-gemini-nano-banana-2-1"
+					]
 				}
+			]
+		},
+		"image_vision_gemini.models-gemini-2-5-flash-image": {
+			"object": "models-gemini-2-5-flash-image",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-1-flash-image": {
+			"object": "models-gemini-3-1-flash-image",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-1-flash-lite": {
+			"object": "models-gemini-3-1-flash-lite",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-1-flash-lite-image": {
+			"object": "models-gemini-3-1-flash-lite-image",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-5-flash": {
+			"object": "models-gemini-3-5-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-5-flash-lite": {
+			"object": "models-gemini-3-5-flash-lite",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-6-flash": {
+			"object": "models-gemini-3-6-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-7-flash": {
+			"object": "models-gemini-3-7-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-8-flash": {
+			"object": "models-gemini-3-8-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-3-pro-image": {
+			"object": "models-gemini-3-pro-image",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-4-argon": {
+			"object": "models-gemini-4-argon",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-4-carbon": {
+			"object": "models-gemini-4-carbon",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-4-hydrogen": {
+			"object": "models-gemini-4-hydrogen",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-4-neon": {
+			"object": "models-gemini-4-neon",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_gemini.models-gemini-nano-banana-2-1": {
+			"object": "models-gemini-nano-banana-2-1",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
 			]
 		}
 	},

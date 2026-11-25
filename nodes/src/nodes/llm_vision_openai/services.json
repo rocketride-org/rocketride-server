@@ -43,31 +43,284 @@
 			"openai-4-1": {
 				"title": "GPT-4.1",
 				"model": "gpt-4.1",
-				"modelTotalTokens": 1047576,
+				"modelSource": "provider",
+				"modelTotalTokens": 1047576, // openrouter
+				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
 			"openai-4-1-mini": {
 				"title": "GPT-4.1-mini",
 				"model": "gpt-4.1-mini",
-				"modelTotalTokens": 1047576,
+				"modelSource": "provider",
+				"modelTotalTokens": 1047576, // openrouter
+				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
 			"openai-4-1-nano": {
 				"title": "GPT-4.1-nano",
 				"model": "gpt-4.1-nano",
-				"modelTotalTokens": 1047576,
+				"modelSource": "manual",
+				"modelTotalTokens": 1047576, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in OpenAI API. Please select a current model.",
 				"apikey": ""
 			},
 			"openai-4o": {
 				"title": "GPT-4o",
 				"model": "gpt-4o",
-				"modelTotalTokens": 128000,
+				"modelSource": "provider",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
 			"openai-4o-mini": {
 				"title": "GPT-4o-mini",
 				"model": "gpt-4o-mini",
-				"modelTotalTokens": 128000,
+				"modelSource": "provider",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 16384, // openrouter
+				"apikey": ""
+			},
+			"gpt-5": {
+				"title": "OpenAI: GPT-5",
+				"model": "gpt-5",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-2": {
+				"title": "OpenAI: GPT-5.2",
+				"model": "gpt-5.2",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4": {
+				"title": "OpenAI: GPT-5.4",
+				"model": "gpt-5.4",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-mini": {
+				"title": "OpenAI: GPT-5.4 Mini",
+				"model": "gpt-5.4-mini",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-nano": {
+				"title": "OpenAI: GPT-5.4 Nano",
+				"model": "gpt-5.4-nano",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-5": {
+				"title": "OpenAI: GPT-5.5",
+				"model": "gpt-5.5",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-luna": {
+				"title": "OpenAI: GPT-5.6 Luna",
+				"model": "gpt-5.6-luna",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-sol": {
+				"title": "OpenAI: GPT-5.6 Sol",
+				"model": "gpt-5.6-sol",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-terra": {
+				"title": "OpenAI: GPT-5.6 Terra",
+				"model": "gpt-5.6-terra",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-mini": {
+				"title": "OpenAI: GPT-5 Mini",
+				"model": "gpt-5-mini",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-nano": {
+				"title": "OpenAI: GPT-5 Nano",
+				"model": "gpt-5-nano",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-1-sol": {
+				"title": "OpenAI: GPT-6.1 Sol",
+				"model": "gpt-6.1-sol",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-1-sol-healthcare": {
+				"title": "GPT-6.1 Sol Healthcare",
+				"model": "gpt-6.1-sol-healthcare",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000, // litellm
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"gpt-6-1-terra": {
+				"title": "OpenAI: GPT-6.1 Terra",
+				"model": "gpt-6.1-terra",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-2-astra": {
+				"title": "OpenAI: GPT-6.2 Astra",
+				"model": "gpt-6.2-astra",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-2-astra-healthcare": {
+				"title": "GPT-6.2 Astra Healthcare",
+				"model": "gpt-6.2-astra-healthcare",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000, // litellm
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"gpt-6-2-sol": {
+				"title": "OpenAI: GPT-6.2 Sol",
+				"model": "gpt-6.2-sol",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-2-sol-healthcare": {
+				"title": "GPT-6.2 Sol Healthcare",
+				"model": "gpt-6.2-sol-healthcare",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000, // litellm
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"gpt-6-astra": {
+				"title": "OpenAI: GPT-6 Astra",
+				"model": "gpt-6-astra",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra-healthcare": {
+				"title": "GPT-6 Astra Healthcare",
+				"model": "gpt-6-astra-healthcare",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000, // litellm
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"gpt-6-luna": {
+				"title": "OpenAI: GPT-6 Luna",
+				"model": "gpt-6-luna",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-sol": {
+				"title": "OpenAI: GPT-6 Sol",
+				"model": "gpt-6-sol",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o3": {
+				"title": "OpenAI: o3",
+				"model": "o3",
+				"modelSource": "provider",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 100000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
 				"apikey": ""
 			}
 		}
@@ -106,51 +359,433 @@
 		},
 		"image_vision_openai.openai-4-1": {
 			"object": "openai-4-1",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_openai.openai-4-1-mini": {
 			"object": "openai-4-1-mini",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_openai.openai-4-1-nano": {
 			"object": "openai-4-1-nano",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_openai.openai-4o": {
 			"object": "openai-4o",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_openai.openai-4o-mini": {
 			"object": "openai-4o-mini",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_openai.profile": {
 			"title": "Vision Model",
 			"description": "Select the OpenAI vision model to use",
 			"type": "string",
 			"default": "openai-4-1",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "openai-4-1",
-					"properties": ["image_vision_openai.openai-4-1"]
+					"properties": [
+						"image_vision_openai.openai-4-1"
+					]
 				},
 				{
 					"value": "openai-4-1-mini",
-					"properties": ["image_vision_openai.openai-4-1-mini"]
+					"properties": [
+						"image_vision_openai.openai-4-1-mini"
+					]
 				},
 				{
 					"value": "openai-4-1-nano",
-					"properties": ["image_vision_openai.openai-4-1-nano"]
+					"properties": [
+						"image_vision_openai.openai-4-1-nano"
+					]
 				},
 				{
 					"value": "openai-4o",
-					"properties": ["image_vision_openai.openai-4o"]
+					"properties": [
+						"image_vision_openai.openai-4o"
+					]
 				},
 				{
 					"value": "openai-4o-mini",
-					"properties": ["image_vision_openai.openai-4o-mini"]
+					"properties": [
+						"image_vision_openai.openai-4o-mini"
+					]
+				},
+				{
+					"value": "gpt-5",
+					"properties": [
+						"image_vision_openai.gpt-5"
+					]
+				},
+				{
+					"value": "gpt-5-2",
+					"properties": [
+						"image_vision_openai.gpt-5-2"
+					]
+				},
+				{
+					"value": "gpt-5-4",
+					"properties": [
+						"image_vision_openai.gpt-5-4"
+					]
+				},
+				{
+					"value": "gpt-5-4-mini",
+					"properties": [
+						"image_vision_openai.gpt-5-4-mini"
+					]
+				},
+				{
+					"value": "gpt-5-4-nano",
+					"properties": [
+						"image_vision_openai.gpt-5-4-nano"
+					]
+				},
+				{
+					"value": "gpt-5-5",
+					"properties": [
+						"image_vision_openai.gpt-5-5"
+					]
+				},
+				{
+					"value": "gpt-5-6-luna",
+					"properties": [
+						"image_vision_openai.gpt-5-6-luna"
+					]
+				},
+				{
+					"value": "gpt-5-6-sol",
+					"properties": [
+						"image_vision_openai.gpt-5-6-sol"
+					]
+				},
+				{
+					"value": "gpt-5-6-terra",
+					"properties": [
+						"image_vision_openai.gpt-5-6-terra"
+					]
+				},
+				{
+					"value": "gpt-5-mini",
+					"properties": [
+						"image_vision_openai.gpt-5-mini"
+					]
+				},
+				{
+					"value": "gpt-5-nano",
+					"properties": [
+						"image_vision_openai.gpt-5-nano"
+					]
+				},
+				{
+					"value": "gpt-6-1-sol",
+					"properties": [
+						"image_vision_openai.gpt-6-1-sol"
+					]
+				},
+				{
+					"value": "gpt-6-1-sol-healthcare",
+					"properties": [
+						"image_vision_openai.gpt-6-1-sol-healthcare"
+					]
+				},
+				{
+					"value": "gpt-6-1-terra",
+					"properties": [
+						"image_vision_openai.gpt-6-1-terra"
+					]
+				},
+				{
+					"value": "gpt-6-2-astra",
+					"properties": [
+						"image_vision_openai.gpt-6-2-astra"
+					]
+				},
+				{
+					"value": "gpt-6-2-astra-healthcare",
+					"properties": [
+						"image_vision_openai.gpt-6-2-astra-healthcare"
+					]
+				},
+				{
+					"value": "gpt-6-2-sol",
+					"properties": [
+						"image_vision_openai.gpt-6-2-sol"
+					]
+				},
+				{
+					"value": "gpt-6-2-sol-healthcare",
+					"properties": [
+						"image_vision_openai.gpt-6-2-sol-healthcare"
+					]
+				},
+				{
+					"value": "gpt-6-astra",
+					"properties": [
+						"image_vision_openai.gpt-6-astra"
+					]
+				},
+				{
+					"value": "gpt-6-astra-healthcare",
+					"properties": [
+						"image_vision_openai.gpt-6-astra-healthcare"
+					]
+				},
+				{
+					"value": "gpt-6-luna",
+					"properties": [
+						"image_vision_openai.gpt-6-luna"
+					]
+				},
+				{
+					"value": "gpt-6-sol",
+					"properties": [
+						"image_vision_openai.gpt-6-sol"
+					]
+				},
+				{
+					"value": "o3",
+					"properties": [
+						"image_vision_openai.o3"
+					]
 				}
+			]
+		},
+		"image_vision_openai.gpt-5": {
+			"object": "gpt-5",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-2": {
+			"object": "gpt-5-2",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-4": {
+			"object": "gpt-5-4",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-4-mini": {
+			"object": "gpt-5-4-mini",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-4-nano": {
+			"object": "gpt-5-4-nano",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-5": {
+			"object": "gpt-5-5",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-6-luna": {
+			"object": "gpt-5-6-luna",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-6-sol": {
+			"object": "gpt-5-6-sol",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-6-terra": {
+			"object": "gpt-5-6-terra",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-mini": {
+			"object": "gpt-5-mini",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-5-nano": {
+			"object": "gpt-5-nano",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-1-sol": {
+			"object": "gpt-6-1-sol",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-1-sol-healthcare": {
+			"object": "gpt-6-1-sol-healthcare",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-1-terra": {
+			"object": "gpt-6-1-terra",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-2-astra": {
+			"object": "gpt-6-2-astra",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-2-astra-healthcare": {
+			"object": "gpt-6-2-astra-healthcare",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-2-sol": {
+			"object": "gpt-6-2-sol",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-2-sol-healthcare": {
+			"object": "gpt-6-2-sol-healthcare",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-astra": {
+			"object": "gpt-6-astra",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-astra-healthcare": {
+			"object": "gpt-6-astra-healthcare",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-luna": {
+			"object": "gpt-6-luna",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.gpt-6-sol": {
+			"object": "gpt-6-sol",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
+		},
+		"image_vision_openai.o3": {
+			"object": "o3",
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
 			]
 		}
 	},
