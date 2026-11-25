@@ -29,3 +29,11 @@ class WeaviateConnectionError(WeaviateBaseError):
 
 class WeaviateTimeoutError(WeaviateBaseError):
     """Mirrors weaviate.exceptions.WeaviateTimeoutError."""
+
+
+class WeaviateQueryError(WeaviateBaseError):
+    """Mirrors weaviate.exceptions.WeaviateQueryError: the server rejected a query."""
+
+    def __init__(self, message: str = '', protocol_type: str = 'GRPC search'):
+        super().__init__(f'Query call with protocol {protocol_type} failed with message {message}.')
+        self.message = message

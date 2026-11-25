@@ -42,6 +42,14 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 import hashlib
 
+from .exceptions import WeaviateQueryError
+
+
+# Weaviate's server defaults: a query without a limit returns QUERY_DEFAULTS_LIMIT
+# objects, and one whose offset + limit exceeds QUERY_MAXIMUM_RESULTS is rejected.
+QUERY_DEFAULTS_LIMIT = 10
+QUERY_MAXIMUM_RESULTS = 10000
+
 
 # =============================================================================
 # Data Classes for Query Results
@@ -197,6 +205,18 @@ class MetadataQuery:
         self.distance = distance
 
 
+class Sort:
+    """Sort order for fetch_objects: one property, ascending or descending."""
+
+    def __init__(self, name: str, ascending: bool = True):
+        self.name = name
+        self.ascending = ascending
+
+    @staticmethod
+    def by_property(name: str, ascending: bool = True) -> 'Sort':
+        return Sort(name, ascending)
+
+
 # =============================================================================
 # Mock Collection Components
 # =============================================================================
@@ -284,8 +304,28 @@ class MockQuery:
 
         return QueryResult(objects=results[:limit])
 
-    def fetch_objects(self, filters: Optional[Filter] = None, limit: int = 100, offset: int = 0) -> QueryResult:
-        """Fetch objects matching filters."""
+    def fetch_objects(
+        self,
+        filters: Optional[Filter] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        sort: Optional[Sort] = None,
+    ) -> QueryResult:
+        """Fetch objects matching filters, with Weaviate's default and maximum result limits.
+
+        Without ``sort`` the objects come back in storage order. With it they are
+        ordered by that property; objects with equal values keep storage order.
+        """
+        if limit is None:
+            limit = QUERY_DEFAULTS_LIMIT
+        maximum = self.collection.queryMaximumResults
+        if offset + limit > maximum:
+            raise WeaviateQueryError(
+                f'invalid pagination params: query maximum results exceeded: the total limit calculated from '
+                f"the provided offset '{offset}' and limit '{limit}' exceeds the configured value for "
+                f"QUERY_MAXIMUM_RESULTS '{maximum}'"
+            )
+
         results = []
 
         for uuid, data in self.collection._storage.items():
@@ -303,6 +343,9 @@ class MockQuery:
                     metadata=MetadataResult(),
                 )
             )
+
+        if sort is not None:
+            results.sort(key=lambda obj: obj.properties.get(sort.name), reverse=not sort.ascending)
 
         return QueryResult(objects=results[offset : offset + limit])
 
@@ -380,6 +423,9 @@ class MockCollection:
         if name not in MockCollection._all_storage:
             MockCollection._all_storage[name] = {}
         self._storage = MockCollection._all_storage[name]
+
+        # A server can set QUERY_MAXIMUM_RESULTS below the default; a test sets this to model one
+        self.queryMaximumResults = QUERY_MAXIMUM_RESULTS
 
         self.query = MockQuery(self)
         self.data = MockData(self)

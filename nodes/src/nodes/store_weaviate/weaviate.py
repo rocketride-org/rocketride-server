@@ -40,7 +40,7 @@ import time
 import weaviate
 from weaviate.client import WeaviateClient
 from weaviate.classes.init import AdditionalConfig, Timeout, Auth
-from weaviate.classes.query import Filter, MetadataQuery
+from weaviate.classes.query import Filter, MetadataQuery, Sort
 from weaviate.collections.collection import Collection
 from weaviate.classes.config import VectorDistances
 from weaviate.util import generate_uuid5
@@ -60,6 +60,11 @@ _REPEAT_PAUSE_SECONDS = 1.0
 # How many such pages in a row a trash update tolerates before it fails.
 _MAX_STALLS = 2
 
+# A query rejected for asking for too many objects names the server's limit.
+# This matches Weaviate's error text: if Weaviate rewords it, render on a server
+# with a lower QUERY_MAXIMUM_RESULTS raises on the first page instead of retrying.
+_QUERY_MAXIMUM_RESULTS = re.compile(r"QUERY_MAXIMUM_RESULTS '(\d+)'")
+
 
 class Store(DocumentStoreBase):
     apikey: str | None = None
@@ -69,6 +74,10 @@ class Store(DocumentStoreBase):
     port: int = 0
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
+    # The most chunks render asks Weaviate for in one page. Weaviate rejects a
+    # query whose offset + limit exceeds QUERY_MAXIMUM_RESULTS (10000 by default).
+    # A server configured lower lowers this to its limit on the first rejection.
+    renderPageSize: int = 10000
     similarity: str = 'Cosine'
     client: WeaviateClient | None = None
     collectionObj: Collection | None = None
@@ -607,56 +616,105 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return
 
-        # Since chunks are returned in any order, and a single objectId
-        # may contain tens of thousands of chunks, we grave them one
-        # group at a time (renderChunkSize), put them into an array,
-        # join them and call the callback
-        offset = 0
+        # A document may hold tens of thousands of chunks. Weaviate returns 10
+        # objects when no limit is given and rejects a limit above
+        # QUERY_MAXIMUM_RESULTS, so page through the document in chunkId
+        # order with a keyset cursor. ChunkIds need not be contiguous, and a
+        # chunk number can be stored more than once (an upsert without chunk 0
+        # that repeats one), so neither a gap nor a page's chunkId span says
+        # where the document ends; only a short page does.
+        #
+        # Render keeps one copy of each chunk number, so after a full page the
+        # next one starts at that page's last chunkId (whose copies may not all
+        # have fit), or past it when the page held copies of that one chunkId
+        # only. The cursor moves forward on every full page, so any number of
+        # copies is passed, and re-reading a copy only replaces it in place.
+        groupSize = self.renderChunkSize
+        groupStart = 0
+        pieces: Dict[int, str] = {}
+
+        cursor = 0
         while True:
-            # Build filter for getting a set of chunks within the offset range
-            points = self.collectionObj.query.fetch_objects(
-                filters=(
-                    Filter.by_property('objectId').equal(objectId)
-                    & Filter.by_property('chunkId').greater_or_equal(offset)
-                    & Filter.by_property('chunkId').less_than(offset + self.renderChunkSize)
-                )
-            )
+            objects = self._fetchRenderPage(objectId, cursor)
 
-            # Create a renderChunkSize array with empty
-            # entries. This will allow us to join even when
-            # a chunk doesn't come back
-            # Process the results
-            text = [''] * self.renderChunkSize
-            lastIndex = -1
-
-            for point in points.objects:
-                content = point.properties.get('content')
+            lastChunk = cursor
+            for point in objects:
                 chunk = point.properties.get('chunkId')
-                index = chunk - offset
 
-                # Should never happen since we gave it an offset
-                if chunk < offset:
+                # chunkId is an INT property and the greater_or_equal filter only
+                # matches objects that have one, so this skips only a malformed
+                # object that has no place in the document's order
+                if not isinstance(chunk, int) or chunk < cursor:
                     continue
+                lastChunk = max(lastChunk, chunk)
 
-                text[index] = content
-                if index > lastIndex:
-                    lastIndex = index
+                # Chunks arrive in order, so a chunk past the current group completes it
+                if chunk >= groupStart + groupSize:
+                    self._emitRenderGroup(pieces, callback)
+                    pieces = {}
+                    groupStart = chunk - chunk % groupSize
 
-            # Compute the number of items we are going to process
-            numberOfItems = lastIndex + 1
+                # Of several copies of one chunk number, the last one read is kept
+                pieces[chunk] = point.properties.get('content') or ''
 
-            # If we got no items back, we are done
-            if numberOfItems < 1:
+            # Compared after the fetch, which may have lowered the page size to the server's limit
+            if len(objects) < self.renderPageSize:
                 break
+            cursor = self._nextRenderCursor(cursor, lastChunk)
 
-            # Join it together
-            fullText = ''.join(text[0:numberOfItems])
+        self._emitRenderGroup(pieces, callback)
 
-            # Call the output function
-            callback(fullText)
+    def _fetchRenderPage(self, objectId: str, cursor: int) -> List[Any]:
+        """
+        Return up to renderPageSize objects of one document from chunkId cursor on, in chunkId order.
 
-            # If we got less than we asked for, must be done
-            if numberOfItems < self.renderChunkSize:
-                break
+        A server whose QUERY_MAXIMUM_RESULTS is below renderPageSize rejects the
+        query and names its limit. renderPageSize then drops to that limit, for
+        this page and every later render, and the page is fetched again.
+        """
+        while True:
+            try:
+                points = self.collectionObj.query.fetch_objects(
+                    filters=(
+                        Filter.by_property('objectId').equal(objectId)
+                        & Filter.by_property('chunkId').greater_or_equal(cursor)
+                    ),
+                    sort=Sort.by_property('chunkId', ascending=True),
+                    limit=self.renderPageSize,
+                )
+                return points.objects
+            except WeaviateBaseError as error:
+                match = _QUERY_MAXIMUM_RESULTS.search(str(error))
+                if match is None:
+                    raise
+                limit = int(match.group(1))
 
-            offset += self.renderChunkSize
+                # Only a lower, usable limit is retried, so the retries end
+                if not 0 < limit < self.renderPageSize:
+                    raise
+                self.renderPageSize = limit
+
+    @staticmethod
+    def _nextRenderCursor(cursor: int, lastChunk: int) -> int:
+        """
+        Return where the page after a full page starts.
+
+        Every full page moves the cursor forward, so render always ends.
+        """
+        if lastChunk > cursor:
+            # Start at the page's last chunkId: its copies may not all have fit
+            return lastChunk
+
+        # A full page of copies of one chunkId: step past it
+        return cursor + 1
+
+    @staticmethod
+    def _emitRenderGroup(pieces: Dict[int, str], callback: Callable[[str], None]) -> None:
+        """
+        Send one render group's text to the callback, joined in chunkId order.
+
+        A missing chunk adds no text, and the join walks only the chunks present,
+        not the gaps between them.
+        """
+        if pieces:
+            callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
