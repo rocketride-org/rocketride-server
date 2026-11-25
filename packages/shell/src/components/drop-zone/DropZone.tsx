@@ -27,6 +27,13 @@ export interface IDropZoneProps {
 	hint?: string;
 	/** Fired with the dropped files. */
 	onFiles: (files: FileList) => void;
+	/**
+	 * The slim one-row variant: an upload mark, the title and the hint on one
+	 * line, for a drop bar pinned under a thread.
+	 */
+	compact?: boolean;
+	/** Draws the drag highlight from outside, e.g. while files are dragged over the window. */
+	highlighted?: boolean;
 }
 
 // =============================================================================
@@ -66,6 +73,37 @@ const styles = {
 		fontSize: 12.5,
 		marginTop: 4,
 	} as CSSProperties,
+
+	// Compact variant: one dashed row, brand-tinted, the mark and the words centred.
+	compactZone: (dragging: boolean): CSSProperties => ({
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: 10,
+		border: `2px dashed ${dragging ? 'var(--rr-brand)' : 'var(--rr-border-hover)'}`,
+		borderRadius: 12,
+		padding: '12px 16px',
+		backgroundColor: dragging ? 'var(--rr-bg-list-active)' : 'var(--rr-bg-paper)',
+		color: dragging ? 'var(--rr-brand)' : 'var(--rr-text-secondary)',
+		fontSize: 13,
+		cursor: 'pointer',
+		transition: 'border-color 0.15s, background-color 0.15s',
+	}),
+
+	compactArrow: {
+		fontSize: 18,
+		color: 'var(--rr-brand)',
+		lineHeight: 1,
+	} as CSSProperties,
+
+	compactTitle: {
+		fontWeight: 700,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+
+	compactHint: {
+		marginLeft: 4,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -78,7 +116,7 @@ const styles = {
  * @param props - {@link IDropZoneProps}.
  * @returns The drop-zone element.
  */
-export function DropZone({ title, hint, onFiles }: IDropZoneProps): React.ReactElement {
+export function DropZone({ title, hint, onFiles, compact = false, highlighted = false }: IDropZoneProps): React.ReactElement {
 	// Tracks whether a drag is currently over the target (drives the highlight).
 	const [dragging, setDragging] = useState(false);
 	// Hidden input powering click / keyboard file selection.
@@ -118,7 +156,7 @@ export function DropZone({ title, hint, onFiles }: IDropZoneProps): React.ReactE
 
 	return (
 		<div
-			style={styles.zone(dragging)}
+			style={compact ? styles.compactZone(dragging || highlighted) : styles.zone(dragging || highlighted)}
 			onDragOver={handleDragOver}
 			onDragLeave={handleDragLeave}
 			onDrop={handleDrop}
@@ -141,9 +179,21 @@ export function DropZone({ title, hint, onFiles }: IDropZoneProps): React.ReactE
 					e.target.value = '';
 				}}
 			/>
-			<div style={styles.plus}>+</div>
-			<div style={styles.title}>{title}</div>
-			{hint && <div style={styles.hint}>{hint}</div>}
+			{compact ? (
+				<>
+					<span style={styles.compactArrow}>&#8679;</span>
+					<span>
+						<span style={styles.compactTitle}>{title}</span>
+						{hint && <span style={styles.compactHint}>{hint}</span>}
+					</span>
+				</>
+			) : (
+				<>
+					<div style={styles.plus}>+</div>
+					<div style={styles.title}>{title}</div>
+					{hint && <div style={styles.hint}>{hint}</div>}
+				</>
+			)}
 		</div>
 	);
 }

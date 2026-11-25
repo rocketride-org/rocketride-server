@@ -13,7 +13,7 @@
  */
 
 import React, { useEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
-import { ChatMessage, CHAT_COLUMN_MAX_WIDTH } from '../types';
+import { ChatMessage, CHAT_COLUMN_MAX_WIDTH, type ChatMessageBodyRenderer } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 import { EmptyState } from '../../empty-state/EmptyState';
@@ -129,6 +129,8 @@ export interface MessageListProps {
 	emptyDescription?: string;
 	/** Rich replacement for the stock EmptyState (e.g. example-prompt cards). */
 	emptySlot?: React.ReactNode;
+	/** Draws a message's host `body` inside its bubble (see ChatMessage.body). */
+	renderBody?: ChatMessageBodyRenderer;
 }
 
 /**
@@ -137,7 +139,7 @@ export interface MessageListProps {
  * @param props - {@link MessageListProps}.
  * @returns The thread element (or an EmptyState when empty).
  */
-export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, emptyTitle, emptyDescription, emptySlot }) => {
+export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, emptyTitle, emptyDescription, emptySlot, renderBody }) => {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const endRef = useRef<HTMLDivElement>(null);
 	// Whether the user is pinned to the bottom (within 40px). Starts true so the
@@ -187,7 +189,7 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 		<div style={styles.scroll} ref={scrollRef} onScroll={handleScroll}>
 			{/* Inner column mirrors the entry bar width so thread and input align. */}
 			<div style={styles.column}>
-				{items.map((item) => (item.kind === 'thinking-group' ? <ThinkingGroup key={`tg-${item.id}`} messages={item.messages} /> : <MessageBubble key={item.message.id} message={item.message} />))}
+				{items.map((item) => (item.kind === 'thinking-group' ? <ThinkingGroup key={`tg-${item.id}`} messages={item.messages} /> : <MessageBubble key={item.message.id} message={item.message} renderBody={renderBody} />))}
 				{isTyping && <TypingIndicator />}
 				<div ref={endRef} />
 			</div>

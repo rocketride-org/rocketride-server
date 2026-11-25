@@ -23,10 +23,10 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV15 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-24T18:54:42.510Z
-// Source commit: f81fc4ea87cd7969adf751c6afbeb030c4aa94ad
+// Generated:     2026-11-25T16:28:48.070Z
+// Source commit: 82a3f13a9be0c719e9eee7c214c2c5c760fb26b1
 // Generator:     dts-bundle-generator@9.5.1
-// Produced by:   ./builder shell:freeze
+// Produced by:   ./builder shell:remint
 // =============================================================================
 
 // ===== BEGIN FROZEN BUNDLE — do not edit =====
@@ -14070,6 +14070,13 @@ export interface IDropZoneProps {
     hint?: string;
     /** Fired with the dropped files. */
     onFiles: (files: FileList) => void;
+    /**
+     * The slim one-row variant: an upload mark, the title and the hint on one
+     * line, for a drop bar pinned under a thread.
+     */
+    compact?: boolean;
+    /** Draws the drag highlight from outside, e.g. while files are dragged over the window. */
+    highlighted?: boolean;
 }
 /**
  * Renders a dashed file-drop target.
@@ -14077,7 +14084,7 @@ export interface IDropZoneProps {
  * @param props - {@link IDropZoneProps}.
  * @returns The drop-zone element.
  */
-export declare function DropZone({ title, hint, onFiles }: IDropZoneProps): React$1.ReactElement;
+export declare function DropZone({ title, hint, onFiles, compact, highlighted }: IDropZoneProps): React$1.ReactElement;
 /** Props for the {@link Card} component. */
 export interface ICardProps {
     /** Header content — a plain string title or a custom node. */
@@ -15344,7 +15351,25 @@ export interface ChatMessage {
     meta?: string;
     /** When true, the message renders as an in-thread error Banner instead of a bubble. */
     isError?: boolean;
+    /**
+     * Host-drawn content inside the bubble (an upload list, a progress line,
+     * a result layout). Plain JSON data, so a conversation saves verbatim;
+     * the host draws it through `MessageList`'s `renderBody`. A message whose
+     * body is not drawn falls back to its `text`.
+     */
+    body?: ChatMessageBody;
 }
+/** The data behind a host-drawn bubble body (see {@link ChatMessage.body}). */
+export interface ChatMessageBody {
+    /** What the body is, as the host names it (e.g. 'upload', 'answer'). */
+    kind: string;
+    /** The body's data: plain JSON only, so the message stays serializable. */
+    data?: unknown;
+    /** When true, the bubble takes the thread's full width (tables, galleries). */
+    wide?: boolean;
+}
+/** Draws a message's {@link ChatMessage.body}; null falls back to the text. */
+export type ChatMessageBodyRenderer = (message: ChatMessage) => React$1.ReactNode;
 /** Props for the top-level ChatView component. */
 export interface IChatViewProps {
     /** Current message list managed by the host via useChatMessages. */
@@ -15402,6 +15427,8 @@ interface MessageListProps {
     emptyDescription?: string;
     /** Rich replacement for the stock EmptyState (e.g. example-prompt cards). */
     emptySlot?: React$1.ReactNode;
+    /** Draws a message's host `body` inside its bubble (see ChatMessage.body). */
+    renderBody?: ChatMessageBodyRenderer;
 }
 /**
  * Renders the scrollable message thread with scroll-locked autoscroll.
@@ -15410,6 +15437,24 @@ interface MessageListProps {
  * @returns The thread element (or an EmptyState when empty).
  */
 export declare const MessageList: React$1.FC<MessageListProps>;
+export interface ChatInputFieldProps {
+    onSend: (text: string) => void;
+    disabled?: boolean;
+    placeholder?: string;
+    /** Optional node rendered before the input field (reserved for attachments). */
+    leadingInputSlot?: React$1.ReactNode;
+    /** When true, Send is enabled with no text (e.g. files are attached) and sends ''. */
+    allowEmpty?: boolean;
+    /** Optional one-line hint under the row (e.g. what the agent takes). */
+    hint?: React$1.ReactNode;
+}
+/**
+ * Renders the composer row.
+ *
+ * @param props - {@link ChatInputFieldProps}.
+ * @returns The composer element.
+ */
+export declare const ChatInputField: React$1.FC<ChatInputFieldProps>;
 interface MarkdownRendererProps {
     content: string;
     /**
