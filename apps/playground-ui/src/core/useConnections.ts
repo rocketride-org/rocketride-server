@@ -50,21 +50,41 @@ export interface ConnectionsApi {
 // HELPERS
 // =============================================================================
 
+/** One delete or removal in flight: when it began, and whether it succeeded. */
+interface Attempt {
+	/** Epoch ms it began. */
+	at: number;
+	/** Settles true on success, false on failure; never rejects. */
+	done: Promise<boolean>;
+}
+
 /**
- * Waits for a write, tells `report` whether it succeeded, and passes its
- * failure on.
+ * Runs one delete or removal as a pending attempt under `key`. When it
+ * settles it leaves the pending set and, on success, `succeeded` records it,
+ * both before anything waiting on `done` resumes. A failure removes only this
+ * attempt and is passed on.
  *
- * @param op - The write in flight.
- * @param report - Receives true on success, false on failure.
+ * @param pending - The attempts in flight, by key.
+ * @param key - The conversation's or connection's id.
+ * @param op - The delete or removal.
+ * @param succeeded - Records a success, given the attempt's start time.
  */
-async function reported(op: Promise<void>, report: (ok: boolean) => void): Promise<void> {
+async function track(pending: Map<string, Set<Attempt>>, key: string, op: () => Promise<void>, succeeded: (at: number) => void): Promise<void> {
+	let settle: (ok: boolean) => void = () => undefined;
+	const attempt: Attempt = { at: Date.now(), done: new Promise<boolean>((resolve) => (settle = resolve)) };
+	const set = pending.get(key) ?? new Set<Attempt>();
+	set.add(attempt);
+	pending.set(key, set);
+	let ok = false;
 	try {
-		await op;
-	} catch (err) {
-		report(false);
-		throw err;
+		await op();
+		ok = true;
+	} finally {
+		set.delete(attempt);
+		if (set.size === 0) pending.delete(key);
+		if (ok) succeeded(attempt.at);
+		settle(ok);
 	}
-	report(true);
 }
 
 // =============================================================================
@@ -86,15 +106,19 @@ export function useConnections(connected: boolean): ConnectionsApi {
 	const mounted = useRef(true);
 	// Each read's ticket: an older read that resolves late never replaces a newer tree.
 	const readSeq = useRef(0);
-	// Conversations deleted here, each with its delete's outcome (true once it
-	// succeeded): a request that settles after its conversation was deleted
-	// still saves, and its row must not bring the conversation back.
-	const deleted = useRef(new Map<string, Promise<boolean>>());
-	// Connections removed here, with when and the removal's outcome. A
-	// conversation's row carries its creation time, so only rows of
-	// conversations begun before the removal are held back, and opening the
-	// same agent again is never blocked.
-	const removed = useRef(new Map<string, { at: number; done: Promise<boolean> }>());
+	// A request that settles after its conversation was deleted, or its
+	// connection removed, still saves; its row must not bring either back.
+	// Successes are kept apart from attempts in flight, so a later attempt that
+	// fails never clears an earlier success.
+	// Conversations deleted here for good, and deletes in flight by conversation.
+	const deleted = useRef(new Set<string>());
+	const deleting = useRef(new Map<string, Set<Attempt>>());
+	// Per connection, the start time of its latest successful removal here, and
+	// removals in flight. A row carries its conversation's creation time: one
+	// begun at or before a removal is covered by it; one begun after (the agent
+	// opened again) is not, so a reopen is never blocked by an older removal.
+	const removedAt = useRef(new Map<string, number>());
+	const removing = useRef(new Map<string, Set<Attempt>>());
 
 	// Set on every setup, not only at creation: StrictMode runs the cleanup and the setup again.
 	useEffect(() => {
@@ -139,46 +163,36 @@ export function useConnections(connected: boolean): ConnectionsApi {
 
 	const openAgent = useCallback((address: string, label: ConnectionLabel) => write(() => saveConnection({ id: address, title: label.name, ...(label.icon ? { icon: label.icon } : {}), date: Date.now() })), [write]);
 	const remove = useCallback(
-		(id: string) => {
-			let settle: (ok: boolean) => void = () => undefined;
-			const removal = { at: Date.now(), done: new Promise<boolean>((resolve) => (settle = resolve)) };
-			removed.current.set(id, removal);
-			return write(() =>
-				reported(removeConnection(id), (ok) => {
-					// a failed removal leaves the connection, so its conversations commit again
-					if (!ok && removed.current.get(id) === removal) removed.current.delete(id);
-					settle(ok);
+		(id: string) =>
+			write(() =>
+				track(removing.current, id, () => removeConnection(id), (at) => {
+					removedAt.current.set(id, Math.max(removedAt.current.get(id) ?? at, at));
 				})
-			);
-		},
+			),
 		[write]
 	);
 	const deleteConversation = useCallback(
-		(sessionId: string) => {
-			let settle: (ok: boolean) => void = () => undefined;
-			const done = new Promise<boolean>((resolve) => (settle = resolve));
-			deleted.current.set(sessionId, done);
-			return write(() =>
-				reported(deleteStored(sessionId), (ok) => {
-					// a failed delete leaves the conversation, so its saves commit again
-					if (!ok && deleted.current.get(sessionId) === done) deleted.current.delete(sessionId);
-					settle(ok);
+		(sessionId: string) =>
+			write(() =>
+				track(deleting.current, sessionId, () => deleteStored(sessionId), () => {
+					deleted.current.add(sessionId);
 				})
-			);
-		},
+			),
 		[write]
 	);
 	const commit = useCallback(
 		async (meta: AgentSessionMeta) => {
-			// step: a delete or removal that covers this conversation is waited out: one that
-			// succeeded keeps it gone, one that failed lets it commit. A conversation begun
-			// after its connection's removal (the agent opened again) is not covered.
+			// step: a recorded success rejects the row; otherwise every delete or removal in
+			// flight that covers it is waited out and all is checked again, so a failed
+			// attempt lets the row through and one that succeeded keeps it out
 			for (;;) {
-				const deletion = deleted.current.get(meta.sessionId);
-				const removal = meta.group !== undefined ? removed.current.get(meta.group) : undefined;
-				const pending = deletion ?? (removal && meta.date <= removal.at ? removal.done : undefined);
-				if (!pending) break;
-				if (await pending) return;
+				if (deleted.current.has(meta.sessionId)) return;
+				const removedTime = meta.group !== undefined ? removedAt.current.get(meta.group) : undefined;
+				if (removedTime !== undefined && meta.date <= removedTime) return;
+				const removals = meta.group !== undefined ? [...(removing.current.get(meta.group) ?? [])].filter((r) => meta.date <= r.at) : [];
+				const covering = [...(deleting.current.get(meta.sessionId) ?? []), ...removals];
+				if (covering.length === 0) break;
+				await Promise.all(covering.map((a) => a.done));
 			}
 			await write(() => commitConversation(meta));
 		},
