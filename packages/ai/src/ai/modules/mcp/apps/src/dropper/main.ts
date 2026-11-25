@@ -76,7 +76,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 	return node;
 }
 
-/** Tab routing mirrors dropper-ui (ResultsTabs + parseDropperResults):
+/** Tab routing by declared type:
  * each result field is routed by its declared type in resultTypes into a
  * typed tab; raw JSON gets its own tab instead of sprawling inline. */
 const TABS = ['Text', 'Tables', 'Images', 'Audio', 'Video', 'Documents', 'Questions', 'Answers'] as const;
@@ -103,7 +103,7 @@ interface Block {
 }
 
 /** Media entries arrive as {mime_type, <lane>} where the base64 payload sits
- * under the lane name (dropper-ui's processMediaData), or as bare data URLs. */
+ * under the lane name, or as bare data URLs. */
 const MIME_RE = /^[\w.+-]+\/[\w.+-]+$/;
 
 function mediaUrls(value: unknown, lane: string): string[] {

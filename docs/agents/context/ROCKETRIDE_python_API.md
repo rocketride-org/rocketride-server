@@ -442,6 +442,13 @@ parameters = (await client.interfaces('acme.docBrain')).get('parameters', [])
 # [{'name': 'maxEdge', 'default': 1024, 'type': 'integer', 'minimum': 256, 'maximum': 4096, 'description': 'Largest input edge'}]
 ```
 
+It also carries `sources`: what each source IS, by the source's own address, from its service's declaration (the classType words cannot tell a Telegram bot from the local file system; both carry `source` alone). Each is `{'nodeId', 'name', 'title', 'kind', 'entry', 'lanes'}`: `kind` is the service's `sourceKind` (`request`: every unit arrives as a caller's request; `listener`: it listens on an outside channel; `scan`: it reads a store on its own; a service that declares none is a scan), `entry` is `tool` for a source that hosts tools or is one, else `data`, and `lanes` are the lanes it declares on `_source`. Only a `request` source is sent to.
+
+```python
+sources = (await client.interfaces('acme.docBrain')).get('sources', {})
+# {'acme.docBrain.chat': {'nodeId': 'chat', 'name': 'chat', 'title': 'Chat', 'kind': 'request', 'entry': 'data', 'lanes': ['questions']}}
+```
+
 ### `async validate(pipeline: PipelineConfig, *, source: Optional[str] = None) -> VALIDATION_RESULT`
 
 Validate a pipeline configuration server-side without starting it. It checks what `use()` checks (structure, required fields, component references), then checks a whole pipeline against the services it names: each provider is a service on the engine, each control entry sits on the node being called, and each input's lane is one its upstream node produces and its node takes. A node with no lanes, such as a tool, is not checked for the lanes it takes, and a `"*"` in a node's lanes matches any lane. `use()` does not make those last checks, so a pipeline with a wiring error can still start, then fail or lose data. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.

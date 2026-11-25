@@ -215,7 +215,7 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
     as this caller. No key is minted and no credential ever rides a URL
     (query strings land in access logs, browser history and ``Referer``
     headers) -- the nonce authorizes one upload into one task the caller
-    already started. ``dropper_url`` is the shell app's deep link (plan 3.6),
+    already started. ``dropper_url`` is the Playground's deep link (plan 3.6),
     credential-free. Unlike ``run_pipeline`` there is no inline-send path.
     """
     started, err = await _start_task(client, args, 'run_dropper_pipe')
@@ -241,7 +241,7 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
 
     # upload_url points at THIS MCP server -- the only place that holds the
     # nonce -- never at the engine the tools talk to, which may be another
-    # origin; dropper_url is the engine's shell app
+    # origin; dropper_url is the engine's Playground app
     mcp_origin = identity.MCP_ORIGIN.get()
     if not mcp_origin:
         raise RuntimeError('MCP origin is not bound: run_dropper_pipe runs only under handle_mcp')
@@ -252,7 +252,7 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
         'ok': True,
         'address': token,
         'upload_url': upload_url(mcp_origin, nonce),
-        'dropper_url': f'{base_url}/?appid=rocketride.dropper&pipe={address}',
+        'dropper_url': f'{base_url}/?appid=rocketride.playground&pipe={address}',
         'projectId': started.get('projectId'),
         'source': started.get('source'),
     }

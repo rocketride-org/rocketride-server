@@ -37,10 +37,10 @@
  */
 
 import type { ChatMessage, TextResult } from 'shell';
-import { configureSessions, deleteSession as deleteStoredSession, getAgentSessions, getContext, isNotFound, saveSession } from './sessions';
-import type { AgentSessionFile, AgentSessionMeta } from './sessions';
+import { configureSessions, deleteAgentGroup, deleteSession as deleteStoredSession, getAgentGroups, getAgentSessions, getContext, isNotFound, saveAgentGroup, saveSession, saveSessionMeta } from './sessions';
+import type { AgentSessionFile, AgentSessionGroup, AgentSessionMeta } from './sessions';
 
-export type { AgentSessionFile, AgentSessionMeta } from './sessions';
+export type { AgentSessionFile, AgentSessionGroup, AgentSessionMeta } from './sessions';
 export { AGENTS_DIR } from './sessions';
 
 // =============================================================================
@@ -89,6 +89,8 @@ export class AgentSession {
 	contextRefs: string[];
 	/** The persisted conversation, hydrated for useChatMessages initialMessages. */
 	messages: ChatMessage[];
+	/** The group the session belongs to, for hosts that group their sessions. */
+	readonly group?: string;
 
 	/**
 	 * Builds an in-memory session; private — hosts go through the statics.
@@ -98,13 +100,15 @@ export class AgentSession {
 	 * @param date - Epoch-ms creation stamp.
 	 * @param contextRefs - Workspace-relative context paths.
 	 * @param messages - The stored conversation.
+	 * @param group - The session's group, if any.
 	 */
-	private constructor(sessionId: string, title: string, date: number, contextRefs: string[], messages: ChatMessage[]) {
+	private constructor(sessionId: string, title: string, date: number, contextRefs: string[], messages: ChatMessage[], group?: string) {
 		this.sessionId = sessionId;
 		this.title = title;
 		this.date = date;
 		this.contextRefs = contextRefs;
 		this.messages = messages;
+		this.group = group;
 	}
 
 	// ── Statics — session management ─────────────────────────────────────
@@ -125,10 +129,48 @@ export class AgentSession {
 	 *
 	 * @param offset - Rows to skip. Defaults to 0.
 	 * @param count - Maximum rows to return. Defaults to 100.
+	 * @param group - Only this group's sessions; omitted = every session.
 	 * @returns The catalog page for the sidebar session list.
 	 */
-	static getSessions(offset = 0, count = 100): Promise<AgentSessionMeta[]> {
-		return getAgentSessions(offset, count);
+	static getSessions(offset = 0, count = 100, group?: string): Promise<AgentSessionMeta[]> {
+		return getAgentSessions(offset, count, group);
+	}
+
+	/**
+	 * Lists the groups (host-defined session folders), most recently touched first.
+	 *
+	 * @returns Every group row.
+	 */
+	static getGroups(): Promise<AgentSessionGroup[]> {
+		return getAgentGroups();
+	}
+
+	/**
+	 * Upserts one group row.
+	 *
+	 * @param group - The group to store.
+	 */
+	static saveGroup(group: AgentSessionGroup): Promise<void> {
+		return saveAgentGroup(group);
+	}
+
+	/**
+	 * Deletes one group with every session in it (files and rows).
+	 *
+	 * @param groupId - The group's id.
+	 */
+	static deleteGroup(groupId: string): Promise<void> {
+		return deleteAgentGroup(groupId);
+	}
+
+	/**
+	 * Upserts one session's catalog row — the commit side of a save made with
+	 * `catalog: false` (a dev tool's controller owns the catalog).
+	 *
+	 * @param meta - The row to store.
+	 */
+	static saveSessionMeta(meta: AgentSessionMeta): Promise<void> {
+		return saveSessionMeta(meta);
 	}
 
 	/**
@@ -151,17 +193,18 @@ export class AgentSession {
 			throw err;
 		}
 		const stored = JSON.parse(raw) as AgentSessionFile;
-		return new AgentSession(sessionId, stored.title ?? UNTITLED, stored.date ?? Date.now(), stored.contextRefs ?? [], stored.messages ?? []);
+		return new AgentSession(sessionId, stored.title ?? UNTITLED, stored.date ?? Date.now(), stored.contextRefs ?? [], stored.messages ?? [], stored.group);
 	}
 
 	/**
 	 * Mints a brand-new session. Nothing is written to disk until the first
 	 * send — abandoned empty sessions leave no files.
 	 *
+	 * @param group - The group the session belongs to, for hosts that group sessions.
 	 * @returns The new in-memory session.
 	 */
-	static newSession(): AgentSession {
-		return new AgentSession(crypto.randomUUID(), UNTITLED, Date.now(), [], []);
+	static newSession(group?: string): AgentSession {
+		return new AgentSession(crypto.randomUUID(), UNTITLED, Date.now(), [], [], group);
 	}
 
 	/**
@@ -202,16 +245,30 @@ export class AgentSession {
 	 * provider after each completed exchange with the hook's message list.
 	 *
 	 * @param messages - The full conversation as rendered by the chat hook.
+	 * @param options - `catalog: false` writes the file only (see saveSession).
 	 */
-	async save(messages: ChatMessage[]): Promise<void> {
+	async save(messages: ChatMessage[], options?: { catalog?: boolean }): Promise<void> {
 		this.messages = messages;
-		await saveSession({
-			version: 1,
-			sessionId: this.sessionId,
-			title: this.title,
-			date: this.date,
-			contextRefs: this.contextRefs,
-			messages,
-		});
+		await saveSession(
+			{
+				version: 1,
+				sessionId: this.sessionId,
+				title: this.title,
+				date: this.date,
+				contextRefs: this.contextRefs,
+				messages,
+				...(this.group !== undefined ? { group: this.group } : {}),
+			},
+			options
+		);
+	}
+
+	/**
+	 * This session's catalog row, as {@link save} would write it.
+	 *
+	 * @returns The row.
+	 */
+	meta(): AgentSessionMeta {
+		return { sessionId: this.sessionId, date: this.date, title: this.title, ...(this.group !== undefined ? { group: this.group } : {}) };
 	}
 }

@@ -49,13 +49,11 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `ai` | AI/ML modules | build, clean, test |
 | `aparavi-ui` | Aparavi AQL chat application | build, clean, dev |
 | `builder` | Build system maintenance | inject, update |
-| `chat-ui` | Chat web interface | build, clean, dev |
 | `check-externals` | 3rd-party interface contract test framework | run, test |
 | `client-mcp` | MCP Protocol client | build, clean, test |
 | `client-python` | Python SDK | build, clean, test |
 | `client-typescript` | TypeScript/JavaScript SDK | build, check, clean, freeze, regen, test |
 | `docs` | Documentation site | build, check, clean, dev, export, serve, test |
-| `dropper-ui` | File drop web interface | build, clean, dev |
 | `events-ui` | Event monitor application | build, clean, dev |
 | `explorer-ui` | File explorer application | build, clean |
 | `hash` | C++ filter fingerprinting document content, for deduplication | build |
@@ -67,6 +65,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `monitor-ui` | Server monitor web interface | build, clean |
 | `nodes` | Pipeline nodes | build, clean, test, test-contracts, test-full |
 | `parse` | C++ and Java filter extracting content from documents (Tika) | build |
+| `playground-ui` | Playground: one front end for every agent (app + dev tool) | build, clean, dev, test |
 | `profiler-ui` | cProfile process profiler | build, clean |
 | `rocket-ui` | Data toolchain interface application | build, clean, dev |
 | `server` | C++ engine (downloads pre-built first, or compile from source) | build, compile, clean, test, build-all, clean-all, configure-cmake, dev, package, run, setup-test-deps |
@@ -85,7 +84,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 ./builder build
 ./builder server:build
 ./builder client-typescript:build client-python:build client-mcp:build
-./builder chat-ui:build dropper-ui:build
+./builder playground-ui:build sql-ui:build
 ./builder vscode:build
 ./builder clean
 ./builder server:clean nodes:clean

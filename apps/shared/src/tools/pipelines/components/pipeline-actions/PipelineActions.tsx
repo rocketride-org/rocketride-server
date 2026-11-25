@@ -5,7 +5,7 @@
 
 /**
  * PipelineActions — Renders action buttons derived from a running pipeline's
- * status notes: the node's own front-end button (Open Chat / Open Dropper /
+ * status notes: the node's own front-end button (Open in Playground /
  * Explore, from its `open-tool` note; plan 3.6) and "Endpoint Info".
  *
  * The endpoint info comes from `taskStatus.notes[0]` when the server reports
@@ -50,11 +50,11 @@ const styles: Record<string, CSSProperties> = {
  * are gone).
  */
 export interface IEndpointInfo {
-	/** Label for the node's front-end button (e.g. "Open Chat", "Open Dropper"). */
+	/** Label for the node's front-end button (e.g. "Open in Playground", "Explore"). */
 	'button-text'?: string;
 	/**
-	 * The app id of the front end that talks to this node (`rocketride.chat`,
-	 * `rocketride.dropper`, `rocketride.sql`): the node's button (plan 3.6).
+	 * The app id of the front end that talks to this node
+	 * (`rocketride.playground`, `rocketride.sql`): the node's button (plan 3.6).
 	 * The host opens that app's document bound to `address` and `nodeId`.
 	 */
 	'open-tool'?: string;

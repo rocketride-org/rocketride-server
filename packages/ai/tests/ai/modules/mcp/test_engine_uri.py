@@ -464,7 +464,7 @@ async def test_dropper_links_use_resolved_origin(
     assert '?' not in result['upload_url']
     assert result['address'] not in result['upload_url']
     # The dropper UI is the shell app's deep link (plan 3.6): the address, no credential
-    assert result['dropper_url'] == f'{origin}/?appid=rocketride.dropper&pipe={FAKE_ADDRESS}'
+    assert result['dropper_url'] == f'{origin}/?appid=rocketride.playground&pipe={FAKE_ADDRESS}'
     assert 'auth=' not in result['dropper_url']
 
 

@@ -763,7 +763,7 @@ def desktop_kind(kinds: Dict[str, str], name: str) -> str:
     """
     What one desktop entry is: ``'pipe'`` when its name row says so, else ``'app'``.
 
-    A desktop holds fully qualified names (``rocketride.chat``,
+    A desktop holds fully qualified names (``rocketride.playground``,
     ``acme.supportBot``); B37 keeps an app and a pipe from sharing one. The
     kind is the name row's, looked up and never stored beside the entry
     (G2, 2026-11-21): a name with no row is an app.

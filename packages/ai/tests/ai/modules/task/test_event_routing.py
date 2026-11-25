@@ -304,7 +304,12 @@ def test_project_status_fills_the_open_tool_notes_node_id_with_the_controls_sour
     two controls of one engine each get a button bound to their own source.
     """
     stored = [
-        {'button-text': 'Open Chat', 'open-tool': 'rocketride.chat', 'nodeId': '{source}', 'address': '{address}'}
+        {
+            'button-text': 'Open in Playground',
+            'open-tool': 'rocketride.playground',
+            'nodeId': '{source}',
+            'address': '{address}',
+        }
     ]
     control = TaskControl()
     control.task = SimpleNamespace(dormant_reason=None, state=None, is_live=True)
@@ -313,8 +318,8 @@ def test_project_status_fills_the_open_tool_notes_node_id_with_the_controls_sour
     control.project_id = 'docBrain'
     assert control.project_status({'notes': stored}, shared=False)['notes'] == [
         {
-            'button-text': 'Open Chat',
-            'open-tool': 'rocketride.chat',
+            'button-text': 'Open in Playground',
+            'open-tool': 'rocketride.playground',
             'nodeId': 'chat_1',
             'address': 'acme.docBrain.chat_1',
         }

@@ -18,12 +18,12 @@ test('a published webhook has a data door at its address, the host left to the d
 
 test('a published chat or dropper source has no URL, only the front end that talks to it', () => {
 	assert.deepEqual(publishedSourceEndpoint({ address: 'acme.docBrain.chat_1', nodeId: 'chat_1', interfaces: ['chat'] }), {
-		'button-text': 'Open Chat',
-		'open-tool': 'rocketride.chat',
+		'button-text': 'Open in Playground',
+		'open-tool': 'rocketride.playground',
 		nodeId: 'chat_1',
 		address: 'acme.docBrain.chat_1',
 	});
-	assert.equal(publishedSourceEndpoint({ address: 'acme.docBrain.drop_1', nodeId: 'drop_1', interfaces: ['dropper'] })?.['open-tool'], 'rocketride.dropper');
+	assert.equal(publishedSourceEndpoint({ address: 'acme.docBrain.drop_1', nodeId: 'drop_1', interfaces: ['dropper'] })?.['open-tool'], 'rocketride.playground');
 });
 
 test('a source that carries neither has no endpoint to show', () => {

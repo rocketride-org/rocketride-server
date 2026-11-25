@@ -410,9 +410,9 @@ def test_the_host_app_is_one_named_constant():
 
 def test_the_kind_lookup_a_pipe_row_is_a_pipe_an_app_row_an_app_an_unknown_name_an_app():
     """The desktop's kinds are the name rows' (G2): only a 'pipe' row makes an entry a pipe."""
-    kinds = {'acme.supportBot': 'pipe', 'rocketride.chat': 'app', 'acme.someNode': 'node'}
+    kinds = {'acme.supportBot': 'pipe', 'rocketride.playground': 'app', 'acme.someNode': 'node'}
     assert pipe_deploy_mod.desktop_kind(kinds, 'acme.supportBot') == 'pipe'
-    assert pipe_deploy_mod.desktop_kind(kinds, 'rocketride.chat') == 'app'
+    assert pipe_deploy_mod.desktop_kind(kinds, 'rocketride.playground') == 'app'
     assert pipe_deploy_mod.desktop_kind(kinds, 'acme.unknown') == 'app'
     assert pipe_deploy_mod.desktop_kind(kinds, 'acme.someNode') == 'app'
 
@@ -616,7 +616,7 @@ async def test_desktop_tiles_are_the_pipe_names_the_caller_still_reaches(monkeyp
     account.deployments_kinds = AsyncMock(
         return_value={
             'acme.b': 'pipe',
-            'rocketride.chat': 'app',
+            'rocketride.playground': 'app',
             'acme.a': 'pipe',
             'acme.gone': 'pipe',
             'acme.broken': 'pipe',
@@ -635,11 +635,11 @@ async def test_desktop_tiles_are_the_pipe_names_the_caller_still_reaches(monkeyp
     tiles = await pipe_deploy_mod.desktop_pipe_tiles(
         account,
         _caller(),
-        ['acme.b', 'rocketride.chat', 'acme.unknown', 'acme.gone', 'acme.broken', 'acme.a', 'acme.b'],
+        ['acme.b', 'rocketride.playground', 'acme.unknown', 'acme.gone', 'acme.broken', 'acme.a', 'acme.b'],
     )
 
     account.deployments_kinds.assert_awaited_once_with(
-        'org-1', ['acme.b', 'rocketride.chat', 'acme.unknown', 'acme.gone', 'acme.broken', 'acme.a']
+        'org-1', ['acme.b', 'rocketride.playground', 'acme.unknown', 'acme.gone', 'acme.broken', 'acme.a']
     )
     assert tiles == [
         {'id': 'acme.b', 'kind': 'pipe', 'onDesktop': True},

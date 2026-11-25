@@ -121,7 +121,8 @@ is this node's own. The parallel `tool_calls` form is not taken:
   line is read. Nested objects and quoted examples are not dispatched. Replies
   mixing this fallback with `FINAL>>>` are retried instead of guessing.
 - A `content` that is not a string (a JSON object, array, number or boolean) is
-  delivered as JSON text. For compatibility, a parsed `final` with missing,
+  delivered as JSON text. One that holds a number JSON cannot write back
+  (`1e400`, `NaN`, `Infinity`, anywhere in it) is retried. For compatibility, a parsed `final` with missing,
   null, empty or whitespace-only content remains a successful answer; this is
   distinct from an empty model reply, which is retried.
 - `FINAL>>>` at the start of a line, followed by the answer as plain text, is

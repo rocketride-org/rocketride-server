@@ -600,7 +600,12 @@ def test_update_status_user_event_merges_notes_by_node_id():
     repeat from the same node replaces only its own (plan 3.6).
     """
     t = _task(status=_make_status_for_update())
-    source = {'button-text': 'Open Chat', 'open-tool': 'rocketride.chat', 'nodeId': '{source}', 'address': '{address}'}
+    source = {
+        'button-text': 'Open in Playground',
+        'open-tool': 'rocketride.playground',
+        'nodeId': '{source}',
+        'address': '{address}',
+    }
     db = {'button-text': 'Explore', 'open-tool': 'rocketride.sql', 'nodeId': 'postgres_1', 'address': '{address}'}
     for notes in ([source], [db]):
         TaskEngine._update_status(t, {'event': 'apaevt_status_user', 'body': {'notes': notes}})

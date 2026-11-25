@@ -400,6 +400,7 @@ import { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl
 import { createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from './components/data-grid/gridConfigChannel';
 import { ChatView } from './components/chat/ChatView';
 import { MessageList } from './components/chat/components/MessageList';
+import { ChatInputField } from './components/chat/components/ChatInputField';
 import { MarkdownRenderer } from './components/chat/components/MarkdownRenderer';
 import { useChatMessages } from './components/chat/hooks/useChatMessages';
 import { ConnectionCard, ConnectionCardAdd } from './components/connection-card/ConnectionCard';
@@ -450,7 +451,7 @@ export {
 	GRID_CONFIG_CLEAR,
 	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
 	formatDuration, formatDateValue,
-	ChatView, MessageList, MarkdownRenderer, useChatMessages,
+	ChatView, MessageList, MarkdownRenderer, useChatMessages, ChatInputField,
 	ConnectionCard, ConnectionCardAdd, ConnectionManagerView,
 	commonStyles,
 	applyTheme, isInVSCode, OAUTH_ROOT_URL,
@@ -462,6 +463,8 @@ export {
 export type { IButtonProps, ButtonVariant } from './components/button/Button';
 export type { IStatusBadgeProps, IStatusDotProps, StatusVariant } from './components/status-badge/StatusBadge';
 export type { IChatViewProps, ChatMessage, UseChatMessagesOptions, TextResult } from './components/chat/types';
+export type { ChatMessageBody, ChatMessageBodyRenderer } from './components/chat/types';
+export type { ChatInputFieldProps } from './components/chat/components/ChatInputField';
 export type { IConnectionCardProps, IConnectionCardAddProps } from './components/connection-card/ConnectionCard';
 export type { IConnectionManagerViewProps, IConnectionCardDisplay, IConnectionFormField } from './components/connection-manager/ConnectionManagerView';
 export type { IEmptyStateProps } from './components/empty-state/EmptyState';

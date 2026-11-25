@@ -12,10 +12,14 @@
  *   - status  → a compact dotted "thinking" row
  *   - bot/sys → a bordered assistant bubble with sanitized markdown, left-aligned
  *               (chart-bearing answers break out of the bubble to full width)
+ *
+ * A message carrying a host `body` is drawn by the host's `renderBody` inside
+ * the same user or assistant bubble, in place of its text; a wide body takes
+ * the thread's width.
  */
 
 import React, { type CSSProperties } from 'react';
-import type { ChatMessage } from '../types';
+import type { ChatMessage, ChatMessageBodyRenderer } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { Banner } from '../../banner/Banner';
 
@@ -88,6 +92,22 @@ const styles = {
 		maxWidth: '100%',
 	} as CSSProperties,
 
+	// A wide host body (a table, a gallery) keeps the bubble's border and
+	// ground but takes the thread's width.
+	botBubbleWide: {
+		maxWidth: '100%',
+		width: '100%',
+		padding: '10px 14px',
+		borderRadius: '12px 12px 12px 4px',
+		backgroundColor: 'var(--rr-bg-widget)',
+		border: '1px solid var(--rr-border)',
+		color: 'var(--rr-text-primary)',
+		fontSize: 13,
+		lineHeight: 1.55,
+		boxSizing: 'border-box',
+		overflowX: 'auto',
+	} as CSSProperties,
+
 	botMeta: {
 		fontSize: 10.5,
 		color: 'var(--rr-text-secondary)',
@@ -143,15 +163,21 @@ const styles = {
 
 export interface MessageBubbleProps {
 	message: ChatMessage;
+	/** Draws the message's host `body` inside the bubble (see ChatMessage.body). */
+	renderBody?: ChatMessageBodyRenderer;
 }
 
 /**
  * Renders one chat message according to its sender and error state.
  *
- * @param props - the {@link ChatMessage} to render.
+ * @param props - the {@link ChatMessage} to render, and the host's body renderer.
  * @returns The message element.
  */
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, renderBody }) => {
+	// A host body replaces the text inside the same bubble; null keeps the text.
+	const body = message.body && renderBody ? renderBody(message) : null;
+	const hasBody = body !== null && body !== undefined;
+
 	// Failed sends/responses surface in-thread as an error Banner (stock component).
 	if (message.isError) {
 		return (
@@ -176,7 +202,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 		return (
 			<div style={styles.userRow}>
 				<div style={styles.userBubble}>
-					<p style={styles.userText}>{message.text}</p>
+					{hasBody ? body : <p style={styles.userText}>{message.text}</p>}
 					{message.meta && <div style={styles.userMeta}>{message.meta}</div>}
 					<div style={styles.userTimestamp}>{message.timestamp}</div>
 				</div>
@@ -186,11 +212,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
 	// Assistant (bot / system) messages render sanitized markdown. Chart-bearing
 	// answers break out to full width; everything else sits in a bordered bubble.
-	const hasChart = /^```chartjs/m.test(message.text);
+	const hasChart = !hasBody && /^```chartjs/m.test(message.text);
+	const bubbleStyle = hasChart ? styles.botWide : hasBody && message.body?.wide ? styles.botBubbleWide : styles.botBubble;
 	return (
 		<div style={styles.botRow}>
-			<div style={hasChart ? styles.botWide : styles.botBubble}>
-				<MarkdownRenderer content={message.text} />
+			<div style={bubbleStyle}>
+				{hasBody ? body : <MarkdownRenderer content={message.text} />}
 				{message.meta && <div style={styles.botMeta}>{message.meta}</div>}
 			</div>
 			<div style={styles.botTimestamp}>

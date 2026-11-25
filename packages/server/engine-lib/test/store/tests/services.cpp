@@ -865,6 +865,23 @@ TEST_CASE("store::Services::custom") {
                url::UrlConfig::PROTOCOL_CAPS::INTERNAL) != 0);
     }
 
+    // How work reaches a source rides the listing as declared; a service
+    // that declares none carries none (the server reads that as "scan")
+    SECTION("custom services: sourceKind rides the listing") {
+        auto source = customNode("custom_src");
+        source["sourceKind"] = "listener";
+        auto scope = IServices::withCustomServices(
+            customList({source, customNode("custom_plain")}));
+        REQUIRE_NO_ERROR(scope);
+
+        auto schemas = IServices::getServiceSchemas();
+        REQUIRE_NO_ERROR(schemas);
+        CHECK((*schemas)["services"]["custom_src"]["sourceKind"].asString() ==
+              "listener");
+        CHECK_FALSE(
+            (*schemas)["services"]["custom_plain"].isMember("sourceKind"));
+    }
+
     SECTION("custom services: nest") {
         auto outer = IServices::withCustomServices(
             customList({customNode("custom_outer")}));
@@ -1084,6 +1101,11 @@ TEST_CASE("store::Services::custom") {
             customList({R"({"lane": "text", "output": "text"})"_json});
         auto badTile = customNode("custom_x");
         badTile["tile"] = customList({R"({})"_json});
+        // A source kind is one of three words
+        auto badKindWord = customNode("custom_ka");
+        badKindWord["sourceKind"] = "remote";
+        auto badKindType = customNode("custom_kt");
+        badKindType["sourceKind"] = R"({})"_json;
 
         // Each group lists the next one twice: no cycle, 2^16 references
         auto fanOut = customNode("custom_r");
@@ -1159,6 +1181,8 @@ TEST_CASE("store::Services::custom") {
             customList({badInputLane}),
             customList({badOutput}),
             customList({badTile}),
+            customList({badKindWord}),
+            customList({badKindType}),
             customList({fanOut}),
             customList({heavy}),
             many,

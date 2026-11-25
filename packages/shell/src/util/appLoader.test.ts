@@ -148,8 +148,8 @@ test('an agent entry is never a remote: it resolves to no load URL and registers
 	assert.equal(resolveServerEntry(agent), null);
 	assert.deepEqual(registerAndMapApps([agent]), []);
 	// The app beside it resolves as before
-	const app = { id: 'rocketride.chat', moduleId: 'rocketride_chat', name: 'Chat', registryVersion: 4 };
-	assert.equal(resolveServerEntry(app), '/apps/rocketride.chat/v4/remoteEntry.js');
+	const app = { id: 'rocketride.sql', moduleId: 'rocketride_sql', name: 'SQL Explorer', registryVersion: 4 };
+	assert.equal(resolveServerEntry(app), '/apps/rocketride.sql/v4/remoteEntry.js');
 });
 
 test('a module load of an unknown app resolves null and marks nothing', async () => {

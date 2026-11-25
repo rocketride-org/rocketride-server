@@ -2,6 +2,7 @@
 	"title": "Pipeline Tool",
 	"protocol": "tool_pipe://",
 	"classType": ["tool"],
+	"sourceKind": "request",
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",

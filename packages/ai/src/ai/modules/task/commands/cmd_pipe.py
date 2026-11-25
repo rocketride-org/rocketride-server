@@ -634,10 +634,13 @@ class DeployPipeCommands(_DeployBase):
         names the one rung to read, ``@<team>/...`` or ``=team/<tid>/...``
         for one team's publication). The retired ``team`` option is refused.
 
-        Body: ``{address, rung, version, teamId?, interfaces}`` where
-        ``interfaces`` is ``{address: {classType: [{nodeId, name}]}}`` —
-        sources under their own address, every other node under the pipe
-        address (see ``interfaces.pipe_interfaces``). The caller's ``@spec``
+        Body: ``{address, rung, version, teamId?, interfaces, sources,
+        parameters}`` where ``interfaces`` is ``{address: {classType:
+        [{nodeId, name}]}}`` — sources under their own address, every other
+        node under the pipe address (see ``interfaces.pipe_interfaces``) —
+        and ``sources`` is ``{source address: {nodeId, name, title, kind,
+        entry, lanes}}``, what each source's service declares about it (see
+        ``interfaces.pipe_sources``). The caller's ``@spec``
         control answers before any publication (the spec it submitted;
         ``version`` is None), as it does for ``submit()``; nothing has to be
         running on any rung.
@@ -646,7 +649,7 @@ class DeployPipeCommands(_DeployBase):
         from ..address import build_address, refuse_team_option
         from ai.common.parameters import describe_parameters
 
-        from ..interfaces import pipe_interfaces
+        from ..interfaces import pipe_interfaces, pipe_sources
         from ..task_control import RESOLVE_READ
 
         # Step 1: who asks, for what
@@ -683,11 +686,15 @@ class DeployPipeCommands(_DeployBase):
         interfaces = await pipe_interfaces(
             resolution.artifact, parsed.developer_id, parsed.pipe_id, services_catalog.get_service
         )
+        sources = await pipe_sources(
+            resolution.artifact, parsed.developer_id, parsed.pipe_id, services_catalog.get_service
+        )
         body: Dict[str, Any] = {
             'address': pipe_address,
             'rung': pin.rung,
             'version': pin.version,
             'interfaces': interfaces,
+            'sources': sources,
             'parameters': describe_parameters(resolution.artifact),
         }
         if pin.rung == 'team':
@@ -702,24 +709,28 @@ class DeployPipeCommands(_DeployBase):
             control: The resolved control.
 
         Returns:
-            ``{address, rung, version: None, teamId?, interfaces}`` — a live run
-            has no registry version to report.
+            ``{address, rung, version: None, teamId?, interfaces, sources,
+            parameters}`` — a live run has no registry version to report.
         """
         from .. import services_catalog
         from ..address import build_address, parse_address
         from ai.common.parameters import describe_parameters
 
-        from ..interfaces import pipe_interfaces
+        from ..interfaces import pipe_interfaces, pipe_sources
 
         parsed = parse_address(control.address)
         interfaces = await pipe_interfaces(
             control.pipeline, parsed.developer_id, parsed.pipe_id, services_catalog.get_service
+        )
+        sources = await pipe_sources(
+            control.pipeline or {}, parsed.developer_id, parsed.pipe_id, services_catalog.get_service
         )
         body: Dict[str, Any] = {
             'address': build_address(parsed.developer_id, parsed.pipe_id),
             'rung': control.rung,
             'version': None,
             'interfaces': interfaces,
+            'sources': sources,
             'parameters': describe_parameters(control.pipeline or {}),
         }
         if control.rung == 'team':

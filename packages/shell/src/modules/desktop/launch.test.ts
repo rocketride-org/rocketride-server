@@ -10,8 +10,8 @@ import test from 'node:test';
 import { AGENT_LABEL, isAgent, switchAppRequestOf } from './launch';
 
 test('an app tile opens the app by its id, with no parameters', () => {
-	assert.deepEqual(switchAppRequestOf({ id: 'rocketride.chat' }), { appId: 'rocketride.chat' });
-	assert.deepEqual(switchAppRequestOf({ id: 'rocketride.chat', kind: 'app' }), { appId: 'rocketride.chat' });
+	assert.deepEqual(switchAppRequestOf({ id: 'rocketride.sql' }), { appId: 'rocketride.sql' });
+	assert.deepEqual(switchAppRequestOf({ id: 'rocketride.sql', kind: 'app' }), { appId: 'rocketride.sql' });
 });
 
 test('an agent tile opens its host app bound to its address', () => {

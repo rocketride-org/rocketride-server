@@ -1541,8 +1541,23 @@ def _answers(conn, *candidates, address='acme.docBrain'):
 
 
 CATALOG = {
-    'chat': {'classType': ['source', 'chat']},
+    'chat': {
+        'title': 'Chat',
+        'classType': ['source', 'chat'],
+        'sourceKind': 'request',
+        'lanes': {'_source': ['questions']},
+    },
     'db_postgres': {'classType': ['database', 'tool']},
+}
+
+#: What the chat source of ARTIFACT is, under the address the request names.
+CHAT_SOURCE = {
+    'nodeId': 'chat',
+    'name': 'chat',
+    'title': 'Chat',
+    'kind': 'request',
+    'entry': 'data',
+    'lanes': ['questions'],
 }
 
 ARTIFACT = {
@@ -1603,6 +1618,8 @@ class TestInterfaces:
                 'tool': [{'nodeId': 'db_main', 'name': 'Ops DB'}],
             },
         }
+        # What each source is, from its service's declaration
+        assert body['sources'] == {'acme.docBrain.chat': CHAT_SOURCE}
         # Nothing was started
         conn._test_scheduler.try_reserve_run.assert_not_called()
 
@@ -1641,6 +1658,7 @@ class TestInterfaces:
         account_stub.deployments_artifact.assert_not_awaited()
         assert body['rung'] == 'dev' and body['version'] is None and body['address'] == 'acme.docBrain'
         assert body['interfaces']['acme.docBrain']['database'] == [{'nodeId': 'db_main', 'name': 'Ops DB'}]
+        assert body['sources'] == {'acme.docBrain.chat': CHAT_SOURCE}
 
     @pytest.mark.asyncio
     async def test_a_team_control_first_in_the_order_reports_its_team(self, interfaces_stub):

@@ -902,6 +902,12 @@ import type { ConvertResult as Frozen_ConvertResult } from '../contract/versions
 import type { ConvertResult as Current_ConvertResult } from './api';
 import type { CreatedPipe as Frozen_CreatedPipe } from '../contract/versions/v15';
 import type { CreatedPipe as Current_CreatedPipe } from './api';
+import type { ChatMessageBody as Frozen_ChatMessageBody } from '../contract/versions/v15';
+import type { ChatMessageBody as Current_ChatMessageBody } from './api';
+import type { ChatMessageBodyRenderer as Frozen_ChatMessageBodyRenderer } from '../contract/versions/v15';
+import type { ChatMessageBodyRenderer as Current_ChatMessageBodyRenderer } from './api';
+import type { ChatInputFieldProps as Frozen_ChatInputFieldProps } from '../contract/versions/v15';
+import type { ChatInputFieldProps as Current_ChatInputFieldProps } from './api';
 import type { LaunchableEntry as Frozen_LaunchableEntry } from '../contract/versions/v15';
 import type { LaunchableEntry as Current_LaunchableEntry } from './api';
 
@@ -1814,5 +1820,11 @@ const _t_ConvertResult: Frozen_ConvertResult = {} as Current_ConvertResult;
 void _t_ConvertResult;
 const _t_CreatedPipe: Frozen_CreatedPipe = {} as Current_CreatedPipe;
 void _t_CreatedPipe;
+const _t_ChatMessageBody: Frozen_ChatMessageBody = {} as Current_ChatMessageBody;
+void _t_ChatMessageBody;
+const _t_ChatMessageBodyRenderer: Frozen_ChatMessageBodyRenderer = {} as Current_ChatMessageBodyRenderer;
+void _t_ChatMessageBodyRenderer;
+const _t_ChatInputFieldProps: Frozen_ChatInputFieldProps = {} as Current_ChatInputFieldProps;
+void _t_ChatInputFieldProps;
 const _t_LaunchableEntry: Frozen_LaunchableEntry = {} as Current_LaunchableEntry;
 void _t_LaunchableEntry;

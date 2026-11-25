@@ -22,7 +22,9 @@
 # =============================================================================
 """The interface map of a pipeline spec (plan 3.6): sources under their own
 address, every other node under the pipe address, one entry per catalog
-classType, ``name`` always present, no reachability, no engine.
+classType, ``name`` always present, no reachability, no engine. And what
+each source is (``pipe_sources``): its kind, entry, title and lanes, from its
+provider's declaration, under the same address.
 """
 
 from __future__ import annotations
@@ -31,13 +33,38 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from ai.modules.task.interfaces import pipe_interfaces
+from ai.modules.task.interfaces import pipe_interfaces, pipe_sources
 
 # ==== Fixtures =================================================================
 
 CATALOG: Dict[str, Dict[str, Any]] = {
-    'chat': {'classType': ['source', 'chat']},
-    'tools': {'classType': ['source', 'tools']},
+    'chat': {
+        'title': 'Chat',
+        'classType': ['source', 'chat'],
+        'sourceKind': 'request',
+        'lanes': {'_source': ['questions']},
+    },
+    'tools': {
+        'title': 'Tools',
+        'classType': ['source', 'tools'],
+        'sourceKind': 'request',
+        'invoke': {'tool': {'min': 0}},
+        'lanes': {'_source': []},
+    },
+    'telegram': {
+        'title': 'Telegram Bot',
+        'classType': ['source'],
+        'sourceKind': 'listener',
+        'lanes': {'_source': ['text', 'image', 'tags']},
+    },
+    'filesys': {'title': 'Local File System', 'classType': ['source'], 'lanes': {'_source': ['tags']}},
+    'odd_kind': {'title': 'Odd', 'classType': ['source'], 'sourceKind': 'remote'},
+    'tool_pipe': {
+        'title': 'Pipeline Tool',
+        'classType': ['tool'],
+        'sourceKind': 'request',
+        'lanes': {'_source': ['text', 'questions']},
+    },
     'llm_agent': {'classType': ['llm', 'agent']},
     'db_postgres': {'classType': ['database', 'tool']},
     'db_mysql': {'classType': ['database', 'tool']},
@@ -143,3 +170,104 @@ async def test_unknown_nodes_and_unaddressable_components_contribute_nothing():
 @pytest.mark.asyncio
 async def test_an_empty_spec_answers_an_empty_map():
     assert await pipe_interfaces({}, 'acme', 'p', lookup) == {}
+
+
+# ==== pipe_sources ===============================================================
+
+
+def _sourced(*components: Dict[str, Any]) -> Dict[str, Any]:
+    """A spec of the given components, each marked a source."""
+    return {'components': [{**c, 'config': {'mode': 'Source'}} for c in components]}
+
+
+@pytest.mark.asyncio
+async def test_sources_sit_under_the_addresses_the_interface_map_gives_them():
+    interfaces = await pipe_interfaces(_pipeline(), 'acme', 'docBrain', lookup)
+    sources = await pipe_sources(_pipeline(), 'acme', 'docBrain', lookup)
+
+    assert list(sources) == ['acme.docBrain.chat', 'acme.docBrain.tools']
+    assert set(sources) == {address for address, by_class in interfaces.items() if 'source' in by_class}
+
+
+@pytest.mark.asyncio
+async def test_a_source_is_described_by_what_its_service_declares():
+    sources = await pipe_sources(_pipeline(), 'acme', 'docBrain', lookup)
+
+    assert sources['acme.docBrain.chat'] == {
+        'nodeId': 'chat',
+        'name': 'My Chat Box',
+        'title': 'Chat',
+        'kind': 'request',
+        'entry': 'data',
+        'lanes': ['questions'],
+    }
+
+
+@pytest.mark.asyncio
+async def test_services_that_share_the_source_class_type_alone_are_told_apart():
+    # Telegram and the file system both carry ['source'] and nothing else
+    pipeline = {'components': [{'id': 'tg', 'provider': 'telegram'}, {'id': 'fs', 'provider': 'filesys'}]}
+    sources = await pipe_sources(pipeline, 'acme', 'p', lookup)
+
+    assert sources['acme.p.tg']['kind'] == 'listener'
+    assert sources['acme.p.tg']['title'] == 'Telegram Bot'
+    assert sources['acme.p.tg']['lanes'] == ['text', 'image', 'tags']
+    assert sources['acme.p.fs']['kind'] == 'scan'
+
+
+@pytest.mark.asyncio
+async def test_a_service_that_declares_no_kind_or_an_unknown_one_is_a_scan():
+    pipeline = {'components': [{'id': 'fs', 'provider': 'filesys'}, {'id': 'odd', 'provider': 'odd_kind'}]}
+    sources = await pipe_sources(pipeline, 'acme', 'p', lookup)
+
+    assert sources['acme.p.fs']['kind'] == 'scan'
+    assert sources['acme.p.odd']['kind'] == 'scan'
+    assert sources['acme.p.odd']['lanes'] == []
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_hosts_tools_or_is_one_is_entered_by_tool_calls():
+    sources = await pipe_sources(
+        _sourced({'id': 'host', 'provider': 'tools'}, {'id': 'run', 'provider': 'tool_pipe'}),
+        'acme',
+        'p',
+        lookup,
+    )
+
+    assert sources['acme.p.host']['entry'] == 'tool'
+    assert sources['acme.p.run']['entry'] == 'tool'
+    assert sources['acme.p.run']['kind'] == 'request'
+    assert sources['acme.p.run']['lanes'] == ['text', 'questions']
+
+
+@pytest.mark.asyncio
+async def test_a_source_the_catalog_does_not_know_is_a_scan_titled_by_its_name():
+    pipeline = _sourced({'id': 'mine', 'provider': 'custom_src', 'name': 'Mine'})
+    sources = await pipe_sources(pipeline, 'acme', 'p', lookup)
+
+    assert sources == {
+        'acme.p.mine': {
+            'nodeId': 'mine',
+            'name': 'Mine',
+            'title': 'Mine',
+            'kind': 'scan',
+            'entry': 'data',
+            'lanes': [],
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_components_that_are_not_sources_are_not_described():
+    pipeline = {
+        'components': [
+            {'id': 'agent', 'provider': 'llm_agent'},
+            {'id': 'run', 'provider': 'tool_pipe'},
+            {'id': 'ghost', 'provider': 'no_such_node'},
+            {'provider': 'chat'},
+            'not a component',
+        ]
+    }
+
+    assert await pipe_sources(pipeline, 'acme', 'p', lookup) == {}
+    assert await pipe_sources({}, 'acme', 'p', lookup) == {}

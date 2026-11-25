@@ -15,8 +15,8 @@ import { actionButtons, openToolDocKey, openToolLabel, openToolNotes, openToolNo
 // ==== The note walk ==========================================================
 
 test('a filled open-tool note is a button bound to the address and node', () => {
-	const notes = [{ 'button-text': 'Open Chat', 'open-tool': 'rocketride.chat', nodeId: 'chat_1', address: 'acme.docBrain.chat_1', 'url-text': 'Chat interface URL', 'url-link': 'http://h/chat/docBrain/chat_1' }];
-	assert.deepEqual(openToolNotes(notes), [{ appId: 'rocketride.chat', nodeId: 'chat_1', address: 'acme.docBrain.chat_1', label: 'Open Chat' }]);
+	const notes = [{ 'button-text': 'Open in Playground', 'open-tool': 'rocketride.playground', nodeId: 'chat_1', address: 'acme.docBrain.chat_1', 'url-text': 'Chat interface URL', 'url-link': 'http://h/chat/docBrain/chat_1' }];
+	assert.deepEqual(openToolNotes(notes), [{ appId: 'rocketride.playground', nodeId: 'chat_1', address: 'acme.docBrain.chat_1', label: 'Open in Playground' }]);
 });
 
 test('a note without open-tool is not a button: the webhook endpoint info, free text, numbers', () => {
@@ -27,21 +27,21 @@ test('a note without open-tool is not a button: the webhook endpoint info, free 
 });
 
 test('a note the server did not fill is not a button: a placeholder cannot bind a document', () => {
-	assert.deepEqual(openToolNotes([{ 'open-tool': 'rocketride.chat', nodeId: '{source}', address: 'acme.x.chat_1' }]), []);
-	assert.deepEqual(openToolNotes([{ 'open-tool': 'rocketride.chat', nodeId: 'chat_1', address: '{address}' }]), []);
-	assert.deepEqual(openToolNotes([{ 'open-tool': 'rocketride.chat', nodeId: 'chat_1' }]), []);
+	assert.deepEqual(openToolNotes([{ 'open-tool': 'rocketride.playground', nodeId: '{source}', address: 'acme.x.chat_1' }]), []);
+	assert.deepEqual(openToolNotes([{ 'open-tool': 'rocketride.playground', nodeId: 'chat_1', address: '{address}' }]), []);
+	assert.deepEqual(openToolNotes([{ 'open-tool': 'rocketride.playground', nodeId: 'chat_1' }]), []);
 	assert.deepEqual(openToolNotes([{ 'open-tool': '', nodeId: 'chat_1', address: 'acme.x.chat_1' }]), []);
 });
 
 test('several notes yield several buttons, in list order, each with its own node', () => {
 	const notes = [
-		{ 'open-tool': 'rocketride.dropper', nodeId: 'dropper_1', address: 'acme.x.dropper_1', 'button-text': 'Open Dropper' },
+		{ 'open-tool': 'rocketride.playground', nodeId: 'dropper_1', address: 'acme.x.dropper_1', 'button-text': 'Open in Playground' },
 		{ 'open-tool': 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.dropper_1' },
 	];
 	assert.deepEqual(
 		openToolNotes(notes).map((n) => [n.nodeId, n.label]),
 		[
-			['dropper_1', 'Open Dropper'],
+			['dropper_1', 'Open in Playground'],
 			['postgres_1', 'Explore'],
 		]
 	);
@@ -51,7 +51,7 @@ test('several notes yield several buttons, in list order, each with its own node
 
 test('a non-source node finds its button in the status of the source whose engine runs it', () => {
 	const statuses = {
-		chat_1: { notes: [{ 'open-tool': 'rocketride.chat', nodeId: 'chat_1', address: 'acme.x.chat_1', 'button-text': 'Open Chat' }, { 'open-tool': 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.chat_1' }] },
+		chat_1: { notes: [{ 'open-tool': 'rocketride.playground', nodeId: 'chat_1', address: 'acme.x.chat_1', 'button-text': 'Open in Playground' }, { 'open-tool': 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.chat_1' }] },
 		dropper_1: { notes: [{ 'open-tool': 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.dropper_1' }] },
 		idle_1: undefined,
 	};
@@ -63,7 +63,7 @@ test('a non-source node finds its button in the status of the source whose engin
 		]
 	);
 	// The source node sees only its own note, not the database's
-	assert.deepEqual(openToolNotesFor(statuses, 'chat_1').map((n) => n.label), ['Open Chat']);
+	assert.deepEqual(openToolNotesFor(statuses, 'chat_1').map((n) => n.label), ['Open in Playground']);
 	// A node nobody names has no button; no map, no button
 	assert.deepEqual(openToolNotesFor(statuses, 'llm_1'), []);
 	assert.deepEqual(openToolNotesFor(undefined, 'postgres_1'), []);
@@ -77,7 +77,7 @@ test('the same button reported by two sources of one engine is shown once', () =
 // ==== The source's endpoint note =============================================
 
 const WEBHOOK = { 'url-text': 'Endpoint URL', 'url-link': 'http://h/webhook/acme.x.webhook_1', address: 'acme.x.webhook_1', lanes: ['json'] };
-const CHAT = { 'button-text': 'Open Chat', 'open-tool': 'rocketride.chat', nodeId: 'chat_1', address: 'acme.x.chat_1' };
+const CHAT = { 'button-text': 'Open in Playground', 'open-tool': 'rocketride.playground', nodeId: 'chat_1', address: 'acme.x.chat_1' };
 const SQL = { 'button-text': 'Explore', 'open-tool': 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.webhook_1' };
 
 test('the webhook door is the endpoint even when a database note was merged in front of it', () => {
@@ -106,14 +106,14 @@ test('no notes, no endpoint-shaped note, no endpoint', () => {
 
 // ==== The actions strip ======================================================
 
-const CHAT_TOOL = { appId: 'rocketride.chat', nodeId: 'chat_1', address: 'acme.x.chat_1', label: 'Open Chat' };
+const CHAT_TOOL = { appId: 'rocketride.playground', nodeId: 'chat_1', address: 'acme.x.chat_1', label: 'Open in Playground' };
 const SQL_TOOL = { appId: 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.chat_1', label: 'Explore' };
 
 test('the strip draws one button per tool, then Endpoint Info, all live', () => {
 	assert.deepEqual(
 		actionButtons([CHAT_TOOL, SQL_TOOL], true, false).map((b) => [b.kind, b.label, b.disabled]),
 		[
-			['tool', 'Open Chat', false],
+			['tool', 'Open in Playground', false],
 			['tool', 'Explore', false],
 			['endpoint', 'Endpoint Info', false],
 		]
@@ -134,8 +134,7 @@ test('during a replay every button of the strip is disabled, the endpoint one in
 // ==== Labels =================================================================
 
 test('the label is the note text, else the app word, else Open', () => {
-	assert.equal(openToolLabel('rocketride.chat'), 'Open Chat');
-	assert.equal(openToolLabel('rocketride.dropper'), 'Open Dropper');
+	assert.equal(openToolLabel('rocketride.playground'), 'Open in Playground');
 	assert.equal(openToolLabel('rocketride.sql'), 'Explore');
 	assert.equal(openToolLabel('rocketride.sql', 'Query'), 'Query');
 	assert.equal(openToolLabel('acme.vectors'), 'Open');
@@ -143,13 +142,20 @@ test('the label is the note text, else the app word, else Open', () => {
 
 // ==== Document identity ======================================================
 
-test('the document key is address/nodeId, so the URI is tool:<appId>/<address>/<nodeId>', () => {
-	assert.equal(openToolDocKey('acme.docBrain.chat_1', 'chat_1'), 'acme.docBrain.chat_1/chat_1');
-	assert.equal(`tool:rocketride.chat/${openToolDocKey('acme.docBrain.chat_1', 'chat_1')}`, 'tool:rocketride.chat/acme.docBrain.chat_1/chat_1');
+test('the document key is the address when the node is its source, else address/nodeId', () => {
+	// A source binds by its address alone: the Playground's connection is that address
+	assert.equal(openToolDocKey('acme.docBrain.chat_1', 'chat_1'), 'acme.docBrain.chat_1');
+	assert.equal(`tool:rocketride.playground/${openToolDocKey('acme.docBrain.chat_1', 'chat_1')}`, 'tool:rocketride.playground/acme.docBrain.chat_1');
+	// Any other node rides beside the address
+	assert.equal(openToolDocKey('acme.docBrain.chat_1', 'postgres_1'), 'acme.docBrain.chat_1/postgres_1');
+	assert.equal(`tool:rocketride.sql/${openToolDocKey('acme.docBrain.chat_1', 'postgres_1')}`, 'tool:rocketride.sql/acme.docBrain.chat_1/postgres_1');
+	// A node whose id only ends the same way is not the source
+	assert.equal(openToolDocKey('acme.docBrain.my_chat_1', 'chat_1'), 'acme.docBrain.my_chat_1/chat_1');
 });
 
 test('parseToolDocKey is the inverse of openToolDocKey, and a bare address still parses', () => {
-	assert.deepEqual(parseToolDocKey(openToolDocKey('acme.docBrain.chat_1', 'chat_1')), { address: 'acme.docBrain.chat_1', nodeId: 'chat_1' });
+	assert.deepEqual(parseToolDocKey(openToolDocKey('acme.docBrain.chat_1', 'chat_1')), { address: 'acme.docBrain.chat_1' });
+	assert.deepEqual(parseToolDocKey(openToolDocKey('acme.docBrain.chat_1', 'postgres_1')), { address: 'acme.docBrain.chat_1', nodeId: 'postgres_1' });
 	assert.deepEqual(parseToolDocKey('acme.docBrain/postgres_1'), { address: 'acme.docBrain', nodeId: 'postgres_1' });
 	assert.deepEqual(parseToolDocKey('acme.docBrain.chat_1'), { address: 'acme.docBrain.chat_1' });
 	assert.deepEqual(parseToolDocKey('acme.docBrain'), { address: 'acme.docBrain' });

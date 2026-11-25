@@ -128,18 +128,19 @@ HTTP endpoint, no `curl` required:
 { "id": "source_1", "provider": "chat" }
 ```
 
-Restart the pipeline. `start` does not print an address. The chat page is the
-platform app `rocketride.chat`: press **Open Chat** on the chat node in the
-Builder and it opens beside the canvas, bound to this pipeline's address. From
-a browser, open the signed-in deep link on the engine's own address:
+Restart the pipeline. `start` does not print an address. You chat with it in
+the Playground, the platform app `rocketride.playground`: press **Open in
+Playground** on the chat node in the Builder and it opens beside the canvas,
+bound to this pipeline's address. From a browser, open the signed-in deep link
+on the engine's own address:
 
 ```text
-http://localhost:5565/?appid=rocketride.chat&pipe=rocketride.webhook-example.source_1
+http://localhost:5565/?appid=rocketride.playground&pipe=rocketride.webhook-example.source_1
 ```
 
 Once the pipeline is published, anyone you share it with reaches the same chat
 by signing in and opening
-`?appid=rocketride.chat&pipe=<developerId>.webhook-example.source_1`.
+`?appid=rocketride.playground&pipe=<developerId>.webhook-example.source_1`.
 No credential rides a URL, so the link is safe to pass on; webhook requests use
 an `rr_` key in an `Authorization: Bearer` header.
 

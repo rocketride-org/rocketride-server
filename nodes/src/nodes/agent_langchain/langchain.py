@@ -380,6 +380,9 @@ _ENVELOPE_OPEN = re.compile(r"""^\s*(?:```[^\s`{\[]*\s*)?\{\s*(?:\}|\Z|(?:"(?:[^
 #: An object's opening brace.
 _OBJECT_OPENING = re.compile(r'\{')
 
+#: Text that opens with an object, optionally inside a markdown fence, whatever follows the brace. The match ends after it.
+_OBJECT_FIRST = re.compile(r'\s*(?:```[^\s`{\[]*\s*)?\{')
+
 #: An opening key may have lost either quote, putting the member walk out of step.
 _DAMAGED_OBJECT_OPEN = re.compile(r'\{\s*(?:"|[A-Za-z_]\w*"\s*:)')
 
@@ -647,7 +650,9 @@ def _envelopes(text: str, *, allow_code: bool = True) -> Iterator[Tuple[str, Any
     and hints for replies containing a final claim use the strict reading, with allow_code=False.
 
     After a parsed final, a new closed markdown block quotes an example. Its objects are not
-    pending work. A call outside that block, or inside an unclosed block, still counts.
+    pending work. A call outside that block, or inside an unclosed block, still counts. A broken
+    `final`, its keys unquoted included, after a parsed final is yielded and read past to its closing, so it cannot hide a
+    call that follows it; one that never closes still ends the walk.
 
     An object that does not parse is read by its own members (``_own_members``): its type, or a
     tool call's name and arguments with no type. When it has neither, what its own text names
@@ -695,7 +700,11 @@ def _envelopes(text: str, *, allow_code: bool = True) -> Iterator[Tuple[str, Any
             return
         if no_word_before and _LOOSE_FINAL_OPEN.match(text, at):
             yield 'final', None, at
-            return
+            # After a parsed final, one that closes is read past, as a broken final is below.
+            if not (final_end and end is not None):
+                return
+            read_to = end
+            continue
         if not members:
             loose = _TYPE_FIRST.match(text, at) if no_word_before else None
             if loose and (loose.group(1) or loose.group(2) or loose.group(3)) in _TOOL_CALL_KINDS:
@@ -745,7 +754,10 @@ def _envelopes(text: str, *, allow_code: bool = True) -> Iterator[Tuple[str, Any
             if kind == 'final' and parsed is not None and not final_end:
                 final_end = end or 0
             yield kind, parsed, at
-            if parsed is None:
+            # After a parsed final the turn is already that answer, so a broken final that closes
+            # after it is set aside like the answer's own trailing text: a tool call after it is
+            # still pending work. Anywhere else an unparsed envelope ends the walk.
+            if parsed is None and not (kind == 'final' and final_end and end is not None):
                 return
         if end is None:
             # It never closes, so the rest of the text is inside it.
@@ -760,6 +772,16 @@ def _unfinished_envelope(text: str) -> Optional[str]:
         if kind in _TOOL_CALL_KINDS or parsed is None:
             return kind
     return None
+
+
+def _pending_tool_call(text: str) -> Optional[str]:
+    """
+    The type of the first tool call that is pending work in the text, or None when there is none.
+
+    Unlike ``_unfinished_envelope``, a broken `final` after a parsed one does not stop the look:
+    with or without it in the middle, a final followed by a tool call is the same reply.
+    """
+    return next((kind for kind, _parsed, _at in _envelopes(text, allow_code=False) if kind in _TOOL_CALL_KINDS), None)
 
 
 def _tool_call_without_type(text: str) -> bool:
@@ -993,7 +1015,7 @@ def _sentinel_answer(text: str) -> Optional[str]:
     would be shown the protocol, so text that is a `final` envelope, whole, is read as one: its
     content when it parses or closes, and None when it was cut off. An envelope that parses with
     more text after it is an answer that quotes one, delivered as written. Nothing after the
-    marker is None too. A whole tool envelope is retried, never delivered as answer text.
+    marker is None too. A tool envelope, whole, cut off or broken, is retried, never delivered as answer text.
     """
     whole = text.strip()
     if not whole:
@@ -1008,15 +1030,33 @@ def _sentinel_answer(text: str) -> Optional[str]:
             return None
         if obj.get('type') == 'final':
             return _final_text(obj.get('content', ''))
-    broken = _looks_like_envelope(text) and not isinstance(_extract_first_json_object(text), dict)
+    unparsed = not isinstance(_extract_first_json_object(text), dict)
+    broken = _looks_like_envelope(text) and unparsed
+    # A tool call that was cut off or does not parse is retried like a whole one. Only text that
+    # opens with an object whose own "type" is a tool call's counts, also when that key's colon or
+    # quotes are miswritten (``_MISWRITTEN_TYPE``): JSON that parses, a broken object of another
+    # type, and prose that names a tool call are still the answer as written.
+    opening = _OBJECT_FIRST.match(text) if unparsed else None
+    at = opening.end() - 1 if opening else -1
+    if opening and (_own_members(text, at)[0].get('type') in _TOOL_CALL_KINDS or _MISWRITTEN_TYPE.match(text, at)):
+        return None
     return _salvage_final_content(whole) if broken and _attempted_kind(text) == 'final' else text
 
 
-def _final_text(content: Any) -> str:
-    """The text of a `final` envelope's content. Anything but a string is written back as JSON, not as a Python repr."""
+def _final_text(content: Any) -> Optional[str]:
+    """
+    The text of a `final` envelope's content. Anything but a string is written back as JSON, not as a Python repr.
+
+    None when that content holds a number that is not finite. ``json.loads`` reads ``1e400`` as
+    infinity and takes ``NaN`` and ``Infinity`` too, and written back they are not JSON. Such an
+    envelope is not read, as one that does not parse is not: the turn is retried.
+    """
     if content is None:
         return ''
-    text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+    try:
+        text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, allow_nan=False)
+    except ValueError:
+        return None
     # json.loads accepts lone surrogates; keep them as escape text, including in nested JSON content.
     return text.encode('utf-8', errors='backslashreplace').decode('utf-8')
 
@@ -1066,9 +1106,8 @@ def _parse_tool_call_envelope(raw: Any) -> Any:
             return _message(content=answer)
         # Nothing after the marker: a `final` envelope that parses before it is still the answer.
         obj = _extract_first_json_object(raw) if not raw[marker.end() :].strip() else None
-        if isinstance(obj, dict) and obj.get('type') == 'final':
-            return _message(content=_final_text(obj.get('content', '')))
-        return None
+        text = _final_text(obj.get('content', '')) if isinstance(obj, dict) and obj.get('type') == 'final' else None
+        return _message(content=text) if text is not None else None
 
     obj = _extract_first_json_object(raw)
     if (not isinstance(obj, dict) or obj.get('type') not in _ENVELOPE_KINDS) and not _SENTINEL_LINE.search(raw):
@@ -1088,9 +1127,10 @@ def _parse_tool_call_envelope(raw: Any) -> Any:
 
     if obj.get('type') == 'final':
         # A claimed result followed by pending work is not a completed turn.
-        if _unfinished_envelope(raw) in _TOOL_CALL_KINDS:
+        if _pending_tool_call(raw):
             return None
-        return _message(content=_final_text(obj.get('content', '')))
+        text = _final_text(obj.get('content', ''))
+        return _message(content=text) if text is not None else None
     if obj.get('type') == 'tool_call':
         call = _tool_call(obj)
         return _message(tool_calls=[call]) if call else None
@@ -1126,7 +1166,8 @@ def _diagnose(raw: Any) -> Tuple[str, str, str]:
     attempted = _attempted_kind(text)
     began_with_final = attempted == 'final'
     if began_with_final or _SENTINEL_LINE.search(text):
-        attempted = _unfinished_envelope(text) or attempted
+        # A tool call after a final comes first, also past a broken final between them.
+        attempted = _pending_tool_call(text) or _unfinished_envelope(text) or attempted
     wanted_a_tool_call = attempted in _TOOL_CALL_KINDS
     if marker and wanted_a_tool_call:
         return (

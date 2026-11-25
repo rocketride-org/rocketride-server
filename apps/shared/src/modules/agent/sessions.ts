@@ -28,7 +28,9 @@
  * Persistence for agent chat sessions. Each controlling app's history lives
  * under `.agents/<appId>/` in the user's server-side file store:
  *
- *   .agents/<appId>/catalog.json        — the session index (id, date, title)
+ *   .agents/<appId>/catalog.json        — the session index (id, date, title,
+ *                                         group) and, for hosts that group
+ *                                         their sessions, the groups
  *   .agents/<appId>/<sessionId>.json    — one full conversation
  *
  * The controlling app id is MODULE state, stamped once by
@@ -56,12 +58,37 @@ export interface AgentSessionMeta {
 	date: number;
 	/** Display title — the first user request, truncated. */
 	title: string;
+	/** The group (a host-defined folder, e.g. one per agent) the session belongs to. */
+	group?: string;
+}
+
+/**
+ * One group row — a host-defined folder of sessions (the Playground keeps
+ * one per agent it has opened). Hosts that never group sessions never see one.
+ */
+export interface AgentSessionGroup {
+	/** The group's id, as the host names it (unique within the catalog). */
+	id: string;
+	/** Display title. */
+	title: string;
+	/** Optional icon URL. */
+	icon?: string;
+	/** Epoch-ms stamp of the last time the host touched the group. */
+	date: number;
 }
 
 /** The catalog file envelope. */
 interface CatalogFile {
 	version: 1;
 	sessions: AgentSessionMeta[];
+	/** Host-defined groups; absent in a catalog that has never had one. */
+	groups?: AgentSessionGroup[];
+}
+
+/** The catalog's two lists, as read. */
+interface CatalogLists {
+	sessions: AgentSessionMeta[];
+	groups: AgentSessionGroup[];
 }
 
 /** One stored conversation — the session file envelope. */
@@ -74,6 +101,8 @@ export interface AgentSessionFile {
 	contextRefs: string[];
 	/** The shell chat message shape verbatim — restore = initialMessages seed. */
 	messages: ChatMessage[];
+	/** The group the session belongs to, when the host groups its sessions. */
+	group?: string;
 }
 
 // =============================================================================
@@ -214,13 +243,27 @@ export function isNotFound(err: unknown): boolean {
  * @returns The catalog rows (unsorted, as stored).
  */
 async function readCatalog(path: string): Promise<AgentSessionMeta[]> {
+	return (await readCatalogLists(path)).sessions;
+}
+
+/**
+ * Reads both catalog lists; a missing file is two empty lists. Same failure
+ * rule as {@link readCatalog}: only a genuinely absent catalog is empty.
+ *
+ * @param path - The catalog file's full store path.
+ * @returns The session rows and the group rows (unsorted, as stored).
+ */
+async function readCatalogLists(path: string): Promise<CatalogLists> {
 	try {
 		const file = await requireClient().fsReadJson<CatalogFile>(path);
-		return Array.isArray(file?.sessions) ? file.sessions : [];
+		return {
+			sessions: Array.isArray(file?.sessions) ? file.sessions : [],
+			groups: Array.isArray(file?.groups) ? file.groups : [],
+		};
 	} catch (err) {
 		// step: ONLY a genuinely absent catalog is empty — a transient read
 		// failure must not feed updateCatalog a bare list to rewrite with
-		if (isNotFound(err)) return [];
+		if (isNotFound(err)) return { sessions: [], groups: [] };
 		throw err;
 	}
 }
@@ -234,13 +277,58 @@ async function readCatalog(path: string): Promise<AgentSessionMeta[]> {
  * @param mutate - Pure transform of the current rows to the new rows.
  */
 async function updateCatalog(mutate: (rows: AgentSessionMeta[]) => AgentSessionMeta[]): Promise<void> {
+	return updateCatalogLists((lists) => ({ ...lists, sessions: mutate(lists.sessions) }));
+}
+
+/**
+ * Queues one read-modify-write of BOTH catalog lists (the one writer behind
+ * {@link updateCatalog}). Groups ride every rewrite, so a host that never
+ * groups sessions never drops another host's groups; an empty group list is
+ * not written at all, leaving an ungrouped catalog byte-identical.
+ *
+ * @param mutate - Transform of the current lists to the new lists. It may be
+ *                 async: it runs inside the queue, so no other rewrite lands
+ *                 between its read and its write.
+ */
+async function updateCatalogLists(mutate: (lists: CatalogLists) => CatalogLists | Promise<CatalogLists>): Promise<void> {
 	const path = `${await agentsDir()}/catalog.json`;
 	const op = catalogChain.then(async () => {
-		const rows = mutate(await readCatalog(path));
-		await requireClient().fsWriteJson(path, { version: 1, sessions: rows } satisfies CatalogFile);
+		const next = await mutate(await readCatalogLists(path));
+		const file: CatalogFile = { version: 1, sessions: next.sessions, ...(next.groups.length > 0 ? { groups: next.groups } : {}) };
+		await requireClient().fsWriteJson(path, file);
 		emitFsChange(path, 'agent');
 	});
 	catalogChain = op.catch(() => undefined);
+	return op;
+}
+
+// =============================================================================
+// SESSION FILES — serialized writer per session
+// =============================================================================
+
+// Two saves of one conversation (two requests settling close together) must
+// land in the order they were made, or an older snapshot written last
+// replaces the newer one; a delete must land after the writes queued before
+// it. Each session's writes and deletes queue behind its previous one, as the
+// catalog's do; the entry is dropped once the session is idle. Nothing queued
+// here waits on the catalog queue.
+const sessionChains = new Map<string, Promise<void>>();
+
+/**
+ * Queues one write (or delete) of a session's file behind that session's
+ * earlier ones. Like {@link updateCatalogLists}, the queue survives failures
+ * while the caller still receives its own operation's outcome.
+ *
+ * @param sessionId - The session GUID (the queue's key).
+ * @param write - The write or delete.
+ */
+function queueSessionWrite(sessionId: string, write: () => Promise<void>): Promise<void> {
+	const op = (sessionChains.get(sessionId) ?? Promise.resolve()).then(write);
+	const settled = op.catch(() => undefined);
+	sessionChains.set(sessionId, settled);
+	void settled.then(() => {
+		if (sessionChains.get(sessionId) === settled) sessionChains.delete(sessionId);
+	});
 	return op;
 }
 
@@ -255,9 +343,11 @@ async function updateCatalog(mutate: (rows: AgentSessionMeta[]) => AgentSessionM
  * @param count - Maximum rows to return.
  * @returns The requested catalog page.
  */
-export async function getAgentSessions(offset: number, count: number): Promise<AgentSessionMeta[]> {
+export async function getAgentSessions(offset: number, count: number, group?: string): Promise<AgentSessionMeta[]> {
 	const rows = await readCatalog(`${await agentsDir()}/catalog.json`);
-	return rows.sort((a, b) => b.date - a.date).slice(offset, offset + count);
+	// step: a group narrows the list to that group's sessions; none = every row
+	const kept = group === undefined ? rows : rows.filter((r) => r.group === group);
+	return kept.sort((a, b) => b.date - a.date).slice(offset, offset + count);
 }
 
 /**
@@ -276,21 +366,100 @@ export async function getContext(sessionId: string): Promise<string> {
  * @param sessionId - The session GUID.
  */
 export async function deleteSession(sessionId: string): Promise<void> {
-	const path = await sessionPath(sessionId);
-	await requireClient().fsDelete(path);
-	emitFsChange(path, 'agent');
+	// step: the delete waits for the session's queued writes, so none of them lands after it
+	await queueSessionWrite(sessionId, async () => {
+		const path = await sessionPath(sessionId);
+		await requireClient().fsDelete(path);
+		emitFsChange(path, 'agent');
+	});
 	await updateCatalog((rows) => rows.filter((r) => r.sessionId !== sessionId));
 }
 
 /**
- * Writes one full conversation and upserts its catalog row.
+ * Writes one full conversation and, unless told not to, upserts its catalog
+ * row. A host whose catalog has one writer elsewhere (a dev tool's
+ * controller mount) writes the file here with `catalog: false` and sends the
+ * row to that writer, which commits it with {@link saveSessionMeta}.
  *
  * @param session - The complete session file content to persist.
+ * @param options - `catalog: false` writes the file only (default true).
  */
-export async function saveSession(session: AgentSessionFile): Promise<void> {
-	const path = await sessionPath(session.sessionId);
-	await requireClient().fsWriteJson(path, session);
-	emitFsChange(path, 'agent');
-	const meta: AgentSessionMeta = { sessionId: session.sessionId, date: session.date, title: session.title };
-	await updateCatalog((rows) => [meta, ...rows.filter((r) => r.sessionId !== session.sessionId)]);
+export async function saveSession(session: AgentSessionFile, options?: { catalog?: boolean }): Promise<void> {
+	// step: the file write waits for this session's earlier writes (queued at
+	// call time, so in call order); the catalog row keeps its own queue
+	await queueSessionWrite(session.sessionId, async () => {
+		const path = await sessionPath(session.sessionId);
+		await requireClient().fsWriteJson(path, session);
+		emitFsChange(path, 'agent');
+	});
+	if (options?.catalog === false) return;
+	await saveSessionMeta({ sessionId: session.sessionId, date: session.date, title: session.title, ...(session.group !== undefined ? { group: session.group } : {}) });
+}
+
+/**
+ * Upserts one session's catalog row (newest first).
+ *
+ * @param meta - The row to store.
+ */
+export async function saveSessionMeta(meta: AgentSessionMeta): Promise<void> {
+	await updateCatalog((rows) => [meta, ...rows.filter((r) => r.sessionId !== meta.sessionId)]);
+}
+
+// =============================================================================
+// GROUP VERBS
+// =============================================================================
+
+/**
+ * Lists the groups, most recently touched first.
+ *
+ * @returns Every group row.
+ */
+export async function getAgentGroups(): Promise<AgentSessionGroup[]> {
+	const { groups } = await readCatalogLists(`${await agentsDir()}/catalog.json`);
+	return groups.sort((a, b) => b.date - a.date);
+}
+
+/**
+ * Upserts one group row.
+ *
+ * @param group - The group to store (its id keys the upsert).
+ */
+export async function saveAgentGroup(group: AgentSessionGroup): Promise<void> {
+	await updateCatalogLists((lists) => ({ ...lists, groups: [group, ...lists.groups.filter((g) => g.id !== group.id)] }));
+}
+
+/**
+ * Deletes one group: every session file in it, their rows, and the group row.
+ *
+ * @param groupId - The group's id.
+ */
+export async function deleteAgentGroup(groupId: string): Promise<void> {
+	// One queued rewrite reads the members, deletes their files and drops their
+	// rows: a save whose row commits during it is queued behind it, so the files
+	// deleted and the rows removed are always the same set.
+	await updateCatalogLists(async (lists) => {
+		// step: the group's sessions, as the catalog lists them inside the rewrite
+		const members = lists.sessions.filter((r) => r.group === groupId);
+
+		// step: each session's file first, behind that session's queued writes (which
+		// never wait on the catalog, so this cannot deadlock); a file already gone is not a failure
+		for (const member of members) {
+			await queueSessionWrite(member.sessionId, async () => {
+				const path = await sessionPath(member.sessionId);
+				try {
+					await requireClient().fsDelete(path);
+				} catch (err) {
+					if (!isNotFound(err)) throw err;
+				}
+				emitFsChange(path, 'agent');
+			});
+		}
+
+		// step: then exactly those rows, and the group row
+		const gone = new Set(members.map((m) => m.sessionId));
+		return {
+			sessions: lists.sessions.filter((r) => !gone.has(r.sessionId)),
+			groups: lists.groups.filter((g) => g.id !== groupId),
+		};
+	});
 }

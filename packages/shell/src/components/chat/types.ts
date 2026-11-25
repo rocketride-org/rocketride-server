@@ -31,7 +31,27 @@ export interface ChatMessage {
 	meta?: string;
 	/** When true, the message renders as an in-thread error Banner instead of a bubble. */
 	isError?: boolean;
+	/**
+	 * Host-drawn content inside the bubble (an upload list, a progress line,
+	 * a result layout). Plain JSON data, so a conversation saves verbatim;
+	 * the host draws it through `MessageList`'s `renderBody`. A message whose
+	 * body is not drawn falls back to its `text`.
+	 */
+	body?: ChatMessageBody;
 }
+
+/** The data behind a host-drawn bubble body (see {@link ChatMessage.body}). */
+export interface ChatMessageBody {
+	/** What the body is, as the host names it (e.g. 'upload', 'answer'). */
+	kind: string;
+	/** The body's data: plain JSON only, so the message stays serializable. */
+	data?: unknown;
+	/** When true, the bubble takes the thread's full width (tables, galleries). */
+	wide?: boolean;
+}
+
+/** Draws a message's {@link ChatMessage.body}; null falls back to the text. */
+export type ChatMessageBodyRenderer = (message: ChatMessage) => ReactNode;
 
 // =============================================================================
 // VIEW PROPS

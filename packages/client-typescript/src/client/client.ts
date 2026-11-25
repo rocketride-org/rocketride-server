@@ -2045,6 +2045,8 @@ export class RocketRideClient extends DAPClient {
 	 * (`acme.docBrain.chat`), every other node under the pipe address
 	 * (`acme.docBrain`, the default source). A front end filters with plain
 	 * equality on the classType word: `chat`, `dropper`, `database`.
+	 * `sources` says what each source is (its kind, entry, title and lanes),
+	 * from its service's declaration, by the same address.
 	 *
 	 * @param address - `[<root>/]developerId.pipelineId[.source]`; a source segment resolves as it does for
 	 *                  `submit()`, and the map covers the whole pipe whichever source is named.

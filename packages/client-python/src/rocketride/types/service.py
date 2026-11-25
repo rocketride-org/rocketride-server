@@ -37,7 +37,7 @@ Usage:
 """
 
 from enum import Flag
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 
 from .pipeline import PipelineConfig
 
@@ -95,6 +95,7 @@ class SERVICE_SUMMARY(TypedDict, total=False):
     lanes: Dict[str, List[str]]  # Lane mapping: input lane name -> list of output lane names
     input: List[SERVICE_INPUT_LANE]  # Structured input/output lane definitions
     invoke: Dict[str, SERVICE_INVOKE_SLOT]  # Control-plane invoke slot definitions
+    sourceKind: Literal['request', 'listener', 'scan']  # How work reaches a source (sources only; none = 'scan')
     tile: Dict[str, Any]  # Tile/card rendering hint for the pipeline editor
     icon: str  # Opaque id into the response's 'icons' table (absent = no icon)
     documentation: str  # External documentation URL

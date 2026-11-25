@@ -157,12 +157,13 @@ rocketride stop --token <the token start printed>
 rocketride start --pipeline ./extract.pipe
 ```
 
-`start` does not print an address. The drop page is the platform app
-`rocketride.dropper`: open it from the dropper node in the Builder, or by a
-signed-in deep link on the engine's own address:
+`start` does not print an address. You drop files in the Playground, the
+platform app `rocketride.playground`: open it from the dropper node in the
+Builder (**Open in Playground**), or by a signed-in deep link on the engine's
+own address:
 
 ```text
-http://localhost:5565/?appid=rocketride.dropper&pipe=rocketride.extraction-example.source_1
+http://localhost:5565/?appid=rocketride.playground&pipe=rocketride.extraction-example.source_1
 ```
 
 The `pipe` value is the run's address, `developerId.pipelineId.source`: the

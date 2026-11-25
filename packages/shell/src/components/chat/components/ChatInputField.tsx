@@ -51,6 +51,15 @@ const styles = {
 		opacity: disabled ? 0.6 : 1,
 		transition: 'border-color 0.15s',
 	}),
+
+	// The optional hint line, centred under the row in the chat column.
+	hint: {
+		maxWidth: CHAT_COLUMN_MAX_WIDTH,
+		margin: '6px auto 0',
+		fontSize: 11,
+		color: 'var(--rr-text-caption)',
+		textAlign: 'center',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -63,6 +72,10 @@ export interface ChatInputFieldProps {
 	placeholder?: string;
 	/** Optional node rendered before the input field (reserved for attachments). */
 	leadingInputSlot?: ReactNode;
+	/** When true, Send is enabled with no text (e.g. files are attached) and sends ''. */
+	allowEmpty?: boolean;
+	/** Optional one-line hint under the row (e.g. what the agent takes). */
+	hint?: ReactNode;
 }
 
 /**
@@ -71,14 +84,16 @@ export interface ChatInputFieldProps {
  * @param props - {@link ChatInputFieldProps}.
  * @returns The composer element.
  */
-export const ChatInputField: React.FC<ChatInputFieldProps> = ({ onSend, disabled = false, placeholder = 'Ask anything…', leadingInputSlot }) => {
+export const ChatInputField: React.FC<ChatInputFieldProps> = ({ onSend, disabled = false, placeholder = 'Ask anything…', leadingInputSlot, allowEmpty = false, hint }) => {
 	const [value, setValue] = useState('');
 	const [focused, setFocused] = useState(false);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	// Send needs text unless the host allows an empty send (attachments).
+	const canSend = !disabled && (allowEmpty || value.trim().length > 0);
 
 	// Send the trimmed value, then snap the auto-grown textarea back to one row.
 	const submit = () => {
-		if (!value.trim() || disabled) return;
+		if (!canSend) return;
 		onSend(value.trim());
 		setValue('');
 		if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -111,10 +126,11 @@ export const ChatInputField: React.FC<ChatInputFieldProps> = ({ onSend, disabled
 						}
 					}}
 				/>
-				<Button variant="primary" disabled={disabled || !value.trim()} onClick={submit}>
+				<Button variant="primary" disabled={!canSend} onClick={submit}>
 					Send
 				</Button>
 			</div>
+			{hint && <div style={styles.hint}>{hint}</div>}
 		</div>
 	);
 };

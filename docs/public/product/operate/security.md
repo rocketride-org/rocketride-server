@@ -66,6 +66,11 @@ to start.
 | `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment except the five `ROCKETRIDE_DB_` variables the engine removes (listed above); use a bare `*` only on a single-user install. |
 | `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                                                                                                              |
 
+Four of the engine's own secrets never reach a task, whatever
+`RR_SUBPROCESS_ENV` names, a prefix such as `RR_*` and a bare `*` included:
+`RR_APIKEY`, `RR_MCP_ENGINE_AUTH`, `RR_DATACORE_GRANT_KEY` and
+`RR_DB_BROKER_TOKEN`.
+
 Set both in the engine's own environment or its `.env` file. Pipelines cannot
 change `RR_` variables.
 

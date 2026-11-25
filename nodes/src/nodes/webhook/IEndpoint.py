@@ -112,11 +112,12 @@ class IEndpoint(IEndpointBase):
             # no URL at all: the SDK and the apps talk to them by address).
             # {source} is the last segment of the control's address, which
             # IS this source's component id; the server fills it per control
-            # (expand_note).
+            # (expand_note). Both front-end sources open the Playground, the
+            # one front end for every agent.
             if self.endpoint.logicalType == 'chat':
                 info = {
-                    'button-text': 'Open Chat',
-                    'open-tool': 'rocketride.chat',
+                    'button-text': 'Open in Playground',
+                    'open-tool': 'rocketride.playground',
                     'nodeId': '{source}',
                     'address': '{address}',
                 }
@@ -125,8 +126,8 @@ class IEndpoint(IEndpointBase):
 
             elif self.endpoint.logicalType == 'dropper':
                 info = {
-                    'button-text': 'Open Dropper',
-                    'open-tool': 'rocketride.dropper',
+                    'button-text': 'Open in Playground',
+                    'open-tool': 'rocketride.playground',
                     'nodeId': '{source}',
                     'address': '{address}',
                 }
