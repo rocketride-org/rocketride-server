@@ -45,16 +45,17 @@ def _handshake_headers(monkeypatch, token):
         monkeypatch.delenv('RR_MODEL_SERVER_AUTH_TOKEN', raising=False)
     else:
         monkeypatch.setenv('RR_MODEL_SERVER_AUTH_TOKEN', token)
-    seen = {}
+    calls = []
 
     async def connect(*args, **kwargs):
-        seen.update(kwargs)
+        calls.append(kwargs)
         raise _Captured
 
     monkeypatch.setattr(transport_module, 'websockets', types.SimpleNamespace(__version__='16.0', connect=connect))
     with pytest.raises(Exception):
         asyncio.run(ModelClient('localhost:5590').attach())
-    return seen.get('additional_headers')
+    assert calls, 'the handshake was never attempted'
+    return calls[0].get('additional_headers')
 
 
 def test_model_client_sends_the_token_on_the_handshake(monkeypatch):
