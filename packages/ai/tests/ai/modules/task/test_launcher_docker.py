@@ -450,7 +450,7 @@ async def test_cli_kills_a_command_that_does_not_answer():
     """A daemon that takes the connection and never answers: the command is killed, not waited on."""
     cli = dk.DockerCli(sys.executable)
     with pytest.raises(DockerError, match='timed out after 0.5 s'):
-        await cli.run(['-c', 'import time; time.sleep(60)'], timeout=0.5)
+        await asyncio.wait_for(cli.run(['-c', 'import time; time.sleep(60)'], timeout=0.5), 5)
 
 
 async def test_only_docker_wait_runs_without_a_time_limit():
@@ -516,9 +516,9 @@ async def test_create_carries_the_isolation_and_limits():
 
 
 async def test_command_line_inside_the_container():
-    """The subprocess runtime's argv, the port fixed, the model server rewritten."""
+    """The subprocess runtime's argv, both hosting flags kept, the port fixed, the model server rewritten."""
     cli = FakeCli()
-    await _launcher(cli).start(_spec())
+    await _launcher(cli).start(_spec(shared_host=True))
     args = cli.call('create').args
     image_at = args.index('rocketride/node:3.4.0')
     assert args[image_at + 1 :] == [
@@ -531,6 +531,7 @@ async def test_command_line_inside_the_container():
         '--data_host=0.0.0.0',
         f'--data_token_sha256={TOKEN_SHA}',
         '--hosted',
+        '--shared-host',
         '--modelserver=host.docker.internal:5590',
         '--threads=2',
         '--dumps',
@@ -1107,7 +1108,7 @@ async def test_a_cancelled_command_is_killed_and_reaped(monkeypatch):
     assert started, run.exception()
     run.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await run
+        await asyncio.wait_for(run, 5)
     assert started[0].returncode is not None
 
 

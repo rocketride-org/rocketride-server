@@ -25,7 +25,7 @@
 
 The persistence nodes save through the store. Under ``--runtime=k8s`` a pod
 sees none of the engine's files, so the engine refuses such a pipeline before
-it starts; the test then asserts that refusal, in that runtime's own words
+it starts; the test then skips on that refusal, in that runtime's own words
 (as ``tool_filesystem/test_live_anchor.py`` does).
 """
 
@@ -115,7 +115,7 @@ async def test_streamed_operations_through_engine(client, media, record_property
         except Exception as e:
             # Only the k8s runtime may refuse, and only with its own reason
             if _K8S and _K8S_REFUSAL in str(e):
-                return
+                pytest.skip(f'runtime refused: {e}')
             raise
         try:
             started = time.perf_counter()

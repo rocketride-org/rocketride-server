@@ -1335,19 +1335,30 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_an_isolated_task_does_not_share_the_host(monkeypatch):
-    """A hosted engine's container or pod task is hosted but does not share
-    the engine's host: the container is the boundary, so the runtime is told
-    so and the pre-launch check keeps stdio MCP allowed.
+@pytest.mark.parametrize('stdio', [False, True])
+async def test_an_isolated_task_of_a_hosted_engine_gets_shared_host(monkeypatch, stdio):
+    """A hosted engine's container or pod task gets --shared-host as a spawn
+    task does, and the pre-launch check is told the same: a stdio MCP
+    pipeline is refused there too, and nothing is started.
     """
+    import rocketlib
+
     import ai.modules.task.task_engine as engine
 
     _fake_db_account(monkeypatch)
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
     monkeypatch.setattr(engine, 'pipeline_opens_store', lambda *a: False)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', _get_service)
+    monkeypatch.setattr(engine, 'resolve_node_config', _mcp_node_config)
     checked = []
-    monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
-    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    gate = engine.saas_pipeline_violation
+    monkeypatch.setattr(
+        engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']) or gate(*a, **k)
+    )
+    components = [{'id': 'src', 'provider': 'tools'}]
+    if stdio:
+        components.append({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'stdio'}})
+    t = _env_task(pipeline={'components': components})
     t.source = 'src'
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
     t._launch_args = {}
@@ -1361,12 +1372,16 @@ async def test_an_isolated_task_does_not_share_the_host(monkeypatch):
         pass
 
     t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
-    with pytest.raises(Launched):
+    refused = 'stdio MCP transport is not available on RocketRide Cloud'
+    with pytest.raises(ValueError if stdio else Launched, match=refused if stdio else None):
         await TaskEngine.start_task(t)
 
-    spec = t._launcher.start.call_args.args[0]
-    assert (spec.hosted, spec.shared_host) == (True, False)
-    assert checked == [False]
+    assert checked == [True]
+    if stdio:
+        t._launcher.start.assert_not_awaited()
+    else:
+        spec = t._launcher.start.call_args.args[0]
+        assert (spec.hosted, spec.shared_host) == (True, True)
 
 
 @pytest.mark.asyncio

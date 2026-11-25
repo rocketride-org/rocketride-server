@@ -357,8 +357,14 @@ async def _settle():
 
 
 def _no_waiting(monkeypatch):
-    """Sleeps return at once: a watch is started again, and the pods counted, without delay."""
-    monkeypatch.setattr(k8.asyncio, 'sleep', lambda _s, real=asyncio.sleep: real(0))
+    """Sleeps return at once: a watch is started again, and the pods counted, without delay.
+
+    Returns:
+        The delays the sleeps were asked for, in order; ``_settle``'s own are 0.
+    """
+    delays = []
+    monkeypatch.setattr(k8.asyncio, 'sleep', lambda s, real=asyncio.sleep: delays.append(s) or real(0))
+    return delays
 
 
 # ---------------------------------------------------------------------------
@@ -837,9 +843,9 @@ def test_bootstrap_unpacks_privately_and_gives_the_engine_the_images_umask():
 
 
 async def test_command_is_the_bootstrap_then_the_engine():
-    """The docker runtime's argv after the bootstrap's own: --hosted, the port fixed."""
+    """The docker runtime's argv after the bootstrap's own: --hosted and --shared-host, the port fixed."""
     cli = FakeKubectl()
-    await _launcher(cli, start_timeout='90').start(_spec())
+    await _launcher(cli, start_timeout='90').start(_spec(shared_host=True))
     container = cli.container()
     # The image's entrypoint (tini) runs it, as under docker: a `command` would replace it
     assert 'command' not in container
@@ -857,6 +863,7 @@ async def test_command_is_the_bootstrap_then_the_engine():
         '--data_host=0.0.0.0',
         f'--data_token_sha256={TOKEN_SHA}',
         '--hosted',
+        '--shared-host',
         '--modelserver=eas-host:5590',
         '--threads=2',
         '--dumps',
@@ -1520,7 +1527,7 @@ async def test_a_pod_the_engine_deleted_is_not_lost():
 
 
 async def test_the_watch_is_started_again_when_it_ends(monkeypatch):
-    _no_waiting(monkeypatch)
+    delays = _no_waiting(monkeypatch)
     cli = FakeKubectl()
     launcher = _launcher(cli)
     await launcher.prepare()
@@ -1529,6 +1536,10 @@ async def test_the_watch_is_started_again_when_it_ends(monkeypatch):
     await _settle()
     assert len(cli.watches) == 2
     assert cli.spawned[1] == cli.spawned[0]
+    # It paused for the rest of the watch's shortest life first, and the pods are counted after the settle pause
+    pauses = [s for s in delays if s]
+    assert len(pauses) == 2 and k8.CONST_WATCH_MIN_LIFE - 1 < pauses[0] <= k8.CONST_WATCH_MIN_LIFE
+    assert pauses[1] == k8.CONST_WATCH_SETTLE
     # And a task started now is told of its pod by the new one
     launch = await launcher.start(_spec())
     cli.emit('Succeeded', exit_code='0')
@@ -1565,7 +1576,7 @@ async def test_a_watch_that_ended_before_its_time_is_not_killed(monkeypatch):
 
 
 async def test_a_watch_that_cannot_be_started_again_is_tried_again(monkeypatch):
-    _no_waiting(monkeypatch)
+    delays = _no_waiting(monkeypatch)
     cli = FakeKubectl()
     launcher = _launcher(cli)
     await launcher.prepare()
@@ -1576,6 +1587,11 @@ async def test_a_watch_that_cannot_be_started_again_is_tried_again(monkeypatch):
     cli.spawn_error = None
     await _settle()
     assert len(cli.watches) == 2
+    # Each try came after a pause for the shortest life, and the one that worked is followed by the settle pause
+    *pauses, settle = [s for s in delays if s]
+    assert len(pauses) == len(cli.spawned) - 1
+    assert all(k8.CONST_WATCH_MIN_LIFE - 1 < s <= k8.CONST_WATCH_MIN_LIFE for s in pauses)
+    assert settle == k8.CONST_WATCH_SETTLE
 
 
 async def test_a_pod_that_went_while_the_watch_was_down_is_lost(monkeypatch):

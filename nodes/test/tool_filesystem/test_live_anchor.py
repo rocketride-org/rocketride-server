@@ -51,7 +51,7 @@ its own subtree, the task running as the engine's own user; where the engine
 cannot mount it (a daemon that does not see its files or remaps users, S3
 through a web-identity token) it refuses the pipeline before it starts. Under
 ``--runtime=k8s`` a pod sees none of the engine's files, so a filesystem store
-is always refused. These tests then assert that refusal instead — only under
+is always refused. These tests then assert that refusal and skip — only under
 those runtimes, and only with the runtime's own reason.
 """
 
@@ -140,7 +140,7 @@ async def test_tool_writes_land_in_the_callers_own_tree(tool_pipeline):
     client, token, refusal = tool_pipeline
     if refusal:
         assert _REFUSAL in refusal
-        return
+        pytest.skip(f'runtime refused: {refusal}')
     content = f'written inside the engine subprocess ({_RUN_ID})'
 
     result = await _tool(client, token, 'write_file', path=f'{_WORKDIR}/from_tool.txt', content=content)
@@ -162,7 +162,7 @@ async def test_session_writes_visible_to_the_tool(tool_pipeline):
     client, token, refusal = tool_pipeline
     if refusal:
         assert _REFUSAL in refusal
-        return
+        pytest.skip(f'runtime refused: {refusal}')
     content = f'written by the session ({_RUN_ID})'
 
     await client.fs_write_string(f'{_WORKDIR}/from_session.txt', content)
@@ -182,7 +182,7 @@ async def test_tool_listing_and_lifecycle(tool_pipeline):
     client, token, refusal = tool_pipeline
     if refusal:
         assert _REFUSAL in refusal
-        return
+        pytest.skip(f'runtime refused: {refusal}')
 
     await _tool(client, token, 'create_directory', path=f'{_WORKDIR}/sub')
     await _tool(client, token, 'write_file', path=f'{_WORKDIR}/sub/x.txt', content='x')

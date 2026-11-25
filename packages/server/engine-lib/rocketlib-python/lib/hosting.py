@@ -28,9 +28,10 @@ How the engine started this task: the flags on its command line.
 ``--hosted``: the task belongs to a hosted engine. Its rules hold wherever the
 task runs: a credit check before every pipe.
 
-``--shared-host``: the task runs on the engine's own host (spawn), so the
-guards for a shared machine apply: the sandbox keeps to its default modules,
-``tool_python`` ignores ``allowed_modules``, stdio MCP is refused.
+``--shared-host``: the guards for a shared machine apply: the sandbox keeps to
+its default modules, ``tool_python`` ignores ``allowed_modules``, stdio MCP is
+refused. A hosted engine gives it to every task, whatever the runtime (see
+``TaskEngine._shares_host`` in ai.modules.task.task_engine).
 
 ``--modelserver=<address>``: GPU inference is delegated to a model server, so
 this task neither installs nor imports torch and the other tensor runtimes
@@ -57,7 +58,7 @@ def is_hosted() -> bool:
 
 
 def is_shared_host() -> bool:
-    """True when this task shares its host with the engine."""
+    """True when the guards for a shared host apply to this task."""
     return SHARED_HOST_FLAG in sys.argv
 
 

@@ -73,6 +73,7 @@ const {
 	missingImage,
 	diagnoseTestTarget,
 	withDotenv,
+	parseCluster,
 	k8sLabelValue,
 	diagnoseKubernetes,
 	unavailableReason,
@@ -799,8 +800,11 @@ function makeDockerPreflightAction(warmup) {
 }
 
 // nodes:test --runtime=k8s needs kubectl, a cluster on this machine and the namespace tasks
-// run in; without them every test would fail on its own. A context that is not a local one
-// is refused before the cluster is asked anything: the tests never run against a remote one.
+// run in; without them every test would fail on its own. A context that is not a local one,
+// or whose cluster kubectl reaches through a proxy (of the kubeconfig or of its environment)
+// or with a sign of a tunnel, is refused before the cluster is asked anything. A tunnel the
+// kubeconfig does not name (ssh -L, kubectl port-forward) to a remote API server looks local
+// and is not seen.
 // Docker Desktop's cluster takes its images from the docker daemon, so there the node image
 // is checked as the docker runtime checks it; any other cluster has to be given the image.
 // A warmup ahead loads the project .env first here too, as the docker preflight does.
@@ -812,22 +816,22 @@ function makeK8sPreflightAction(warmup) {
 			const { current, context, namespace, scope, kubectlEnv } = await k8sTarget();
 			let problem = diagnoseKubernetes({ context, current, namespace });
 			if (!problem) {
-				// The context's API server, read from the kubeconfig: a local name is not enough
+				// The context's cluster, read from the kubeconfig: a local name is not enough.
+				// Only the cluster's entry: the users' entries hold their tokens.
 				const view = await capture(
 					'kubectl',
-					[
-						'config',
-						'view',
-						'--minify',
-						'--context',
-						context,
-						'-o',
-						'jsonpath={.clusters[0].cluster.server}',
-					],
+					['config', 'view', '--minify', '--context', context, '-o', 'jsonpath={.clusters[0]}'],
 					{ env: kubectlEnv }
 				);
-				const server = view.code === 0 ? view.stdout.trim() : '';
-				problem = diagnoseKubernetes({ context, current, namespace, server });
+				const judged = {
+					context,
+					current,
+					namespace,
+					...parseCluster(view.code === 0 ? view.stdout : ''),
+					env: kubectlEnv,
+					platform: os.platform(),
+				};
+				problem = diagnoseKubernetes(judged);
 				if (!problem) {
 					const found = await capture(
 						'kubectl',
@@ -842,7 +846,7 @@ function makeK8sPreflightAction(warmup) {
 						],
 						{ env: kubectlEnv }
 					);
-					problem = diagnoseKubernetes({ context, current, namespace, server, found });
+					problem = diagnoseKubernetes({ ...judged, found });
 				}
 			}
 			if (problem) throw new Error(formatDiagnosis(name, problem));

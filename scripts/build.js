@@ -241,32 +241,6 @@ function parseArgs(args) {
 	return { requests, options, globalCommands };
 }
 
-/**
- * Expand global commands to all modules that support them
- *
- * Looks for actions like "moduleName:command" with descriptions (public actions)
- */
-function expandGlobalCommands(globalCommands, registry, options) {
-	const requests = [];
-
-	for (const command of globalCommands) {
-		for (const moduleName of registry.names()) {
-			const actionName = `${moduleName}:${command}`;
-			const actionDef = registry.getAction(actionName);
-			// Actions that do not run on this OS, or only run by name, are left out, not failed
-			if (actionDef && registry.inGlobalCommands(actionDef)) {
-				const actionObj = typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
-				// Only expand to public actions (those with descriptions)
-				if (actionObj?.description) {
-					requests.push({ module: moduleName, command: actionName });
-				}
-			}
-		}
-	}
-
-	return requests;
-}
-
 // Usage, options and the actions the registry has, for --help
 function showHelp(registry, options) {
 	console.log(`
@@ -445,7 +419,7 @@ async function main() {
 	}
 
 	// Expand global commands (e.g., "build" -> "build:server", "build:playground-ui", etc.)
-	const expandedRequests = expandGlobalCommands(globalCommands, registry, options);
+	const expandedRequests = registry.expandGlobalCommands(globalCommands, options);
 	const requests = [...explicitRequests, ...expandedRequests];
 
 	// Handle --list-actions - show ALL registered actions across all modules

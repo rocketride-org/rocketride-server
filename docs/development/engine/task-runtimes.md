@@ -167,12 +167,28 @@ that `KUBECONFIG`.
 **The context rule.** `nodes:test --runtime=k8s` runs only against a cluster
 on your machine. It accepts the contexts `docker-desktop`, `kind-*`, `k3d-*`,
 `minikube`, `rancher-desktop` and `orbstack`, and refuses any other before it
-asks the cluster anything. A local name is not enough: the context's API
-server, read from the kubeconfig, must be on this machine too (a loopback
-address, or Docker Desktop's `kubernetes.docker.internal`; for `minikube` also a
-private-network address), so a `kind-dev` that points at a remote cluster is
-refused as well. The context is `RR_K8S_CONTEXT` when set (in the environment or
-in the engine's `.env`), else `kubectl`'s current one, and the tests run on the
+asks the cluster anything. A local name is not enough: the context's cluster,
+read from the kubeconfig, must be on this machine too, so a `kind-dev` that
+points at a remote cluster is refused as well. Its API server must be
+`localhost`, `0.0.0.0`, `[::1]`, a `127.x.y.z` address in its usual spelling
+(not `127.1`, `0177.0.0.1` or `2130706433`), or Docker's
+`kubernetes.docker.internal` or `host.docker.internal`; for `minikube` also an
+address of a private network (`10.x`, `172.16.x` to `172.31.x`, `192.168.x`).
+The cluster must set neither `proxy-url` nor `tls-server-name`: a proxy takes
+even a loopback address to another machine, and a TLS server name is the usual
+sign of a tunnel. A proxy in kubectl's environment (yours, or the engine's
+`.env`) is refused too: `HTTPS_PROXY` or `https_proxy` for an `https://` server,
+`HTTP_PROXY` or `http_proxy` for an `http://` one. kubectl goes around it only
+to `localhost` (in lower case), to a loopback address, and to a host that
+`NO_PROXY` (or `no_proxy`) names. So with a proxy set, any other server is
+accepted only when `NO_PROXY` holds `*`, the host itself, or, for a host name, a
+domain it ends in (`docker.internal`, `.docker.internal` or `*.docker.internal`);
+an address such as `192.168.49.2` must be listed whole. An entry
+the check does not read, such as a CIDR or a host with a port, does not count:
+add the host itself. A tunnel the kubeconfig does not name, such as `ssh -L` or
+`kubectl port-forward` to a remote API server, cannot be seen in it and is not
+detected. The context is `RR_K8S_CONTEXT` when set (in the environment or in
+the engine's `.env`), else `kubectl`'s current one, and the tests run on the
 one the check judged, in the namespace it checked. With `--taskserver` none of
 this applies: the builder starts no server and checks no context, the tests
 run on the server you named and on whatever cluster it uses, and `--runtime`
@@ -253,10 +269,10 @@ Under `docker` and `k8s` the builder does three more things:
 Two test files behave differently under a runtime, because a task there does
 not see the engine's files:
 
-| Test                                  | `docker`                                                                                                                  | `k8s`                                                                        |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `tool_filesystem/test_live_anchor.py` | Runs as under spawn, through a mount of the run's storage root. Where the daemon cannot give one, it asserts the refusal. | Asserts the refusal: `tool_filesystem is not available under --runtime=k8s`. |
-| `media_inspect/test_live.py`          | As under spawn.                                                                                                           | Its pipeline saves through the store, so it asserts the same refusal.        |
+| Test                                  | `docker`                                                                                                                            | `k8s`                                                                                    |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `tool_filesystem/test_live_anchor.py` | Runs as under spawn, through a mount of the run's storage root. Where the daemon cannot give one, it asserts the refusal and skips. | Asserts the refusal, then skips: `tool_filesystem is not available under --runtime=k8s`. |
+| `media_inspect/test_live.py`          | As under spawn.                                                                                                                     | Its pipeline saves through the store, so it skips on the same refusal.                   |
 
 To run a few tests rather than all of them:
 
@@ -481,7 +497,9 @@ settings, secrets included, so delete them.
 | A task runs Python you have since changed                                                 | The image is stale: `./builder container:sync`. Under k8s on any cluster but Docker Desktop's, give the image to the cluster again; with kind, `kind load docker-image rocketride/node:<version> --name <name>` (see [Preparing](#k8s)).                                                                                                             |
 | `... is not on this daemon`, or `Image ... not found; run ./builder container:build`      | The node image of this version is missing: see [Preparing](#docker).                                                                                                                                                                                                                                                                                 |
 | `Image ... not found on the node`                                                         | Under k8s, the cluster's node does not have the image: see [Preparing](#k8s).                                                                                                                                                                                                                                                                        |
-| `the kubectl context <name> is not a cluster on this machine`                             | The context rule: `kubectl config use-context docker-desktop`, or set `RR_K8S_CONTEXT` to a local one.                                                                                                                                                                                                                                               |
+| `the kubectl context <name> is not a cluster on this machine`, or `points at <server>`    | The context rule: `kubectl config use-context docker-desktop`, or set `RR_K8S_CONTEXT` to a local one.                                                                                                                                                                                                                                               |
+| `the kubectl context <name> sets proxy-url in its cluster`, or `tls-server-name`          | The context rule: through a proxy or a tunnel the cluster can be on another machine. Remove the field with the command the message gives (`kubectl config unset clusters.<cluster>.<field>`), or use another local context.                                                                                                                          |
+| `the kubectl context <name> reaches <host> through the proxy in <variable>`               | The context rule: kubectl takes that proxy from its environment, and the cluster behind it can be on another machine. Add the host itself to `NO_PROXY` (a CIDR does not count), or unset the variable: in your environment or in `dist/server/.env`.                                                                                                |
 | `the namespace rocketride-tasks does not exist in <context>`                              | `kubectl --context <context> create namespace rocketride-tasks`.                                                                                                                                                                                                                                                                                     |
 | `... names this host by a loopback address ...`                                           | Under k8s, a model server or database at a loopback address needs `RR_K8S_HOST_ALIAS`.                                                                                                                                                                                                                                                               |
 | `tool_filesystem is not available under --runtime=...`                                    | The pipeline uses the store (`tool_filesystem`, or `tool_skills` with a folder) and the runtime cannot give it to the task. Under k8s, and under docker on a hosted engine, that is always so with a filesystem store.                                                                                                                               |
