@@ -28,6 +28,7 @@ import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
 import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
 import { Banner } from '../../../components/banner/Banner';
 import { Button } from '../../../components/button/Button';
+import { useShellApiConfig } from '../../../connection/ShellApiConfigContext';
 import type { ConnectResult, ProfileUpdate } from '../types';
 import { S, Badge, Avatar, initials, avatarColor } from './shared';
 
@@ -103,6 +104,7 @@ const styles = {
 		fontSize: 12,
 		color: 'var(--rr-text-secondary)',
 		display: 'flex',
+		flexWrap: 'wrap',
 		alignItems: 'center',
 		gap: 5,
 	} as CSSProperties,
@@ -250,6 +252,7 @@ const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} 
  * assignment action per team, and an inline Edit Profile modal.
  */
 export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDevTeam, onSetDefaultOrg, identityOnly }) => {
+	const { RR_ZITADEL_URL } = useShellApiConfig();
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
 	 * Called exactly when the edit panel OPENS — the concurrent-edit ruling
@@ -349,6 +352,15 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 									{profile?.email || authUser?.email}
 									{/* Show verified / unverified badge only when the server has provided the flag. */}
 									{profile?.emailVerified !== undefined && (profile.emailVerified ? <VerifiedBadge /> : <span style={styles.unverifiedPill}>Unverified</span>)}
+									{/* Invites to an unverified email wait for verification; link to the identity provider's verify page. */}
+									{profile?.emailVerified === false && RR_ZITADEL_URL && profile.email && (
+										<>
+											<a href={`${RR_ZITADEL_URL}/ui/v2/login/verify?loginName=${encodeURIComponent(profile.email)}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--rr-text-link)' }}>
+												Verify email
+											</a>
+											<span>After verifying, sign out and back in.</span>
+										</>
+									)}
 								</span>
 							)}
 							{(profile?.phoneNumber || authUser?.phoneNumber) && (
