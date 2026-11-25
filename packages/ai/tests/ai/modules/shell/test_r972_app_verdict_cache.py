@@ -75,6 +75,9 @@ class _Account:
     async def get_public_apps(self):
         return []
 
+    async def authorize_app_use(self, info, app_id, version=None):
+        return info is not None and app_id in self.entitled
+
 
 def _setup(monkeypatch, account):
     clock = _Clock()
@@ -150,23 +153,32 @@ def test_authorize_app_denial_error_tuple_is_cached(monkeypatch):
 
 
 def test_version_dirs_unavailable_error_tuple_is_not_cached(monkeypatch):
-    """A 503 error tuple is an outage: answered anonymously once, never cached."""
+    """A 503 error tuple is an outage: answered anonymously once, never cached.
+
+    Observed on the listing path (``want=None``): with a version wanted the
+    live paid-seat check answers first and nothing reaches the cache.
+    """
     account = _Account(error_tuples=[(503, 'unavailable')])
     _setup(monkeypatch, account)
 
-    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=1)) == {}
-    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=1)) == {1: 'app.x/v1/dist'}
+    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x')) == {}
+    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x')) == {1: 'app.x/v1/dist'}
     assert account.authentications == 2
 
 
 def test_version_dirs_denial_error_tuple_is_cached(monkeypatch):
-    """A 401 error tuple is a definite denial: the anonymous answer is cached."""
+    """A 401 error tuple is a definite denial: the anonymous map is cached.
+
+    Observed on the listing path (``want=None``): with a version wanted the
+    live paid-seat check answers first and nothing reaches the cache, and
+    the token is re-authenticated on every call, so the second call sees a
+    valid identity and is still answered from the cached (empty) map.
+    """
     account = _Account(error_tuples=[(401, 'invalid')])
     _setup(monkeypatch, account)
 
-    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=1)) == {}
-    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=1)) == {}
-    assert account.authentications == 1
+    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x')) == {}
+    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.x')) == {}
 
 
 def test_r972_1a_app_entry_info_auth_exception_answers_anonymously(monkeypatch):

@@ -488,29 +488,16 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
     stays conservative both ways: the refresh can only ADD what the DB now
     grants, and revocation still converges on the hard expiry as before.
     """
-    key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
-    now = time.time()
-    hit = _version_dir_cache.get(key)
-    if hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
-        # A hit only answers when it can satisfy the caller: an absent
-        # ``want`` on a map old enough to re-resolve falls through to a
-        # fresh DB walk below (the miss-refresh); a map younger than the
-        # key's current floor answers stale to keep the miss path from
-        # becoming a per-request walk.
-        if want is None or want in hit['dirs'] or now - hit['resolvedAt'] < hit['floor']:
-            return hit['dirs']
-
     from ai.account import account
     from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
 
+    info = None
     auth_failed = False
     if _is_saas():
-        info = None
         if token:
             try:
                 info = await account.authenticate(token)
             except Exception:
-                # Answer as anonymous, but never cache it (#972)
                 auth_failed = True
                 info = None
         if info is not None and not hasattr(info, 'userId'):
@@ -518,6 +505,34 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
             if not _is_auth_denial(info):
                 auth_failed = True
             info = None
+        # A cached publish/version map is not a cached paid seat. Re-check
+        # live membership and seat allocation even on a warm asset request.
+        if want is not None and not await account.authorize_app_use(info, app_id, want):
+            return {}
+
+    key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
+    now = time.time()
+    hit = _version_dir_cache.get(key)
+    # A warm entitled map is never reused once the token stops authenticating
+    # (denied or unverifiable): ``info`` is None then, and the map was resolved
+    # for a verified identity. An anonymous map still answers any caller.
+    stale_identity = info is None and hit is not None and hit.get('authed', False)
+    if not auth_failed and not stale_identity and hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
+        # A hit only answers when it can satisfy the caller: an absent
+        # ``want`` on a map old enough to re-resolve falls through to a
+        # fresh DB walk below (the miss-refresh); a map younger than the
+        # key's current floor answers stale to keep the miss path from
+        # becoming a per-request walk.
+        if want is None or want in hit['dirs'] or now - hit['resolvedAt'] < hit['floor']:
+            if _is_saas() and want is None:
+                return {
+                    version: path
+                    for version, path in hit['dirs'].items()
+                    if await account.authorize_app_use(info, app_id, version)
+                }
+            return hit['dirs']
+
+    if _is_saas():
         dirs = await entitled_version_dirs(info, app_id)
     else:
         dirs = await open_version_dirs(app_id)
@@ -537,6 +552,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
         'resolvedAt': now,
         'floor': floor,
         'appId': app_id,
+        'authed': info is not None,
     }
     # Bounded like _app_auth_cache: expired first, then soonest-to-expire.
     if len(_version_dir_cache) > 4096:
@@ -649,6 +665,13 @@ async def apps_session(request: Request):
     return resp
 
 
+# The only files the unversioned /apps/<dir>/<file> route serves on SaaS: the
+# listing assets seeded manifests point at ('/apps/<dir>/icon.svg', og images,
+# readmes) and the README images the build copies flat into '<dir>/assets/'.
+# Never a script, stylesheet or other executable bundle part.
+_LISTING_ASSET_SUFFIXES = frozenset({'.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.ico', '.md'})
+
+
 async def apps_static(request: Request):
     """
     Serve MF remote app bundles (versioned, store-backed) + app assets.
@@ -665,7 +688,8 @@ async def apps_static(request: Request):
       JSON document saying what a bundle fetch would serve this caller
       (see ``_app_entry_info``). The deploy smoke test's probe.
     - anything else — the static assets tree on disk: the icons/readmes the
-      app manifests point at (``/apps/<dir>/icon.svg``).
+      app manifests point at (``/apps/<dir>/icon.svg``). On SaaS only those
+      top-level listing assets are served, never a bundle file.
 
     Raises:
         HTTPException: 404 if file not found, 503 if apps dir missing.
@@ -727,6 +751,15 @@ async def apps_static(request: Request):
         token = request.cookies.get(_APP_COOKIE, '')
         if not await _authorize_app(token, app_id):
             raise HTTPException(status_code=403, detail=f'Not authorized for app {app_id}')
+        # _authorize_app is catalog visibility, not the per-version entitlement
+        # the versioned route enforces, so a bundle served from here would skip
+        # the paid-app gate. Serve only the listing assets (icons, readmes) the
+        # manifests point at, directly under the app directory or its assets/
+        # folder; bundles come from /apps/<id>/v<N>/ alone.
+        top_level = len(rel_parts) == 2
+        readme_asset = len(rel_parts) == 3 and rel_parts[1] == 'assets'
+        if not (top_level or readme_asset) or file_path.suffix.lower() not in _LISTING_ASSET_SUFFIXES:
+            raise HTTPException(status_code=404, detail='Not found')
 
     # Serve the file if it exists
     if file_path.exists() and file_path.is_file():

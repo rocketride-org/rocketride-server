@@ -519,6 +519,53 @@ async def test_r972_1a_push_never_installs_over_a_deauth(monkeypatch, perms):
     assert events(conn, 'apaext_account') == []
 
 
+@pytest.mark.asyncio
+async def test_r972_deauth_disconnect_event_stays_user_scoped(monkeypatch):
+    """A deauthed socket's connection_removed is scoped to its former user, not ''."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('admin', ADMIN), monitors=WILDCARD_ALL)
+
+    await conn.on_deauth(_request('deauth'))
+    server.broadcast_server_event = AsyncMock()
+    await server._dapbase_on_disconnected(conn)
+
+    assert server.broadcast_server_event.call_args.kwargs['user_id'] == 'admin'
+
+
+@pytest.mark.asyncio
+async def test_r972_empty_user_id_disconnect_event_stays_scoped(monkeypatch):
+    """A never-deauthed connection with userId '' disconnects scoped to '', not None."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('', []), monitors=WILDCARD_ALL)
+
+    server.broadcast_server_event = AsyncMock()
+    await server._dapbase_on_disconnected(conn)
+
+    assert server.broadcast_server_event.call_args.kwargs['user_id'] == ''
+
+
+@pytest.mark.asyncio
+async def test_r972_reauth_after_deauth_scopes_disconnect_event_to_new_user(monkeypatch):
+    """A socket that deauths then re-auths as someone else reports its removal to the new user."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('admin', ADMIN))
+
+    await conn.on_deauth(_request('deauth'))
+
+    async def authenticate_credential(credential):
+        return identity('bob', ADMIN)
+
+    server._server.authenticate_credential = authenticate_credential
+    await conn.on_auth(_request('auth', auth='rr_session'))
+    assert conn._authenticated is True
+    assert conn._account_info.userId == 'bob'
+
+    server.broadcast_server_event = AsyncMock()
+    await server._dapbase_on_disconnected(conn)
+
+    assert server.broadcast_server_event.call_args.kwargs['user_id'] == 'bob'
+
+
 # ---------------------------------------------------------------------------
 # Signed out is not waitlisted
 # ---------------------------------------------------------------------------
