@@ -40,6 +40,7 @@ from rocketride import TASK_STATE
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
 from ai.modules.task.launcher import SubprocessLauncher
+from ai.modules.task.launcher.subprocess import SubprocessLaunch
 from ai.modules.task.task_engine import (
     CONST_PARAM_TOKEN_SECRET_ENV,
     CONST_TRACE_PAYLOAD_CAP,
@@ -2703,6 +2704,46 @@ async def test_a_ttl_stop_after_a_crash_was_read_keeps_its_holders_dormant_on_tt
 
     assert t.state is EngineState.STOPPED and t.dormant_reason == 'ttl'
     t._server.engine_crashed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_spawn_stop_ends_by_its_term_and_waits_for_the_teardown(monkeypatch):
+    """A signal to a local child arrives: the stop needs no kill, waits for a slow teardown, and gives up on nothing."""
+    said = []
+    monkeypatch.setattr('ai.modules.task.task_engine.warning', said.append)
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        '-c',
+        'import time; time.sleep(60)',
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        t = _ending_task(None)
+        del t._process_exit_code
+        t._termination_lock = asyncio.Lock()
+        t._stop_count = 0
+        t._launch = SubprocessLaunch(process, 0, None, SimpleNamespace(release_port=MagicMock()))
+        t._launch.kill = MagicMock(wraps=t._launch.kill)
+
+        async def output_closes():
+            """The stdio reader's EOF starts the teardown, a slow one here."""
+            await process.stdout.read()
+            await asyncio.sleep(0.3)
+            await TaskEngine._terminated(t)
+
+        eof = asyncio.ensure_future(output_closes())
+        await asyncio.wait_for(TaskEngine.stop_task(t, reason='user'), timeout=10)
+
+        assert eof.done() and process.returncode is not None
+        assert (t.state, t._status.status) == (EngineState.STOPPED, 'Stopped')
+        t._launch.kill.assert_not_called()
+        assert said == []
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
 
 
 @pytest.mark.asyncio

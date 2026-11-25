@@ -42,6 +42,7 @@ Classes:
 Constants:
     CONST_DEFAULT_MAX_THREADS: Default thread pool size (64)
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS: Graceful termination timeout (5s)
+    CONST_STOP_WAIT_TIMEOUT: How long a stop waits for the end after its signals (30s)
     CONST_STATUS_UPDATE_FREQ: Status update frequency (100ms)
     CONST_MAX_READY_TIME: Maximum time to wait for task readiness (30s)
 
@@ -70,6 +71,7 @@ from rocketlib import debug, warning, args as startup_args
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
+    CONST_STOP_WAIT_TIMEOUT,
     CONST_STATUS_UPDATE_FREQ,
     CONST_MAX_READY_TIME,
     CONST_READY_POLL_INTERVAL,
@@ -3981,6 +3983,10 @@ class TaskEngine(DAPBase):
         """
         Initiate graceful task termination with resource cleanup.
 
+        Returns when the run has ended, or ``CONST_STOP_WAIT_TIMEOUT`` after
+        the signals when its runtime did not take them: the engine then stays
+        stopping, the task runs on, and a later stop signals it again.
+
         Args:
             reason: WHY the stop happens — 'user' (explicit request) or
                 'ttl' (the run window elapsed). Drives the recorded run
@@ -4029,8 +4035,18 @@ class TaskEngine(DAPBase):
                     except Exception as e:
                         self.debug_message(f'Error during subprocess termination: {e}')
 
-                # Wait for completion
+                # Wait for completion, for a while: a runtime that did not take the signals (a docker
+                # kill or a pod delete refused) leaves the task running, and a later stop sends them again
+                deadline = time.monotonic() + CONST_STOP_WAIT_TIMEOUT
                 while self._status.state not in [TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value]:
+                    if time.monotonic() >= deadline:
+                        message = (
+                            f'Engine "{self.engine_key}" did not end within {CONST_STOP_WAIT_TIMEOUT:g}s '
+                            'after its stop signals and is left running; a later stop signals it again'
+                        )
+                        warning(message)
+                        self.debug_message(message)
+                        return
                     await asyncio.sleep(0.1)
 
         except Exception as e:

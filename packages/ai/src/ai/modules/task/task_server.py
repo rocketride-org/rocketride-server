@@ -743,6 +743,7 @@ class TaskServer(DAPBase):
         self._launched: Dict[int, Set[str]] = {}  # Launching connection id -> keys of the controls it launched
         self._engine_restarts: Dict[str, Deque[float]] = {}  # Engine key -> automatic restart times, last hour
         self._restart_tasks: Set[asyncio.Task] = set()  # Pending automatic listener restarts
+        self._ttl_stops: Set[asyncio.Task] = set()  # TTL stops still running (_ttl_stop)
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
         self._connection_id = 0  # Monotonic connection identifier generator
         self._unauthed_by_ip: Dict[str, int] = {}  # Count of unauthenticated connections per client IP
@@ -913,6 +914,9 @@ class TaskServer(DAPBase):
           they stay, dormant, and their next request starts the engine again
           (``ensure_engine``). An engine with a ttl-0 holder does not age.
 
+        Each stop runs as its own task (``_ttl_stop``), so a stop that does not
+        end holds no other check.
+
         This method runs as a background async task throughout server lifetime.
         """
         while True:
@@ -1012,7 +1016,7 @@ class TaskServer(DAPBase):
             # Its own idle time reached its ttl: release this hold only.
             # Reason 'ttl', so the run records as completed, never as cancelled
             self.debug_message(f'Task "{control.id}" exceeded TTL ({int(idle)}s >= {control.ttl}s), releasing...')
-            await self.stop_task(control.key, reason='ttl')
+            await self._ttl_stop(self.stop_task(control.key, reason='ttl'))
 
         # Step 2: engines whose own inactivity reached the policy timer
         while self._engine_expiry and self._engine_expiry[0][0] <= now:
@@ -1039,13 +1043,34 @@ class TaskServer(DAPBase):
             # next request starts it again under the same key (plan 7.2)
             self.debug_message(f'Engine "{engine.engine_key}" inactive for {int(idle)}s, stopping...')
             engine.dormant_reason = 'ttl'
-            await self._stop_engine_now(engine, 'ttl')
+            await self._ttl_stop(self._stop_engine_now(engine, 'ttl'))
 
         return popped
 
+    async def _ttl_stop(self, stop: Awaitable[None]) -> None:
+        """
+        Start one stop of a TTL pass as its own task, and go on once it has taken its first step.
+
+        A stop whose runtime does not take its signals waits for its bound
+        (``TaskEngine.stop_task``); the checks after it do not. Its first step
+        marks the engine stopping, so step 2 of the same pass does not stop as
+        inactive an engine whose last control step 1 released.
+
+        Args:
+            stop: The stop to run.
+        """
+        task = asyncio.ensure_future(stop)
+        self._ttl_stops.add(task)
+        task.add_done_callback(self._ttl_stops.discard)
+        await asyncio.wait({task}, timeout=0)
+
     async def shutdown(self) -> None:
-        """Cancel all background tasks, pending listener restarts included."""
-        bg_tasks = getattr(self, '_bg_tasks', []) + list(getattr(self, '_restart_tasks', ()))
+        """Cancel all background tasks, pending listener restarts and TTL stops included."""
+        bg_tasks = (
+            getattr(self, '_bg_tasks', [])
+            + list(getattr(self, '_restart_tasks', ()))
+            + list(getattr(self, '_ttl_stops', ()))
+        )
         for task in bg_tasks:
             if not task.done():
                 task.cancel()
@@ -4361,8 +4386,8 @@ class TaskServer(DAPBase):
                 # delivered through the registered control. A new run started
                 # under the same key meanwhile is not this control's to remove.
                 # The wait is bounded: a stalled terminal-event forward must not
-                # hold this caller (the ttl monitor stops tasks serially); on a
-                # timeout the control is left to the cleanup pass instead.
+                # hold this caller; on a timeout the control is left to the
+                # cleanup pass instead.
                 if control.run_kind == 'dev':
                     try:
                         await asyncio.wait_for(control.task.wait_terminated(), timeout=CONST_TEARDOWN_WAIT_TIMEOUT)

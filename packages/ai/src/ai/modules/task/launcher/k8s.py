@@ -1187,7 +1187,13 @@ class K8sLaunch(Launch):
         self._signal(lambda: self._delete_pod(f'--grace-period={CONST_TERMINATE_GRACE}'))
 
     def kill(self) -> None:
-        """SIGKILL: the pod is deleted at once, unless it has ended meanwhile."""
+        """
+        SIGKILL: the pod is deleted at once, unless it has ended meanwhile.
+
+        The attach's stdin is closed first, which ends the engine through
+        ``--autoterm`` even when the cluster refuses the delete.
+        """
+        self.process.stdin.close()
         self._signal(self._kill)
 
     def metrics(self) -> Dict[str, Any]:

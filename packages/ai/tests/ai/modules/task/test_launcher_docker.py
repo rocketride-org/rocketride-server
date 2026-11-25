@@ -44,7 +44,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from rocketride import TASK_STATE
 
+from ai.modules.task import task_engine
 from ai.modules.task.launcher import LaunchSpec, create_launcher
 from ai.modules.task.launcher import docker as dk
 from ai.modules.task.launcher.docker import (
@@ -59,6 +61,8 @@ from ai.modules.task.launcher.docker import (
     rewrite_loopback,
     task_tar,
 )
+from ai.modules.task.task_engine import TaskEngine
+from ai.modules.task.types import EngineState
 
 LINUX_ENGINE = {'OSType': 'linux', 'OperatingSystem': 'Ubuntu 22.04.4 LTS'}
 DOCKER_DESKTOP = {'OSType': 'linux', 'OperatingSystem': 'Docker Desktop (containerized)'}
@@ -1016,6 +1020,53 @@ async def test_terminate_and_kill_go_through_the_daemon():
     await asyncio.sleep(0)
     kills = [c.args for c in cli.calls if c.args[0] == 'kill']
     assert kills == [['kill', '-s', 'TERM', 'c0ffee'], ['kill', 'c0ffee']]
+    gate.set()
+
+
+def _running_engine(launch):
+    """A running TaskEngine over ``launch``, with only what stop_task reads."""
+    engine = TaskEngine.__new__(TaskEngine)
+    engine.engine_key = 'enginehash:user-1'
+    engine.state = EngineState.RUNNING
+    engine._status = SimpleNamespace(state=TASK_STATE.RUNNING.value)
+    engine._launch = launch
+    engine._termination_lock = asyncio.Lock()
+    engine._stop_count = 0
+    engine.debug_message = MagicMock()
+    return engine
+
+
+async def test_a_stop_whose_kills_the_daemon_refuses_lets_go_and_a_later_stop_signals_again(monkeypatch):
+    """An authorization plugin refuses docker kill, so the container runs on with its attach up.
+
+    The stop gives up after its bound and says so, the lock is free, and the next stop sends both signals again.
+    """
+    monkeypatch.setattr(task_engine, 'CONST_CANCEL_WAIT_TIMEOUT_SECONDS', 0.01)
+    monkeypatch.setattr(task_engine, 'CONST_STOP_WAIT_TIMEOUT', 0.2)
+    said = []
+    monkeypatch.setattr(task_engine, 'warning', said.append)
+    cli = FakeCli(kill=CliResult(1, '', 'Error response from daemon: authorization denied by plugin authz'))
+    gate = asyncio.Event()
+    original = cli.run
+
+    async def run(args, *, stdin=None, env=None, check=True, timeout=dk.CONST_CLI_TIMEOUT):
+        """The fake CLI, with docker wait held at the gate so the container keeps running."""
+        if args[0] == 'wait':
+            await gate.wait()
+        return await original(args, stdin=stdin, env=env, check=check, timeout=timeout)
+
+    cli.run = run
+    launch = await _launcher(cli).start(_spec())
+    engine = _running_engine(launch)
+
+    await asyncio.wait_for(TaskEngine.stop_task(engine, reason='ttl'), timeout=5)
+    assert launch.returncode is None and engine.state is EngineState.STOPPING
+    assert not engine._termination_lock.locked()
+    assert len(said) == 1 and 'left running' in said[0]
+
+    await asyncio.wait_for(TaskEngine.stop_task(engine, reason='user'), timeout=5)
+    kills = [c.args for c in cli.calls if c.args[0] == 'kill']
+    assert kills == [['kill', '-s', 'TERM', 'c0ffee'], ['kill', 'c0ffee']] * 2
     gate.set()
 
 

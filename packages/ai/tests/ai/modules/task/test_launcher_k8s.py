@@ -53,6 +53,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from ai.modules.task import launcher as launcher_pkg
+from ai.modules.task import task_engine
 from ai.modules.task.launcher import LaunchSpec, create_launcher
 from ai.modules.task.launcher import k8s as k8
 from ai.modules.task.launcher.docker import CliResult
@@ -71,6 +72,10 @@ from ai.modules.task.launcher.k8s import (
     parse_quantity,
     payload_tar,
 )
+from ai.modules.task.task_engine import TaskEngine
+from ai.modules.task.types import EngineState
+
+from .test_launcher_docker import _running_engine
 
 TOKEN_SHA = 'a' * 64
 SELECTOR = 'rocketride.eas=host-a_5565-7fbe1a96'
@@ -1727,6 +1732,52 @@ async def test_a_pod_already_gone_at_the_kill_is_lost_and_not_deleted():
     assert await launch.wait() == -9
     assert cli.deletes('pod') == []
     assert launch.lost == REMOVED
+
+
+FORBIDDEN = CliResult(
+    1, '', 'Error from server (Forbidden): pods "rr-x" is forbidden: User "eas" cannot delete resource "pods"'
+)
+
+
+async def test_kill_closes_the_attach_stdin_and_terminate_does_not():
+    """A closed stdin ends the engine (--autoterm) without the DELETE right; a SIGTERM keeps its grace."""
+    cli = FakeKubectl(**{'delete pod': FORBIDDEN})
+    launch = await _launcher(cli).start(_spec())
+    launch.terminate()
+    await _settle()
+    assert cli.attach_process.stdin.closed is False
+    launch.kill()
+    await asyncio.gather(*launch._signals)
+    assert cli.attach_process.stdin.closed is True
+    # The delete is still asked for: the right may be there
+    assert cli.deletes('pod')[-1] == ['delete', 'pod', cli.pod, '--grace-period=0', '--force', '--wait=false']
+
+
+async def test_a_stop_whose_deletes_the_cluster_refuses_lets_go_and_a_later_stop_signals_again(monkeypatch):
+    """No DELETE right on pods, and a task that does not leave when its stdin closes: the pod runs on.
+
+    The stop gives up after its bound and says so, the lock is free, and the next stop asks for both deletes again.
+    """
+    monkeypatch.setattr(task_engine, 'CONST_CANCEL_WAIT_TIMEOUT_SECONDS', 0.01)
+    monkeypatch.setattr(task_engine, 'CONST_STOP_WAIT_TIMEOUT', 0.2)
+    said = []
+    monkeypatch.setattr(task_engine, 'warning', said.append)
+    cli = FakeKubectl(**{'delete pod': FORBIDDEN})
+    launch = await _launcher(cli).start(_spec())
+    engine = _running_engine(launch)
+
+    await asyncio.wait_for(TaskEngine.stop_task(engine, reason='ttl'), timeout=5)
+    assert launch.returncode is None and engine.state is EngineState.STOPPING
+    assert not engine._termination_lock.locked()
+    assert len(said) == 1 and 'left running' in said[0]
+    assert cli.attach_process.stdin.closed is True
+
+    await asyncio.wait_for(TaskEngine.stop_task(engine, reason='user'), timeout=5)
+    signals = [
+        ['delete', 'pod', cli.pod, '--grace-period=5', '--wait=false'],
+        ['delete', 'pod', cli.pod, '--grace-period=0', '--force', '--wait=false'],
+    ]
+    assert cli.deletes('pod') == signals * 2
 
 
 async def test_a_task_that_has_ended_is_not_signalled():

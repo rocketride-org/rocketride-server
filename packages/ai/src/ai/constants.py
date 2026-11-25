@@ -57,6 +57,7 @@ CONST_BILLING_API_TIMEOUT = 10.0  # seconds timeout for HTTP requests to billing
 # =============================================================================
 CONST_DEFAULT_MAX_THREADS = 64  # default thread pool size for task execution
 CONST_CANCEL_WAIT_TIMEOUT_SECONDS = 5  # seconds to wait for graceful task cancellation
+CONST_STOP_WAIT_TIMEOUT = 30.0  # seconds TaskEngine.stop_task waits after its signals; then it lets go of the task
 CONST_STATUS_UPDATE_FREQ = 1.0  # seconds between status broadcast updates
 CONST_MAX_READY_TIME = 5 * 60  # seconds to wait for task to become ready
 CONST_READY_POLL_INTERVAL = 0.250  # seconds between readiness checks
@@ -138,7 +139,7 @@ CONST_LOG_KF_OPEN_CEILING = 4096
 # Task Server Configuration
 # =============================================================================
 CONST_CLEANUP_DELAY_TIME = 5 * 60  # seconds grace period to keep completed tasks (5 minutes)
-CONST_TEARDOWN_WAIT_TIMEOUT = 30.0  # seconds stop_task waits for a @spec run's teardown before leaving it to cleanup
+CONST_TEARDOWN_WAIT_TIMEOUT = 30.0  # seconds TaskServer.stop_task waits for a @spec run's teardown; then cleanup has it
 CONST_CLEANUP_SLEEP_TIME = 1 * 60  # seconds between cleanup scans (1 minute)
 
 # =============================================================================

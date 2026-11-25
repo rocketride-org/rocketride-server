@@ -20,6 +20,7 @@ Focus areas:
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import errno
 import socket
@@ -66,6 +67,7 @@ def _make_server(*, config=None, web_server=None):
     ts._launched = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()
+    ts._ttl_stops = set()
     ts._connections = {}
     ts._connection_id = 0
     ts._unauthed_by_ip = {}
@@ -1245,6 +1247,32 @@ async def test_monitor_ttl_drops_the_stale_entry_of_a_replaced_control(monkeypat
 
     ts.stop_task.assert_not_awaited()
     assert len(ts._control_expiry) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_ttl_stop_that_does_not_end_holds_no_other_check():
+    """A stop whose runtime does not take its signals runs on by itself; the pass still releases the next control."""
+    ts = _make_server()
+    stopped = []
+
+    async def stop_task(key, reason='user'):
+        stopped.append((key, reason))
+        if key == 'stuck':
+            await asyncio.Event().wait()
+
+    ts.stop_task = stop_task
+    # The stuck control's deadline is the earlier one: the pass pops it first
+    _ttl_control(ts, 'stuck', ttl=100, idle=300)
+    _ttl_control(ts, 'idle', ttl=100, idle=150)
+
+    assert await asyncio.wait_for(ts._ttl_cycle(), timeout=5) == 2
+    assert stopped == [('stuck', 'ttl'), ('idle', 'ttl')]
+    (stuck,) = ts._ttl_stops
+    assert not stuck.done()
+
+    # The server's shutdown ends it with its other background tasks
+    await ts.shutdown()
+    assert stuck.cancelled()
 
 
 # ---------------------------------------------------------------------------

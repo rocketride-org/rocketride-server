@@ -229,6 +229,7 @@ def _server() -> TaskServer:
     ts._launched = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()
+    ts._ttl_stops = set()
     ts._connections = {}
     ts._connection_id = 0
     ts._unauthed_by_ip = {}
@@ -1081,6 +1082,25 @@ async def test_every_running_engine_is_scheduled_once(catalog, engines, clock):
     await ts._ttl_cycle()
     assert ts._engine_expiry == []
     assert engines == [(engine, 'ttl')]
+
+
+@pytest.mark.asyncio
+async def test_a_control_and_its_engine_due_in_one_pass_stop_once_as_the_controls(catalog, engines, clock):
+    """The control's stop runs as its own task, yet the engine check after it sees the engine stopping.
+
+    Stopped again as inactive, the engine would be marked dormant, and a control that expired would wake it.
+    """
+    ts = _server()
+    only = await _start(ts, _pipeline(), user='user-a', ttl=CONST_ENGINE_IDLE_TTL)
+    engine = only.task
+
+    clock.advance(CONST_ENGINE_IDLE_TTL)
+    assert await ts._ttl_cycle() == 2
+    await asyncio.gather(*list(ts._ttl_stops))
+
+    assert engines == [(engine, 'ttl')]
+    assert engine.dormant_reason is None
+    assert ts._task_control == {}
 
 
 @pytest.mark.asyncio
