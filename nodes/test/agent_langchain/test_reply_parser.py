@@ -52,6 +52,8 @@ REPAIRED_TOOL_CALL = '{"type":"tool_call","name":"crm.note_create","args":{"cont
 CUT_OFF_FINAL = '{"type":"final","content":"Acme reported revenue of 12'
 # A short `final` envelope whose content has quotes that were not escaped.
 BROKEN_MIDDLE_FINAL = '{"type":"final","content":"a "b" c"}'
+# Closed `final` envelopes written as a JavaScript object and as a Python dict.
+LOOSE_FINALS = ['{type:"final",content:"extra"}', "{'type': 'final', 'content': 'extra'}"]
 PARALLEL_CALLS = '{"type":"tool_calls","calls":[{"name":"a.one","args":{}},{"name":"b.two","args":{"x":1}}]}'
 TOOL_CALL = '{"type":"tool_call","name":"crm.create","args":{"name":"Acme"}}'
 PRETTY_BROKEN_TOOL_CALL = '{\n  "name": "crm.create",\n  "args": {"note": "a "quoted" word"},\n  "type": "tool_call"\n}'
@@ -1760,6 +1762,39 @@ def test_an_answer_that_is_not_a_tool_envelope_is_still_delivered_after_the_mark
     assert answer_of(parse(FINAL_SENTINEL + ' ' + after)) == after
 
 
+@pytest.mark.parametrize(
+    'body',
+    [
+        # The type's colon missing, an equals sign in its place, and the key and value in curly quotes.
+        '{"type" "tool_call","name":"crm.create","args":{}}',
+        '{"type"= "tool_call","name":"crm.create","args":{}}',
+        '{“type”: “tool_call”, "name":"crm.create","args":{}}',
+    ],
+)
+def test_a_tool_envelope_with_its_type_key_miswritten_after_the_marker_is_retried(body):
+    """It is a tool call that does not parse, like one cut off, whether or not its first key has its colon."""
+    raw = FINAL_SENTINEL + ' ' + body
+    assert parse(raw) is None
+    ask, feedback = scripted(raw, TOOL_CALL)
+    assert reply._run_model_turn(ask).tool_calls[0]['name'] == 'crm.create'
+    assert len(feedback) == 2
+    assert 'tool call' in feedback[1]
+
+
+@pytest.mark.parametrize(
+    'after',
+    [
+        # A key that is not the type, JSON that parses with a type of its own, and prose before the object.
+        '{"types" "tool_call"}',
+        '{"kind" "tool_call","name":"crm.create"}',
+        '{"type":"tool_call_result","ok":true}',
+        'Use {"type" "tool_call"} like that.',
+    ],
+)
+def test_a_near_miss_of_a_miswritten_tool_envelope_is_still_delivered_after_the_marker(after):
+    assert answer_of(parse(FINAL_SENTINEL + ' ' + after)) == after
+
+
 @pytest.mark.parametrize('number', ['1e400', '-1e400', 'NaN', 'Infinity', '-Infinity'])
 @pytest.mark.parametrize(
     'shape', ['{"type":"final","content":%s}', '{"type":"final","content":{"value":[1,{"x":%s}]}}']
@@ -1811,6 +1846,25 @@ def test_a_broken_final_between_a_final_and_pending_work_does_not_hide_the_work(
 def test_a_broken_final_after_a_final_with_no_work_after_it_keeps_the_answer(after):
     """The first envelope is the turn. A broken final and a closed fenced example after it are not pending work."""
     raw = '{"type":"final","content":"Created."}\n' + BROKEN_MIDDLE_FINAL + after
+    assert answer_of(parse(raw)) == 'Created.'
+
+
+@pytest.mark.parametrize('loose', LOOSE_FINALS)
+def test_a_closed_loose_final_between_a_final_and_pending_work_does_not_hide_the_work(loose):
+    """A final with unquoted or single-quoted keys in the middle is read past like a broken one."""
+    raw = '{"type":"final","content":"Created."}\n' + loose + '\n' + TOOL_CALL
+    assert parse(raw) is None
+    ask, feedback = scripted(raw)
+    with pytest.raises(ValueError):
+        reply._run_model_turn(ask)
+    assert len(feedback) == 3
+    assert 'do not answer in prose' in feedback[1]
+
+
+@pytest.mark.parametrize('after', ['', '\nThat is all.'])
+@pytest.mark.parametrize('loose', LOOSE_FINALS)
+def test_a_loose_final_after_a_final_with_no_work_after_it_keeps_the_answer(loose, after):
+    raw = '{"type":"final","content":"Created."}\n' + loose + after
     assert answer_of(parse(raw)) == 'Created.'
 
 

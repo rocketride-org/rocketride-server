@@ -380,6 +380,9 @@ _ENVELOPE_OPEN = re.compile(r"""^\s*(?:```[^\s`{\[]*\s*)?\{\s*(?:\}|\Z|(?:"(?:[^
 #: An object's opening brace.
 _OBJECT_OPENING = re.compile(r'\{')
 
+#: Text that opens with an object, optionally inside a markdown fence, whatever follows the brace. The match ends after it.
+_OBJECT_FIRST = re.compile(r'\s*(?:```[^\s`{\[]*\s*)?\{')
+
 #: An opening key may have lost either quote, putting the member walk out of step.
 _DAMAGED_OBJECT_OPEN = re.compile(r'\{\s*(?:"|[A-Za-z_]\w*"\s*:)')
 
@@ -648,7 +651,7 @@ def _envelopes(text: str, *, allow_code: bool = True) -> Iterator[Tuple[str, Any
 
     After a parsed final, a new closed markdown block quotes an example. Its objects are not
     pending work. A call outside that block, or inside an unclosed block, still counts. A broken
-    `final` after a parsed final is yielded and read past to its closing, so it cannot hide a
+    `final`, its keys unquoted included, after a parsed final is yielded and read past to its closing, so it cannot hide a
     call that follows it; one that never closes still ends the walk.
 
     An object that does not parse is read by its own members (``_own_members``): its type, or a
@@ -697,7 +700,11 @@ def _envelopes(text: str, *, allow_code: bool = True) -> Iterator[Tuple[str, Any
             return
         if no_word_before and _LOOSE_FINAL_OPEN.match(text, at):
             yield 'final', None, at
-            return
+            # After a parsed final, one that closes is read past, as a broken final is below.
+            if not (final_end and end is not None):
+                return
+            read_to = end
+            continue
         if not members:
             loose = _TYPE_FIRST.match(text, at) if no_word_before else None
             if loose and (loose.group(1) or loose.group(2) or loose.group(3)) in _TOOL_CALL_KINDS:
@@ -1023,11 +1030,15 @@ def _sentinel_answer(text: str) -> Optional[str]:
             return None
         if obj.get('type') == 'final':
             return _final_text(obj.get('content', ''))
-    broken = _looks_like_envelope(text) and not isinstance(_extract_first_json_object(text), dict)
+    unparsed = not isinstance(_extract_first_json_object(text), dict)
+    broken = _looks_like_envelope(text) and unparsed
     # A tool call that was cut off or does not parse is retried like a whole one. Only text that
-    # opens with an object whose own "type" is a tool call's counts: JSON that parses, a broken
-    # object of another type, and prose that names a tool call are still the answer as written.
-    if broken and _own_members(text, text.find('{'))[0].get('type') in _TOOL_CALL_KINDS:
+    # opens with an object whose own "type" is a tool call's counts, also when that key's colon or
+    # quotes are miswritten (``_MISWRITTEN_TYPE``): JSON that parses, a broken object of another
+    # type, and prose that names a tool call are still the answer as written.
+    opening = _OBJECT_FIRST.match(text) if unparsed else None
+    at = opening.end() - 1 if opening else -1
+    if opening and (_own_members(text, at)[0].get('type') in _TOOL_CALL_KINDS or _MISWRITTEN_TYPE.match(text, at)):
         return None
     return _salvage_final_content(whole) if broken and _attempted_kind(text) == 'final' else text
 

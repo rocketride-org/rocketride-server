@@ -206,6 +206,10 @@ FAILED = {
         'FINAL>>> {"type":"tool_call","name":"crm.get_deal","args":{"deal_id":4',
         'put a tool-call envelope after FINAL>>>',
     ),
+    'tool_call_whose_type_lost_its_colon_after_the_sentinel': (
+        'FINAL>>> {"type" "tool_call","name":"crm.get_deal","args":{"deal_id":42}}',
+        'named a tool and its arguments with no "type"',
+    ),
     'final_with_a_number_that_is_not_finite': (
         '{"type":"final","content":{"value":1e400}}',
         'not one of the allowed shapes',
