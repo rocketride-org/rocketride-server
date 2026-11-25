@@ -278,7 +278,7 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key].append({k: v for k, v in turn.items() if v is not None})
             return
 
-        # A text or JSON answer stays a plain entry: chat-ui keeps only strings. Its tokens go beside it.
+        # A text or JSON answer stays a plain entry: a chat front end keeps only strings. Its tokens go beside it.
         if answer.isJson():
             self.instance.currentObject.response[key].append(answer.getJson())
         else:

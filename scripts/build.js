@@ -421,7 +421,7 @@ async function main() {
 		process.exit(1);
 	}
 
-	// Expand global commands (e.g., "build" -> "build:server", "build:chat-ui", etc.)
+	// Expand global commands (e.g., "build" -> "build:server", "build:playground-ui", etc.)
 	const expandedRequests = expandGlobalCommands(globalCommands, registry, options);
 	const requests = [...explicitRequests, ...expandedRequests];
 

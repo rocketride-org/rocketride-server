@@ -128,12 +128,12 @@ export interface IPipelineEditorHost {
 	/** Opens a docs URL in the host's browser (node documentation, the
 	 *  endpoint modal's links). Never a node's front end: that is `openTool`. */
 	openLink(url: string, displayName?: string): void;
-	/** Opens a node's front end (plan §3.6): the app `appId` (`rocketride.chat`,
-	 *  `rocketride.dropper`, `rocketride.sql`) as the tool document bound to
-	 *  the running control's `address` and the node `nodeId` — rocket-ui opens
-	 *  `tool:<appId>/<address>/<nodeId>`, VS Code the dev-tool panel. No URL,
-	 *  no credential. A host without a tool workbench omits it; the node's
-	 *  button is then not shown. */
+	/** Opens a node's front end (plan §3.6): the app `appId`
+	 *  (`rocketride.playground`, `rocketride.sql`) as the tool document bound
+	 *  to the running control's `address` and the node `nodeId` — rocket-ui
+	 *  opens `tool:<appId>/<openToolDocKey(address, nodeId)>`, VS Code the
+	 *  dev-tool panel. No URL, no credential. A host without a tool workbench
+	 *  omits it; the node's button is then not shown. */
 	openTool?: OpenToolHandler;
 	/** Mints the owner's scoped API key for one endpoint address (`task.data`,
 	 *  that address, the home team; plan §2.4) — the endpoint modal's Create

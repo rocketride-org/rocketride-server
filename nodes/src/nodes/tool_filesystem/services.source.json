@@ -2,6 +2,7 @@
 	"title": "File Store Source",
 	"protocol": "filestore_source://",
 	"classType": ["source"],
+	"sourceKind": "scan",
 	"capabilities": ["noinclude"],
 	"register": "endpoint",
 	"node": "python",

@@ -215,7 +215,7 @@ test('an address has two or three dot-free segments', () => {
 test('the link reads pipe= and node=, and is absent without a pipe', () => {
 	assert.deepEqual(pipeLinkFromSearch('?appid=rocketride.sql&pipe=acme.doc&node=pg_1'), { pipe: 'acme.doc', node: 'pg_1' });
 	assert.deepEqual(pipeLinkFromSearch('?pipe=%20acme.doc.chat_1%20'), { pipe: 'acme.doc.chat_1' });
-	assert.equal(pipeLinkFromSearch('?appid=rocketride.chat'), null);
+	assert.equal(pipeLinkFromSearch('?appid=rocketride.playground'), null);
 	assert.equal(pipeLinkFromSearch('?pipe=%20&node=x'), null);
 });
 
@@ -223,6 +223,6 @@ test('writing the choice keeps the other parameters and drops a stale node', () 
 	const sql = hrefWithPipeLink('https://h/?appid=rocketride.sql', 'acme.doc', 'pg_1');
 	assert.deepEqual(pipeLinkFromSearch(new URL(sql).search), { pipe: 'acme.doc', node: 'pg_1' });
 	assert.equal(new URL(sql).searchParams.get('appid'), 'rocketride.sql');
-	const chat = hrefWithPipeLink('https://h/?appid=rocketride.chat&pipe=old.one&node=stale', 'acme.doc.chat_1');
-	assert.deepEqual(pipeLinkFromSearch(new URL(chat).search), { pipe: 'acme.doc.chat_1' });
+	const playground = hrefWithPipeLink('https://h/?appid=rocketride.playground&pipe=old.one&node=stale', 'acme.doc.chat_1');
+	assert.deepEqual(pipeLinkFromSearch(new URL(playground).search), { pipe: 'acme.doc.chat_1' });
 });

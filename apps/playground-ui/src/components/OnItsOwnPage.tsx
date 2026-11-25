@@ -104,7 +104,8 @@ export interface IOnItsOwnPageProps {
 export const OnItsOwnPage: React.FC<IOnItsOwnPageProps> = ({ agent, source, simple, onAbout, onUseSource, onChooseAnother }) => {
 	const name = agent.listing.name;
 	const others = otherWaysIn(agent.sources, source);
-	const sentence = source.entry === 'tool' ? `${name} takes tool calls from other agents. The Playground can't call tools yet.` : `${name} works on its own, from ${source.title}. It doesn't take messages or files here.`;
+	// step: one sentence by how work reaches the source (its declared kind)
+	const sentence = source.kind === 'request' && source.entry === 'tool' ? `${name} takes tool calls from other agents. The Playground can't call tools yet.` : source.kind === 'listener' ? `${name} works on what arrives through ${source.title}. It doesn't take messages here.` : `${name} reads from ${source.title} on its own. It doesn't take messages or files here.`;
 
 	return (
 		<div style={styles.page}>
@@ -144,7 +145,7 @@ export const OnItsOwnPage: React.FC<IOnItsOwnPageProps> = ({ agent, source, simp
 					<Section label="Sources">
 						{agent.sources.map((s) => (
 							<LabelValue key={s.address} label={s.title}>
-								{`${s.address} · ${s.kind === 'request' ? `request · ${s.entry}` : 'on its own'}${s.lanes.length ? ` · ${s.lanes.join(', ')}` : ''}`}
+								{`${s.address} · ${s.kind === 'request' ? `request · ${s.entry}` : s.kind}${s.lanes.length ? ` · ${s.lanes.join(', ')}` : ''}`}
 							</LabelValue>
 						))}
 					</Section>

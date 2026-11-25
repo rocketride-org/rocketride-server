@@ -32,8 +32,8 @@ const AGENT: CatalogEntry = {
 test('an agent row reads "Agent" whatever its categories say; an app row its first category', () => {
 	assert.equal(AGENT_LABEL, 'Agent');
 	assert.equal(entryLabel(AGENT), 'Agent');
-	assert.equal(entryLabel({ id: 'rocketride.chat', categories: ['ai', 'chat'] }), 'AI');
-	assert.equal(entryLabel({ id: 'rocketride.chat' }), null);
+	assert.equal(entryLabel({ id: 'rocketride.sql', categories: ['ai', 'chat'] }), 'AI');
+	assert.equal(entryLabel({ id: 'rocketride.sql' }), null);
 	assert.equal(isAgentEntry(AGENT), true);
 	assert.equal(isAgentEntry({ kind: 'app' }), false);
 });
@@ -41,10 +41,10 @@ test('an agent row reads "Agent" whatever its categories say; an app row its fir
 test('opening goes through the shell rule: an agent opens its host bound to its address, an app its id', () => {
 	const cm = recorder();
 	launchEntry(cm, shell, AGENT);
-	launchEntry(cm, shell, { id: 'rocketride.chat' });
+	launchEntry(cm, shell, { id: 'rocketride.sql' });
 	assert.deepEqual(cm.calls, [
 		{ appId: 'rocketride.playground', params: { pipe: 'acme.supportBot' } },
-		{ appId: 'rocketride.chat' },
+		{ appId: 'rocketride.sql' },
 	]);
 });
 
@@ -55,18 +55,18 @@ test('a host shell without the rule opens every entry by its id', () => {
 });
 
 test('a signed-out viewer keeps the public apps without their enrichment and no agent', () => {
-	const app = { id: 'rocketride.chat', categories: ['ai'], onDesktop: true, appStatus: 'subscribed' };
+	const app = { id: 'rocketride.sql', categories: ['ai'], onDesktop: true, appStatus: 'subscribed' };
 	const kept = signedOutEntries([app, { ...AGENT, onDesktop: true, appStatus: 'free' }]);
-	assert.deepEqual(kept, [{ id: 'rocketride.chat', categories: ['ai'], onDesktop: false, appStatus: undefined }]);
+	assert.deepEqual(kept, [{ id: 'rocketride.sql', categories: ['ai'], onDesktop: false, appStatus: undefined }]);
 	// The input is left as it was
 	assert.equal(app.onDesktop, true);
 });
 
 test('a signed-out viewer keeps only what an anonymous fetch returns', () => {
-	const open = { id: 'rocketride.chat', public: true, requiredPermissions: [] };
+	const open = { id: 'rocketride.sql', public: true, requiredPermissions: [] };
 	const plain = { id: 'rocketride.hello' };
 	const teamOnly = { id: 'acme.internal', public: false };
 	const gated = { id: 'rocketride.admin', public: true, requiredPermissions: ['sys.app'] };
 	assert.deepEqual([open, plain, teamOnly, gated, AGENT].map(isAnonymousEntry), [true, true, false, false, false]);
-	assert.deepEqual(signedOutEntries([open, plain, teamOnly, gated, AGENT]).map((entry) => entry.id), ['rocketride.chat', 'rocketride.hello']);
+	assert.deepEqual(signedOutEntries([open, plain, teamOnly, gated, AGENT]).map((entry) => entry.id), ['rocketride.sql', 'rocketride.hello']);
 });

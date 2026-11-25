@@ -6,7 +6,7 @@ description: Official client libraries for the RocketRide Engine. The TypeScript
 
 # RocketRide Client Libraries
 
-Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The engine's built-in MCP server lets AI assistants build, run and observe pipelines over the Model Context Protocol. A pipeline's chat and dropper front ends are platform apps (`rocketride.chat`, `rocketride.dropper`), not an embeddable widget.
+Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The engine's built-in MCP server lets AI assistants build, run and observe pipelines over the Model Context Protocol. A pipeline's chat and dropper sources are fronted by the Playground, a platform app (`rocketride.playground`), not an embeddable widget.
 
 ---
 
@@ -56,7 +56,7 @@ pip install rocketride
 
 The `rocketride-mcp` package is deprecated. Use the built-in server instead; see [HTTP MCP Server](/connect/mcp/http). Existing users can still find the old package on the [stdio MCP page](/connect/mcp/stdio).
 
-There is no embeddable chat widget: a pipeline's chat and dropper front ends are the platform apps `rocketride.chat` and `rocketride.dropper`, opened from the pipe's node in the Builder or by a signed-in deep link (`?appid=rocketride.chat&pipe=<address>`).
+There is no embeddable chat widget: a pipeline's chat and dropper sources are fronted by the Playground, the platform app `rocketride.playground`, opened from the pipe's node in the Builder or by a signed-in deep link (`?appid=rocketride.playground&pipe=<address>`).
 
 ### From the Engine (self-hosted download)
 

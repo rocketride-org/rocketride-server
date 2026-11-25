@@ -15,6 +15,14 @@
 	//
 	"classType": ["source", "tools"],
 	//
+	// Required for a source:
+	//		How work reaches this source: "request" (every unit of work
+	//		arrives as a caller's request), "listener" (it listens on an
+	//		outside channel for as long as it runs) or "scan" (it reads a
+	//		store on its own). A source that declares none is a "scan".
+	//
+	"sourceKind": "request",
+	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine. "invoke" lets tool nodes attach via control-plane

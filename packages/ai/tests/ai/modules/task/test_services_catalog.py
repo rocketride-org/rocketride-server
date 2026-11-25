@@ -91,6 +91,19 @@ async def test_summary_drops_schema_and_paths(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_summary_carries_a_sources_kind(monkeypatch, tmp_path):
+    """How work reaches a source rides the summary; a service that declares none carries none."""
+    raw = _fake_definitions(tmp_path)
+    raw['services']['ocr']['sourceKind'] = 'request'
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
+
+    summary = await services_catalog.get_summary()
+
+    assert summary['services']['ocr']['sourceKind'] == 'request'
+    assert 'sourceKind' not in summary['services']['ocr_twin']
+
+
+@pytest.mark.asyncio
 async def test_get_service_returns_full_entry_without_icon(monkeypatch, tmp_path):
     raw = _fake_definitions(tmp_path)
     monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)

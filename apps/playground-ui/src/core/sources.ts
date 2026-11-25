@@ -4,18 +4,16 @@
 // =============================================================================
 
 /**
- * What an agent's sources are and what they take, from two reads the client
- * already has: the contract read (`client.interfaces(address)`, each source
- * under its own address with the catalog classTypes it carries) and the
- * services catalog (each service's classTypes and declared lanes).
+ * What an agent's sources are and what they take, from the contract read
+ * (`client.interfaces(address)`): its `sources` say, by each source's own
+ * address, what the source's service declares about it — its kind, how a
+ * request reaches it, its title and the lanes it declares on `_source`.
  *
- * Two facts here are stand-ins until the server reports them (Playground
- * plan v2, section 3): a source's KIND, which its service will declare as
- * `sourceKind`, and what it TAKES, which the server will work out from how
- * the pipeline is wired. Until then a source is a request source only when
- * it carries a classType of the webhook node's request services (the safe
- * default: anything else is never sent to), and it takes what its service
- * declares on `_source`.
+ * A source's KIND is its service's `sourceKind` (the server reads a service
+ * that declares none as a scan); only a `request` source is ever sent to.
+ * What a source TAKES is a stand-in until the server works it out from how
+ * the pipeline is wired (Playground plan v2, section 3): the lanes its
+ * service declares on `_source`.
  *
  * Pure functions over plain data, so node:test drives them directly.
  */
@@ -25,12 +23,6 @@ import type { AgentSource, SourceEntry, SourceKind, TypedLane } from './model';
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-/** The classTypes of the services whose every unit of work is a caller's request. */
-const REQUEST_CLASS_TYPES = ['chat', 'dropper', 'webhook', 'tools'];
-
-/** The classType of a source entered by tool calls. */
-const TOOL_CLASS_TYPE = 'tools';
 
 /** Typed-input lanes, in the order typed text prefers them. */
 const TYPED_LANES: TypedLane[] = ['questions', 'text', 'json'];
@@ -49,70 +41,41 @@ export const TYPED_MIME: Record<TypedLane, string> = {
 // INPUT SHAPES
 // =============================================================================
 
-/** One node of the contract read's interface map. */
-export interface InterfaceNode {
+/** One source of the contract read's `sources`, as the server describes it. */
+export interface SourceLike {
 	nodeId: string;
 	name: string;
-}
-
-/** The contract read's interface map: address → classType → nodes. */
-export type InterfaceMap = Record<string, Record<string, ReadonlyArray<InterfaceNode | null | undefined> | undefined>>;
-
-/** The part of a service summary this module reads. */
-export interface ServiceLike {
 	title: string;
-	classType: string[];
-	lanes?: Record<string, string[]>;
+	kind: SourceKind;
+	entry: SourceEntry;
+	lanes: string[];
 }
+
+/** The contract read's `sources`: source address → its description. */
+export type SourceMap = Record<string, SourceLike | null | undefined>;
 
 // =============================================================================
 // SOURCES
 // =============================================================================
 
 /**
- * The service a source's classTypes name, when exactly one service carries
- * that classType set; otherwise undefined (several services share `source`
- * alone, and the Playground never guesses between them).
+ * Every source of an agent, in the order the contract read lists them.
  *
- * @param classTypes - The source's classTypes.
- * @param services - The services catalog, by name.
- * @returns The matching service, or undefined.
- */
-export function serviceFor(classTypes: string[], services: Record<string, ServiceLike>): ServiceLike | undefined {
-	const key = [...classTypes].sort().join('|');
-	const matches = Object.values(services).filter((s) => [...(s.classType ?? [])].sort().join('|') === key);
-	return matches.length === 1 ? matches[0] : undefined;
-}
-
-/**
- * Every source of an agent, in the order the interface map lists them.
- *
- * @param interfaces - The contract read's interface map.
- * @param services - The services catalog, by name.
+ * @param sources - The contract read's `sources` (absent from a server that predates it: no sources).
  * @returns The sources.
  */
-export function describeSources(interfaces: InterfaceMap, services: Record<string, ServiceLike>): AgentSource[] {
+export function describeSources(sources: SourceMap | undefined): AgentSource[] {
 	const out: AgentSource[] = [];
-	for (const [address, byClass] of Object.entries(interfaces ?? {})) {
-		// step: a source sits under its own address with the `source` classType
-		const node = (byClass?.source ?? []).find((n): n is InterfaceNode => !!n && typeof n.nodeId === 'string');
-		if (!node) continue;
-		const classTypes = Object.keys(byClass ?? {});
-
-		// step: its service's declared lanes and title, when one service matches
-		const service = serviceFor(classTypes, services);
-		const lanes = service?.lanes?._source ?? [];
-		const kind: SourceKind = classTypes.some((c) => REQUEST_CLASS_TYPES.includes(c)) ? 'request' : 'onItsOwn';
-		const entry: SourceEntry = classTypes.includes(TOOL_CLASS_TYPE) ? 'tool' : 'data';
-
+	for (const [address, source] of Object.entries(sources ?? {})) {
+		if (!source || typeof source.nodeId !== 'string') continue;
+		const lanes = Array.isArray(source.lanes) ? source.lanes : [];
 		out.push({
 			address,
-			nodeId: node.nodeId,
-			name: node.name || node.nodeId,
-			title: service?.title || node.name || node.nodeId,
-			classTypes,
-			kind,
-			entry,
+			nodeId: source.nodeId,
+			name: source.name || source.nodeId,
+			title: source.title || source.name || source.nodeId,
+			kind: source.kind,
+			entry: source.entry,
 			lanes,
 			typed: TYPED_LANES.find((l) => lanes.includes(l)) ?? null,
 			fileLanes: FILE_LANES.filter((l) => lanes.includes(l)),

@@ -52,11 +52,6 @@ const { PROJECT_ROOT } = require('./paths');
 // POLICY
 // =============================================================================
 
-// Apps that predate the MF baseline; standalone rsbuild apps, exempt from
-// template + browserslist conformance (still checked for license, scripts,
-// ports, and dependency ranges).
-const LEGACY_APPS = ['chat-ui', 'dropper-ui'];
-
 // Apps allowed to extend the baseline (extra plugins/rules); checked for the
 // structural invariants instead of byte-conformance.
 // home-ui validates its copy-roulette catalog at config time (an extra import
@@ -339,7 +334,6 @@ function runUiAudit({ overlayRoot, task } = {}) {
 		const configText = fs.readFileSync(path.join(dir, 'rsbuild.config.mts'), 'utf8').replace(/\r\n/g, '\n');
 		const portMatch = configText.match(/port: (\d+)/);
 		if (portMatch) ports.push({ name, port: portMatch[1] });
-		if (LEGACY_APPS.includes(name)) continue;
 		if (STRUCTURAL_APPS.includes(name)) {
 			errors.push(...checkStructuralInvariants(name, configText));
 		} else {
@@ -355,7 +349,7 @@ function runUiAudit({ overlayRoot, task } = {}) {
 	const manifests = readFamilyManifests(apps, overlayRoot);
 	for (const { name, pkg } of manifests) {
 		const isApp = apps.some((a) => a.name === name);
-		const needsBrowserslist = name === 'shell' || (isApp && !LEGACY_APPS.includes(name));
+		const needsBrowserslist = name === 'shell' || isApp;
 		errors.push(...checkManifestHygiene(name, pkg, isApp, needsBrowserslist));
 	}
 	errors.push(...checkDependencyRanges(manifests));

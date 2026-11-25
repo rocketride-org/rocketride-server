@@ -277,6 +277,12 @@ static Error checkDepth(const json::Value &definition) noexcept {
 //          use these on creating configurations and for hiding
 //          nodes from the services.json
 //
+//      "sourceKind": "request" | "listener" | "scan" (sources only)
+//          How work reaches the source: every unit of work arrives as a
+//          caller's request, it listens on an outside channel, or it reads
+//          a store on its own. Passed through to getServiceDefinitions; the
+//          server reads an undeclared kind as "scan"
+//
 //      "register": empty | "filter" | "endpoint"
 //          Used to automatically register a python filter or endpoint. If
 //          set, registration of the appropriate Factories will be called.
@@ -1327,6 +1333,17 @@ static Error checkShape(const json::Value &info, const iText &protocol) {
 
     if (info.isMember("tile") && !isStrings(info["tile"]))
         return refuse("tile", "a list of strings");
+
+    // How work reaches a source: one of three words (an undeclared kind is
+    // read as "scan" by the server, never decided here)
+    if (info.isMember("sourceKind")) {
+        const auto &kind = info["sourceKind"];
+        if (!kind.isString() ||
+            (kind.asString() != "request" && kind.asString() != "listener" &&
+             kind.asString() != "scan"))
+            return refuse("sourceKind",
+                          "one of \"request\", \"listener\" or \"scan\"");
+    }
     return {};
 }
 
@@ -2000,6 +2017,11 @@ ErrorOr<json::Value> IServices::getServiceSchemas(
             // Copy over the invoke info
             if (def.serviceDefinition.isMember("invoke"))
                 schemas[logicalType]["invoke"] = def.serviceDefinition["invoke"];
+
+            // Copy over how work reaches a source (request, listener, scan)
+            if (def.serviceDefinition.isMember("sourceKind"))
+                schemas[logicalType]["sourceKind"] =
+                    def.serviceDefinition["sourceKind"];
 
             // Copy over the render info
             if (def.serviceDefinition.isMember("tile"))

@@ -40,6 +40,18 @@
 # borrow of a node the entry source did not load fails at the engine and
 # the front end shows that error (decided 2026-11-16).
 #
+# SOURCES. The classType words cannot tell sources apart: Telegram, Discord
+# and the local file system all carry ``source`` alone, yet one is a
+# listener and one a scan. ``pipe_sources`` answers what each source IS,
+# from its provider's own declaration, under the same address the map uses:
+#
+#     { "<source address>": { nodeId, name, title, kind, entry, lanes } }
+#
+# ``kind`` is the service's ``sourceKind`` (``request``, ``listener`` or
+# ``scan``; a service that declares none is a scan); ``entry`` is how a
+# request reaches it (``tool`` for a source that hosts tools or is one,
+# else ``data``); ``lanes`` are the lanes it declares on ``_source``.
+#
 # PURE MODULE: the catalog lookup is injected so the derivation is testable
 # without a server and reusable from any door.
 # =============================================================================
@@ -56,8 +68,23 @@ CatalogLookup = Callable[[str], Awaitable[Optional[Mapping[str, Any]]]]
 #: The answer: address -> classType -> [{nodeId, name}].
 InterfaceMap = Dict[str, Dict[str, List[Dict[str, str]]]]
 
+#: One source, as ``pipe_sources`` describes it.
+SourceInfo = Dict[str, Any]
+
+#: The sources answer: source address -> its description.
+SourceMap = Dict[str, SourceInfo]
+
 #: The classType word that marks a source component in the catalog.
 CONST_SOURCE_CLASS_TYPE = 'source'
+
+#: The classType word of a tool (a node an agent, or a caller, calls).
+CONST_TOOL_CLASS_TYPE = 'tool'
+
+#: The ways work reaches a source, as a service declares them.
+SOURCE_KINDS = ('request', 'listener', 'scan')
+
+#: The kind of a source whose service declares none (it reads on its own).
+CONST_DEFAULT_SOURCE_KIND = 'scan'
 
 
 # ==== The derivation ===========================================================
@@ -156,3 +183,124 @@ async def pipe_interfaces(
             by_class.setdefault(class_type, []).append(dict(entry))
 
     return interfaces
+
+
+def _source_kind(entry: Optional[Mapping[str, Any]]) -> str:
+    """
+    How work reaches a source, as its service declares it.
+
+    Args:
+        entry: The catalog entry for the source's provider, or None.
+
+    Returns:
+        The declared ``sourceKind``; ``scan`` for an unknown provider, a
+        service that declares none, or a value the engine would refuse.
+    """
+    if isinstance(entry, Mapping):
+        kind = entry.get('sourceKind')
+        if kind in SOURCE_KINDS:
+            return kind
+    return CONST_DEFAULT_SOURCE_KIND
+
+
+def _source_entry(entry: Optional[Mapping[str, Any]], class_types: List[str]) -> str:
+    """
+    How a request reaches a source: by tool call, or as data.
+
+    A source that hosts tools (its service declares a ``tool`` invoke
+    channel, as the Tools endpoint does) or is itself a tool (``tool`` in
+    its classTypes, as the Pipeline Tool is) is entered by tool calls.
+
+    Args:
+        entry: The catalog entry for the source's provider, or None.
+        class_types: The component's catalog classTypes.
+
+    Returns:
+        ``tool`` or ``data``.
+    """
+    if CONST_TOOL_CLASS_TYPE in class_types:
+        return 'tool'
+    if isinstance(entry, Mapping):
+        invoke = entry.get('invoke')
+        if isinstance(invoke, Mapping) and CONST_TOOL_CLASS_TYPE in invoke:
+            return 'tool'
+    return 'data'
+
+
+def _source_lanes(entry: Optional[Mapping[str, Any]]) -> List[str]:
+    """
+    The lanes a source's service declares on ``_source``, in its order.
+
+    Args:
+        entry: The catalog entry for the source's provider, or None.
+
+    Returns:
+        The lane names; empty for an unknown provider or a service that
+        declares none.
+    """
+    if not isinstance(entry, Mapping):
+        return []
+    lanes = entry.get('lanes')
+    if not isinstance(lanes, Mapping):
+        return []
+    declared = lanes.get('_source')
+    if not isinstance(declared, (list, tuple)):
+        return []
+    return [lane for lane in declared if isinstance(lane, str) and lane]
+
+
+async def pipe_sources(
+    pipeline: Mapping[str, Any],
+    developer_id: str,
+    pipe_id: str,
+    lookup: CatalogLookup,
+) -> SourceMap:
+    """
+    What each source of one pipeline spec is, from its provider's declaration.
+
+    The same components ``pipe_interfaces`` puts under their own address,
+    by the same rule (the catalog's ``source`` classType, or the spec's
+    ``mode: Source``), keyed by that same address.
+
+    Args:
+        pipeline: The pipeline spec: its ``components`` list is read,
+            nothing else.
+        developer_id: The namespace segment of the pipe's address.
+        pipe_id: The pipe's short id.
+        lookup: One async catalog lookup, provider -> entry.
+
+    Returns:
+        ``{address: {nodeId, name, title, kind, entry, lanes}}`` in the
+        order the components appear in the spec. ``title`` is the service's
+        title, else the display name; a source whose provider the catalog
+        does not know is a ``scan`` entered by ``data`` with no lanes.
+    """
+    sources: SourceMap = {}
+    components = pipeline.get('components') or []
+
+    for component in components:
+        # Step 1: only addressable source components
+        if not isinstance(component, Mapping):
+            continue
+        node_id = str(component.get('id') or '')
+        provider = str(component.get('provider') or '')
+        if not node_id or not provider:
+            continue
+        entry = await lookup(provider)
+        class_types = _class_types(entry)
+        if not _is_source(component, class_types):
+            continue
+
+        # Step 2: what its service declares about it
+        name = str(component.get('name') or node_id)
+        title = entry.get('title') if isinstance(entry, Mapping) else None
+        sources[build_address(developer_id, pipe_id, node_id)] = {
+            'nodeId': node_id,
+            'name': name,
+            'title': title if isinstance(title, str) and title else name,
+            'kind': _source_kind(entry),
+            'entry': _source_entry(entry, class_types),
+            'lanes': _source_lanes(entry),
+        }
+
+    return sources

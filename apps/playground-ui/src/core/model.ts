@@ -14,8 +14,12 @@
 // AGENT
 // =============================================================================
 
-/** A source's kind as the Playground can tell it without the server's declaration. */
-export type SourceKind = 'request' | 'onItsOwn';
+/**
+ * How work reaches a source, as its service declares it (`sourceKind`):
+ * every unit arrives as a caller's request, it listens on an outside
+ * channel, or it reads a store on its own.
+ */
+export type SourceKind = 'request' | 'listener' | 'scan';
 
 /** How a request reaches a request source. */
 export type SourceEntry = 'data' | 'tool';
@@ -31,11 +35,9 @@ export interface AgentSource {
 	nodeId: string;
 	/** The author's name for the source, else its node id. */
 	name: string;
-	/** The catalog title of the source's service (or the node's name when it can't be told). */
+	/** The title of the source's service, else the node's name. */
 	title: string;
-	/** The catalog classTypes the source carries. */
-	classTypes: string[];
-	/** Whether a caller can send to it. */
+	/** How work reaches it (a request source is the only kind a caller sends to). */
 	kind: SourceKind;
 	/** How a request reaches it (request sources only). */
 	entry: SourceEntry;

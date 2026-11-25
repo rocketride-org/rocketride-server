@@ -87,6 +87,7 @@ SUMMARY_FIELDS = (
     'invoke',
     'tile',
     'documentation',
+    'sourceKind',
 )
 
 # Build-once state: (master, summary) or None when the cache is cold.

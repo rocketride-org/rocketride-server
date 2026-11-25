@@ -27,7 +27,7 @@
 # deployment registry the OSS defaults already keep there:
 #
 #     orgs/<org_id>/files/.desktop/<user_id>.json
-#     {"version": 1, "apps": ["rocketride.chat", "rocketride.dropper"]}
+#     {"version": 1, "apps": ["rocketride.playground", "rocketride.sql"]}
 #
 # A missing document means "never written": the account layer seeds it with
 # the caller's reachable inventory on the first read, so an existing user's

@@ -8,7 +8,8 @@
 // =============================================================================
 //
 // A running node that a front end talks to (the chat and dropper sources,
-// later the database and explorer bases) emits an `open-tool` status note:
+// which the Playground fronts, later the database and explorer bases) emits
+// an `open-tool` status note:
 // the app id of that front end, with the node's own id beside it. The
 // server fills the note's identity placeholders per control, so by the time
 // it reaches a host the note names ONE {address, nodeId}. The host op
@@ -21,14 +22,13 @@
 
 /** The app ids the platform's pipe-bound front ends register under. */
 export const OPEN_TOOL_LABELS: Readonly<Record<string, string>> = {
-	'rocketride.chat': 'Open Chat',
-	'rocketride.dropper': 'Open Dropper',
+	'rocketride.playground': 'Open in Playground',
 	'rocketride.sql': 'Explore',
 };
 
 /** One node's resolved button: what to open, where it is bound. */
 export interface IOpenToolNote {
-	/** The front end's app id (`rocketride.chat`, `rocketride.dropper`, `rocketride.sql`, …). */
+	/** The front end's app id (`rocketride.playground`, `rocketride.sql`, …). */
 	appId: string;
 	/** The node the document binds to: the component id in the pipeline. */
 	nodeId: string;
@@ -169,15 +169,19 @@ export function actionButtons(tools: ReadonlyArray<IOpenToolNote>, hasEndpointIn
 }
 
 /**
- * The document key a tool document binds under: `<address>/<nodeId>`, so the
- * tool document URI is `tool:<appId>/<address>/<nodeId>` in every host.
+ * The document key a tool document binds under: the address alone when the
+ * node IS the address's source (a chat or dropper source, whose front end is
+ * the Playground: its connection is that address, so the Builder's button,
+ * the Playground's own sidebar and a `?pipe=` link all open ONE tab), else
+ * `<address>/<nodeId>`. The tool document URI is `tool:<appId>/<key>` in
+ * every host.
  *
  * @param address - The running control's address.
  * @param nodeId - The bound node's component id.
  * @returns The per-document key.
  */
 export function openToolDocKey(address: string, nodeId: string): string {
-	return `${address}/${nodeId}`;
+	return address.endsWith(`.${nodeId}`) ? address : `${address}/${nodeId}`;
 }
 
 /** An address (two or three dot-free segments) with an optional `/<nodeId>`. */
@@ -185,9 +189,9 @@ const TOOL_DOC_KEY = /^([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?)(?:\
 
 /**
  * The inverse of {@link openToolDocKey}, for the apps a tool document mounts:
- * the address and, when the key carries one, the node. A bare address is
- * still a valid key (the chat and dropper sources bind by address alone);
- * anything else (a saved-connection id, an editor key) is not a tool key.
+ * the address and, when the key carries one, the node. A bare address is a
+ * valid key (a source binds by its address alone); anything else (a
+ * saved-connection id, an editor key) is not a tool key.
  *
  * @param docKey - The host document key.
  * @returns `{address, nodeId?}`, or null when the key is not address-shaped.

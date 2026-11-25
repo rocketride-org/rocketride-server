@@ -98,6 +98,12 @@ export interface ServiceSummary {
 	input?: ServiceInputLane[];
 	/** Control-plane invoke slot definitions. */
 	invoke?: Record<string, ServiceInvokeSlot>;
+	/**
+	 * How work reaches a source: every unit of work arrives as a caller's
+	 * request, it listens on an outside channel, or it reads a store on its
+	 * own. Declared by sources only; a source that declares none is a scan.
+	 */
+	sourceKind?: 'request' | 'listener' | 'scan';
 	/** Tile/card rendering hint for the pipeline editor. */
 	tile?: Record<string, unknown>;
 	/**

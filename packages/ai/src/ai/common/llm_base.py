@@ -92,7 +92,7 @@ class LLMBase(IInstanceBase):
             STOP_SEQUENCES_VAR.reset(token)
 
     def writeQuestions(self, question: Question):
-        # Stream the model's reasoning live, one line at a time, on the chat-ui
+        # Stream the model's reasoning live, one line at a time, on the chat
         # 'thinking' lane (same channel as agents). The answer is written normally.
         buf: list = []
 

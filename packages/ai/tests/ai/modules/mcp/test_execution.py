@@ -388,7 +388,7 @@ async def test_run_dropper_pipe_returns_the_address_and_a_credential_free_upload
     }
     # The dropper UI is the shell app's deep link (plan 3.6): the address, no credential
     # ...and the deep link names the PIPE (the address), not the run
-    assert result['dropper_url'] == f'{fake_engine.base_url}/?appid=rocketride.dropper&pipe={FAKE_ADDRESS}'
+    assert result['dropper_url'] == f'{fake_engine.base_url}/?appid=rocketride.playground&pipe={FAKE_ADDRESS}'
     assert 'auth=' not in result['dropper_url']
     assert result['projectId'] == 'proj-fake'
     assert result['source'] == 'src-fake'

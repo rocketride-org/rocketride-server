@@ -4,17 +4,16 @@
 // =============================================================================
 
 /**
- * Reading one agent: the contract read for its sources and settings, the
- * services catalog for what each source's service declares, and the pipe
- * catalog for its listing (name, tagline, icon, README, default source).
- * Three reads the client already has; nothing here starts an engine.
+ * Reading one agent: the contract read for its sources (what each source's
+ * service declares about it) and settings, and the pipe catalog for its
+ * listing (name, tagline, icon, README, default source). Two reads the
+ * client already has; nothing here starts an engine.
  */
 
 import type { RocketRideClient } from 'shell';
 import type { AgentInfo, AgentListing, AgentParameter } from './model';
 import { nameFromAddress } from './friendly';
 import { describeSources, pickSource } from './sources';
-import type { InterfaceMap, ServiceLike } from './sources';
 
 // =============================================================================
 // TYPES
@@ -41,35 +40,12 @@ interface CatalogPage {
 // CACHES
 // =============================================================================
 
-/** The services catalog, read once per realm (it changes only on node installs). */
-let servicesRead: Promise<Record<string, ServiceLike>> | null = null;
-
 /** Listings already found, by pipe address. */
 const listings = new Map<string, AgentListing | null>();
 
 // =============================================================================
 // READS
 // =============================================================================
-
-/**
- * The services catalog by name; a failed read is retried on the next call.
- *
- * @param client - The realm's client.
- * @returns Each service's title, classTypes and lanes.
- */
-async function readServices(client: RocketRideClient): Promise<Record<string, ServiceLike>> {
-	const read: Promise<Record<string, ServiceLike>> =
-		servicesRead ??
-		client
-			.getServices()
-			.then((r: unknown) => ((r as { services?: Record<string, ServiceLike> }).services ?? {}) as Record<string, ServiceLike>)
-			.catch((err: unknown) => {
-				servicesRead = null;
-				throw err;
-			});
-	servicesRead = read;
-	return read;
-}
 
 /**
  * A catalog row as a listing.
@@ -130,10 +106,10 @@ export async function loadAgent(client: RocketRideClient, address: string): Prom
 	// step: the contract read resolves the address for this caller
 	const answer = await client.interfaces(address);
 
-	// step: the catalogs (either may fail without hiding the agent)
-	const [services, listing] = await Promise.all([readServices(client).catch(() => ({}) as Record<string, ServiceLike>), findListing(client, answer.address).catch(() => null)]);
+	// step: the listing (a failed read never hides the agent)
+	const listing = await findListing(client, answer.address).catch(() => null);
 
-	const sources = describeSources(answer.interfaces as unknown as InterfaceMap, services);
+	const sources = describeSources(answer.sources);
 	return {
 		pipe: answer.address,
 		listing: listing ?? { name: nameFromAddress(answer.address) },

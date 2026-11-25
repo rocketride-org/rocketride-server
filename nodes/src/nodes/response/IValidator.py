@@ -34,8 +34,8 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from rocketlib import IValidatorBase, warning
 
 # The key a result sums its text and JSON answers' token counts under. A plain string entry has no
-# room for them, and a turn entry carries its own. Not a lane: never in result_types, so chat-ui,
-# dropper-ui and the shell's chat never see it.
+# room for them, and a turn entry carries its own. Not a lane: never in result_types, so the
+# Playground and the shell's chat never see it.
 TOKENS_RESULT_KEY = 'tokens'
 
 # Keys the result object holds for something other than a lane: the node writes

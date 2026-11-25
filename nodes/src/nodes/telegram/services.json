@@ -2,6 +2,7 @@
 	"title": "Telegram Bot",
 	"protocol": "telegram://",
 	"classType": ["source"],
+	"sourceKind": "listener",
 	"capabilities": ["noinclude"],
 	"register": "endpoint",
 	"node": "python",

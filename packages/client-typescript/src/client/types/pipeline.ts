@@ -210,6 +210,35 @@ export interface PipeInterfaceNode {
 export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]>>;
 
 /**
+ * One source of a pipeline, as its service declares it.
+ *
+ * The classType words cannot tell sources apart (a Telegram bot and the local
+ * file system both carry `source` alone); this is what the source IS.
+ */
+export interface PipeSource {
+	/** The component id. */
+	nodeId: string;
+	/** The author's display name, else the node id. */
+	name: string;
+	/** The service's title (`Chat`, `Telegram Bot`), else the display name. */
+	title: string;
+	/**
+	 * How work reaches it, as its service declares `sourceKind`: every unit
+	 * arrives as a caller's `request`, it is a `listener` on an outside
+	 * channel, or it is a `scan` that reads a store on its own (a service
+	 * that declares none, or a node the catalog does not know).
+	 */
+	kind: 'request' | 'listener' | 'scan';
+	/** How a request reaches it: by `tool` call (it hosts tools, or is one), else as `data`. */
+	entry: 'data' | 'tool';
+	/** The lanes its service declares on `_source`, in its order. */
+	lanes: string[];
+}
+
+/** What each source is, by the source's own address (the address the interface map gives it). */
+export type PipeSourceMap = Record<string, PipeSource>;
+
+/**
  * One per-call parameter of a pipeline, as a caller sees it: the public name
  * a call sets in `params`, what the value must be, and what a call gets when
  * it omits it. The node and field behind the name are not told.
@@ -245,6 +274,8 @@ export interface PipeInterfaces {
 	teamId?: string;
 	/** The map. */
 	interfaces: PipeInterfaceMap;
+	/** What each source is, by its address; absent on a server that predates it. */
+	sources?: PipeSourceMap;
 	/** The pipeline's per-call parameters, in the map's order; absent on a server that predates them. */
 	parameters?: PipeParameter[];
 }

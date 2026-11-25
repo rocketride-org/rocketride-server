@@ -105,7 +105,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		},
 	},
 	'drop-zone': {
-		direct: ['--rr-border-hover', '--rr-brand', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],
+		direct: ['--rr-bg-list-active', '--rr-bg-paper', '--rr-border-hover', '--rr-brand', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {},
 	},
 	'empty-state': {

@@ -4692,7 +4692,7 @@ declare class BillingApi {
  * Constructor shape of the `Sequelize` class, injected by the caller so the
  * RocketRide client never statically (runtime) imports the `sequelize`
  * package. `sequelize` transitively pulls in Node built-ins (`util`, `debug`)
- * that cannot be bundled for browser targets (dropper-ui, chat-ui, etc.).
+ * that cannot be bundled for browser targets (the platform apps, the shell).
  * Callers pass their own `import { Sequelize } from 'sequelize'` through.
  */
 export type SequelizeConstructor = new (options?: Options) => Sequelize;

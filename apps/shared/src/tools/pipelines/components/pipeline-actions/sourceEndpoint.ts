@@ -15,10 +15,10 @@
 import type { IEndpointInfo } from './PipelineActions';
 import { OPEN_TOOL_LABELS } from './openTool';
 
-/** The front end of each source interface that has one. */
+/** The front end of each source interface that has one: the Playground fronts both. */
 const SOURCE_TOOLS: Readonly<Record<string, string>> = {
-	chat: 'rocketride.chat',
-	dropper: 'rocketride.dropper',
+	chat: 'rocketride.playground',
+	dropper: 'rocketride.playground',
 };
 
 /** A published source as the Catalog knows it. */

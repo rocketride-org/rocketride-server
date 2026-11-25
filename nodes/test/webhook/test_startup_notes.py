@@ -59,7 +59,10 @@ def _notes_of(source_module, logical_type):
 
 @pytest.mark.parametrize(
     ('logical_type', 'app_id', 'label'),
-    [('chat', 'rocketride.chat', 'Open Chat'), ('dropper', 'rocketride.dropper', 'Open Dropper')],
+    [
+        ('chat', 'rocketride.playground', 'Open in Playground'),
+        ('dropper', 'rocketride.playground', 'Open in Playground'),
+    ],
 )
 def test_front_end_sources_publish_the_open_tool_note(source_module, logical_type, app_id, label):
     """The note names the app and the node; the node id is the control's source placeholder."""

@@ -230,8 +230,8 @@ separate HTTP channel (bytes cannot ride an MCP tool call).
   names the MCP server itself (the only holder of the nonce),
   not the engine the tools run on. One request may carry at most 100 MiB; a
   larger body answers `413` with a link to retry with once the drop is split.
-  `dropper_url` opens the dropper app on that pipe
-  (`?appid=rocketride.dropper&pipe=<address>`), where a person signs in and
+  `dropper_url` opens the Playground on that pipe
+  (`?appid=rocketride.playground&pipe=<address>`), where a person signs in and
   drags files into the running pipeline.
 - **Notable:** neither URL carries a credential; `upload_url` carries only
   the nonce, `dropper_url` only the address. If the pipeline has no
