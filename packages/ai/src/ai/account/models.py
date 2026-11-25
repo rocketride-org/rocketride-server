@@ -225,6 +225,12 @@ class RequestContext:
         conn_id:      Stable identifier for the originating client connection,
                       e.g. ``"orch-1:4527"`` (pod mode) or ``"conn-5"`` (OSS).
                       Used to scope and clean up per-connection resources.
+        auth_epoch:   The connection's identity generation when this context was
+                      built (``TaskConn._auth_epoch``). File handles are stamped
+                      with it and only usable by a context carrying the same
+                      value, so a handle never outlives the identity that opened
+                      it on a socket that re-auths or deauths. 0 for callers
+                      with no changing identity.
         source:       ``'local'`` for OSS standalone connections or
                       ``'orchestrator'`` for commands forwarded by the
                       Orchestrator via an internal pod connection.
@@ -233,6 +239,7 @@ class RequestContext:
     account_info: Optional[AccountInfo] = None
     conn_id: str = ''
     source: str = 'local'
+    auth_epoch: int = 0
 
     # ── Additions on this branch (see MERGE NOTE above) ──────────────────────
     # source == 'engine' marks an ENGINE-SUBPROCESS context (tool nodes): no

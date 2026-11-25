@@ -34,6 +34,7 @@ task lifecycle.
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.account.file_store import SYSTEM_TREES, normalize_path
+from ai.account.store import StorageError
 from ai.common.dap import DAPConn, TransportBase
 
 if TYPE_CHECKING:
@@ -163,6 +164,9 @@ class StoreCommands(DAPConn):
         Returns:
             DAP response with handle ID (and metadata for read mode).
         """
+        # Read the identity generation in the same synchronous step that builds
+        # the ctx: the handle is authorized for THIS identity only.
+        epoch = getattr(self, '_auth_epoch', 0)
         fs = self._get_file_store()
         path = args.get('path')
         mode = args.get('mode', 'r')
@@ -170,11 +174,28 @@ class StoreCommands(DAPConn):
         if mode == 'w':
             # Create a write handle tied to this connection for cleanup on disconnect
             handle_id = await fs.open_write(path)
-            return self.build_response(request, body={'handle': handle_id})
+            result = None
         else:
             # Open for reading; returns handle ID plus file metadata
             result = await fs.open_read(path)
-            return self.build_response(request, body=result)
+            handle_id = result['handle']
+
+        # The backend open awaited: if the socket re-authed or deauthed meanwhile,
+        # the handle was authorized for an identity that is gone. Close it (the
+        # epoch-stale sweep already ran, so nothing else would) and refuse.
+        if getattr(self, '_auth_epoch', 0) != epoch:
+            try:
+                if mode == 'w':
+                    await fs.close_write(handle_id)
+                else:
+                    await fs.close_read(handle_id)
+            except Exception as e:
+                self.debug_message(f'Store: failed to close stale handle {handle_id}: {e}')
+            raise StorageError('Authentication changed while opening the file; reopen it')
+
+        if mode == 'w':
+            return self.build_response(request, body={'handle': handle_id})
+        return self.build_response(request, body=result)
 
     async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """

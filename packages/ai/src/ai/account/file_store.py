@@ -534,6 +534,10 @@ class FileHandle:
     # The owning ctx.conn_id ('' = unowned) — scopes handles per connection
     # for ownership checks, the DoS cap, and disconnect cleanup.
     connection_id: str = ''
+    # The owning connection's identity generation (ctx.auth_epoch) when the
+    # handle was opened. A handle is usable only by a ctx carrying the same
+    # epoch, so it cannot outlive the identity that opened it.
+    auth_epoch: int = 0
     context: Any = None
     bytes_written: int = 0
     closed: bool = False
@@ -654,6 +658,7 @@ class FileStore:
             path=full_path,
             mode=FileHandleMode.WRITE,
             connection_id=connection_id,
+            auth_epoch=getattr(self._ctx, 'auth_epoch', 0),
             context=result['context'],
         )
         self._handles[handle.handle_id] = handle
@@ -710,6 +715,7 @@ class FileStore:
             path=full_path,
             mode=FileHandleMode.READ,
             connection_id=connection_id,
+            auth_epoch=getattr(self._ctx, 'auth_epoch', 0),
             context=result['context'],
         )
         self._handles[handle.handle_id] = handle
@@ -1196,6 +1202,10 @@ class FileStore:
         # test contexts) may touch a handle.
         if handle.connection_id != self._ctx.conn_id:
             raise StorageError('Handle belongs to another connection')
+        # The same socket may re-auth or deauth: a handle opened under an
+        # earlier identity is dead even for its own connection.
+        if handle.auth_epoch != getattr(self._ctx, 'auth_epoch', 0):
+            raise StorageError('Handle is no longer valid: the connection identity changed')
         return handle
 
     def _release_handle(self, handle: FileHandle) -> None:

@@ -252,6 +252,10 @@ class TaskConn(
         _connection_id: Unique identifier for this DAP connection session
         _server: Reference to TaskServer for task lookup and management
         transport: Communication layer for DAP message exchange
+        _auth_epoch: Identity generation of this socket. Bumped (synchronously)
+            whenever an identity is installed (``on_auth``) or dropped
+            (``on_deauth``); file handles are stamped with it and die with the
+            identity that opened them.
     """
 
     # Revocation state (#972). Class-level defaults so a connection built
@@ -265,6 +269,10 @@ class TaskConn(
     _authz_verified_at: float = 0.0
     # When the last ``[AUTHZ] denied`` warning for this connection was logged
     _authz_denied_logged_at: float = float('-inf')
+    # Identity generation for file handles. Bumped whenever this socket's
+    # identity is dropped or replaced, so handles opened under an older
+    # identity are unusable at once. Class default for __init__-bypassing doubles.
+    _auth_epoch: int = 0
 
     def __init__(
         self,
@@ -328,6 +336,10 @@ class TaskConn(
         # Account info set when client sends successful auth { auth: apikey } command.
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
+
+        # Identity generation (class default _auth_epoch = 0): bumped each time
+        # an identity is installed or dropped so file handles opened under an
+        # earlier identity stop working on this same socket.
 
         # Client IP — set by task_server.listen() immediately after construction,
         # used for per-IP unauthenticated connection tracking.
@@ -487,10 +499,15 @@ class TaskConn(
                 await self.send(self.build_error(request, 'Connection revoked'))
                 return
 
+        # Install the new identity and bump the generation in one synchronous
+        # step: every handle opened under the previous identity is unusable
+        # from this instant, then swept (closed at the backend) below.
         self._account_info = result
         self._authenticated = True
         self._authz_verified_at = t0
+        self._auth_epoch += 1
         self._server.release_unauthed_slot(self._client_ip)
+        await self._close_stale_file_handles()
 
         # Capture optional client identification from auth arguments
         if args.get('clientName'):
@@ -529,7 +546,9 @@ class TaskConn(
         subscriptions are dropped with the identity (#972): a deauthed
         socket receives nothing. The connection is also detached as the
         debugger of every task, so a later re-auth as another user does not
-        inherit the debugger stream. Open write handles are left as they are.
+        inherit the debugger stream. File handles opened under the dropped
+        identity are closed and cannot be reused by a later identity on the
+        same socket.
         """
         # Nothing to do if not authenticated
         if not self._authenticated:
@@ -538,8 +557,22 @@ class TaskConn(
         self._drop_authority()
 
         await self._detach_debuggers()
+        # _drop_authority bumped the generation; close the handles the dropped
+        # identity opened (they are unusable already).
+        await self._close_stale_file_handles()
 
         return self.build_response(request, body={})
+
+    async def _close_stale_file_handles(self) -> None:
+        """Close this connection's file handles from an older identity.
+
+        Best-effort like disconnect cleanup: errors are logged and swallowed
+        (the epoch check already makes stale handles unusable).
+        """
+        try:
+            await self._server.store.close_stale_handles(str(self._connection_id), self._auth_epoch)
+        except Exception as e:
+            self.debug_message(f'Error closing stale file handles for connection {self._connection_id}: {e}')
 
     async def _detach_debuggers(self) -> None:
         """Detach this connection as the debugger of every task."""
@@ -556,11 +589,13 @@ class TaskConn(
         unauthenticated, drops every event subscription and installs the
         signed-out identity ``AccountInfo()``. It has an empty ``userId`` and
         no organization, so no user push, org push or org/user-scoped server
-        event can match or rebuild it. It is not waitlisted: a signed-out
+        event can match or rebuild it. It bumps the file-handle generation, so
+        handles the dropped identity opened are unusable at once. It is not waitlisted: a signed-out
         connection is not a waitlisted user.
         """
         self._server.acquire_unauthed_slot(self._client_ip)
         self._authenticated = False
+        self._auth_epoch += 1
         monitors = getattr(self, '_monitors', None)
         if monitors is not None:
             monitors.clear()
@@ -694,6 +729,7 @@ class TaskConn(
             account_info=self._account_info,
             conn_id=str(self._connection_id),
             source='local',
+            auth_epoch=self._auth_epoch,
         )
 
     def verify_team_permission(self, team_id: str, perm: str) -> None:
