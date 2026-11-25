@@ -108,6 +108,13 @@ ANSWERED = {
         1,
         'bad \\ud800 "x"',
     ),
+    'final_with_a_large_finite_number': ('{"type":"final","content":{"value":1e300}}', 1, '{"value": 1e+300}'),
+    'json_object_after_the_sentinel': ('FINAL>>> {"a": 1}', 1, '{"a": 1}'),
+    'final_then_a_broken_final': (
+        '{"type":"final","content":"Deal 42 is won."}\n{"type":"final","content":"a "b" c"}',
+        1,
+        'Deal 42 is won.',
+    ),
 }
 
 # Replies with no answer to deliver: (reply, what the error says about it).
@@ -194,6 +201,19 @@ FAILED = {
     'cut_off_final_with_an_escaped_type_after_a_line_of_prose': (
         'Here is the answer:\n{"type":"fin\\u0061l","content":"Acme reported revenue of 12',
         'not valid JSON',
+    ),
+    'tool_call_cut_off_after_the_sentinel': (
+        'FINAL>>> {"type":"tool_call","name":"crm.get_deal","args":{"deal_id":4',
+        'put a tool-call envelope after FINAL>>>',
+    ),
+    'final_with_a_number_that_is_not_finite': (
+        '{"type":"final","content":{"value":1e400}}',
+        'not one of the allowed shapes',
+    ),
+    'final_then_a_broken_final_then_a_tool_call': (
+        '{"type":"final","content":"Deal 42 is won."}\n{"type":"final","content":"a "b" c"}\n'
+        '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}',
+        'combined a final answer with a pending tool call',
     ),
 }
 

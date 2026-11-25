@@ -50,6 +50,8 @@ BROKEN_FINAL = (
 BROKEN_TOOL_CALL = '{"type":"tool_call","name":"crm.note_create","args":{"content":"a "quoted" note"}}'
 REPAIRED_TOOL_CALL = '{"type":"tool_call","name":"crm.note_create","args":{"content":"a \\"quoted\\" note"}}'
 CUT_OFF_FINAL = '{"type":"final","content":"Acme reported revenue of 12'
+# A short `final` envelope whose content has quotes that were not escaped.
+BROKEN_MIDDLE_FINAL = '{"type":"final","content":"a "b" c"}'
 PARALLEL_CALLS = '{"type":"tool_calls","calls":[{"name":"a.one","args":{}},{"name":"b.two","args":{"x":1}}]}'
 TOOL_CALL = '{"type":"tool_call","name":"crm.create","args":{"name":"Acme"}}'
 PRETTY_BROKEN_TOOL_CALL = '{\n  "name": "crm.create",\n  "args": {"note": "a "quoted" word"},\n  "type": "tool_call"\n}'
@@ -1720,6 +1722,96 @@ def test_a_final_followed_by_pending_work_is_retried(call):
 def test_a_final_can_be_followed_by_a_quoted_call_example():
     raw = '{"type":"final","content":"Done."}\nFor example, ' + TOOL_CALL + ' creates a record.'
     assert answer_of(parse(raw)) == 'Done.'
+
+
+@pytest.mark.parametrize(
+    'body',
+    [
+        '{"type":"tool_call","name":"crm.create","args":{"name":"Ac',
+        # The same in a fence that never closes, a call whose escaping is broken, and the parallel form cut off.
+        '```json\n{"type":"tool_call","name":"crm.create","args":{"name":"Ac',
+        BROKEN_TOOL_CALL,
+        '{"type":"tool_calls","calls":[{"name":"a.one","args":{}',
+    ],
+)
+def test_a_tool_envelope_that_does_not_parse_after_the_marker_is_retried(body):
+    """Delivered as written, the person was shown a call that never ran. It is retried as a whole one is."""
+    raw = FINAL_SENTINEL + ' ' + body
+    assert parse(raw) is None
+    ask, feedback = scripted(raw, TOOL_CALL)
+    assert reply._run_model_turn(ask).tool_calls[0]['name'] == 'crm.create'
+    assert len(feedback) == 2
+    assert 'tool call' in feedback[1]
+
+
+@pytest.mark.parametrize(
+    'after',
+    [
+        '{"a": 1}',
+        '{"company":"Acme","revenue":12',
+        # A broken object of another type, and text that only names a tool call.
+        '{"note": "a "quoted" word"}',
+        '{"note": "it stopped at {"type":"tool_call"',
+        'The call {"type":"tool_call","name":"crm.create","args":{"name":"Ac',
+    ],
+)
+def test_an_answer_that_is_not_a_tool_envelope_is_still_delivered_after_the_marker(after):
+    """Only text that opens with an object whose own type is a tool call's is retried."""
+    assert answer_of(parse(FINAL_SENTINEL + ' ' + after)) == after
+
+
+@pytest.mark.parametrize('number', ['1e400', '-1e400', 'NaN', 'Infinity', '-Infinity'])
+@pytest.mark.parametrize(
+    'shape', ['{"type":"final","content":%s}', '{"type":"final","content":{"value":[1,{"x":%s}]}}']
+)
+def test_a_final_with_a_number_that_is_not_finite_is_retried(number, shape):
+    """Written back, such a number is ``Infinity`` or ``NaN``, which is not JSON. The envelope is not read."""
+    raw = shape % number
+    assert parse(raw) is None
+    assert parse(FINAL_SENTINEL + ' ' + raw) is None
+    assert parse(raw + '\n' + FINAL_SENTINEL) is None
+    assert reply._salvage_final_content(raw) is None
+    ask, feedback = scripted(raw)
+    with pytest.raises(ValueError):
+        reply._run_model_turn(ask)
+    assert len(feedback) == 3
+    ask, feedback = scripted(raw, '{"type":"final","content":"done"}')
+    assert answer_of(reply._run_model_turn(ask)) == 'done'
+    assert len(feedback) == 2
+
+
+@pytest.mark.parametrize(
+    'raw, expected',
+    [
+        ('{"type":"final","content":{"value":1e300}}', '{"value": 1e+300}'),
+        ('{"type":"final","content":-1e-400}', '-0.0'),
+        ('{"type":"final","content":"Infinity"}', 'Infinity'),
+        # After the marker the answer is the model's own text, delivered as written.
+        (FINAL_SENTINEL + ' {"value": 1e400}', '{"value": 1e400}'),
+    ],
+)
+def test_a_final_with_finite_numbers_or_the_word_infinity_is_delivered(raw, expected):
+    assert answer_of(parse(raw)) == expected
+
+
+@pytest.mark.parametrize('middle', ['', BROKEN_MIDDLE_FINAL + '\n'])
+@pytest.mark.parametrize('call', [TOOL_CALL, BROKEN_TOOL_CALL, PARALLEL_CALLS])
+def test_a_broken_final_between_a_final_and_pending_work_does_not_hide_the_work(middle, call):
+    """With or without the broken final in the middle, it is the same reply: a claim and work that has not run."""
+    raw = '{"type":"final","content":"Created."}\n' + middle + call
+    assert parse(raw) is None
+    ask, feedback = scripted(raw)
+    with pytest.raises(ValueError):
+        reply._run_model_turn(ask)
+    assert len(feedback) == 3
+    assert 'do not answer in prose' in feedback[1]
+
+
+@pytest.mark.parametrize('after', ['', '\nThat is all.', '\n```json\n' + TOOL_CALL + '\n```'])
+def test_a_broken_final_after_a_final_with_no_work_after_it_keeps_the_answer(after):
+    """The first envelope is the turn. A broken final and a closed fenced example after it are not pending work."""
+    raw = '{"type":"final","content":"Created."}\n' + BROKEN_MIDDLE_FINAL + after
+    assert answer_of(parse(raw)) == 'Created.'
 
 
 @pytest.mark.parametrize('label', ['json', 'json5', 'c++', 'objective-c'])
