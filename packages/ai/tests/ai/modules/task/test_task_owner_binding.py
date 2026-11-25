@@ -98,6 +98,7 @@ def _server():
     ts._reserved_ports = set()
     ts._store_instance = None
     ts._config = {}
+    ts._launcher = None
     ts._server = MagicMock()
     ts.debug_message = MagicMock()
     ts._debug_task_started = lambda *args: None

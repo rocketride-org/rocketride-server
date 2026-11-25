@@ -153,6 +153,7 @@ from .task_engine import (
     hosted_refusal,
     resolve_parameter_tokens,
 )
+from .launcher import Launcher, create_launcher
 from ai.common.rocketride_db import DB_PROVIDERS, dsn_key
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .pipeline import MultipleSourcesError, resolve_implied_source
@@ -779,8 +780,27 @@ class TaskServer(DAPBase):
         self._server = server
         self._config = server.config
 
+        # The runtime every Task of this process starts with (see launcher())
+        self._launcher: Optional[Launcher] = None
+
         # Initialize DAP base class with server identification
         super().__init__('SERVER', **kwargs)
+
+    def launcher(self) -> Launcher:
+        """
+        The launcher every Task of this process starts with.
+
+        Built once from ``server.config['runtime']`` (``--runtime`` on
+        ``eaas.py``), so a runtime's one-time work happens once per process
+        and the state of one run lives in its ``Launch``. A config without a
+        runtime gets spawn.
+
+        Returns:
+            Launcher: The shared launcher.
+        """
+        if self._launcher is None:
+            self._launcher = create_launcher(self._config.get('runtime') or '', self)
+        return self._launcher
 
     @property
     def store(self) -> Store:

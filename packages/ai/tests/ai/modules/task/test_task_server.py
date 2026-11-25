@@ -76,6 +76,7 @@ def _make_server(*, config=None, web_server=None):
     ts._expiry_gen = 0
     ts._store_instance = None
     ts._config = config if config is not None else {}
+    ts._launcher = None
     ts._server = web_server or MagicMock()
     ts.debug_message = MagicMock()
     return ts
