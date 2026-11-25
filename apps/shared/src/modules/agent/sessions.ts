@@ -303,6 +303,34 @@ async function updateCatalogLists(mutate: (lists: CatalogLists) => CatalogLists 
 }
 
 // =============================================================================
+// SESSION FILES — serialized writer per session
+// =============================================================================
+
+// Two saves of one conversation (two requests settling close together) must
+// land in the order they were made, or an older snapshot written last
+// replaces the newer one. Each session's writes queue behind its previous
+// one, as the catalog's do; the entry is dropped once the session is idle.
+const sessionChains = new Map<string, Promise<void>>();
+
+/**
+ * Queues one write of a session's file behind that session's earlier writes.
+ * Like {@link updateCatalogLists}, the queue survives failures while the
+ * caller still receives its own write's outcome.
+ *
+ * @param sessionId - The session GUID (the queue's key).
+ * @param write - The write.
+ */
+function queueSessionWrite(sessionId: string, write: () => Promise<void>): Promise<void> {
+	const op = (sessionChains.get(sessionId) ?? Promise.resolve()).then(write);
+	const settled = op.catch(() => undefined);
+	sessionChains.set(sessionId, settled);
+	void settled.then(() => {
+		if (sessionChains.get(sessionId) === settled) sessionChains.delete(sessionId);
+	});
+	return op;
+}
+
+// =============================================================================
 // SESSION VERBS
 // =============================================================================
 
@@ -352,9 +380,13 @@ export async function deleteSession(sessionId: string): Promise<void> {
  * @param options - `catalog: false` writes the file only (default true).
  */
 export async function saveSession(session: AgentSessionFile, options?: { catalog?: boolean }): Promise<void> {
-	const path = await sessionPath(session.sessionId);
-	await requireClient().fsWriteJson(path, session);
-	emitFsChange(path, 'agent');
+	// step: the file write waits for this session's earlier writes (queued at
+	// call time, so in call order); the catalog row keeps its own queue
+	await queueSessionWrite(session.sessionId, async () => {
+		const path = await sessionPath(session.sessionId);
+		await requireClient().fsWriteJson(path, session);
+		emitFsChange(path, 'agent');
+	});
 	if (options?.catalog === false) return;
 	await saveSessionMeta({ sessionId: session.sessionId, date: session.date, title: session.title, ...(session.group !== undefined ? { group: session.group } : {}) });
 }

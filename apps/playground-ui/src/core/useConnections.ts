@@ -42,7 +42,7 @@ export interface ConnectionsApi {
 	removeConnection: (id: string) => Promise<void>;
 	/** Deletes one conversation. */
 	deleteConversation: (sessionId: string) => Promise<void>;
-	/** Commits a conversation's row after its file was saved (skipped for one deleted here). */
+	/** Commits a conversation's row after its file was saved (skipped for one deleted here, or begun before its connection was removed here). */
 	commit: (meta: AgentSessionMeta) => Promise<void>;
 }
 
@@ -68,6 +68,10 @@ export function useConnections(connected: boolean): ConnectionsApi {
 	// Conversations deleted here: a request that settles after its conversation
 	// was deleted still saves, and its row must not bring the conversation back.
 	const deleted = useRef(new Set<string>());
+	// Connections removed here, with when. A conversation's row carries its
+	// creation time, so only rows of conversations begun before the removal are
+	// held back, and opening the same agent again is never blocked.
+	const removed = useRef(new Map<string, number>());
 
 	// Set on every setup, not only at creation: StrictMode runs the cleanup and the setup again.
 	useEffect(() => {
@@ -111,7 +115,13 @@ export function useConnections(connected: boolean): ConnectionsApi {
 	);
 
 	const openAgent = useCallback((address: string, label: ConnectionLabel) => write(() => saveConnection({ id: address, title: label.name, ...(label.icon ? { icon: label.icon } : {}), date: Date.now() })), [write]);
-	const remove = useCallback((id: string) => write(() => removeConnection(id)), [write]);
+	const remove = useCallback(
+		(id: string) => {
+			removed.current.set(id, Date.now());
+			return write(() => removeConnection(id));
+		},
+		[write]
+	);
 	const deleteConversation = useCallback(
 		(sessionId: string) => {
 			deleted.current.add(sessionId);
@@ -119,7 +129,15 @@ export function useConnections(connected: boolean): ConnectionsApi {
 		},
 		[write]
 	);
-	const commit = useCallback((meta: AgentSessionMeta) => (deleted.current.has(meta.sessionId) ? Promise.resolve() : write(() => commitConversation(meta))), [write]);
+	const commit = useCallback(
+		(meta: AgentSessionMeta) => {
+			// step: a conversation begun before its connection was removed stays gone; one begun after (the agent opened again) commits
+			const removedAt = meta.group !== undefined ? removed.current.get(meta.group) : undefined;
+			if (deleted.current.has(meta.sessionId) || (removedAt !== undefined && meta.date <= removedAt)) return Promise.resolve();
+			return write(() => commitConversation(meta));
+		},
+		[write]
+	);
 
 	return { tree, loading, error, refresh, openAgent, removeConnection: remove, deleteConversation, commit };
 }

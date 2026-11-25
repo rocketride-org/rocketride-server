@@ -163,7 +163,12 @@ export const PlaygroundDevToolSidebar: React.FC<DevToolProps> = ({ channel, docu
 			}}
 			onDeleteConversation={(sessionId) => {
 				void connections.deleteConversation(sessionId);
-				if (active?.sessionId === sessionId) channel.sendEvent('open', { connectionId: active.connectionId, sessionId: null } satisfies OpenEvent);
+				// step: the tab showing it (by what each tab shows, not the last move) starts a new conversation
+				const showing = Object.keys(shownSessions).find((id) => shownSessions[id] === sessionId);
+				if (showing) {
+					channel.sendEvent('open', { connectionId: showing, sessionId: null } satisfies OpenEvent);
+					markActive({ connectionId: showing, sessionId: null });
+				}
 			}}
 		/>
 	);
