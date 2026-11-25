@@ -308,17 +308,19 @@ async function updateCatalogLists(mutate: (lists: CatalogLists) => CatalogLists 
 
 // Two saves of one conversation (two requests settling close together) must
 // land in the order they were made, or an older snapshot written last
-// replaces the newer one. Each session's writes queue behind its previous
-// one, as the catalog's do; the entry is dropped once the session is idle.
+// replaces the newer one; a delete must land after the writes queued before
+// it. Each session's writes and deletes queue behind its previous one, as the
+// catalog's do; the entry is dropped once the session is idle. Nothing queued
+// here waits on the catalog queue.
 const sessionChains = new Map<string, Promise<void>>();
 
 /**
- * Queues one write of a session's file behind that session's earlier writes.
- * Like {@link updateCatalogLists}, the queue survives failures while the
- * caller still receives its own write's outcome.
+ * Queues one write (or delete) of a session's file behind that session's
+ * earlier ones. Like {@link updateCatalogLists}, the queue survives failures
+ * while the caller still receives its own operation's outcome.
  *
  * @param sessionId - The session GUID (the queue's key).
- * @param write - The write.
+ * @param write - The write or delete.
  */
 function queueSessionWrite(sessionId: string, write: () => Promise<void>): Promise<void> {
 	const op = (sessionChains.get(sessionId) ?? Promise.resolve()).then(write);
@@ -364,9 +366,12 @@ export async function getContext(sessionId: string): Promise<string> {
  * @param sessionId - The session GUID.
  */
 export async function deleteSession(sessionId: string): Promise<void> {
-	const path = await sessionPath(sessionId);
-	await requireClient().fsDelete(path);
-	emitFsChange(path, 'agent');
+	// step: the delete waits for the session's queued writes, so none of them lands after it
+	await queueSessionWrite(sessionId, async () => {
+		const path = await sessionPath(sessionId);
+		await requireClient().fsDelete(path);
+		emitFsChange(path, 'agent');
+	});
 	await updateCatalog((rows) => rows.filter((r) => r.sessionId !== sessionId));
 }
 
@@ -436,15 +441,18 @@ export async function deleteAgentGroup(groupId: string): Promise<void> {
 		// step: the group's sessions, as the catalog lists them inside the rewrite
 		const members = lists.sessions.filter((r) => r.group === groupId);
 
-		// step: each session's file first; a file that is already gone is not a failure
+		// step: each session's file first, behind that session's queued writes (which
+		// never wait on the catalog, so this cannot deadlock); a file already gone is not a failure
 		for (const member of members) {
-			const path = await sessionPath(member.sessionId);
-			try {
-				await requireClient().fsDelete(path);
-			} catch (err) {
-				if (!isNotFound(err)) throw err;
-			}
-			emitFsChange(path, 'agent');
+			await queueSessionWrite(member.sessionId, async () => {
+				const path = await sessionPath(member.sessionId);
+				try {
+					await requireClient().fsDelete(path);
+				} catch (err) {
+					if (!isNotFound(err)) throw err;
+				}
+				emitFsChange(path, 'agent');
+			});
 		}
 
 		// step: then exactly those rows, and the group row

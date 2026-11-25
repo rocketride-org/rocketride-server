@@ -154,17 +154,25 @@ export const PlaygroundDevToolSidebar: React.FC<DevToolProps> = ({ channel, docu
 			onNewConnection={() => {
 				documents?.open(PICK_KEY, 'New connection');
 				channel.sendEvent('pick', {});
+				// A single-frame host (no documents) now shows the picker in its one frame.
+				if (!documents) setActive(null);
 			}}
 			onOpenConnection={(id) => openIn(id, tree.find((n) => n.group.id === id)?.conversations[0]?.sessionId ?? null)}
 			onOpenConversation={(id, sessionId) => openIn(id, sessionId)}
 			onRemoveConnection={(id) => {
 				documents?.close(id);
+				// A single-frame host has no tab to close: its one frame, if it shows this connection, goes back to the picker.
+				if (!documents && active?.connectionId === id) {
+					channel.sendEvent('pick', {});
+					setActive(null);
+				}
 				void connections.removeConnection(id);
 			}}
 			onDeleteConversation={(sessionId) => {
 				void connections.deleteConversation(sessionId);
-				// step: the tab showing it (by what each tab shows, not the last move) starts a new conversation
-				const showing = Object.keys(shownSessions).find((id) => shownSessions[id] === sessionId);
+				// step: the frame showing it starts a new conversation. With tabs (documents), that is the
+				// tab whose connection shows it; a single-frame host's one frame only when it shows it now.
+				const showing = documents ? Object.keys(shownSessions).find((id) => shownSessions[id] === sessionId) : active?.sessionId === sessionId ? active.connectionId : undefined;
 				if (showing) {
 					channel.sendEvent('open', { connectionId: showing, sessionId: null } satisfies OpenEvent);
 					markActive({ connectionId: showing, sessionId: null });
