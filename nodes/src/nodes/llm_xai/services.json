@@ -90,56 +90,80 @@
 				"model": "grok-4-1-fast-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000, // manual
-				"modelOutputTokens": 4096 // manual
+				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in xAI API. Please select a current model."
 			},
 			"grok-4-1-fast-non-reasoning": {
 				"title": "Grok 4.1 Fast Non-Reasoning",
 				"model": "grok-4-1-fast-non-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000, // manual
-				"modelOutputTokens": 4096 // manual
+				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in xAI API. Please select a current model."
 			},
 			"grok-code-fast-1": {
 				"title": "Grok Code Fast 1",
 				"model": "grok-code-fast-1",
 				"modelSource": "manual",
 				"modelTotalTokens": 256000, // manual
-				"modelOutputTokens": 10000 // manual
+				"modelOutputTokens": 10000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in xAI API. Please select a current model."
 			},
 			"grok-4-fast-reasoning": {
 				"title": "Grok 4 Fast",
 				"model": "grok-4-fast-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000, // manual
-				"modelOutputTokens": 4096 // manual
+				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in xAI API. Please select a current model."
 			},
 			"grok-4-fast-non-reasoning": {
 				"title": "Grok 4 Fast Non-Reasoning",
 				"model": "grok-4-fast-non-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000, // manual
-				"modelOutputTokens": 4096 // manual
+				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in xAI API. Please select a current model."
 			},
 			"grok-4": {
 				"title": "Grok 4",
 				"model": "grok-4-0709",
 				"modelSource": "manual",
 				"modelTotalTokens": 256000, // manual
-				"modelOutputTokens": 256000 // manual
+				"modelOutputTokens": 256000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in xAI API. Please select a current model."
 			},
 			"grok-3-mini": {
 				"title": "Grok 3 Mini",
 				"model": "grok-3-mini",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072, // manual
-				"modelOutputTokens": 131072 // manual
+				"modelOutputTokens": 131072, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in xAI API. Please select a current model."
 			},
 			"grok-3": {
 				"title": "Grok 3",
 				"model": "grok-3",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072, // manual
-				"modelOutputTokens": 131072 // manual
+				"modelOutputTokens": 131072, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in xAI API. Please select a current model."
 			},
 			"grok-3-beta": {
 				"title": "xAI: Grok 3 Beta",
@@ -175,8 +199,8 @@
 				"title": "xAI: Grok 4.20",
 				"model": "grok-4.20",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 2000000, // openrouter
-				"modelOutputTokens": 1800000, // openrouter
+				"modelTotalTokens": 2000000, // manual
+				"modelOutputTokens": 1800000, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -186,8 +210,8 @@
 				"title": "xAI: Grok 4.20 Multi-Agent",
 				"model": "grok-4.20-multi-agent",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 2000000, // openrouter
-				"modelOutputTokens": 1800000, // openrouter
+				"modelTotalTokens": 2000000, // manual
+				"modelOutputTokens": 1800000, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -206,8 +230,8 @@
 			"grok-4-3": {
 				"title": "xAI: Grok 4.3",
 				"model": "grok-4.3",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 1000000, // openrouter
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // provider API
 				"modelOutputTokens": 900000, // openrouter
 				"capabilities": {
 					"reasoning": true
@@ -217,8 +241,8 @@
 			"grok-4-5": {
 				"title": "xAI: Grok 4.5",
 				"model": "grok-4.5",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 500000, // openrouter
+				"modelSource": "provider",
+				"modelTotalTokens": 500000, // provider API
 				"modelOutputTokens": 450000, // openrouter
 				"capabilities": {
 					"reasoning": true
@@ -229,8 +253,8 @@
 				"title": "xAI: Grok Build 0.1",
 				"model": "grok-build-0.1",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 256000, // openrouter
-				"modelOutputTokens": 230400, // openrouter
+				"modelTotalTokens": 256000, // manual
+				"modelOutputTokens": 230400, // manual
 				"capabilities": {
 					"reasoning": true
 				},
@@ -240,8 +264,8 @@
 				"title": "xAI: Grok Latest",
 				"model": "grok-latest",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 500000, // openrouter
-				"modelOutputTokens": 450000, // openrouter
+				"modelTotalTokens": 500000, // manual
+				"modelOutputTokens": 450000, // manual
 				"capabilities": {
 					"reasoning": true
 				},
@@ -251,8 +275,8 @@
 				"title": "SpaceXAI: Grok 4.3 (batch)",
 				"model": "grok-4.3:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1000000, // openrouter
-				"modelOutputTokens": 900000, // openrouter
+				"modelTotalTokens": 1000000, // manual
+				"modelOutputTokens": 900000, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the xAI API serves no model with this ID. Please use 'grok-4.3' instead.",
 				"capabilities": {
@@ -263,8 +287,35 @@
 			"grok-4-6": {
 				"title": "SpaceXAI: Grok 4.6",
 				"model": "grok-4.6",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 500000, // openrouter
+				"modelSource": "provider",
+				"modelTotalTokens": 500000, // provider API
+				"modelOutputTokens": 450000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"grok-4-20-0309-non-reasoning": {
+				"title": "Grok 4.20 0309 Non Reasoning",
+				"model": "grok-4.20-0309-non-reasoning",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // provider API
+				"modelOutputTokens": 1000000, // litellm
+				"apikey": ""
+			},
+			"grok-4-20-0309-reasoning": {
+				"title": "Grok 4.20 0309 Reasoning",
+				"model": "grok-4.20-0309-reasoning",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // provider API
+				"modelOutputTokens": 1000000, // litellm
+				"apikey": ""
+			},
+			"grok-4-7": {
+				"title": "SpaceXSI: Grok 4.7",
+				"model": "grok-4.7",
+				"modelSource": "provider",
+				"modelTotalTokens": 500000, // provider API
 				"modelOutputTokens": 450000, // openrouter
 				"capabilities": {
 					"reasoning": true
@@ -497,6 +548,24 @@
 					"properties": [
 						"xai.grok-4-6"
 					]
+				},
+				{
+					"value": "grok-4-20-0309-non-reasoning",
+					"properties": [
+						"xai.grok-4-20-0309-non-reasoning"
+					]
+				},
+				{
+					"value": "grok-4-20-0309-reasoning",
+					"properties": [
+						"xai.grok-4-20-0309-reasoning"
+					]
+				},
+				{
+					"value": "grok-4-7",
+					"properties": [
+						"xai.grok-4-7"
+					]
 				}
 			]
 		},
@@ -579,6 +648,27 @@
 		},
 		"xai.grok-4-6": {
 			"object": "grok-4-6",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"xai.grok-4-20-0309-non-reasoning": {
+			"object": "grok-4-20-0309-non-reasoning",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"xai.grok-4-20-0309-reasoning": {
+			"object": "grok-4-20-0309-reasoning",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"xai.grok-4-7": {
+			"object": "grok-4-7",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

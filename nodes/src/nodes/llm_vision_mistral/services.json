@@ -21,37 +21,55 @@
 			"mistral-large-3": {
 				"title": "Mistral Large 3 - Premier Vision (256k tokens)",
 				"model": "mistral-large-2512",
-				"modelTotalTokens": 256000,
+				"modelSource": "manual",
+				"modelTotalTokens": 256000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-medium-3.1": {
 				"title": "Mistral Medium 3.1 - Balanced Vision (128k tokens)",
 				"model": "mistral-medium-2508",
-				"modelTotalTokens": 128000,
+				"modelSource": "manual",
+				"modelTotalTokens": 128000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-small-3.2": {
 				"title": "Mistral Small 3.2 - Fast & Cheap Vision (128k tokens)",
 				"model": "mistral-small-2506",
-				"modelTotalTokens": 128000,
+				"modelSource": "manual",
+				"modelTotalTokens": 128000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"ministral-14b-3": {
 				"title": "Ministral 3 14B - High Performance Vision (256k tokens)",
 				"model": "ministral-14b-2512",
-				"modelTotalTokens": 256000,
+				"modelSource": "provider",
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 209715, // openrouter
 				"apikey": ""
 			},
 			"ministral-8b-3": {
 				"title": "Ministral 3 8B - Balanced Vision (256k tokens)",
 				"model": "ministral-8b-2512",
-				"modelTotalTokens": 256000,
+				"modelSource": "provider",
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 209715, // openrouter
 				"apikey": ""
 			},
 			"ministral-3b-3": {
 				"title": "Ministral 3 3B - Efficient Vision (256k tokens)",
 				"model": "ministral-3b-2512",
-				"modelTotalTokens": 256000,
+				"modelSource": "provider",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 104857, // openrouter
 				"apikey": ""
 			}
 		}
@@ -81,58 +99,102 @@
 		},
 		"image_vision_mistral.mistral-large-3": {
 			"object": "mistral-large-3",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_mistral.mistral-medium-3.1": {
 			"object": "mistral-medium-3.1",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_mistral.mistral-small-3.2": {
 			"object": "mistral-small-3.2",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_mistral.ministral-14b-3": {
 			"object": "ministral-14b-3",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_mistral.ministral-8b-3": {
 			"object": "ministral-8b-3",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_mistral.ministral-3b-3": {
 			"object": "ministral-3b-3",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
+			"properties": [
+				"llm.cloud.apikey",
+				"vision.systemPrompt",
+				"vision.prompt",
+				"llm.cloud.modelSource"
+			]
 		},
 		"image_vision_mistral.profile": {
 			"title": "Vision Model",
 			"description": "Select the Mistral vision model to use",
 			"type": "string",
 			"default": "mistral-large-3",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "mistral-large-3",
-					"properties": ["image_vision_mistral.mistral-large-3"]
+					"properties": [
+						"image_vision_mistral.mistral-large-3"
+					]
 				},
 				{
 					"value": "mistral-medium-3.1",
-					"properties": ["image_vision_mistral.mistral-medium-3.1"]
+					"properties": [
+						"image_vision_mistral.mistral-medium-3.1"
+					]
 				},
 				{
 					"value": "mistral-small-3.2",
-					"properties": ["image_vision_mistral.mistral-small-3.2"]
+					"properties": [
+						"image_vision_mistral.mistral-small-3.2"
+					]
 				},
 				{
 					"value": "ministral-14b-3",
-					"properties": ["image_vision_mistral.ministral-14b-3"]
+					"properties": [
+						"image_vision_mistral.ministral-14b-3"
+					]
 				},
 				{
 					"value": "ministral-8b-3",
-					"properties": ["image_vision_mistral.ministral-8b-3"]
+					"properties": [
+						"image_vision_mistral.ministral-8b-3"
+					]
 				},
 				{
 					"value": "ministral-3b-3",
-					"properties": ["image_vision_mistral.ministral-3b-3"]
+					"properties": [
+						"image_vision_mistral.ministral-3b-3"
+					]
 				}
 			]
 		}

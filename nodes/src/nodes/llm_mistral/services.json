@@ -27,8 +27,11 @@
 				"title": "Mistral Large 3",
 				"model": "mistral-large-2512",
 				"modelSource": "provider",
-				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 209715, // openrouter
+				"modelTotalTokens": 262144, // manual
+				"modelOutputTokens": 209715, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-medium": {
@@ -37,6 +40,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 131072, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-small": {
@@ -45,6 +51,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 131072, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"codestral": {
@@ -61,6 +70,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 40000, // manual
 				"modelOutputTokens": 40000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"magistral-small": {
@@ -69,6 +81,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 40960, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"devstral-medium": {
@@ -77,6 +92,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 128000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"devstral-small": {
@@ -85,6 +103,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 128000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"ministral-14b": {
@@ -116,15 +137,18 @@
 				"model": "codestral-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 8191, // manual
-				"modelOutputTokens": 8191, // manual
+				"modelOutputTokens": 8191, // litellm
 				"apikey": ""
 			},
 			"devstral-2512": {
 				"title": "Mistral: Devstral 2 2512",
 				"model": "devstral-2512",
 				"modelSource": "provider",
-				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 209715, // openrouter
+				"modelTotalTokens": 262144, // manual
+				"modelOutputTokens": 209715, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"devstral-latest": {
@@ -133,6 +157,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 256000, // manual
 				"modelOutputTokens": 256000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"devstral-medium-latest": {
@@ -141,6 +168,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 256000, // manual
 				"modelOutputTokens": 256000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"magistral-medium-latest": {
@@ -148,23 +178,29 @@
 				"model": "magistral-medium-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 40000, // manual
-				"modelOutputTokens": 40000, // manual
-				"apikey": ""
+				"modelOutputTokens": 262144, // litellm
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"magistral-small-latest": {
 				"title": "Magistral-small-latest",
 				"model": "magistral-small-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 40000, // manual
-				"modelOutputTokens": 40000, // manual
-				"apikey": ""
+				"modelOutputTokens": 262144, // litellm
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"ministral-14b-latest": {
 				"title": "Ministral-14b-latest",
 				"model": "ministral-14b-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"ministral-3b-latest": {
@@ -172,7 +208,7 @@
 				"model": "ministral-3b-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelOutputTokens": 131072, // litellm
 				"apikey": ""
 			},
 			"ministral-8b-latest": {
@@ -180,7 +216,7 @@
 				"model": "ministral-8b-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-large-2411": {
@@ -189,6 +225,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 131072, // manual
 				"modelOutputTokens": 128000, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-large-latest": {
@@ -197,6 +236,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 32000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-medium-2505": {
@@ -205,6 +247,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 8191, // manual
 				"modelOutputTokens": 8191, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-medium-2604": {
@@ -212,15 +257,15 @@
 				"model": "mistral-medium-2604",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-medium-3": {
 				"title": "Mistral: Mistral Medium 3",
 				"model": "mistral-medium-3",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 104857, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-medium-3-5": {
@@ -240,6 +285,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-medium-latest": {
@@ -247,7 +295,7 @@
 				"model": "mistral-medium-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 131072, // manual
-				"modelOutputTokens": 131072, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-small-2603": {
@@ -266,7 +314,7 @@
 				"model": "mistral-small-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 131072, // manual
-				"modelOutputTokens": 131072, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-tiny-2407": {
@@ -275,6 +323,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-tiny-latest": {
@@ -283,6 +334,9 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Mistral AI API. Please select a current model.",
 				"apikey": ""
 			},
 			"mistral-vibe-cli-fast": {
@@ -290,7 +344,7 @@
 				"model": "mistral-vibe-cli-fast",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-vibe-cli-latest": {
@@ -298,7 +352,7 @@
 				"model": "mistral-vibe-cli-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-vibe-cli-with-tools": {
@@ -306,71 +360,71 @@
 				"model": "mistral-vibe-cli-with-tools",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-large-2407": {
 				"title": "Mistral Large 2407",
 				"model": "mistral-large-2407",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 104857, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 104857, // manual
 				"apikey": ""
 			},
 			"mistral-medium-3-1": {
 				"title": "Mistral: Mistral Medium 3.1",
 				"model": "mistral-medium-3.1",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 104857, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 104857, // manual
 				"apikey": ""
 			},
 			"mistral-nemo": {
 				"title": "Mistral: Mistral Nemo",
 				"model": "mistral-nemo",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
 			"mistral-saba": {
 				"title": "Mistral: Saba",
 				"model": "mistral-saba",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 26214, // openrouter
+				"modelTotalTokens": 32768, // manual
+				"modelOutputTokens": 26214, // manual
 				"apikey": ""
 			},
 			"mistral-small-24b-instruct-2501": {
 				"title": "Mistral: Mistral Small 3",
 				"model": "mistral-small-24b-instruct-2501",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 32768, // manual
+				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
 			"mistral-small-3-1-24b-instruct": {
 				"title": "Mistral: Mistral Small 3.1 24B",
 				"model": "mistral-small-3.1-24b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 102400, // openrouter
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 102400, // manual
 				"apikey": ""
 			},
 			"mistral-small-3-2-24b-instruct": {
 				"title": "Mistral: Mistral Small 3.2 24B",
 				"model": "mistral-small-3.2-24b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
 			"mistral-medium-3-5-batch": {
 				"title": "Mistral: Mistral Medium 3.5 (batch)",
 				"model": "mistral-medium-3-5:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 26214, // openrouter
+				"modelTotalTokens": 32768, // manual
+				"modelOutputTokens": 26214, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Mistral API serves no model with this ID. Please use 'mistral-medium-3-5' instead.",
 				"capabilities": {

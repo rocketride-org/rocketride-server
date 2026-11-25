@@ -20,19 +20,154 @@
 			"gemini-2.5-flash": {
 				"title": "Gemini 2.5 Flash - Fast & Efficient (1M tokens)",
 				"model": "gemini-2.5-flash",
-				"modelTotalTokens": 1048576,
-				"apikey": ""
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 65535, // openrouter
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2.5-pro": {
 				"title": "Gemini 2.5 Pro - High Quality (1M tokens)",
 				"model": "gemini-2.5-pro",
-				"modelTotalTokens": 1048576,
-				"apikey": ""
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2.0-flash": {
 				"title": "Gemini 2.0 Flash - Balanced (1M tokens)",
 				"model": "gemini-2.0-flash",
-				"modelTotalTokens": 1048576,
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in Gemini API. Please select a current model.",
+				"apikey": ""
+			},
+			"gemini-3-1-flash-lite": {
+				"title": "Google: Gemini 3.1 Flash Lite",
+				"model": "gemini-3.1-flash-lite",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 65536, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-3-5-flash": {
+				"title": "Google: Gemini 3.5 Flash",
+				"model": "gemini-3.5-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 65536, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-3-5-flash-lite": {
+				"title": "Google: Gemini 3.5 Flash Lite",
+				"model": "gemini-3.5-flash-lite",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 65536, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-3-6-flash": {
+				"title": "Google: Gemini 3.6 Flash",
+				"model": "gemini-3.6-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 65536, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-3-7-flash": {
+				"title": "Google: Gemini 3.7 Flash",
+				"model": "gemini-3.7-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 65536, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-3-8-flash": {
+				"title": "Google: Gemini 3.8 Flash",
+				"model": "gemini-3.8-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 65536, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-4-argon": {
+				"title": "Google: Gemini 4 Argon",
+				"model": "gemini-4-argon",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-4-carbon": {
+				"title": "Google: Gemini 4 Carbon",
+				"model": "gemini-4-carbon",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-4-hydrogen": {
+				"title": "Google: Gemini 4 Hydrogen",
+				"model": "gemini-4-hydrogen",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-4-neon": {
+				"title": "Google: Gemini 4 Neon",
+				"model": "gemini-4-neon",
+				"modelSource": "provider",
+				"modelTotalTokens": 1048576, // provider API
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gemini-nano-banana-2-1": {
+				"title": "Google: Nano Banana 2.1",
+				"model": "gemini-nano-banana-2.1",
+				"modelSource": "provider",
+				"modelTotalTokens": 65536, // provider API
+				"modelOutputTokens": 58982, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
 				"apikey": ""
 			}
 		}
@@ -68,9 +203,18 @@
 			"description": "How aggressively to prioritize hazard detection",
 			"default": "high",
 			"enum": [
-				["high", "High - Always lead with hazards"],
-				["medium", "Medium - Include hazards when present"],
-				["low", "Low - Standard description order"]
+				[
+					"high",
+					"High - Always lead with hazards"
+				],
+				[
+					"medium",
+					"Medium - Include hazards when present"
+				],
+				[
+					"low",
+					"Low - Standard description order"
+				]
 			]
 		},
 		"accessibility.spatialFormat": {
@@ -79,42 +223,267 @@
 			"description": "How to describe spatial positions",
 			"default": "clock",
 			"enum": [
-				["clock", "Clock positions (12 o'clock, 3 o'clock)"],
-				["relative", "Relative (left, right, ahead, behind)"],
-				["both", "Both clock and relative"]
+				[
+					"clock",
+					"Clock positions (12 o'clock, 3 o'clock)"
+				],
+				[
+					"relative",
+					"Relative (left, right, ahead, behind)"
+				],
+				[
+					"both",
+					"Both clock and relative"
+				]
 			]
 		},
 		"accessibility_describe.gemini-2.5-flash": {
 			"object": "gemini-2.5-flash",
-			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
 		},
 		"accessibility_describe.gemini-2.5-pro": {
 			"object": "gemini-2.5-pro",
-			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
 		},
 		"accessibility_describe.gemini-2.0-flash": {
 			"object": "gemini-2.0-flash",
-			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
 		},
 		"accessibility_describe.profile": {
 			"title": "Vision Model",
 			"description": "Select the Gemini vision model for accessibility descriptions",
 			"type": "string",
 			"default": "gemini-2.5-flash",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "gemini-2.5-flash",
-					"properties": ["accessibility_describe.gemini-2.5-flash"]
+					"properties": [
+						"accessibility_describe.gemini-2.5-flash"
+					]
 				},
 				{
 					"value": "gemini-2.5-pro",
-					"properties": ["accessibility_describe.gemini-2.5-pro"]
+					"properties": [
+						"accessibility_describe.gemini-2.5-pro"
+					]
 				},
 				{
 					"value": "gemini-2.0-flash",
-					"properties": ["accessibility_describe.gemini-2.0-flash"]
+					"properties": [
+						"accessibility_describe.gemini-2.0-flash"
+					]
+				},
+				{
+					"value": "gemini-3-1-flash-lite",
+					"properties": [
+						"accessibility_describe.gemini-3-1-flash-lite"
+					]
+				},
+				{
+					"value": "gemini-3-5-flash",
+					"properties": [
+						"accessibility_describe.gemini-3-5-flash"
+					]
+				},
+				{
+					"value": "gemini-3-5-flash-lite",
+					"properties": [
+						"accessibility_describe.gemini-3-5-flash-lite"
+					]
+				},
+				{
+					"value": "gemini-3-6-flash",
+					"properties": [
+						"accessibility_describe.gemini-3-6-flash"
+					]
+				},
+				{
+					"value": "gemini-3-7-flash",
+					"properties": [
+						"accessibility_describe.gemini-3-7-flash"
+					]
+				},
+				{
+					"value": "gemini-3-8-flash",
+					"properties": [
+						"accessibility_describe.gemini-3-8-flash"
+					]
+				},
+				{
+					"value": "gemini-4-argon",
+					"properties": [
+						"accessibility_describe.gemini-4-argon"
+					]
+				},
+				{
+					"value": "gemini-4-carbon",
+					"properties": [
+						"accessibility_describe.gemini-4-carbon"
+					]
+				},
+				{
+					"value": "gemini-4-hydrogen",
+					"properties": [
+						"accessibility_describe.gemini-4-hydrogen"
+					]
+				},
+				{
+					"value": "gemini-4-neon",
+					"properties": [
+						"accessibility_describe.gemini-4-neon"
+					]
+				},
+				{
+					"value": "gemini-nano-banana-2-1",
+					"properties": [
+						"accessibility_describe.gemini-nano-banana-2-1"
+					]
 				}
+			]
+		},
+		"accessibility_describe.gemini-3-1-flash-lite": {
+			"object": "gemini-3-1-flash-lite",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-3-5-flash": {
+			"object": "gemini-3-5-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-3-5-flash-lite": {
+			"object": "gemini-3-5-flash-lite",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-3-6-flash": {
+			"object": "gemini-3-6-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-3-7-flash": {
+			"object": "gemini-3-7-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-3-8-flash": {
+			"object": "gemini-3-8-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-4-argon": {
+			"object": "gemini-4-argon",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-4-carbon": {
+			"object": "gemini-4-carbon",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-4-hydrogen": {
+			"object": "gemini-4-hydrogen",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-4-neon": {
+			"object": "gemini-4-neon",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
+			]
+		},
+		"accessibility_describe.gemini-nano-banana-2-1": {
+			"object": "gemini-nano-banana-2-1",
+			"properties": [
+				"llm.cloud.apikey",
+				"accessibility.systemPrompt",
+				"accessibility.prompt",
+				"accessibility.prioritizeHazards",
+				"accessibility.spatialFormat",
+				"llm.cloud.modelSource"
 			]
 		}
 	},

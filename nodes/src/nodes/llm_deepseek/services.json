@@ -94,6 +94,9 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "https://api.deepseek.com/v1",
 				"apikey": ""
 			},
@@ -101,8 +104,11 @@
 				"title": "Cloud Chat",
 				"model": "deepseek-chat",
 				"modelSource": "manual",
-				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 163840, // manual
+				"modelOutputTokens": 16384, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "https://api.deepseek.com/v1",
 				"apikey": ""
 			},
@@ -111,6 +117,9 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-7b": {
@@ -118,6 +127,9 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-8b": {
@@ -125,6 +137,9 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-14b": {
@@ -132,6 +147,9 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-32b": {
@@ -139,6 +157,9 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-70b": {
@@ -146,6 +167,9 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-671b": {
@@ -153,6 +177,9 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-v3": {
@@ -160,22 +187,25 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 128000, // manual
 				"modelOutputTokens": 4096, // manual
+				"deprecated": true,
+				"deprecatedBy": "provider",
+				"migration": "Model no longer listed in DeepSeek API. Please select a current model.",
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-chat-v3-0324": {
 				"title": "DeepSeek: DeepSeek V3 0324",
 				"model": "deepseek-chat-v3-0324",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 147456, // openrouter
+				"modelTotalTokens": 163840, // manual
+				"modelOutputTokens": 147456, // manual
 				"apikey": ""
 			},
 			"deepseek-chat-v3-1": {
 				"title": "DeepSeek: DeepSeek V3.1",
 				"model": "deepseek-chat-v3.1",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 144900, // openrouter
+				"modelTotalTokens": 163840, // manual
+				"modelOutputTokens": 144900, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -185,8 +215,8 @@
 				"title": "DeepSeek: R1",
 				"model": "deepseek-r1",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 64000, // openrouter
-				"modelOutputTokens": 16000, // openrouter
+				"modelTotalTokens": 64000, // manual
+				"modelOutputTokens": 16000, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -196,8 +226,8 @@
 				"title": "DeepSeek: R1 0528",
 				"model": "deepseek-r1-0528",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 32768, // openrouter
+				"modelTotalTokens": 163840, // manual
+				"modelOutputTokens": 32768, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -207,8 +237,8 @@
 				"title": "DeepSeek: R1 Distill Llama 70B",
 				"model": "deepseek-r1-distill-llama-70b",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 8192, // openrouter
-				"modelOutputTokens": 7372, // openrouter
+				"modelTotalTokens": 8192, // manual
+				"modelOutputTokens": 7372, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -248,8 +278,8 @@
 				"title": "DeepSeek: DeepSeek V3.1 Terminus",
 				"model": "deepseek-v3.1-terminus",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 32768, // openrouter
+				"modelTotalTokens": 163840, // manual
+				"modelOutputTokens": 32768, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -259,8 +289,8 @@
 				"title": "DeepSeek: DeepSeek V3.2",
 				"model": "deepseek-v3.2",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 163840, // manual
+				"modelOutputTokens": 65536, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -270,8 +300,8 @@
 				"title": "DeepSeek: DeepSeek V3.2 Exp",
 				"model": "deepseek-v3.2-exp",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 163840, // manual
+				"modelOutputTokens": 65536, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -291,8 +321,8 @@
 				"title": "DeepSeek: DeepSeek V4 Flash",
 				"model": "deepseek-v4-flash",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 384000, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 384000, // manual
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -301,9 +331,9 @@
 			"deepseek-v4-pro": {
 				"title": "DeepSeek: DeepSeek V4 Pro",
 				"model": "deepseek-v4-pro",
-				"modelSource": "openrouter",
+				"modelSource": "provider",
 				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 384000, // openrouter
+				"modelOutputTokens": 393216, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -313,8 +343,8 @@
 				"title": "DeepSeek: DeepSeek V4 Flash 0731",
 				"model": "deepseek-v4-flash-0731",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1310720, // openrouter
-				"modelOutputTokens": 131072, // openrouter
+				"modelTotalTokens": 1310720, // manual
+				"modelOutputTokens": 131072, // manual
 				"capabilities": {
 					"reasoning": true
 				},
@@ -324,8 +354,8 @@
 				"title": "DeepSeek: DeepSeek V4 Flash 0731 (batch)",
 				"model": "deepseek-v4-flash-0731:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 943718, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 943718, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the DeepSeek API serves no model with this ID. Please use 'deepseek-v4-flash-0731' instead.",
 				"capabilities": {
@@ -337,8 +367,8 @@
 				"title": "DeepSeek V4 Flash Latest",
 				"model": "deepseek-v4-flash-latest",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1310720, // openrouter
-				"modelOutputTokens": 393216, // openrouter
+				"modelTotalTokens": 1310720, // manual
+				"modelOutputTokens": 393216, // manual
 				"capabilities": {
 					"reasoning": true
 				},
@@ -348,8 +378,8 @@
 				"title": "DeepSeek: DeepSeek V4 Flash Vision Exp",
 				"model": "deepseek-v4-flash-vision-exp",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 384000, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 384000, // manual
 				"capabilities": {
 					"reasoning": true
 				},
@@ -359,8 +389,8 @@
 				"title": "DeepSeek: DeepSeek V4 Pro 0813",
 				"model": "deepseek-v4-pro-0813",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 384000, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 384000, // manual
 				"capabilities": {
 					"reasoning": true
 				},
@@ -370,13 +400,21 @@
 				"title": "DeepSeek: DeepSeek V4 Pro 0813 (batch)",
 				"model": "deepseek-v4-pro-0813:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 943718, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 943718, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the DeepSeek API serves no model with this ID. Please use 'deepseek-v4-pro-0813' instead.",
 				"capabilities": {
 					"reasoning": true
 				},
+				"apikey": ""
+			},
+			"deepseek-flash": {
+				"title": "DeepSeek Flash",
+				"model": "deepseek-flash",
+				"modelSource": "provider",
+				"modelTotalTokens": 393216, // litellm
+				"modelOutputTokens": 393216, // litellm
 				"apikey": ""
 			}
 		}
@@ -643,6 +681,12 @@
 					"properties": [
 						"deepseek.deepseek-v4-pro-0813-batch"
 					]
+				},
+				{
+					"value": "deepseek-flash",
+					"properties": [
+						"deepseek.deepseek-flash"
+					]
 				}
 			]
 		},
@@ -781,6 +825,13 @@
 		},
 		"deepseek.deepseek-v4-pro-0813-batch": {
 			"object": "deepseek-v4-pro-0813-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-flash": {
+			"object": "deepseek-flash",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
