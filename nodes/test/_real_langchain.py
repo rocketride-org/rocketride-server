@@ -7,8 +7,8 @@
 
 """Loader for the adapter tool-builder tests: real LangChain and Pydantic, engine stubs only where needed.
 
-Other test modules keep hand-built ``langchain_core`` stubs in ``sys.modules``: the
-parser test from collection on, the DeepAgent envelope test while it runs. A tool
+Other test modules keep hand-built ``langchain_core`` stubs in ``sys.modules``,
+including the DeepAgent envelope test while it runs. A tool
 built on a stub ``BaseTool`` proves nothing about whether the framework accepts
 ``_rr_input_schema``, so these tests swap the stubs out and put them back afterwards.
 """
@@ -98,11 +98,16 @@ def real_langchain_or_skip() -> Callable[[], None]:
 def engine_stubs(symbols: Dict[str, Dict[str, Any]]) -> Callable[[], None]:
     """Stub each named module that cannot be imported and return the function that removes those stubs."""
     installed = []
+    before = set(sys.modules)
     for name, attrs in symbols.items():
         try:
             importlib.import_module(name)
         except Exception:
             stub = types.ModuleType(name)
+            if name == 'ai' or name.startswith('ai.'):
+                stub.__path__ = [
+                    str(Path(__file__).resolve().parents[2] / 'packages' / 'ai' / 'src' / name.replace('.', '/'))
+                ]
             for attr, value in attrs.items():
                 setattr(stub, attr, value)
             sys.modules[name] = stub
@@ -111,6 +116,10 @@ def engine_stubs(symbols: Dict[str, Dict[str, Any]]) -> Callable[[], None]:
     def remove() -> None:
         for name in installed:
             sys.modules.pop(name, None)
+        # A module loaded through a stub package goes with it, or a later import would find it bound to stubs that are gone.
+        for name in [loaded for loaded in sys.modules if loaded not in before]:
+            if any(name.startswith(stub + '.') for stub in installed):
+                sys.modules.pop(name, None)
 
     return remove
 

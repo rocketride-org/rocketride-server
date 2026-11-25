@@ -145,15 +145,111 @@ The host LLM is opaque to the driver, so tool calling uses a JSON envelope proto
 
 **Why the answer left JSON.** Arguments are structured data, where JSON earns its keep. An answer is prose, and the JSON form asked the model to escape a whole markdown table into a string value — one missed inner quote and the envelope stopped parsing, so the person read the envelope instead of the answer. After `FINAL>>>` there is nothing left to escape, and the text is delivered exactly as written. The `{"type":"final","content":"..."}` shape is still accepted by the parser for any model that emits it; it is no longer what the preamble asks for.
 
-"Exactly as written" is literal: only the separator between the marker and the answer is removed — one newline, or one space on the same line. Whitespace after that belongs to the answer, so `FINAL>>>` followed by an indented line still arrives as a markdown code block.
+"Exactly as written" is literal: only the separator between the marker and the answer is removed, which is one LF, CRLF or CR newline, or one space or tab on the same line. Whitespace after that belongs to the answer, so `FINAL>>>` followed by an indented line still arrives as a markdown code block. Two things are not delivered as written: whitespace at the very end of the reply is trimmed, and text after the marker that is itself a `{"type":"final"}` envelope is unwrapped to its content.
 
-The sentinel is matched **at the start of a line** and is checked before any JSON is parsed. Before it, because an answer may legitimately open with `{`; anchored, because protocol text travels — a delegation carrying instructions, a note quoting the format, a transcript replayed into a prompt — and an unanchored match would read a tool call that merely mentions `FINAL>>>` as a final answer and drop the call. A sentinel with nothing after it is not an answer, and goes back through the retry loop.
+Reply parsing, final-answer recovery and the three-attempt retry loop are
+shared with `agent_langchain` in `ai.common.agent._internal.protocol`. The
+DeepAgent prompt and asynchronous execution are unchanged, and only DeepAgent
+enables the parallel `tool_calls` form.
 
-The plural `tool_calls` form dispatches all entries concurrently (LangGraph's async ToolNode fans them out via `asyncio.gather`), which is what unlocks parallel sub-agent delegation in a single turn.
+The sentinel opens a line. A tool call before it takes precedence, the plural
+form included: a claim about work that has not run is not delivered. The
+reply is then read as its first JSON object, so a tool call there runs and
+anything else is retried. A tool call that does not parse takes precedence
+wherever it sits. One that parses with a word before it and a word after it
+on its line is quoted and does not override the sentinel, and one wrapped
+inside another object that parses is not read. A marker inside or after a broken
+`final` envelope is ambiguous and the reply is retried. A `final` envelope kept after the
+marker is unwrapped; a truncated one is retried. A whole tool-call envelope
+after the marker, including one with malformed JSON, is retried with guidance to
+omit the marker. A valid `final` followed by pending tool work or a broken
+envelope is also retried instead of delivering its claim. A new closed markdown
+block after a parsed final quotes examples,
+including malformed calls, and does not prevent delivery of that final. Calls
+outside that block, in the final's own fence, or in an unclosed block remain
+pending work. LF, CRLF and bare CR all start a new `FINAL>>>` line.
 
-Up to 3 attempts are made when the LLM produces malformed JSON. Each retry names the character that broke the parse and quotes the text around it, and what it asks for next depends on what was attempted: a broken **answer** is pointed at `FINAL>>>`, where nothing can break again, while a broken **tool call** is asked for the same call repaired — telling the model to answer in prose instead would trade the work for a sentence about it. A tolerant parser extracts the first balanced JSON object, rescuing responses wrapped in markdown fences, followed by trailing prose, or stacked with a stray second object (a common failure mode: a duplicate call or hallucinated `final` appended after a `tool_call`). An unparseable envelope that unmistakably opens as a `final` is salvaged for its content rather than printed at the person; a malformed TOOL call never is, since rescuing one would turn work the crew intended to do into a sentence claiming it was done.
+If text on later lines follows a call before the marker, it may retract the call
+or describe an example. The reply is retried without dispatching the call or
+delivering the claim. The model is asked for a standalone call if needed, or
+only `FINAL>>>` and the answer otherwise. This deliberately favors a retry over
+guessing whether the call was intended.
 
-Host tool descriptors are converted to LangChain `BaseTool` instances with typed Pydantic input schemas built from each tool's JSON-Schema `inputSchema`; tool execution and LLM calls are bridged off the event loop via `asyncio.to_thread` so concurrent calls do not serialize.
+Without a sentinel the first JSON object in the reply is the envelope, also
+inside a markdown fence or after a line of prose. If that object is not an
+envelope, the parser can select a standalone envelope on a later line; for
+example, `Example: {"x":1}` does not hide a later `tool_calls` envelope. It does
+not recover a nested call from an unclosed object, even with comments between
+the wrapper and the call. A JSON array of `tool_call` envelopes is read as a
+complete parallel batch, including in a fence or after a
+preamble. Every entry in that array or a `tool_calls` list is validated before
+any call runs. An invalid entry retries the whole batch with its zero-based index
+in the diagnostic; a missing or blank tool name, a non-string name, a non-object
+entry, or another envelope type is invalid. Empty `tool_calls` lists and truncated
+call arrays are refused. Ordinary arrays containing no call envelopes
+remain answer data. `agent_langchain` accepts only a single-call array and retries
+multi-call arrays. Preamble citations such as `Note [1].` do not bypass whole-array
+validation. Non-string `final` content is serialized as JSON; numeric overflow
+or non-finite values are retried instead of emitting `Infinity` or `NaN`. Tool
+arguments that are not an object are passed as `{"input": value}`, the values
+`false`, `0`, `""` and `[]` included; only a missing or `null` `args` becomes
+`{}`. A malformed `final` envelope is recovered only when it opens the reply
+and closes it; one that was cut off, or is followed by more text, by other
+members (including strings with broken escaping) or by a second envelope, is retried. An answer cut off exactly at an
+unescaped inner `"}` can look complete.
+
+Nested objects, quoted examples and template wrappers are not newly dispatched;
+an ambiguous mix with `FINAL>>>` is
+retried. Final recovery accepts fence labels such as `json5`, `c++` and
+`objective-c`. The marker itself must be plain: markdown wrappers such as
+`**FINAL>>>**` are not recognized.
+
+Each retry describes what broke and asks for either a regenerated tool call or
+an answer after `FINAL>>>`. Ordinary prose is delivered after three attempts,
+also when it starts with a brace that opens no object (`{curly} braces`).
+This deliberately retains up to three model calls and their latency and
+token cost. Hints include only an excerpt of the failed reply, so they ask
+the model to generate the call from the task and tool schema. A parsed
+`final` with missing, null, empty or whitespace-only content remains a
+successful answer for compatibility. An empty `FINAL>>>` after a valid `final`
+envelope delivers that envelope's content on the first attempt. An
+empty reply, an isolated `FINAL>>>` with no answer, a reply that opens with a
+JSON object that is neither shape, a tool call or an answer that never parsed,
+and an object that has a tool call's `name` and `args` and no `type`, is not
+quoted, and is the reply's first object or has no word before it on its line
+are not answers: the run fails with `stop_reason: error`. Explicit code
+expressions (`return`/`yield`, assignments, arrow functions and same-line function
+arguments, including later comma-separated arguments inside an open parenthesis)
+are exempt from the first-object rule only when deciding whether to deliver prose
+after three attempts; prose such as `Calling: {...}` is not. When accepting a
+final claim or choosing its retry hint, a code dictionary with `name` and `args`
+before `FINAL>>>` or a `final` envelope is pending work. The claim is withheld
+and the model is asked to regenerate the call. A real code example in that
+position cannot be distinguished from an unexecuted call and is refused too. That holds
+for a sub-agent's turn too, and a sub-agent turn that fails this way fails the
+orchestrator's run. The returned error contains the reason and position,
+while excerpts of the model's reply go only into the repair hint. Whitespace
+around a reply is trimmed before parsing. Recovery decodes recognized JSON
+escapes, including `\n`, `\t`, `\b` and `\f`; unknown escapes remain
+literal. A malformed envelope cannot distinguish a literal Windows-path
+backslash from a recognized escape. Use escaped backslashes in JSON or
+`FINAL>>>` for literal paths. Recovery joins valid surrogate pairs and keeps
+unpaired surrogates as their original `\uXXXX` escape text, preserving UTF-8
+encodability. Parsed final content also preserves lone surrogates as literal
+`\uXXXX` escapes, including after `FINAL>>>` and in object or array content.
+Valid Unicode characters and surrogate pairs keep their decoded values.
+
+A damaged first key or an early closing brace does not hide a tool-call
+type in the remaining members. The reply is retried as a call, and a claim
+after `FINAL>>>` is not delivered. This is conservative: an unreadable object
+followed by text naming a tool-call type may be retried even when it was
+intended as an example. Standalone `final` envelopes with unquoted or
+single-quoted keys are also retried, including in a fence or after the marker.
+
+The plural `tool_calls` form dispatches entries concurrently through LangGraph's
+async ToolNode. Host tools use typed Pydantic input schemas built from their
+JSON-Schema `inputSchema`; tool execution and LLM calls run off the event loop
+via `asyncio.to_thread` so concurrent calls do not serialize.
 
 ### Hierarchical delegation
 

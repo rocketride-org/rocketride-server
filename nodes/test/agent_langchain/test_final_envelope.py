@@ -16,7 +16,7 @@ a reply is read, retried and, when nothing can be delivered, failed.
 Each case runs the real ``LangChainDriver`` through ``AgentBase.run_agent`` and the real
 ``langchain.agents.create_agent``. Only the host LLM is scripted, so what is checked is what a caller
 gets: the answer payload, its ``stop_reason`` and the text written to the answers lane. The parser
-and the retry loop have their own tests in ``test_reply_parser.py``.
+and the retry loop have their own tests in ``packages/ai/tests/ai/common/agent/test_protocol.py``.
 """
 
 from __future__ import annotations
@@ -90,6 +90,8 @@ ANSWERED = {
         1,
         ANSWER_JSON,
     ),
+    'empty_marker_keeps_the_preceding_final': ('{"type":"final","content":"Done."}\nFINAL>>>', 1, 'Done.'),
+    'large_finite_number_stays_json': ('{"type":"final","content":{"estimate":1e300}}', 1, '{"estimate": 1e+300}'),
     'final_wrapped_in_an_array': ('[' + json.dumps({'type': 'final', 'content': ANSWER_JSON}) + ']', 1, ANSWER_JSON),
     'final_with_a_fenced_tool_example': (
         '{"type":"final","content":"Here is how to call it."}\n```json\n'
@@ -115,6 +117,17 @@ FAILED = {
     'D_raw_json_object_no_envelope': (ANSWER_JSON, 'not one of the allowed shapes'),
     'I_envelope_cut_off_mid_answer': ('{"type":"final","content":"Acme reported revenue of 12', 'not valid JSON'),
     'tool_call_that_never_parses': (BROKEN_TOOL_CALL, 'not valid JSON'),
+    'broken_tool_call_after_the_marker': ('FINAL>>> ' + BROKEN_TOOL_CALL, 'put a tool-call envelope after FINAL>>>'),
+    'non_finite_final_content': ('{"type":"final","content":{"estimate":1e400}}', 'strict JSON'),
+    'call_inside_a_commented_wrapper': (
+        '{\n  // example wrapper\n  {"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}\n}',
+        'not valid JSON',
+    ),
+    'broken_final_masks_a_later_call': (
+        '{"type":"final","content":"Done."}\n{"type":"final","content":"bad "quote" here"}\n'
+        '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}',
+        'not valid JSON',
+    ),
     'parallel_form_the_node_does_not_offer': (PARALLEL_CALLS, 'not one of the allowed shapes'),
     'empty_reply': ('', 'The last reply was empty.'),
     'broken_tool_call_after_a_line_of_prose': ('Sure, let me do that.\n' + BROKEN_TOOL_CALL, 'not valid JSON'),
@@ -457,7 +470,7 @@ def test_a_run_that_fails_after_a_tool_call_still_reports_the_call(run):
 
 
 def test_a_tool_call_wrapped_in_an_array_still_runs(run):
-    """The node has always taken the first object of an array. Refusing it would fail runs that work today."""
+    """A single call wrapped in an array remains compatible with existing model output."""
     result = run(
         '[{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}]',
         '{"type":"final","content":"Deal 42 is won."}',
@@ -467,6 +480,38 @@ def test_a_tool_call_wrapped_in_an_array_still_runs(run):
     assert result.invocations == [('crm.get_deal', {'deal_id': 42})]
     assert result.content == 'Deal 42 is won.'
     assert result.stop_reason is None
+
+
+def test_multiple_array_calls_retry_then_run_sequentially(run):
+    first = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":41}}'
+    second = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}'
+    raw = '[' + first + ',' + second + ']'
+    failed = run(raw, tools=(GET_DEAL,))
+    assert failed.stop_reason == 'error'
+    assert failed.invocations == []
+    assert len(failed.prompts) == 3
+    assert 'one tool call per reply' in failed.prompts[1]
+    repaired = run(raw, first, second, 'FINAL>>> Both checked.', tools=(GET_DEAL,))
+    assert repaired.stop_reason is None
+    assert repaired.invocations == [('crm.get_deal', {'deal_id': 41}), ('crm.get_deal', {'deal_id': 42})]
+    assert repaired.content == 'Both checked.'
+    assert len(repaired.prompts) == 4
+
+
+def test_a_call_retracted_by_later_prose_never_runs(run):
+    raw = (
+        'I could run\n{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}\n'
+        'but it is not needed.\nFINAL>>> Nothing to do.'
+    )
+    failed = run(raw, tools=(GET_DEAL,))
+    assert failed.stop_reason == 'error'
+    assert failed.invocations == []
+    assert len(failed.prompts) == 3
+    repaired = run(raw, 'FINAL>>> Nothing to do.', tools=(GET_DEAL,))
+    assert repaired.stop_reason is None
+    assert repaired.invocations == []
+    assert repaired.content == 'Nothing to do.'
+    assert len(repaired.prompts) == 2
 
 
 def test_a_tool_call_runs_and_its_result_reaches_the_next_turn(run):

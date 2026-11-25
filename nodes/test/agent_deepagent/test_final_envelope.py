@@ -39,6 +39,7 @@ import json
 import os
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -66,10 +67,14 @@ def _install_stubs():
 
     The stubs stay in `sys.modules` for the whole test module rather than being
     torn down after the import: `_parse_tool_call_envelope` imports AIMessage
-    LAZILY, inside the call, and swallows the failure by returning None — so a
-    stub that is only present at load time makes every parse look like a refusal.
+    lazily, inside the call, so a stub that is only present at load time is gone
+    by the time a reply is parsed.
     """
     saved = {}
+    before = set(sys.modules)
+    parent = sys.modules.get('ai.common.agent._internal')
+    absent = object()
+    saved_protocol = getattr(parent, 'protocol', absent)
     stubs = {
         'rocketlib': types.ModuleType('rocketlib'),
         'ai': types.ModuleType('ai'),
@@ -94,6 +99,10 @@ def _install_stubs():
     stubs['langchain_core.messages'].AIMessage = FakeAIMessage
 
     for name, stub in stubs.items():
+        if name == 'ai' or name.startswith('ai.'):
+            stub.__path__ = [
+                str(Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / name.replace('.', '/'))
+            ]
         saved[name] = sys.modules.get(name)
         sys.modules[name] = stub
 
@@ -104,12 +113,23 @@ def _install_stubs():
             else:
                 sys.modules[name] = saved[name]
         sys.modules.pop('deepagent_under_test', None)
+        # The shared module was loaded through the stub packages: it goes with them.
+        for name in [loaded for loaded in sys.modules if loaded not in before and loaded.startswith('ai.')]:
+            sys.modules.pop(name, None)
+        if parent is not None:
+            if saved_protocol is absent:
+                parent.__dict__.pop('protocol', None)
+            else:
+                parent.protocol = saved_protocol
 
     try:
         spec = importlib.util.spec_from_file_location('deepagent_under_test', os.path.join(_NODE_DIR, 'deepagent.py'))
         mod = importlib.util.module_from_spec(spec)
         sys.modules['deepagent_under_test'] = mod
         spec.loader.exec_module(mod)
+        from ai.common.agent._internal import protocol
+
+        mod.protocol = protocol
     except Exception:
         restore()
         raise
@@ -121,6 +141,29 @@ def dp():
     mod, restore = _install_stubs()
     yield mod
     restore()
+
+
+@pytest.mark.parametrize('had_protocol', [False, True])
+def test_stub_teardown_restores_the_retained_parent_attribute(monkeypatch, had_protocol):
+    parent = types.ModuleType('ai.common.agent._internal')
+    parent.__path__ = [str(Path(__file__).resolve().parents[3] / 'packages/ai/src/ai/common/agent/_internal')]
+    original = types.ModuleType('original_protocol')
+    if had_protocol:
+        parent.protocol = original
+    monkeypatch.setitem(sys.modules, 'ai.common.agent._internal', parent)
+    monkeypatch.delitem(sys.modules, 'ai.common.agent._internal.protocol', raising=False)
+    _mod, restore = _install_stubs()
+    try:
+        # Importing through the retained package must not leave a stub-backed module behind.
+        importlib.import_module('ai.common.agent._internal.protocol')
+        assert parent.protocol is not original
+    finally:
+        restore()
+    assert 'ai.common.agent._internal.protocol' not in sys.modules
+    if had_protocol:
+        assert parent.protocol is original
+    else:
+        assert not hasattr(parent, 'protocol')
 
 
 # ---------------------------------------------------------------------------
@@ -271,20 +314,20 @@ def test_salvage_refuses_a_malformed_tool_call(dp):
     """
     broken_call = '{"type":"tool_call","name":"pipedrive.create","args":{"name":"a "quoted" org"}}'
 
-    assert dp._salvage_final_content(broken_call) is None
+    assert dp.protocol._salvage_final_content(broken_call) is None
     assert dp._parse_tool_call_envelope(broken_call) is None
 
 
 def test_salvage_leaves_ordinary_prose_alone(dp):
     """Not every unparseable output is an envelope."""
-    assert dp._salvage_final_content('I could not do that.') is None
+    assert dp.protocol._salvage_final_content('I could not do that.') is None
 
 
 def test_unescaping_handles_the_escapes_that_were_right(dp):
     """Newlines, tabs, quotes, backslashes and \\u — the ones json.loads would have."""
     body = 'a\\nb\\tc\\"d\\\\e\\u00e9'
 
-    assert dp._unescape_json_string_body(body) == 'a\nb\tc"d\\eé'
+    assert dp.protocol._unescape_json_string_body(body) == 'a\nb\tc"d\\eé'
 
 
 def test_unescaping_joins_a_surrogate_pair_into_one_character(dp):
@@ -294,16 +337,18 @@ def test_unescaping_joins_a_surrogate_pair_into_one_character(dp):
     and `str.encode` refuses them, so the salvaged answer would raise on its way
     out rather than read as what somebody typed.
     """
-    assert dp._unescape_json_string_body('\\uD83D\\uDE00') == '😀'
+    assert dp.protocol._unescape_json_string_body('\\uD83D\\uDE00') == '😀'
     # Still one character, with prose either side, and it survives an encode.
-    recovered = dp._unescape_json_string_body('all done \\uD83D\\uDE00 — shipping')
-    assert recovered == 'all done 😀 — shipping'
+    recovered = dp.protocol._unescape_json_string_body('all done \\uD83D\\uDE00, shipping')
+    assert recovered == 'all done 😀, shipping'
     assert recovered.encode('utf-8').decode('utf-8') == recovered
 
 
-def test_unescaping_leaves_a_lone_high_surrogate_alone(dp):
-    """Only a real pair is joined; a half-written escape keeps the old behaviour."""
-    assert dp._unescape_json_string_body('\\uD83Dx') == chr(0xD83D) + 'x'
+def test_unescaping_preserves_a_lone_high_surrogate_as_escape_text(dp):
+    """Only a real pair is joined; an unpaired escape stays encodable as text."""
+    recovered = dp.protocol._unescape_json_string_body('\\uD83Dx')
+    assert recovered == '\\uD83Dx'
+    assert recovered.encode('utf-8').decode('utf-8') == recovered
 
 
 def test_unescaping_passes_through_what_it_does_not_recognise(dp):
@@ -311,7 +356,7 @@ def test_unescaping_passes_through_what_it_does_not_recognise(dp):
     A lone backslash is far likelier to be part of the prose — a Windows path,
     a LaTeX fragment — than a mistake worth deleting.
     """
-    assert dp._unescape_json_string_body('C:\\Users\\x') == 'C:\\Users\\x'
+    assert dp.protocol._unescape_json_string_body('C:\\Users\\x') == 'C:\\Users\\x'
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +370,7 @@ def test_the_retry_hint_names_the_break(dp):
     which character broke it, so it retypes the same answer three times. The hint
     has to carry the position and the text around it.
     """
-    hint = dp._parse_failure_hint(BROKEN)
+    hint = dp.protocol._parse_failure_hint(BROKEN)
 
     assert 'not valid JSON' in hint
     assert 'character' in hint
@@ -336,12 +381,12 @@ def test_the_retry_hint_names_the_break(dp):
 
 
 def test_the_retry_hint_handles_an_empty_output(dp):
-    assert 'empty' in dp._parse_failure_hint('').lower()
+    assert 'empty' in dp.protocol._parse_failure_hint('').lower()
 
 
 def test_the_retry_hint_reports_valid_json_of_the_wrong_shape(dp):
     """Parsed fine, but `type` was not one of the three."""
-    hint = dp._parse_failure_hint('{"type":"task","description":"..."}')
+    hint = dp.protocol._parse_failure_hint('{"type":"task","description":"..."}')
 
     assert 'not one of the allowed shapes' in hint
 
@@ -429,7 +474,7 @@ def test_a_broken_tool_call_is_told_to_repair_the_tool_call(dp):
     for a broken CALL asks for the call again, and only a broken ANSWER is
     pointed at the sentinel.
     """
-    hint = dp._parse_failure_hint('{"type":"tool_call","name":"crm.create","args":{"name":"a "quoted" org"}}')
+    hint = dp.protocol._parse_failure_hint('{"type":"tool_call","name":"crm.create","args":{"name":"a "quoted" org"}}')
 
     assert 'tool call' in hint
     assert 'do not answer in prose' in hint.lower()
@@ -437,13 +482,13 @@ def test_a_broken_tool_call_is_told_to_repair_the_tool_call(dp):
 
 
 def test_a_broken_final_envelope_is_still_pointed_at_the_sentinel(dp):
-    hint = dp._parse_failure_hint(BROKEN)
+    hint = dp.protocol._parse_failure_hint(BROKEN)
 
     assert dp.FINAL_SENTINEL in hint
 
 
 def test_prose_that_never_reached_json_is_pointed_at_the_sentinel(dp):
-    hint = dp._parse_failure_hint('I think the answer is "42", probably.')
+    hint = dp.protocol._parse_failure_hint('I think the answer is "42", probably.')
 
     assert dp.FINAL_SENTINEL in hint
 
@@ -474,10 +519,10 @@ def test_the_second_attempt_can_follow_the_first_hint(dp, llm_answering):
 
 
 def test_an_envelope_is_recognised_inside_a_markdown_fence(dp):
-    assert dp._looks_like_envelope('```json\n{"type":"tool_call"')
-    assert dp._looks_like_envelope('  {"type":"tool_calls"')
-    assert not dp._looks_like_envelope('I could not do that.')
-    assert not dp._looks_like_envelope('')
+    assert dp.protocol._looks_like_envelope('```json\n{"type":"tool_call"')
+    assert dp.protocol._looks_like_envelope('  {"type":"tool_calls"')
+    assert not dp.protocol._looks_like_envelope('I could not do that.')
+    assert not dp.protocol._looks_like_envelope('')
 
 
 # ---------------------------------------------------------------------------

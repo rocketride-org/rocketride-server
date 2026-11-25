@@ -5,26 +5,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""How ``agent_langchain`` reads the host LLM's replies (#3367).
-
-The driver parses a reply into a tool call or an answer, retries a reply that is
-neither with a hint about what was wrong, and decides what a turn ends on when
-the retries run out. These are the unit tests of that code, which lives in
-``agent_langchain/langchain.py``. What a caller of the node gets is checked in
-``test_final_envelope.py``.
-
-The cases come from three places:
-
-* the reply handling of ``agent_deepagent`` (the sentinel, salvage of a broken
-  `final` envelope, the retry hint), which this node now has its own copy of;
-* this node's older parser tests in ``nodes/test/test_agent_langchain_parser.py``,
-  which still run and pass unchanged;
-* issue #3367: a `final` envelope whose content is an object (C), a bare JSON
-  object (D) and an envelope cut off mid-answer (I).
-
-Runs against the real ``langchain_core``, because the parser hands LangChain an
-``AIMessage`` and a stub would not show what the framework is given.
-"""
+"""Shared reply parsing, recovery and retry regressions for both agent adapters."""
 
 from __future__ import annotations
 
@@ -34,7 +15,7 @@ from typing import Any, List, Tuple
 
 import pytest
 
-from .._real_langchain import LANGCHAIN_SYMBOLS, load_adapter, real_langchain_or_skip
+from ai.common.agent._internal import protocol as reply
 
 FINAL_SENTINEL = 'FINAL>>>'
 ANSWER_JSON = '{"company": "Acme", "revenue": 1200}'
@@ -61,34 +42,8 @@ CODE_WITH_A_NAME_AND_ARGS = (
 )
 
 
-class _Adapter:
-    """The loaded ``langchain.py``. Filled by the module fixture, so collection alone imports nothing."""
-
-    module: Any = None
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(_Adapter.module, name)
-
-
-reply = _Adapter()
-
-
-@pytest.fixture(scope='module', autouse=True)
-def _loaded_adapter():
-    restore = real_langchain_or_skip()
-    try:
-        _Adapter.module = load_adapter(
-            'agent_langchain/langchain.py', '_agent_langchain_reply_parser', LANGCHAIN_SYMBOLS
-        )
-        yield
-    finally:
-        # Also when the load raised: the next test module must not find the swapped modules.
-        _Adapter.module = None
-        restore()
-
-
 def parse(raw: Any) -> Any:
-    return reply._parse_tool_call_envelope(raw)
+    return reply.parse_reply(raw)
 
 
 def answer_of(turn: Any) -> str:
@@ -280,7 +235,6 @@ class TestSentinel:
             ('- ', ' is the next step.'),
             # A carriage return ends a line as a newline does.
             ('Note:\r', ' now'),
-            ('Action: ', '\rnow'),
         ],
     )
     def test_a_tool_call_that_is_not_quoted_stands(self, before, after):
@@ -289,6 +243,9 @@ class TestSentinel:
 
         assert turn.content == ''
         assert turn.tool_calls[0]['name'] == 'crm.create'
+
+    def test_prose_after_a_carriage_return_makes_a_call_and_marker_ambiguous(self):
+        assert parse('Action: ' + TOOL_CALL + '\rnow' + STACKED_FINAL) is None
 
     @pytest.mark.parametrize('before, after', [('{', '} (searching)'), ('{ ', ' } now'), ('{-} ', ' now')])
     def test_a_brace_before_a_tool_call_on_its_line_is_no_word(self, before, after):
@@ -403,7 +360,7 @@ class TestSentinel:
         """The object is not the reply's first and has a word before it on its line: it is code, not a tool call that lost its type."""
         ask, _feedback = scripted(CODE_WITH_A_NAME_AND_ARGS)
 
-        assert reply._run_model_turn(ask).content == CODE_WITH_A_NAME_AND_ARGS
+        assert reply.run_model_turn(ask).content == CODE_WITH_A_NAME_AND_ARGS
 
     def test_a_marker_with_nothing_after_it_leaves_a_final_envelope_that_parses_as_the_answer(self):
         """Only a `final` envelope: a quoted tool call before a bare marker does not run and is not an answer."""
@@ -664,19 +621,17 @@ class TestJsonEnvelope:
         ],
     )
     def test_a_tool_call_is_found_inside_noise(self, raw, name):
-        assert parse(raw).tool_calls[0]['name'] == name
+        assert [call['name'] for call in parse(raw).tool_calls] == [name]
 
     @pytest.mark.parametrize(
         'raw',
         [
             '[' + TOOL_CALL + ']',
-            '[' + TOOL_CALL + ',{"type":"tool_call","name":"b.two","args":{}}]',
-            '[' + TOOL_CALL + ',{"type":"tool_call","name":"b.two","args":{}}] Done.',
-            'Here are the calls: [' + TOOL_CALL + ',{"type":"tool_call","name":"b.two","args":{}}]',
+            'Here is the call: [' + TOOL_CALL + ']',
         ],
     )
-    def test_the_first_object_of_an_array_is_the_envelope(self, raw):
-        """As it always was in this node, with or without text around the array. Refusing it failed runs that work."""
+    def test_a_single_call_wrapped_in_an_array_is_still_the_envelope(self, raw):
+        """A single call remains compatible; a multi-call array requires parallel support."""
         assert [c['name'] for c in parse(raw).tool_calls] == ['crm.create']
 
     def test_a_final_wrapped_in_an_array_is_the_answer(self):
@@ -948,7 +903,7 @@ class TestSalvage:
         """It raised out of the parser, so the turn failed on the first reply with no retry."""
         ask, feedback = scripted('{"type":"final","content":"a "b" \\u-001 c"}')
 
-        assert reply._run_model_turn(ask).content == 'a "b" \\u-001 c'
+        assert reply.run_model_turn(ask).content == 'a "b" \\u-001 c'
         assert len(feedback) == 1
 
 
@@ -1286,6 +1241,7 @@ def test_an_envelope_is_recognised_inside_a_markdown_fence():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize('allow_parallel', [False, True])
 @pytest.mark.parametrize('prefix, suffix', [('', ''), ('Working.\n', ''), ('Calling: ', ''), ('```json\n', '\n```')])
 @pytest.mark.parametrize(
     'broken',
@@ -1298,18 +1254,18 @@ def test_an_envelope_is_recognised_inside_a_markdown_fence():
         '{"args: {"note":"a \\"quoted\\" word"}, "type":"tool_call", "name":"crm.get_deal"}',
     ],
 )
-def test_a_damaged_first_key_or_early_closing_cannot_turn_a_call_into_a_claim(broken, prefix, suffix):
-    """The adapter requests the same call again, then either run the repaired call or fail without its claim."""
+def test_a_damaged_first_key_or_early_closing_cannot_turn_a_call_into_a_claim(broken, prefix, suffix, allow_parallel):
+    """Both adapters request the same call again, then either run the repaired call or fail without its claim."""
     raw = prefix + broken + suffix + '\nFINAL>>> Deal 42 is won.'
-    assert reply._parse_tool_call_envelope(raw) is None
+    assert reply.parse_reply(raw, allow_parallel=allow_parallel) is None
     ask, feedback = scripted(raw)
     with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts'):
-        reply._run_model_turn(ask)
+        reply.run_model_turn(ask, allow_parallel=allow_parallel)
     assert len(feedback) == 3
     assert 'Generate the required tool call' in feedback[1]
     repaired = '{"type":"tool_call","name":"crm.get_deal","args":{"deal_id":42}}'
     ask, feedback = scripted(raw, repaired)
-    turn = reply._run_model_turn(ask)
+    turn = reply.run_model_turn(ask, allow_parallel=allow_parallel)
     assert turn.content == ''
     assert [(call['name'], call['args']) for call in turn.tool_calls] == [('crm.get_deal', {'deal_id': 42})]
     assert len(feedback) == 2
@@ -1323,7 +1279,7 @@ def test_a_final_with_unquoted_or_single_quoted_keys_is_retried(raw, prefix, suf
     """An invalid final is protocol, including after a marker; its raw envelope is not prose to deliver."""
     ask, feedback = scripted(prefix + raw + suffix)
     with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts'):
-        reply._run_model_turn(ask)
+        reply.run_model_turn(ask)
     assert len(feedback) == 3
 
 
@@ -1331,21 +1287,21 @@ class TestRunModelTurn:
     def test_a_reply_that_parses_costs_one_call(self):
         ask, feedback = scripted(FINAL_SENTINEL + 'Done.')
 
-        assert answer_of(reply._run_model_turn(ask)) == 'Done.'
+        assert answer_of(reply.run_model_turn(ask)) == 'Done.'
         assert feedback == ['']
 
     def test_a_salvaged_answer_costs_one_call(self):
         """#3367 cases A, E and F took three calls and then gave up."""
         ask, feedback = scripted('{"type":"final","content":"' + ANSWER_JSON + '"}')
 
-        assert reply._run_model_turn(ask).content == ANSWER_JSON
+        assert reply.run_model_turn(ask).content == ANSWER_JSON
         assert len(feedback) == 1
 
     def test_the_second_attempt_can_follow_the_first_hint(self):
         """A broken tool call, the hint, the same call repaired: the turn ends in the call, in two attempts."""
         ask, feedback = scripted(BROKEN_TOOL_CALL, REPAIRED_TOOL_CALL)
 
-        turn = reply._run_model_turn(ask)
+        turn = reply.run_model_turn(ask)
 
         assert turn.tool_calls[0]['name'] == 'crm.note_create'
         assert turn.tool_calls[0]['args'] == {'content': 'a "quoted" note'}
@@ -1356,14 +1312,14 @@ class TestRunModelTurn:
         """#3367 case D with a model that reads the hint: the JSON arrives, after the sentinel, on attempt two."""
         ask, feedback = scripted(ANSWER_JSON, FINAL_SENTINEL + ANSWER_JSON)
 
-        assert reply._run_model_turn(ask).content == ANSWER_JSON
+        assert reply.run_model_turn(ask).content == ANSWER_JSON
         assert len(feedback) == 2
         assert f'write {FINAL_SENTINEL} followed by the JSON' in feedback[1]
 
     def test_each_failed_attempt_adds_its_hint(self):
         ask, feedback = scripted('', 'Some prose.', FINAL_SENTINEL + 'Done.')
 
-        assert reply._run_model_turn(ask).content == 'Done.'
+        assert reply.run_model_turn(ask).content == 'Done.'
         assert feedback[1] == '\n\nsystem: Your last output was empty.'
         assert feedback[2] == feedback[1] + '\n\nsystem: ' + reply._parse_failure_hint('Some prose.')
 
@@ -1371,7 +1327,7 @@ class TestRunModelTurn:
         """After the marker everything is the answer, so this is where the trimming of the reply shows."""
         ask, _ = scripted('\n  FINAL>>> Done.  \n')
 
-        assert reply._run_model_turn(ask).content == 'Done.'
+        assert reply.run_model_turn(ask).content == 'Done.'
 
     def test_an_envelope_kept_after_the_hint_is_followed_is_still_unwrapped(self):
         """Attempt one has text after a broken envelope, so it is retried. Attempt two puts the envelope after the marker."""
@@ -1380,7 +1336,7 @@ class TestRunModelTurn:
             'FINAL>>> {"type":"final","content":"No org named \\"EARTH\\" was found."}',
         )
 
-        assert answer_of(reply._run_model_turn(ask)) == 'No org named "EARTH" was found.'
+        assert answer_of(reply.run_model_turn(ask)) == 'No org named "EARTH" was found.'
         assert len(feedback) == 2
 
     @pytest.mark.parametrize(
@@ -1450,7 +1406,7 @@ class TestRunModelTurn:
         ask, feedback = scripted(text)
 
         with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts') as failure:
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
 
         message = str(failure.value)
         assert said in message
@@ -1487,7 +1443,7 @@ class TestRunModelTurn:
         ask, feedback = scripted(text)
 
         with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts') as failure:
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
 
         assert said in str(failure.value)
         assert len(feedback) == reply._MAX_ATTEMPTS == 3
@@ -1497,7 +1453,7 @@ class TestRunModelTurn:
         ask, feedback = scripted('{"type":"final","content":"Card 4111 belongs to Jane Roe, and')
 
         with pytest.raises(ValueError) as failure:
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
 
         assert 'Card 4111' in feedback[1]
         assert 'Card 4111' not in str(failure.value)
@@ -1508,14 +1464,14 @@ class TestRunModelTurn:
         ask, _ = scripted('Some prose.', 'Some prose.', '')
 
         with pytest.raises(ValueError, match='The last reply was empty.'):
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
 
     def test_a_cut_off_envelope_with_a_marker_line_in_it_is_retried_and_then_fails(self):
         """Three attempts, then an error. The text after the marker line is never the answer."""
         ask, feedback = scripted('{"type":"final","content":"Example:\nFINAL>>> partial')
 
         with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts'):
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
         assert len(feedback) == 3
 
     def test_a_reply_whose_envelope_may_have_closed_is_answered_on_the_retry(self):
@@ -1524,21 +1480,21 @@ class TestRunModelTurn:
             'FINAL>>> {"company":"Acme"}',
         )
 
-        assert answer_of(reply._run_model_turn(ask)) == '{"company":"Acme"}'
+        assert answer_of(reply.run_model_turn(ask)) == '{"company":"Acme"}'
         assert len(feedback) == 2
 
     def test_a_cut_off_envelope_after_the_marker_is_retried_and_then_fails(self):
         ask, feedback = scripted('FINAL>>> {"type":"final","content":"Acme reported revenue of 12')
 
         with pytest.raises(ValueError, match='Unterminated string'):
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
         assert len(feedback) == 3
         assert f'send the answer as {FINAL_SENTINEL} followed by plain text' in feedback[1]
 
     def test_a_stacked_final_does_not_replace_the_tool_call_it_follows(self):
         ask, feedback = scripted(TOOL_CALL + STACKED_FINAL)
 
-        assert reply._run_model_turn(ask).tool_calls[0]['name'] == 'crm.create'
+        assert reply.run_model_turn(ask).tool_calls[0]['name'] == 'crm.create'
         assert len(feedback) == 1
 
     @pytest.mark.parametrize(
@@ -1566,26 +1522,26 @@ class TestRunModelTurn:
         """#3367 cases G and H. The model said something readable, so it is delivered once the retries are spent."""
         ask, feedback = scripted(text)
 
-        assert answer_of(reply._run_model_turn(ask)) == text
+        assert answer_of(reply.run_model_turn(ask)) == text
         assert len(feedback) == 3
 
     def test_several_calls_in_one_reply_never_run(self):
         ask, feedback = scripted(PARALLEL_CALLS)
         with pytest.raises(ValueError, match='not one of the allowed shapes'):
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
         assert len(feedback) == 3
 
     def test_a_final_with_a_member_after_its_content_is_answered_on_the_retry(self):
         ask, feedback = scripted('{"type":"final","content":"a "b"","note":"z"}', 'FINAL>>> a "b"')
 
-        assert answer_of(reply._run_model_turn(ask)) == 'a "b"'
+        assert answer_of(reply.run_model_turn(ask)) == 'a "b"'
         assert len(feedback) == 2
         assert f'send the answer as {FINAL_SENTINEL}' in feedback[1]
 
     def test_a_marker_after_an_envelope_that_closed_costs_one_call(self):
         ask, feedback = scripted('{"type":"final","content":"old"}\nFINAL>>> {"company":"Acme"}')
 
-        assert answer_of(reply._run_model_turn(ask)) == '{"company":"Acme"}'
+        assert answer_of(reply.run_model_turn(ask)) == '{"company":"Acme"}'
         assert len(feedback) == 1
 
     def test_a_tool_call_that_lost_its_type_runs_once_the_hint_is_followed(self):
@@ -1595,11 +1551,63 @@ class TestRunModelTurn:
             TOOL_CALL,
         )
 
-        turn = reply._run_model_turn(ask)
+        turn = reply.run_model_turn(ask)
 
         assert [(c['name'], c['args']) for c in turn.tool_calls] == [('crm.create', {'name': 'Acme'})]
         assert len(feedback) == 2
         assert FINAL_SENTINEL not in feedback[1].split('It broke here')[0]
+
+
+@pytest.mark.parametrize('allow_parallel', [False, True])
+@pytest.mark.parametrize(
+    'raw',
+    [
+        '{"name":"crm.create","args":{"note":"a "quoted" word"}}\nFINAL>>> Created.',
+        '{"name":"crm.\\u0063reate","args":{"note":"a "quoted" word"}}\nFINAL>>> Created.',
+        'FINAL>>> {"content":"Acme reported revenue","type":"final"',
+        'FINAL>>> {"content":{"type":"tool_call","note":"unfinished"},"type":"final"',
+        '{"content":{"note":"Example:"},"type":"final","more":"x\nFINAL>>> partial',
+        'Here is the result:\n{"type":"final","content":"Example:\nFINAL>>> partial',
+        '{"type":"final","content":"a "b" c"}\n{"type":"final"}',
+    ],
+)
+def test_previous_review_failures_stay_errors_for_both_adapters(raw, allow_parallel):
+    """Restored review cases must never become a claim or a partial answer during extraction."""
+    ask, feedback = scripted(raw)
+    with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts'):
+        reply.run_model_turn(ask, allow_parallel=allow_parallel)
+    assert len(feedback) == 3
+
+
+def test_parallel_calls_are_an_explicit_driver_capability():
+    assert reply.parse_reply(PARALLEL_CALLS) is None
+    result = reply.parse_reply(PARALLEL_CALLS, allow_parallel=True)
+    assert result.content == ''
+    assert [(call['name'], call['args']) for call in result.tool_calls] == [('a.one', {}), ('b.two', {'x': 1})]
+    assert len({call['id'] for call in result.tool_calls}) == 2
+
+
+@pytest.mark.parametrize('args', [False, 0, '', []])
+def test_parallel_calls_preserve_explicit_falsy_arguments(args):
+    raw = json.dumps({'type': 'tool_calls', 'calls': [{'name': 'echo', 'args': args}]})
+    assert reply.parse_reply(raw, allow_parallel=True).tool_calls[0]['args'] == {'input': args}
+
+
+@pytest.mark.parametrize('calls', [None, [], [None, {}, {'name': ''}]])
+def test_parallel_calls_with_no_invocable_entry_are_retried(calls):
+    raw = json.dumps({'type': 'tool_calls', 'calls': calls})
+    ask, feedback = scripted(raw)
+    with pytest.raises(ValueError, match='No valid tool call or final answer'):
+        reply.run_model_turn(ask, allow_parallel=True)
+    assert len(feedback) == 3
+
+
+def test_parallel_retry_preserves_the_drivers_protocol():
+    raw = '{"type":"tool_calls","calls":[]}'
+    ask, feedback = scripted(raw, PARALLEL_CALLS)
+    assert len(reply.run_model_turn(ask, allow_parallel=True).tool_calls) == 2
+    assert 'non-empty calls list' in feedback[1]
+    assert 'one tool call per reply' not in feedback[1]
 
 
 @pytest.mark.parametrize(
@@ -1642,7 +1650,7 @@ def test_a_long_reply_is_read_in_linear_time(make_reply, count):
         for _ in range(repetitions):
             ask, _feedback = scripted(raw)
             try:
-                reply._run_model_turn(ask)
+                reply.run_model_turn(ask)
             except ValueError:
                 pass
         return thread_time() - started
@@ -1665,7 +1673,7 @@ def test_a_long_reply_is_read_in_linear_time(make_reply, count):
 @pytest.mark.parametrize('envelope', [TOOL_CALL, '{"type":"final","content":"done"}'])
 def test_a_preamble_object_does_not_hide_a_standing_envelope(prefix, envelope):
     ask, feedback = scripted(prefix + envelope)
-    turn = reply._run_model_turn(ask)
+    turn = reply.run_model_turn(ask)
     if 'tool_call' in envelope:
         assert [(c['name'], c['args']) for c in turn.tool_calls] == [('crm.create', {'name': 'Acme'})]
     else:
@@ -1693,12 +1701,12 @@ def test_a_whole_tool_envelope_after_the_marker_is_retried(body):
     assert parse(raw) is None
     ask, feedback = scripted(raw)
     with pytest.raises(ValueError):
-        reply._run_model_turn(ask)
+        reply.run_model_turn(ask)
     assert len(feedback) == 3
     assert 'tool call' in feedback[1]
     assert 'To give this JSON as your answer' not in feedback[1]
     ask, feedback = scripted(raw, TOOL_CALL)
-    assert reply._run_model_turn(ask).tool_calls[0]['name'] == 'crm.create'
+    assert reply.run_model_turn(ask).tool_calls[0]['name'] == 'crm.create'
     assert len(feedback) == 2
 
 
@@ -1712,7 +1720,7 @@ def test_a_final_followed_by_pending_work_is_retried(call):
     raw = '{"type":"final","content":"Created."}\n' + call
     ask, feedback = scripted(raw)
     with pytest.raises(ValueError):
-        reply._run_model_turn(ask)
+        reply.run_model_turn(ask)
     assert len(feedback) == 3
     assert 'do not answer in prose' in feedback[1]
 
@@ -1739,7 +1747,7 @@ def test_a_marker_line_separator_is_removed_once(separator):
 def test_a_retry_does_not_pretend_the_model_has_its_previous_full_reply():
     raw = '{"type":"tool_call","name":"crm.create","args":{"note":"' + 'x' * 150 + ' a "b" c"}}'
     ask, feedback = scripted(raw, TOOL_CALL)
-    assert reply._run_model_turn(ask).tool_calls
+    assert reply.run_model_turn(ask).tool_calls
     assert raw not in feedback[1]
     assert 'from the task and tool schema' in feedback[1]
     assert 'SAME' not in feedback[1]
@@ -1755,7 +1763,7 @@ def test_an_inline_fence_without_a_language_keeps_its_json(body):
 def test_a_standing_final_that_cannot_be_unwrapped_is_not_delivered_as_protocol():
     ask, feedback = scripted('Example: {"x":1} {"type":"final","content":"done"}')
     with pytest.raises(ValueError):
-        reply._run_model_turn(ask)
+        reply.run_model_turn(ask)
     assert len(feedback) == 3
 
 
@@ -1766,7 +1774,7 @@ class TestNihalFollowup:
         closing = fence.rstrip('json5')
         raw = '{"type":"final","content":"Here is how to call it."}\n\n' + fence + '\n' + call + '\n' + closing
         ask, feedback = scripted(raw)
-        assert answer_of(reply._run_model_turn(ask)) == 'Here is how to call it.'
+        assert answer_of(reply.run_model_turn(ask)) == 'Here is how to call it.'
         assert len(feedback) == 1
 
     @pytest.mark.parametrize('prefix', ['', '```json\n'])
@@ -1775,7 +1783,7 @@ class TestNihalFollowup:
         final = prefix + final + ('\n```' if prefix else '')
         ask, feedback = scripted(final + '\n```json\n' + TOOL_CALL)
         with pytest.raises(ValueError):
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
         assert len(feedback) == 3
 
     @pytest.mark.parametrize('example', [TOOL_CALL, BROKEN_TOOL_CALL])
@@ -1784,7 +1792,7 @@ class TestNihalFollowup:
         raw = '{"type":"final","content":"Done."}\n```json\n' + example + '\n```\n' + call
         ask, feedback = scripted(raw)
         with pytest.raises(ValueError):
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
         assert len(feedback) == 3
         assert 'tool call' in feedback[1]
 
@@ -1792,13 +1800,13 @@ class TestNihalFollowup:
     def test_the_first_dict_in_code_is_not_a_typeless_call(self, statement):
         raw = 'Use this helper:\n\ndef f():\n    ' + statement + '{"name": "x", "args": [1]}'
         ask, feedback = scripted(raw)
-        assert answer_of(reply._run_model_turn(ask)) == raw
+        assert answer_of(reply.run_model_turn(ask)) == raw
         assert len(feedback) == 3
 
     @pytest.mark.parametrize('line_end', ['\r', '\n', '\r\n'])
     def test_a_marker_after_a_line_end_delivers_only_its_answer(self, line_end):
         ask, feedback = scripted('Thinking' + line_end + ' \tFINAL>>> ok')
-        assert answer_of(reply._run_model_turn(ask)) == 'ok'
+        assert answer_of(reply.run_model_turn(ask)) == 'ok'
         assert len(feedback) == 1
 
     @pytest.mark.parametrize('prefix', ['I looked at {x}.\n', 'Example: {"x": 1}\n'])
@@ -1814,7 +1822,7 @@ class TestNihalFollowup:
     def test_recovered_unpaired_surrogates_can_be_encoded(self, escape):
         raw = '{"type":"final","content":"bad ' + escape + ' "x""}'
         ask, feedback = scripted(raw)
-        answer = answer_of(reply._run_model_turn(ask))
+        answer = answer_of(reply.run_model_turn(ask))
         assert answer.encode('utf-8').decode('utf-8') == answer
         assert '\\u' in answer
         assert len(feedback) == 1
@@ -1830,7 +1838,7 @@ class TestCodeDictionariesAndUnicodeFinals:
         raw = expression.format(call='{"name":"crm.create","args":{"n":1}}') + '\n' + claim
         ask, feedback = scripted(raw)
         with pytest.raises(ValueError, match='after 3 attempts'):
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
         assert len(feedback) == 3
         # The repair must request the missing call, never teach the model to drop it for a claim.
         for hint in feedback[1:]:
@@ -1855,7 +1863,7 @@ class TestCodeDictionariesAndUnicodeFinals:
     def test_later_arguments_and_arrow_function_dictionaries_are_answer_text(self, prefix):
         raw = 'Call it like this:\n\n' + prefix + '{"name": "x", "args": [1]})'
         ask, feedback = scripted(raw)
-        assert answer_of(reply._run_model_turn(ask)) == raw
+        assert answer_of(reply.run_model_turn(ask)) == raw
         assert len(feedback) == 3
 
     @pytest.mark.parametrize(
@@ -1874,7 +1882,7 @@ class TestCodeDictionariesAndUnicodeFinals:
         raw = prefix + '{"name":"crm.create","args":{"name":"Acme"}}' + STACKED_FINAL
         ask, feedback = scripted(raw)
         with pytest.raises(ValueError):
-            reply._run_model_turn(ask)
+            reply.run_model_turn(ask)
         assert len(feedback) == 3
 
     @pytest.mark.parametrize('wrapper', ['{}', 'FINAL>>> {}', '```json\n{}\n```', '[{}]'])
@@ -1894,7 +1902,7 @@ class TestCodeDictionariesAndUnicodeFinals:
     def test_valid_final_content_always_encodes_as_utf8(self, wrapper, content, expected):
         raw = wrapper.format(json.dumps({'type': 'final', 'content': content}))
         ask, feedback = scripted(raw)
-        answer = answer_of(reply._run_model_turn(ask))
+        answer = answer_of(reply.run_model_turn(ask))
         assert answer == expected
         assert answer.encode('utf-8').decode('utf-8') == answer
         assert len(feedback) == 1
