@@ -1322,10 +1322,11 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
     order = []
 
-    def place(pipeline):
+    def place(pipeline, isolated=False):
         order.append(('place', [c['provider'] for c in pipeline['components']]))
         if not available:
             raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
+        return ['llm_x']
 
     monkeypatch.setattr(engine.node_store, 'place', place)
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
@@ -1355,6 +1356,135 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
         await Task.start_task(t)
 
     assert order == ([('place', ['llm_x']), ('spawn',)] if available else [('place', ['llm_x'])])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stdio', [False, True])
+async def test_an_isolated_task_of_a_hosted_engine_gets_shared_host(monkeypatch, stdio):
+    """A hosted engine's container or pod task gets --shared-host as a spawn
+    task does, and the pre-launch check is told the same: a stdio MCP
+    pipeline is refused there too, and nothing is started.
+    """
+    import rocketlib
+    from ai.common.config import Config
+
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(engine, 'pipeline_opens_store', lambda *a: False)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', _get_service)
+    monkeypatch.setattr(
+        Config, 'getNodeConfig', staticmethod(lambda provider, config, *_: _mcp_node_config(provider, config))
+    )
+    checked = []
+    gate = engine.saas_pipeline_violation
+    monkeypatch.setattr(
+        engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']) or gate(*a, **k)
+    )
+    components = [{'id': 'src', 'provider': 'tools'}]
+    if stdio:
+        components.append({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'stdio'}})
+    t = _env_task(pipeline={'components': components})
+    t.source = 'src'
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
+    refused = 'stdio MCP transport is not available on RocketRide Cloud'
+    with pytest.raises(ValueError if stdio else Launched, match=refused if stdio else None):
+        await Task.start_task(t)
+
+    assert checked == [True]
+    if stdio:
+        t._launcher.start.assert_not_awaited()
+    else:
+        spec = t._launcher.start.call_args.args[0]
+        assert (spec.hosted, spec.shared_host) == (True, True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('opens', [True, False])
+async def test_an_isolated_task_is_told_whether_it_opens_the_store(monkeypatch, opens):
+    """A container or pod task is told whether its pipeline opens the store,
+    and the task's storage anchor when it does: the runtime gives it that
+    subtree of the store or refuses the pipeline. The store node counts when
+    only EaaS serves it, as before the engine's first restart after it came.
+    """
+    import rocketlib
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: None)
+    store = {'path': 'nodes.tool_filesystem'} if opens else None
+    monkeypatch.setattr(engine.node_store, 'served', lambda provider: store if provider == 'filestore' else None)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'filestore'}]})
+    t.source = 'src'
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
+    with pytest.raises(Launched):
+        await Task.start_task(t)
+
+    spec = t._launcher.start.call_args.args[0]
+    assert (spec.uses_store, spec.storage_root) == ((True, 'users/client-env-test/files') if opens else (False, ''))
+
+
+@pytest.mark.asyncio
+async def test_the_runtime_is_given_the_folders_of_the_nodes_its_run_loads(monkeypatch, tmp_path):
+    """The runtime is given the folder of each node place() names: a container
+    or a pod cannot see the engine's nodes/, so its runtime copies them in.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    monkeypatch.setattr(engine, 'pipeline_opens_store', lambda *a: False)
+    monkeypatch.setattr(engine.node_store, 'place', lambda pipeline, isolated: ['embed_y', 'llm_x'] if isolated else [])
+    monkeypatch.setattr(engine.node_release, 'nodes_dir', lambda: str(tmp_path))
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    t.source = 'src'
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
+    with pytest.raises(Launched):
+        await Task.start_task(t)
+
+    spec = t._launcher.start.call_args.args[0]
+    assert spec.nodes == [str(tmp_path / 'embed_y'), str(tmp_path / 'llm_x')]
 
 
 # ---------------------------------------------------------------------------
@@ -2244,6 +2374,7 @@ async def test_on_event_exit_reads_the_key_the_emitters_write():
     t._status.state = 0
     t._is_restarting = False
     t._stop_requested = False
+    t._stop_reason = None
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2262,6 +2393,7 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     t._status.state = 0
     t._is_restarting = False
     t._stop_requested = False
+    t._stop_reason = None
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2473,8 +2605,10 @@ def _exit_task(exit_event_seen=False):
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
     t._stop_requested = False
+    t._stop_reason = None
     t._crash = None
     t._process_killed = False
+    t._launch = None
     return t
 
 
@@ -2558,6 +2692,8 @@ async def test_no_process_counts_as_failed():
 class _LingeringProcess:
     """Output closed, but the process only exits once it is killed."""
 
+    lost = None
+
     def __init__(self):
         self.returncode = None
         self.killed = False
@@ -2601,14 +2737,73 @@ def _ending_task(process_exit_code):
     t._terminated_called = False
     t._is_restarting = False
     t._debug_stdio = t._data_client = t._task_metrics = t._launch = None
+    t._launcher = SimpleNamespace(isolated=False)
     t._status_update_task = None
     t._final_events_sent = True
-    t._stop_reason = None
     t._run_trigger = None
     t._send_status_update = AsyncMock()
     t._forward_task_event = AsyncMock()
     t._process_exit_code = AsyncMock(return_value=process_exit_code)
     return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'reported, stop_at, status, exit_code, outcome, reason',
+    [
+        # The stop came first: the -11 is its kill, and a run window that ran out is a success
+        (None, 'exit-wait', 'Stopped', 0, 'ok', 'ttl'),
+        # The crash was read first: teardown holds no lock, so the stop still lands
+        (None, 'cleanup', 'Stopped unexpectedly', -11, 'error', None),
+        # A reported end is read when it arrives, before the wait for the exit code
+        (_SEGV, 'exit-wait', 'Stopped unexpectedly', 1, 'error', None),
+        ({'exitCode': 0, 'message': ''}, 'exit-wait', 'Completed', 0, 'ok', None),
+        # What the engine reports while it stops is part of the stop
+        (_SEGV, 'report', 'Stopped', 0, 'ok', 'ttl'),
+    ],
+    ids=[
+        'before-the-end-is-read',
+        'during-the-cleanup',
+        'after-a-reported-crash',
+        'after-a-reported-end',
+        'before-the-report',
+    ],
+)
+async def test_a_ttl_stop_counts_only_if_it_came_before_the_end_was_read(
+    reported, stop_at, status, exit_code, outcome, reason
+):
+    t = _ending_task(-11)
+    t._termination_lock = asyncio.Lock()
+    t._stop_count = 0
+    t._final_events_sent = False
+    t._server = MagicMock(broadcast_server_event=AsyncMock())
+    t._launch = MagicMock(lost=None, returncode=-11, cleanup=AsyncMock())
+    run_log = t._run_log = AsyncMock()
+    stops = []
+
+    async def ttl_stop(result=None):
+        stops.append(asyncio.ensure_future(Task.stop_task(t, reason='ttl')))
+        await asyncio.sleep(0)
+        return result
+
+    if stop_at == 'report':
+        await ttl_stop()
+    if reported:
+        await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(reported)})
+    if stop_at == 'exit-wait':
+        t._process_exit_code = lambda: ttl_stop(-11)
+    elif stop_at == 'cleanup':
+        t._launch.cleanup = ttl_stop
+    await Task._terminated(t)
+    await asyncio.wait_for(stops[0], timeout=5)
+
+    assert t._stop_reason == 'ttl'
+    assert (t._status.status, t._status.exitCode) == (status, exit_code)
+    assert run_log.end_run.await_args.args[0] == outcome
+    end = [
+        call.args[1]['body'] for call in t._forward_task_event.await_args_list if call.args[1]['event'] == 'apaevt_task'
+    ]
+    assert (end[0].get('reason'), run_log.end_run.await_args.kwargs['reason']) == (reason, reason)
 
 
 @pytest.mark.asyncio
@@ -2628,6 +2823,93 @@ async def test_a_reported_crash_ends_the_task(stop_requested, status, exit_code,
     await Task._terminated(t)
     assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (status, exit_code, exit_message)
     assert run_log.end_run.await_args.args[0] == outcome
+
+
+@pytest.mark.asyncio
+async def test_a_container_task_that_left_with_0_and_no_report_was_cut_off():
+    """A task reports every end it reaches; with its input closed it leaves with 0 and no word."""
+    t = _ending_task(0)
+    t._launcher = SimpleNamespace(isolated=True)
+    run_log = t._run_log = AsyncMock()
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (
+        'Stopped unexpectedly',
+        1,
+        'Stopped unexpectedly',
+    )
+    assert run_log.end_run.await_args.args[0] == 'error'
+    said = [str(call) for call in t._forward_task_event.await_args_list]
+    assert any('Unexpected termination: the task ended without reporting its end' in line for line in said)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'isolated, reported, stop_requested, status, outcome',
+    [
+        # It said >EXIT itself: the 0 is its own end
+        (True, True, False, 'Completed', 'ok'),
+        # The engine stopped it
+        (True, False, True, 'Stopped', 'cancelled'),
+        # No CLI process stands between a child process and the engine
+        (False, False, False, 'Completed', 'ok'),
+    ],
+    ids=['reported-its-end', 'stopped-by-the-engine', 'child-process'],
+)
+async def test_an_exit_code_0_with_a_known_reason_is_no_cut_off(isolated, reported, stop_requested, status, outcome):
+    t = _ending_task(0)
+    t._launcher = SimpleNamespace(isolated=isolated)
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    if reported:
+        await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': ''}})
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode) == (status, 0)
+    assert run_log.end_run.await_args.args[0] == outcome
+    assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_a_task_its_runtime_lost_ends_as_stopped_unexpectedly():
+    """The runtime says what it saw; the engine's own kill of what was left does not make that a stop."""
+    lost = 'what the runtime saw of the task'
+    t = _ending_task(-9)
+    t._launch = MagicMock(lost=lost, cleanup=AsyncMock())
+    t._process_killed = True
+    run_log = t._run_log = AsyncMock()
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (
+        'Stopped unexpectedly',
+        -9,
+        'Stopped unexpectedly',
+    )
+    assert run_log.end_run.await_args.args[0] == 'error'
+    assert any(f'Unexpected termination: {lost}' in str(call) for call in t._forward_task_event.await_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'reported, stop_requested, exit_code, outcome',
+    [
+        # It reported a failure of its own before its pod went: its own code stands
+        (True, False, 3, 'cancelled'),
+        # The engine stopped it, and deleted what was left
+        (False, True, 0, 'cancelled'),
+    ],
+    ids=['reported-its-end', 'stopped-by-the-engine'],
+)
+async def test_what_the_runtime_saw_is_not_asked_of_a_task_that_reported_or_was_stopped(
+    reported, stop_requested, exit_code, outcome
+):
+    t = _ending_task(-9)
+    t._launch = MagicMock(lost='what the runtime saw of the task', cleanup=AsyncMock())
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    if reported:
+        await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 3, 'message': 'failed'}})
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode) == ('Stopped', exit_code)
+    assert run_log.end_run.await_args.args[0] == outcome
+    assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
 
 
 # ---------------------------------------------------------------------------

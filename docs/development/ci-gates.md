@@ -43,7 +43,7 @@ The `changes` job (`dorny/paths-filter`) computes these booleans:
 | Filter | Paths |
 | --- | --- |
 | `code` | `packages/**`, `nodes/**`, `apps/**`, `scripts/**`, `builder`, `builder.cmd`, `.github/workflows/**`, `package.json`, `docker/**` |
-| `container` | `docker/**`, `nodes/scripts/tasks.js`, the `requirement*.txt` and `overrides.txt` files under `nodes/` and `packages/ai/`, `packages/server/engine-lib/rocketlib-python/lib/depends.py`, `packages/server/scripts/tasks.js`, `.github/workflows/_build.yaml` |
+| `container` | `docker/**`, `nodes/scripts/tasks.js`, `nodes/scripts/container-checks.js`, the `requirement*.txt` and `overrides.txt` files under `nodes/` and `packages/ai/`, `packages/server/engine-lib/rocketlib-python/lib/depends.py`, `packages/server/scripts/tasks.js`, `.github/workflows/_build.yaml`, the task launchers `packages/ai/src/ai/modules/task/launcher/**` |
 | `cpp` | `packages/server/**`, the C/C++ sources and `CMakeLists.txt` files under `nodes/`, `packages/vcpkg/**`, the C++ build scripts (`scripts/build.js`, `scripts/compiler.js`, `scripts/compiler-unix.js`, `scripts/compiler-unix.sh`, `scripts/lib/cmake.js`, `scripts/lib/toolchain.js`, `nodes/scripts/node-build.js`, `nodes/scripts/tasks.js`), `packages/ai/src/ai/modules/task/task_engine.py`, `.github/workflows/_sanitize.yaml`, `scripts/ci/**` |
 
 `code == false` skips `build` (a `build-skip` job reports success under the same
@@ -118,6 +118,13 @@ starts moto (S3), Azurite, and Postgres (pgvector on `:55432`, Apache AGE 1.5.0 
 `:55433` and 1.6.0 on `:55434`) for the storage tests and the live database node
 tests (`nodes/test/test_*_live.py`), then runs the graph suite once more against
 AGE 1.6.0.
+
+Ubuntu also runs `./builder container:test` — the node image probes, then the
+node tests with every task in a container (`--runtime=docker`) — on a PR only
+when the image's inputs or the task launchers changed (the `container` path
+filter in `ci.yml`), and on every other trigger. CI has no Kubernetes cluster,
+so `nodes:test --runtime=k8s` runs only on your machine: see
+[Testing the task runtimes](engine/task-runtimes.md).
 
 Per-module equivalents when you only touched one area:
 

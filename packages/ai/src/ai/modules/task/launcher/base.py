@@ -39,8 +39,8 @@ from typing import Any, Dict, List, Optional
 from hosting import HOSTED_FLAG, SHARED_HOST_FLAG
 
 # Task subprocesses of a hosted engine get these flags on their command line
-# (see the hosting module): --hosted always, --shared-host when the task shares
-# the engine's host. Pipeline-supplied args can add flags but not remove these,
+# (see the hosting module): --hosted and --shared-host, whatever the runtime
+# (Task._shares_host). Pipeline-supplied args can add flags but not remove these,
 # so the task can rely on them.
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
@@ -64,10 +64,16 @@ class LaunchSpec:
     modelserver: Optional[str] = None
     # The engine is hosted (--saas): the task gets --hosted
     hosted: bool = False
-    # The task shares the engine's host: it gets --shared-host
+    # The guards for a shared host apply (Task._shares_host): the task gets --shared-host
     shared_host: bool = False
     # Attach the VS Code debugger to the task (subprocess runtime only)
     debug_attach: bool = False
+    # A component opens the store from inside the task (tool_filesystem, or tool_skills with a folder)
+    uses_store: bool = False
+    # The run's storage anchor (the task file's storage.root)
+    storage_root: str = ''
+    # The folders of the packaged nodes the run loads (node_store.place), for a task that cannot see the engine's nodes/
+    nodes: List[str] = field(default_factory=list)
 
 
 def task_argv(
@@ -136,6 +142,15 @@ class Launch(abc.ABC):
     def returncode(self) -> Optional[int]:
         """The task's exit code, or None while it runs."""
 
+    @property
+    def lost(self) -> Optional[str]:
+        """What the runtime saw of a task it lost, for the task's console; else None.
+
+        Read for a task that ended without reporting it (no ``>EXIT``) and that
+        nobody asked to stop.
+        """
+        return None
+
     @abc.abstractmethod
     async def wait(self) -> int:
         """Wait for the task to exit and return its exit code."""
@@ -162,6 +177,12 @@ class Launcher(abc.ABC):
 
     # The runtime's name, as given to --runtime
     name: str = ''
+    # The task cannot see the engine's files, so Task says what it needs from them.
+    # A CLI process carries its stdio, so the task can be cut off from the engine while it runs
+    isolated: bool = False
+
+    async def prepare(self) -> None:
+        """One-time work before the first task; ``TaskServer`` runs it at start."""
 
     @property
     @abc.abstractmethod

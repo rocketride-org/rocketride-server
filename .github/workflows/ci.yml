@@ -80,10 +80,11 @@ jobs:
               - '.github/workflows/**'
               - 'package.json'
               - 'docker/**'
-            # What the node image is made of beyond the engine itself
+            # What the node image is made of beyond the engine itself, and the task launchers
             container:
               - 'docker/**'
               - 'nodes/scripts/tasks.js'
+              - 'nodes/scripts/container-checks.js'
               - 'nodes/**/requirement*.txt'
               - 'nodes/**/overrides.txt'
               - 'packages/ai/**/requirement*.txt'
@@ -91,6 +92,7 @@ jobs:
               - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
               - 'packages/server/scripts/tasks.js'
               - '.github/workflows/_build.yaml'
+              - 'packages/ai/src/ai/modules/task/launcher/**'
             # What the sanitizer job builds, how it builds and runs it, and
             # how it reports. The node patterns go by file type, so a new C++
             # node needs no edit here. task_engine.py holds the environment
@@ -359,6 +361,10 @@ jobs:
       - run: pnpm run lint:scripts
       - name: Test node packaging
         run: node --test nodes/scripts/tasks.test.js
+      # Not in the hook: the unit tests of the builder's container checks
+      - run: node --test nodes/scripts/container-checks.test.js
+      # Actions that run on some OSes only, and the global commands over them
+      - run: node --test scripts/lib/registry.test.js
 
   # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream

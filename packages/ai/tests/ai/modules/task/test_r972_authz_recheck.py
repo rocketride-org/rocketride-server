@@ -342,7 +342,7 @@ async def test_r972_1b_oss_has_no_recheck(monkeypatch):
         server = TaskServer(web)
         try:
             assert (server._authz is not None) is expected
-            assert len(server._bg_tasks) == (3 if expected else 2)
+            assert len(server._bg_tasks) == (4 if expected else 3)
         finally:
             await server.shutdown()
 

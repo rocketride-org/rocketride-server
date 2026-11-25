@@ -14,7 +14,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const AdmZip = require('adm-zip');
 
-const { packageNode, contentDigest, syncNodes, NODES_CONTRACT } = require('./tasks');
+const { packageNode, contentDigest, syncNodes, NODES_CONTRACT, capture } = require('./tasks');
 
 function makeNode() {
 	const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rr-node-')), 'demo');
@@ -182,6 +182,17 @@ test('the index names the archive and lists only the packaged nodes, with the di
 		fs.readFileSync(path.join(root, 'dist', 'server', 'nodes', 'index.json')),
 		fs.readFileSync(path.join(root, 'dist', 'nodes', 'index.json'))
 	);
+});
+
+test('a command that does not finish by its deadline is killed and reported', async () => {
+	const started = Date.now();
+	const result = await capture(process.execPath, ['-e', 'setTimeout(() => {}, 1e6)'], { timeout: 200 });
+	assert.ok(Date.now() - started < 5000);
+	assert.strictEqual(result.timedOut, true);
+	assert.notStrictEqual(result.code, 0);
+	assert.notStrictEqual(result.code, -1);
+	assert.match(result.stderr, /did not answer within 0\.2 s/);
+	assert.strictEqual((await capture(process.execPath, ['-e', 'process.stdout.write("ok")'])).stdout, 'ok');
 });
 
 test('the index contract is the one the engine reads', () => {

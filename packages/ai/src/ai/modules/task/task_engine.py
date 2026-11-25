@@ -64,6 +64,7 @@ from ai.constants import (
     CONST_CHANNEL_REDIAL_DELAY,
 )
 from ai.account.base import OutOfCreditsError
+from ai.common import node_release
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.model_gateway import GATEWAY_ENV, PASS_RENEW_INTERVAL_S, no_pass_marker, wants_hosted_openai
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
@@ -382,9 +383,9 @@ def resolve_parameter_tokens(pipeline: Dict[str, Any], environ: Mapping[str, str
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
 # `nosaas` services, but a pipeline can reach the engine without the canvas,
 # so the engine enforces the same rule itself. Any service built on the MCP
-# client node is refused in stdio mode while the task shares the engine's
-# host: that transport launches a command there. Its HTTP transports are
-# fine. Matching is on the node module, not the provider name: several
+# client node is refused in stdio mode while the task gets --shared-host
+# (Task._shares_host): that transport launches a command. Its HTTP transports
+# are fine. Matching is on the node module, not the provider name: several
 # services share the node (tool_butterbase is one) and provider lookup is
 # case-insensitive.
 CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
@@ -425,8 +426,8 @@ def saas_pipeline_violation(
     and ``Config.getNodeConfig`` in production. The MCP transport is resolved the
     way the node resolves it (profile defaults merged under the component config),
     because the default profile is itself stdio. Anything that cannot be resolved
-    is refused. ``shared_host`` says the task will share the engine's host (the
-    task's ``--shared-host``); only then is stdio MCP refused.
+    is refused. ``shared_host`` says the task gets ``--shared-host``; only then
+    is stdio MCP refused.
     """
     for component in pipeline.get('components', []) or []:
         provider = str(component.get('provider') or '')
@@ -466,6 +467,53 @@ def _accepts_credential(authorize: Callable[..., Any]) -> bool:
     if named is not None and named.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
         return True
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+
+
+# The nodes that open the store from inside the task: tool_filesystem (its tool, source and
+# store services), and tool_skills when it reads a skills folder
+CONST_STORE_NODE_PATH = 'nodes.tool_filesystem'
+CONST_SKILLS_NODE_PATH = 'nodes.tool_skills'
+
+
+def pipeline_opens_store(
+    pipeline: Dict[str, Any],
+    get_service: Callable[[str], Any],
+    get_node_config: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+) -> bool:
+    """
+    Whether a component of the pipeline opens the store from inside the task.
+
+    ``tool_filesystem`` does (its tool, source and store services alike), and
+    ``tool_skills`` does when it reads a skills folder, so a runtime that
+    isolates the task's files has to give it the run's store or refuse the
+    pipeline.
+
+    Args:
+        pipeline: The resolved pipeline.
+        get_service: in production the engine's registry, then the nodes
+            EaaS serves (``node_store.served``).
+        get_node_config: ``Config.getNodeConfig`` in production. The folder is
+            resolved the way the node resolves it; one that cannot be resolved
+            counts as a folder.
+
+    Returns:
+        True if any component is served by ``nodes.tool_filesystem``, or by
+        ``nodes.tool_skills`` with a skills folder.
+    """
+    for component in pipeline.get('components', []) or []:
+        provider = str(component.get('provider') or '')
+        service = get_service(provider) if provider else None
+        path = str((service or {}).get('path') or '').lower()
+        if path == CONST_STORE_NODE_PATH:
+            return True
+        if path == CONST_SKILLS_NODE_PATH:
+            try:
+                folder = str(get_node_config(provider, component.get('config') or {}).get('folder') or '').strip()
+            except Exception:
+                folder = 'unresolved'
+            if folder:
+                return True
+    return False
 
 
 def _is_saas_engine() -> bool:
@@ -728,6 +776,8 @@ class Task(DAPBase):
         # Whether the task sent its own >EXIT event this run. Without one,
         # _terminated() falls back to the process exit code.
         self._exit_event_seen = False
+        # Whether a stop was requested, and why, when that event was read
+        self._exit_event_stop: Tuple[bool, Optional[str]] = (False, None)
 
         # This run's crash, as the console shows it, and whether the server killed the process
         self._crash: Optional[str] = None
@@ -1352,10 +1402,12 @@ class Task(DAPBase):
 
     def _shares_host(self) -> bool:
         """
-        Whether the task shares the engine's host, so it gets --shared-host.
+        Whether the task gets --shared-host.
 
-        A hosted engine's task does: spawn is the only runtime. The pre-launch
-        check and the task's command line both ask here, so they agree.
+        A hosted engine's task does, whatever the runtime, a container or a pod
+        included; #3524 tracks dropping it for the runtimes that isolate the
+        task. The pre-launch check and the task's command line both ask here,
+        so they agree.
 
         Returns:
             True for a task of a hosted engine.
@@ -1876,10 +1928,26 @@ class Task(DAPBase):
         A process that reported no crash but ended by a crash signal, an OOM
         kill or, on Windows, a crash exception code crashed before its handlers
         could say so, unless the server killed it.
+
+        A task in a container or a pod that left with code 0 was cut off from
+        the engine: a task reports every end it reaches by itself, and leaves
+        with 0 and no word once its input closes (``--autoterm``). Its 0
+        records 1, because the dashboard's task_error goes by a non-zero code.
+        A task its runtime lost (``Launch.lost``) did not end by itself either,
+        whoever killed what was left of it.
         """
         if not self._exit_event_seen and not self._stop_requested:
             self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
+            if exit_code == 0 and self._launcher.isolated:
+                self._crash = (
+                    'the task ended without reporting its end, as it does when its connection to the engine drops'
+                )
+                self._status.exitCode = 1
+                return
+            if self._launch and self._launch.lost:
+                self._crash = self._launch.lost
+                return
             if exit_code is None or self._process_killed:
                 return
             if exit_code < 0:
@@ -1923,6 +1991,11 @@ class Task(DAPBase):
 
         reported = self._crash
         self._apply_process_exit_code(exit_code)
+        # How the run ended is read once, from its >EXIT event or else here: a
+        # stop that arrives later (a TTL pass, a user) does not turn that end into a stop
+        stop_requested, stop_reason = (
+            self._exit_event_stop if self._exit_event_seen else (self._stop_requested, self._stop_reason)
+        )
 
         # The engine reported nothing: the console still shows the crash
         if self._crash and not reported:
@@ -2041,7 +2114,7 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up debugger termination: {e}')
 
         # Set final state
-        if self._stop_requested:
+        if stop_requested:
             if self._is_restarting:
                 self._status.status = 'Restarting'
                 self._status.state = TASK_STATE.CANCELLED.value
@@ -2049,7 +2122,7 @@ class Task(DAPBase):
             else:
                 self._status.status = 'Stopped'
                 self._status.state = TASK_STATE.CANCELLED.value
-                self.debug_task_message('stopped', reason=self._stop_reason or 'user')
+                self.debug_task_message('stopped', reason=stop_reason or 'user')
         elif self._crash:
             # The crash's detail is in the console
             self._status.status = 'Stopped unexpectedly'
@@ -2131,7 +2204,7 @@ class Task(DAPBase):
                         'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
-                        **({'reason': self._stop_reason} if self._stop_reason else {}),
+                        **({'reason': stop_reason} if stop_reason else {}),
                     },
                     id=self.id,
                 )
@@ -2178,15 +2251,15 @@ class Task(DAPBase):
                     # A ttl-window expiry is SUCCESS: the run stayed up
                     # exactly as configured, then shut down. Only a real
                     # stop (or abnormal exit) reads as cancelled; a crash is an error.
-                    if self._crash and not self._stop_requested:
+                    if self._crash and not stop_requested:
                         outcome = 'error'
                     elif self._status.state == TASK_STATE.CANCELLED.value:
-                        outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
+                        outcome = 'ok' if stop_reason == 'ttl' else 'cancelled'
                     elif self._status.exitCode == 0:
                         outcome = 'ok'
                     else:
                         outcome = 'error'
-                    await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
+                    await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=stop_reason)
                     self._run_log = None
             except Exception as e:
                 self.debug_message(f'Run-log close failed: {e}')
@@ -2599,6 +2672,8 @@ class Task(DAPBase):
             if not self._stop_requested:
                 self._status.exitCode = exit_code
                 self._status.exitMessage = exit_message
+            # The run's end is read here: a stop that arrives later does not count
+            self._exit_event_stop = self._stop_requested, self._stop_reason
             self._exit_event_seen = True
 
             # The engine's handlers caught a crash: its >EXIT code is Crash
@@ -3129,6 +3204,7 @@ class Task(DAPBase):
             self._final_events_sent = False
             self._terminated_called = False
             self._exit_event_seen = False
+            self._exit_event_stop = (False, None)
             self._crash = None
             self._process_killed = False
             self._service_up_notes = []
@@ -3172,9 +3248,22 @@ class Task(DAPBase):
 
             # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
             try:
-                await asyncio.to_thread(node_store.place, resolved)
+                nodes = await asyncio.to_thread(node_store.place, resolved, self._launcher.isolated)
             except Exception as e:
                 raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
+
+            # A runtime that isolates the task's files needs to know whether it opens the store
+            uses_store = False
+            if self._launcher.isolated:
+                from ai.common.config import Config
+                from rocketlib import getServiceDefinition
+
+                # A node EaaS serves is not in the engine's registry until a restart
+                uses_store = pipeline_opens_store(
+                    resolved,
+                    lambda provider: getServiceDefinition(provider) or node_store.served(provider),
+                    lambda provider, config: Config.getNodeConfig(provider, config, node_store.served(provider)),
+                )
             del resolved
 
             # VS Code subprocess debugging goes through the python shim (subprocess runtime)
@@ -3244,10 +3333,13 @@ class Task(DAPBase):
                     env=subprocess_env,
                     args=child_args,
                     modelserver=self._server._config.get('modelserver'),
-                    # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
+                    # Tell the task it runs under a hosted engine, and which guards apply (see CONST_HOSTED_CHILD_FLAG)
                     hosted=_is_saas_engine(),
                     shared_host=self._shares_host(),
                     debug_attach=debug_attach,
+                    uses_store=uses_store,
+                    storage_root=self._storage_root() if uses_store else '',
+                    nodes=[os.path.join(node_release.nodes_dir(), name) for name in nodes],
                 )
             )
             del task_file
@@ -3431,7 +3523,8 @@ class Task(DAPBase):
         Args:
             reason: WHY the stop happens — 'user' (explicit request) or
                 'ttl' (the run window elapsed). Drives the recorded run
-                outcome: a ttl expiry is a successful run, not a cancel.
+                outcome: a ttl expiry is a successful run, not a cancel. A
+                stop that arrives after the run's end was read changes nothing.
         """
         try:
             # Prevent race conditions
