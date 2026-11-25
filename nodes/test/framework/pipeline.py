@@ -141,6 +141,11 @@ _LLM_MOCK_CREDENTIALS = {
     'tool_deepl': {'apikey': 'mock-deepl-placeholder-for-tests'},
     'tool_slack': {'token': 'xoxb-mock-placeholder-for-tests'},
     'tool_notion': {'apikey': 'secret_mock-notion-placeholder-for-tests'},
+    'tool_confluence': {
+        'base_url': 'https://mock.atlassian.net/wiki',
+        'email': 'mock@example.com',
+        'apikey': 'mock-confluence-placeholder-for-tests',
+    },
     'tool_tenki': {'apikey': 'lx_mock-tenki-placeholder-for-tests'},
 }
 
