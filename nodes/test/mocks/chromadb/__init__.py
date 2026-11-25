@@ -185,6 +185,11 @@ class MockCollection:
             if limit is not None and len(results['ids']) >= limit:
                 break
 
+        # Like the client, a field the request did not include comes back as None
+        for name in ('metadatas', 'documents', 'embeddings'):
+            if name not in include:
+                results[name] = None
+
         return results
 
     def upsert(
