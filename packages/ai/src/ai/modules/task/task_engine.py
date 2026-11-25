@@ -239,6 +239,9 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'RR_SIGNING_KEY',
         'RR_CORS_ORIGINS',
         'RR_OAUTH_BROKER_URL',
+        # The model server's shared secret: nodes open their own ModelClient
+        # connection to --modelserver, which requires it when it has one
+        'RR_MODEL_SERVER_AUTH_TOKEN',
         # Operator opt-in that makes task processes hide their /proc entries
         # (ai.proc_privacy); non-secret, and tasks must see it to act on it
         'RR_PROC_PRIVATE',

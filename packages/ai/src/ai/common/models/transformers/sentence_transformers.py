@@ -133,8 +133,8 @@ class SentenceTransformerLoader(BaseLoader):
         if model_name.startswith('sentence-transformer/'):
             model_name = model_name[21:]
 
-        # Enable trust_remote_code by default (can be overridden via kwargs)
-        kwargs.setdefault('trust_remote_code', True)
+        # Do not run the model repository's own code unless the caller asks for it
+        kwargs.setdefault('trust_remote_code', False)
 
         exclude_gpus = exclude_gpus or []
 

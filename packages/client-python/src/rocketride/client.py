@@ -151,6 +151,7 @@ class RocketRideClient(
                 - module: Custom module name for client identification
                 - ws_path: Custom WebSocket path override (default: '/task/service').
                     Use '/models' for the model server.
+                - headers: Extra HTTP headers sent on the WebSocket handshake (e.g. ``Authorization``)
                 - request_timeout: Default timeout in ms for individual requests (default: no timeout)
                 - max_retry_time: Max total time in ms to keep retrying connections (default: forever)
                 - persist: Enable automatic reconnection with exponential backoff (default: False)
@@ -215,6 +216,7 @@ class RocketRideClient(
         self._ws_path = kwargs.get('ws_path', '/task/service')
         self._uri = ConnectionMixin._get_websocket_uri(uri, self._ws_path)
         self._apikey = auth
+        self._headers = kwargs.get('headers', None)
 
         # Initialize chat question counter — each chat request gets a unique sequential ID
         self._next_chat_id = 1
@@ -248,6 +250,7 @@ class RocketRideClient(
         # with the explicit keyword arguments passed to super().__init__().
         module = kwargs.pop('module', client_name)
         kwargs.pop('ws_path', None)
+        kwargs.pop('headers', None)
         kwargs.pop('client_name', None)
         kwargs.pop('client_version', None)
         kwargs.pop('public', None)
