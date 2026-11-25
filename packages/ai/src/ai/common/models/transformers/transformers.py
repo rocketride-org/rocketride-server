@@ -121,8 +121,8 @@ class TransformersLoader(BaseLoader):
         from transformers import AutoModel
         from ai.common.torch import torch
 
-        # Enable trust_remote_code by default (can be overridden via kwargs)
-        kwargs.setdefault('trust_remote_code', True)
+        # Do not run the model repository's own code unless the caller asks for it
+        kwargs.setdefault('trust_remote_code', False)
 
         logger.info(f'Loading Transformers model {model_name}...')
 
@@ -193,8 +193,8 @@ class TransformersLoader(BaseLoader):
         from transformers import pipeline as hf_pipeline
         from ai.common.torch import torch
 
-        # Enable trust_remote_code by default (can be overridden via kwargs)
-        kwargs.setdefault('trust_remote_code', True)
+        # Do not run the model repository's own code unless the caller asks for it
+        kwargs.setdefault('trust_remote_code', False)
 
         if allocate_gpu:
             # === SERVER MODE: Estimate, allocate, load ===

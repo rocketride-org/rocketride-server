@@ -143,7 +143,7 @@ class ConnectionMixin(DAPClient):
     async def _internal_attach(self, timeout: Optional[float] = None) -> None:
         """Create transport if needed and open the WebSocket. No auth."""
         if self._transport is None:
-            self._transport = TransportWebSocket(uri=self._uri)
+            self._transport = TransportWebSocket(uri=self._uri, headers=getattr(self, '_headers', None))
             self._bind_transport(self._transport)
         await DAPClient.connect(self, timeout)
 

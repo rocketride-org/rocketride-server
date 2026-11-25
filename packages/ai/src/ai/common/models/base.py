@@ -35,6 +35,7 @@ import contextlib
 import threading
 import hashlib
 import json
+import os
 import sys
 import asyncio
 import time
@@ -42,6 +43,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketride import RocketRideClient
 from ai import node as ai_node
+
+# Shared secret for the model server's /models socket (same value on the engine and the model server)
+MODEL_SERVER_AUTH_TOKEN_ENV = 'RR_MODEL_SERVER_AUTH_TOKEN'
 
 
 # =============================================================================
@@ -301,7 +305,10 @@ class ModelClient(RocketRideClient):
                      understands (e.g. "5590", "localhost:5590",
                      "model.rocketride.dev:443", "wss://host:443").
         """
-        super().__init__(uri=address, module='MODEL_CLIENT', ws_path='/models')
+        # The model server requires this shared secret on the handshake when it has one
+        token = os.environ.get(MODEL_SERVER_AUTH_TOKEN_ENV, '').strip()
+        headers = {'Authorization': f'Bearer {token}'} if token else None
+        super().__init__(uri=address, module='MODEL_CLIENT', ws_path='/models', headers=headers)
         self.model_id: Optional[str] = None
         self.metadata: Dict = {}
         self._model_name: Optional[str] = None
