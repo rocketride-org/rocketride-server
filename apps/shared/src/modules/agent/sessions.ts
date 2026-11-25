@@ -286,12 +286,14 @@ async function updateCatalog(mutate: (rows: AgentSessionMeta[]) => AgentSessionM
  * groups sessions never drops another host's groups; an empty group list is
  * not written at all, leaving an ungrouped catalog byte-identical.
  *
- * @param mutate - Pure transform of the current lists to the new lists.
+ * @param mutate - Transform of the current lists to the new lists. It may be
+ *                 async: it runs inside the queue, so no other rewrite lands
+ *                 between its read and its write.
  */
-async function updateCatalogLists(mutate: (lists: CatalogLists) => CatalogLists): Promise<void> {
+async function updateCatalogLists(mutate: (lists: CatalogLists) => CatalogLists | Promise<CatalogLists>): Promise<void> {
 	const path = `${await agentsDir()}/catalog.json`;
 	const op = catalogChain.then(async () => {
-		const next = mutate(await readCatalogLists(path));
+		const next = await mutate(await readCatalogLists(path));
 		const file: CatalogFile = { version: 1, sessions: next.sessions, ...(next.groups.length > 0 ? { groups: next.groups } : {}) };
 		await requireClient().fsWriteJson(path, file);
 		emitFsChange(path, 'agent');
@@ -395,25 +397,29 @@ export async function saveAgentGroup(group: AgentSessionGroup): Promise<void> {
  * @param groupId - The group's id.
  */
 export async function deleteAgentGroup(groupId: string): Promise<void> {
-	// step: the group's sessions, as the catalog lists them now
-	const { sessions } = await readCatalogLists(`${await agentsDir()}/catalog.json`);
-	const members = sessions.filter((r) => r.group === groupId);
+	// One queued rewrite reads the members, deletes their files and drops their
+	// rows: a save whose row commits during it is queued behind it, so the files
+	// deleted and the rows removed are always the same set.
+	await updateCatalogLists(async (lists) => {
+		// step: the group's sessions, as the catalog lists them inside the rewrite
+		const members = lists.sessions.filter((r) => r.group === groupId);
 
-	// step: each session's file first; a file that is already gone is not a failure
-	for (const member of members) {
-		const path = await sessionPath(member.sessionId);
-		try {
-			await requireClient().fsDelete(path);
-		} catch (err) {
-			if (!isNotFound(err)) throw err;
+		// step: each session's file first; a file that is already gone is not a failure
+		for (const member of members) {
+			const path = await sessionPath(member.sessionId);
+			try {
+				await requireClient().fsDelete(path);
+			} catch (err) {
+				if (!isNotFound(err)) throw err;
+			}
+			emitFsChange(path, 'agent');
 		}
-		emitFsChange(path, 'agent');
-	}
 
-	// step: then the rows and the group row, in one rewrite
-	const gone = new Set(members.map((m) => m.sessionId));
-	await updateCatalogLists((lists) => ({
-		sessions: lists.sessions.filter((r) => !gone.has(r.sessionId) && r.group !== groupId),
-		groups: lists.groups.filter((g) => g.id !== groupId),
-	}));
+		// step: then exactly those rows, and the group row
+		const gone = new Set(members.map((m) => m.sessionId));
+		return {
+			sessions: lists.sessions.filter((r) => !gone.has(r.sessionId)),
+			groups: lists.groups.filter((g) => g.id !== groupId),
+		};
+	});
 }

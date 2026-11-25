@@ -8,8 +8,8 @@
  * they hold:
  *   - one request, one lane      → that lane;
  *   - one request, several lanes → a tab per lane, each with its count;
- *   - several files, one lane    → records as one table (a row per file,
- *                                  failed files in place), text and
+ *   - several files, one lane    → one record per file as one table (a row
+ *                                  per file, failed files in place), text and
  *                                  documents as a section per file, media
  *                                  as one gallery captioned by file;
  *   - several files and lanes    → a tab per lane, and a row of file toggles
@@ -108,6 +108,16 @@ function fileLanes(files: AnswerFile[]): FileLane[] {
 	return order.map((k) => byKey.get(k)!);
 }
 
+/**
+ * The sentence for a file that could not be read.
+ *
+ * @param file - The failed file's part.
+ * @returns The sentence, with the file's error.
+ */
+function couldNotRead(file: AnswerFile): string {
+	return `Couldn't read ${file.name}: ${file.error ?? 'unknown error'}`;
+}
+
 // =============================================================================
 // SEVERAL FILES, ONE LANE
 // =============================================================================
@@ -120,7 +130,8 @@ function fileLanes(files: AnswerFile[]): FileLane[] {
  */
 const FileLaneView: React.FC<{ lane: FileLane; simple: boolean; agentName: string }> = ({ lane, simple, agentName }) => {
 	// ── Records: one table, a row per file ────────────────────────────────
-	const records = lane.type === 'answers' || lane.type === 'json' ? lane.perFile.map((p) => (p.lane ? firstRecord(p.lane.items) : null)) : [];
+	// step: only when every file sent exactly one record; a file with more goes to the sections, so no record is hidden
+	const records = lane.type === 'answers' || lane.type === 'json' ? lane.perFile.map((p) => (p.lane?.items.length === 1 ? firstRecord(p.lane.items) : null)) : [];
 	const tabular = records.length > 0 && records.some((r) => r !== null) && lane.perFile.every((p, i) => records[i] !== null || !p.lane);
 	if (tabular) {
 		// step: the columns are the first record's keys, later keys appended
@@ -198,29 +209,40 @@ export const ResultView: React.FC<IResultViewProps> = ({ result, files, simple, 
 
 	// ── Several files ─────────────────────────────────────────────────────
 	if (files && files.length > 1) {
+		// step: the file filter follows the whole batch, so narrowing to one file never hides the way back
+		const batchLanes = fileLanes(files);
+		if (batchLanes.length === 0) return <div style={styles.empty}>{files.every((f) => f.state === 'failed') ? 'None of these files could be read.' : `${agentName} sent back nothing to show.`}</div>;
 		const shownFiles = onlyFile === '__all' ? files : files.filter((f) => f.name === onlyFile);
-		const lanes = fileLanes(shownFiles);
-		if (lanes.length === 0) return <div style={styles.empty}>{files.every((f) => f.state === 'failed') ? 'None of these files could be read.' : `${agentName} sent back nothing to show.`}</div>;
-		const active = lanes.find((l) => l.key === tab) ?? lanes[0];
+		const lanes = onlyFile === '__all' ? batchLanes : fileLanes(shownFiles);
+		const active: FileLane | undefined = lanes.find((l) => l.key === tab) ?? lanes[0];
 		const menu: ViewMenu = { entries: lanes.map((l) => ({ id: l.key, label: laneLabel(l.type), count: l.perFile.reduce((n, p) => n + (p.lane?.items.length ?? 0), 0) })) };
+		const picked = shownFiles[0];
 		return (
 			<>
-				{lanes.length > 1 && (
+				{batchLanes.length > 1 && (
 					<div style={styles.filter}>
 						<ToggleGroup wrap small options={[{ id: '__all', label: 'All files' }, ...files.map((f) => ({ id: f.name, label: f.state === 'failed' ? `! ${f.name}` : f.name }))]} value={onlyFile} onChange={setOnlyFile} />
 					</div>
 				)}
-				{lanes.length > 1 && (
+				{lanes.length > 1 && active && (
 					<div style={styles.tabs}>
 						<TabControl menu={menu} activeId={active.key} onSelect={setTab} />
 					</div>
 				)}
-				<FileLaneView lane={active} simple={simple} agentName={agentName} />
+				{active ? (
+					<FileLaneView lane={active} simple={simple} agentName={agentName} />
+				) : picked?.state === 'failed' ? (
+					<div style={styles.error}>{couldNotRead(picked)}</div>
+				) : (
+					<div style={styles.empty}>{`${agentName} sent back nothing to show for ${picked?.name ?? 'this file'}.`}</div>
+				)}
 			</>
 		);
 	}
 
 	// ── One request ───────────────────────────────────────────────────────
+	// step: one file that could not be read says why, instead of "nothing to show"
+	if (files?.length === 1 && files[0].state === 'failed') return <div style={styles.error}>{couldNotRead(files[0])}</div>;
 	const single = files?.length === 1 ? files[0].result : result;
 	const all = lanesOf(single);
 	if (all.length === 0) return <div style={styles.empty}>{agentName} sent back nothing to show.</div>;

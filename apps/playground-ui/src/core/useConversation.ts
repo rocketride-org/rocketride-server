@@ -45,8 +45,10 @@ export interface UseConversationOptions {
 	/**
 	 * Called after each save with the conversation's catalog row. The file is
 	 * already written; the host commits the row (it owns the catalog).
+	 * `current` is false when the pane closed before the request settled: the
+	 * row is still committed, but the host's selection must not follow it.
 	 */
-	onSaved: (meta: AgentSessionMeta) => void;
+	onSaved: (meta: AgentSessionMeta, current: boolean) => void;
 }
 
 /** What the hook gives its host. */
@@ -161,6 +163,16 @@ export function useConversation(options: UseConversationOptions): ConversationAp
 	const latest = useRef({ client, agent, params, onSaved });
 	latest.current = { client, agent, params, onSaved };
 
+	// Whether the pane is still mounted. A request that settles after the pane
+	// closed still saves, and tells the host the pane is no longer current.
+	const alive = useRef(true);
+	useEffect(() => {
+		alive.current = true;
+		return () => {
+			alive.current = false;
+		};
+	}, []);
+
 	// ── Rows ──────────────────────────────────────────────────────────────
 
 	const setRows = useCallback((next: (rows: ChatMessage[]) => ChatMessage[]) => {
@@ -185,6 +197,7 @@ export function useConversation(options: UseConversationOptions): ConversationAp
 		setLoading(true);
 		setLoadError(null);
 		setSavedId(sessionId);
+		sessionRef.current = null;
 		rowsRef.current = [];
 		rerender();
 		openConversation(connectionId, sessionId)
@@ -215,7 +228,7 @@ export function useConversation(options: UseConversationOptions): ConversationAp
 		try {
 			await session.save(rowsRef.current, { catalog: false });
 			setSavedId(session.sessionId);
-			latest.current.onSaved(session.meta());
+			latest.current.onSaved(session.meta(), alive.current);
 		} catch (err) {
 			console.log('[playground] save failed:', failureOf(err).message);
 		}
@@ -227,6 +240,9 @@ export function useConversation(options: UseConversationOptions): ConversationAp
 		(text: string) => {
 			const { client: c, agent: a, params: p } = latest.current;
 			const source = a?.source;
+			// step: nothing is sent until the conversation is open: the load would
+			// replace a row added during it, and a failed load has nowhere to save
+			if (!sessionRef.current) return;
 			if (!c || !source?.typed || !text.trim()) return;
 
 			const history = historyOf(rowsRef.current);
@@ -256,6 +272,8 @@ export function useConversation(options: UseConversationOptions): ConversationAp
 		(files: File[]) => {
 			const { client: c, agent: a, params: p } = latest.current;
 			const source = a?.source;
+			// step: nothing is sent until the conversation is open (as for typed text)
+			if (!sessionRef.current) return;
 			if (!c || !a || !source || files.length === 0) return;
 
 			// step: the caller's bubble lists every file; ones the source does not take are refused

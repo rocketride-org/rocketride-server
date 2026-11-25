@@ -78,8 +78,8 @@ export interface IConversationPaneProps {
 	simple: boolean;
 	/** Flips Simple / Advanced. */
 	onToggleView: () => void;
-	/** A conversation's file was saved; commit its row. */
-	onSaved: (meta: AgentSessionMeta) => void;
+	/** A conversation's file was saved; commit its row (`current`: the pane still shows it). */
+	onSaved: (meta: AgentSessionMeta, current: boolean) => void;
 	/** Starts a new conversation with this agent. */
 	onNewConversation: () => void;
 	/** Back to the picker. */
@@ -196,7 +196,8 @@ export const ConversationPane: React.FC<IConversationPaneProps> = ({ connectionI
 			) : (
 				<MessageList messages={conversation.messages} isTyping={false} emptySlot={conversation.loading ? <EmptyState title="Opening the conversation…" /> : empty} renderBody={renderBody} />
 			)}
-			<BottomBar source={source!} agentName={agent.listing.name} connected={isConnected} onText={conversation.sendText} onFiles={conversation.sendFiles} />
+			{/* The bar shows once the conversation is open: nothing typed or dropped while it loads, or after it failed to load, has a conversation to land in. */}
+			{!conversation.loading && !conversation.loadError && <BottomBar source={source!} agentName={agent.listing.name} connected={isConnected} onText={conversation.sendText} onFiles={conversation.sendFiles} />}
 		</div>
 	);
 };

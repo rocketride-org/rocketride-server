@@ -78,12 +78,20 @@ export const PlaygroundDevToolSidebar: React.FC<DevToolProps> = ({ channel, docu
 	const { isConnected } = useShellConnection();
 	const connections = useConnections(isConnected);
 	const [active, setActive] = useState<ActiveEvent | null>(null);
+	// The conversation each connection's tab shows, so fronting a tab again marks its own.
+	const [shownSessions, setShownSessions] = useState<Readonly<Record<string, string | null>>>({});
 	const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 	const [onItsOwn, setOnItsOwn] = useState<ReadonlySet<string>>(new Set());
 	const { tree, commit, openAgent } = connections;
 	// The tree as of the latest render, for handlers subscribed once.
 	const treeRef = useRef(tree);
 	treeRef.current = tree;
+
+	/** Records what a frame shows: the latest move, and that connection's conversation. */
+	const markActive = useCallback((event: ActiveEvent) => {
+		setActive(event);
+		setShownSessions((cur) => ({ ...cur, [event.connectionId]: event.sessionId }));
+	}, []);
 
 	// ── Frames → controller ───────────────────────────────────────────────
 	useEffect(() => {
@@ -92,7 +100,10 @@ export const PlaygroundDevToolSidebar: React.FC<DevToolProps> = ({ channel, docu
 				const meta = payload as AgentSessionMeta;
 				if (meta?.sessionId) void commit(meta);
 			}),
-			channel.onEvent('active', (payload) => setActive((payload as ActiveEvent) ?? null)),
+			channel.onEvent('active', (payload) => {
+				const p = payload as ActiveEvent;
+				if (p?.connectionId) markActive(p);
+			}),
 			channel.onEvent('agent', (payload) => {
 				const p = payload as AgentEvent;
 				if (!p?.connectionId) return;
@@ -112,10 +123,11 @@ export const PlaygroundDevToolSidebar: React.FC<DevToolProps> = ({ channel, docu
 				void openAgent(p.address, { name: p.name });
 				documents?.open(p.address, p.name);
 				channel.sendEvent('open', { connectionId: p.address, sessionId: null } satisfies OpenEvent);
+				markActive({ connectionId: p.address, sessionId: null });
 			}),
 		];
 		return () => offs.forEach((off) => off());
-	}, [channel, commit, documents, openAgent]);
+	}, [channel, commit, documents, markActive, openAgent]);
 
 	// ── The sidebar's moves (each in response to a click) ─────────────────
 	const openIn = useCallback(
@@ -123,9 +135,9 @@ export const PlaygroundDevToolSidebar: React.FC<DevToolProps> = ({ channel, docu
 			const name = tree.find((n) => n.group.id === connectionId)?.group.title ?? connectionId;
 			documents?.open(connectionId, name);
 			channel.sendEvent('open', { connectionId, sessionId } satisfies OpenEvent);
-			setActive({ connectionId, sessionId });
+			markActive({ connectionId, sessionId });
 		},
-		[channel, documents, tree]
+		[channel, documents, markActive, tree]
 	);
 
 	// The fronted tab decides which connection is highlighted, when the host says.
@@ -134,7 +146,7 @@ export const PlaygroundDevToolSidebar: React.FC<DevToolProps> = ({ channel, docu
 	return (
 		<ConnectionsTree
 			tree={tree}
-			selected={{ connectionId: shownConnection, sessionId: active?.connectionId === shownConnection ? (active?.sessionId ?? null) : null }}
+			selected={{ connectionId: shownConnection, sessionId: shownConnection ? (shownSessions[shownConnection] ?? null) : null }}
 			onItsOwn={onItsOwn}
 			expanded={expanded}
 			error={connections.error}
@@ -179,8 +191,9 @@ export const PlaygroundDevTool: React.FC<DevToolProps> = ({ channel, documents, 
 			channel.onEvent('open', (payload) => {
 				const p = payload as OpenEvent;
 				if (!p?.connectionId) return;
-				// A tab bound to a connection follows only its own; a single frame follows every open.
-				if (bound && p.connectionId !== bound) return;
+				// A tab follows only its own connection (the picker tab, bound to none,
+				// follows none); a single frame, with no document key, follows every open.
+				if (docKey && p.connectionId !== bound) return;
 				if (p.sessionId === null) startNew(p.connectionId);
 				else open(p.connectionId, p.sessionId);
 			}),
@@ -189,13 +202,14 @@ export const PlaygroundDevTool: React.FC<DevToolProps> = ({ channel, documents, 
 			}),
 		];
 		return () => offs.forEach((off) => off());
-	}, [bound, channel, documents, open, startNew]);
+	}, [bound, channel, docKey, documents, open, startNew]);
 
 	// ── This frame → controller ───────────────────────────────────────────
 	const handleSaved = useCallback(
-		(meta: AgentSessionMeta) => {
+		(meta: AgentSessionMeta, current: boolean) => {
 			channel.sendEvent('saved', meta);
-			if (selection.connectionId) channel.sendEvent('active', { connectionId: selection.connectionId, sessionId: meta.sessionId } satisfies ActiveEvent);
+			// A pane that closed before its request settled never moves the sidebar's selection.
+			if (current && selection.connectionId) channel.sendEvent('active', { connectionId: selection.connectionId, sessionId: meta.sessionId } satisfies ActiveEvent);
 		},
 		[channel, selection.connectionId]
 	);

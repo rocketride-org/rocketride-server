@@ -135,7 +135,11 @@ export const FieldTable: React.FC<{ record: Record<string, unknown>; simple: boo
  */
 const MediaItem: React.FC<{ lane: string; item: unknown; caption?: string }> = ({ lane, item, caption }) => {
 	const media = mediaSource(lane, item);
-	const [failed, setFailed] = useState(false);
+	// The source that failed, not a flag: when this slot is reused for another
+	// item (another lane's tab, another file), the new source gets its own try.
+	const [failedSrc, setFailedSrc] = useState<string | null>(null);
+	const failed = failedSrc !== null && failedSrc === media.src;
+	const setFailed = () => setFailedSrc(media.src);
 	const name = media.name ?? caption ?? 'This file';
 
 	let element: React.ReactNode;
@@ -143,11 +147,11 @@ const MediaItem: React.FC<{ lane: string; item: unknown; caption?: string }> = (
 		element = <div style={styles.mediaGone}>{media.isLink || failed ? `${name} has been removed.` : `${name} can't be shown here.`}</div>;
 	} else if (lane === 'image') {
 		// Media elements: the shell has no image, audio or video control.
-		element = <img src={media.src} alt={name} style={styles.media} onError={() => setFailed(true)} />;
+		element = <img src={media.src} alt={name} style={styles.media} onError={setFailed} />;
 	} else if (lane === 'audio') {
-		element = <audio src={media.src} controls style={styles.media} onError={() => setFailed(true)} />;
+		element = <audio src={media.src} controls style={styles.media} onError={setFailed} />;
 	} else {
-		element = <video src={media.src} controls style={styles.media} onError={() => setFailed(true)} />;
+		element = <video src={media.src} controls style={styles.media} onError={setFailed} />;
 	}
 	return (
 		<div>

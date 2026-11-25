@@ -96,6 +96,23 @@ async function closeQuietly(pipe: { isOpened: boolean; close: () => Promise<unkn
 	}
 }
 
+/**
+ * Cancels the request of a pipe that is still open, ignoring a failure. A
+ * cancelled request refuses its END and never flushes held text, so the
+ * close that follows releases the pipe without the server taking the part
+ * that arrived for the whole input.
+ *
+ * @param pipe - The pipe.
+ */
+async function cancelQuietly(pipe: { isOpened: boolean; cancel: () => Promise<void> }): Promise<void> {
+	if (!pipe.isOpened) return;
+	try {
+		await pipe.cancel();
+	} catch {
+		// the close still releases the pipe; the first failure is the one reported
+	}
+}
+
 // =============================================================================
 // QUESTIONS
 // =============================================================================
@@ -169,6 +186,10 @@ export async function sendFile(client: RocketRideClient, address: string, file: 
 				sent += value.length;
 				callbacks.onProgress?.(sent);
 			}
+		} catch (err) {
+			// step: a file that did not go through whole is cancelled before the pipe is released
+			await cancelQuietly(pipe);
+			throw err;
 		} finally {
 			reader.releaseLock();
 		}

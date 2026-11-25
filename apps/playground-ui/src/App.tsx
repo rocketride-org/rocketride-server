@@ -71,8 +71,9 @@ const App: React.FC<ShellAppProps> = () => {
 	// ── Writes ────────────────────────────────────────────────────────────
 
 	const handleSaved = useCallback(
-		(meta: AgentSessionMeta) => {
-			setActiveSession(meta.sessionId);
+		(meta: AgentSessionMeta, current: boolean) => {
+			// A pane that closed before its request settled still commits its row, but never moves the selection.
+			if (current) setActiveSession(meta.sessionId);
 			void connections.commit(meta);
 		},
 		[connections]

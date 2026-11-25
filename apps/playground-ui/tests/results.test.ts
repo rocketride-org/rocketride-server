@@ -51,6 +51,15 @@ test('mediaSource: base64 becomes a data URL; a link stays a link', () => {
 	assert.equal(mediaSource('image', { mime_type: 'image/png', path: '/spool/x' }).src, null);
 });
 
+test('mediaSource: base64 in the lane that starts with a slash is data, not a server path', () => {
+	// a JPEG's base64 begins '/9j/', an MP3 frame's '//'
+	assert.deepEqual(mediaSource('image', { mime_type: 'image/jpeg', image: '/9j/4AAQSkZJRg==' }), { src: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==', isLink: false, mime: 'image/jpeg', name: undefined });
+	assert.equal(mediaSource('audio', { mime_type: 'audio/mpeg', audio: '//uQxAAAAAAA' }).isLink, false);
+	// a server path in the lane holds a character base64 never does, and stays a link
+	assert.deepEqual(mediaSource('image', { mime_type: 'image/png', image: '/task/fetch?token=x' }), { src: '/task/fetch?token=x', isLink: true, mime: 'image/png', name: undefined });
+	assert.equal(mediaSource('image', { mime_type: 'image/png', image: 'https://store.example/a.png' }).isLink, true);
+});
+
 test('readDocument: the parent file name, the passage, chunk and score', () => {
 	assert.deepEqual(readDocument({ page_content: 'Leave is…', score: 0.82, metadata: { parent: '/policies/HR-Policy-Leave-2026.pdf', chunkId: 4 } }), {
 		file: 'HR-Policy-Leave-2026.pdf',

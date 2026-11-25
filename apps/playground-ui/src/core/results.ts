@@ -136,10 +136,16 @@ export interface MediaSource {
 	name?: string;
 }
 
+/** A character base64 never holds: a value with one is not inline data. */
+const NOT_BASE64 = /[^A-Za-z0-9+/=]/;
+
 /**
  * A media item's source. The response node returns either a file-store link
  * (an `http(s)` URL or a server path) or base64 in the lane's key; a `url`
- * or `link` field is read too. Either is drawn the same way.
+ * or `link` field is read too. Either is drawn the same way. In the lane's
+ * key a leading slash alone is not a link: base64 starts with one too (a
+ * JPEG's begins `/9j/`, an MP3 frame's `//`), so a server path there must
+ * hold a character base64 never does (`/task/fetch?token=…`).
  *
  * @param lane - The media lane (`image`, `audio`, `video`).
  * @param item - The item as returned.
@@ -155,7 +161,8 @@ export function mediaSource(lane: string, item: unknown): MediaSource {
 	const linkField = [rec.url, rec.link].find((v): v is string => typeof v === 'string' && v.length > 0);
 	const payload = linkField ?? (typeof rec[lane] === 'string' ? (rec[lane] as string) : null);
 	if (!payload) return { src: null, isLink: false, mime, name };
-	if (/^(https?:)?\/\//i.test(payload) || payload.startsWith('/')) return { src: payload, isLink: true, mime, name };
+	const isLink = linkField ? /^(https?:)?\/\//i.test(payload) || payload.startsWith('/') : /^https?:\/\//i.test(payload) || (payload.startsWith('/') && NOT_BASE64.test(payload));
+	if (isLink) return { src: payload, isLink: true, mime, name };
 	return { src: `data:${mime};base64,${payload}`, isLink: false, mime, name };
 }
 

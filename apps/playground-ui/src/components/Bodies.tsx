@@ -221,6 +221,9 @@ export const UploadBody: React.FC<{ data: UploadBodyData }> = ({ data }) => {
 	const waiting = files.length - started.length;
 	const rows = started.length > 0 ? started.slice(-UPLOAD_ROWS) : files.slice(0, UPLOAD_ROWS);
 	const hidden = files.length - rows.length - (started.length > 0 ? waiting : 0);
+	// step: the line under the rows counts the files they leave out; only files not yet started are called waiting
+	const pending = started.length > 0 ? waiting : 0;
+	const more = hidden > 0 && pending > 0 ? `and ${hidden + pending} more, ${pending} waiting` : pending > 0 ? `and ${pending} more waiting` : hidden > 0 ? `and ${hidden} more` : '';
 	return (
 		<div style={styles.uploads}>
 			{rows.map((f, i) => (
@@ -236,7 +239,7 @@ export const UploadBody: React.FC<{ data: UploadBodyData }> = ({ data }) => {
 					)}
 				</div>
 			))}
-			{(waiting > 0 && started.length > 0) || hidden > 0 ? <div style={styles.more}>{started.length > 0 ? `and ${waiting + Math.max(0, hidden)} more waiting` : `and ${hidden} more`}</div> : null}
+			{more && <div style={styles.more}>{more}</div>}
 		</div>
 	);
 };
