@@ -59,7 +59,9 @@ TASKS = {
 }
 
 MAX_NEW_TOKENS = 256
-# Local-mode watchdog: Florence can hang on complex scenes; skip the frame past this.
+# Local-mode watchdog: Florence can stall on complex scenes. The wait for the
+# inference slot and the inference itself each fail past this (the model call
+# may still finish later).
 INFERENCE_TIMEOUT = 60
 
 # Long-edge (px) the input is downscaled to before captioning. Florence resizes
@@ -265,6 +267,9 @@ class Captioner:
 
         server_addr = get_model_server_address()
         self._proxy_mode = bool(server_addr) and (device is None or device == 'server')
+        self._local_gate = threading.BoundedSemaphore(1)
+        self._local_state_lock = threading.Lock()
+        self._local_closed = False
 
         if self._proxy_mode:
             self._client = ModelClient(server_addr)
@@ -315,7 +320,12 @@ class Captioner:
         return self._caption_local(image, task)
 
     def _caption_local(self, image: Any, task: str) -> str:
-        """Run local inference under a watchdog thread; raise TimeoutError if it hangs.
+        """Run local inference on a worker thread that holds the captioner's single slot.
+
+        The caller waits up to ``INFERENCE_TIMEOUT`` seconds for the slot, then up to
+        ``INFERENCE_TIMEOUT`` seconds for its own inference. A caller that times out
+        stops waiting, but the worker keeps the slot until the model call returns, so
+        the next caller cannot start a second inference beside it.
 
         Args:
             image: PIL Image or encoded image bytes.
@@ -323,20 +333,67 @@ class Captioner:
 
         Returns:
             The caption string.
+
+        Raises:
+            TimeoutError: The slot stayed busy with a previous image, or this
+                image's inference did not finish in time.
+            RuntimeError: The captioner was disconnected.
         """
         result: List[Optional[str]] = [None]
         error: List[Optional[BaseException]] = [None]
+        # done: the worker finished; abandoned: the caller stopped waiting. Both
+        # are read and written under outcome_lock, so exactly one side sees the
+        # other's flag and a late finish is logged once.
+        outcome = {'done': False, 'abandoned': False}
+        outcome_lock = threading.Lock()
+        with self._local_state_lock:
+            if self._local_closed:
+                raise RuntimeError('captioner is closed')
+        # Reserve before spawning: callers waiting behind a timed-out worker do
+        # not create an unbounded collection of watchdog threads.
+        if not self._local_gate.acquire(timeout=INFERENCE_TIMEOUT):
+            raise TimeoutError(f'caption inference still busy with a previous image after {INFERENCE_TIMEOUT}s')
 
         def _work():
+            started = time.monotonic()
             try:
                 result[0] = self._infer_local(image, task)
             except BaseException as exc:  # propagated to the caller after join
                 error[0] = exc
+            finally:
+                with outcome_lock:
+                    outcome['done'] = True
+                    late = outcome['abandoned']
+                try:
+                    if late:
+                        # Nobody reads error[0] once the caller gave up, so name a late failure here.
+                        if error[0] is None:
+                            how = 'finished'
+                        else:
+                            how = f'failed ({type(error[0]).__name__}: {error[0]})'
+                        logger.warning(
+                            'caption: a timed-out inference %s after %.1fs; the slot is free again',
+                            how,
+                            time.monotonic() - started,
+                        )
+                finally:
+                    # Only completion of the actual worker returns this permit.
+                    self._local_gate.release()
 
-        worker = threading.Thread(target=_work, daemon=True)
-        worker.start()
+        try:
+            with self._local_state_lock:
+                if self._local_closed:
+                    raise RuntimeError('captioner is closed')
+                worker = threading.Thread(target=_work, daemon=True)
+                worker.start()
+        except BaseException:
+            self._local_gate.release()
+            raise
         worker.join(timeout=INFERENCE_TIMEOUT)
-        if worker.is_alive():
+        with outcome_lock:
+            timed_out = not outcome['done']
+            outcome['abandoned'] = timed_out
+        if timed_out:
             raise TimeoutError(f'caption inference timed out after {INFERENCE_TIMEOUT}s')
         if error[0] is not None:
             raise error[0]
@@ -374,7 +431,7 @@ class Captioner:
         return out[0]['caption']
 
     def disconnect(self) -> None:
-        """Release the model-server connection (proxy mode only); no-op locally.
+        """Close the connection or reject further local work without revoking a worker.
 
         Returns:
             None.
@@ -384,3 +441,6 @@ class Captioner:
                 self._client.disconnect()
             except Exception:
                 pass
+        else:
+            with self._local_state_lock:
+                self._local_closed = True
