@@ -53,6 +53,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..pipeline import MultipleSourcesError, resolve_implied_source, resolve_pipeline_env, substituted_env
+from ai.account import node_deploy
 from .. import node_store, services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
@@ -177,7 +178,7 @@ def _can_validate_echo(pipeline: Dict[str, Any]) -> bool:
 _STRUCTURAL_CONFIG_KEYS = frozenset({'profile', 'parameters', 'secureParameters', 'name'})
 
 
-def _service_profile_names(provider: str) -> frozenset:
+def _service_profile_names(provider: str, published: Optional[Dict[str, Any]] = None) -> frozenset:
     """Return every profile name the service declares, or an empty set.
 
     A config saved by an editor carries one sub-object per profile, so an unselected
@@ -185,16 +186,22 @@ def _service_profile_names(provider: str) -> frozenset:
 
     Args:
         provider: Component provider, e.g. 'llm_openai'.
+        published: The caller's published nodes ({node id: publish row}).
 
     Returns:
         The declared profile names. Empty when the service or its preconfig is
         unavailable, which leaves the caller reporting the key rather than hiding it.
     """
     try:
-        service = getServiceDefinition(provider) or node_store.served(provider)
+        service = getServiceDefinition(provider) or node_store.served(provider, published)
         return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
     except Exception:
         return frozenset()
+
+
+def _visible(name: str, published: Dict[str, Any]) -> bool:
+    """A release node is visible to everyone; a published one (a dotted id) only where it is published."""
+    return '.' not in name or name in published
 
 
 class MiscCommands(DAPConn):
@@ -271,16 +278,24 @@ class MiscCommands(DAPConn):
             args = request.get('arguments', {})
             service = args.get('service', None)
 
+            # The published nodes this caller reaches join their catalogue
+            published = await node_deploy.visible_nodes(self)
+
             if service:
-                # Retrieve the full cached entry (config schema included)
-                schema = await services_catalog.get_service(service)
+                # Retrieve the full cached entry (config schema included); a
+                # published node only for a caller it is published to
+                schema = (
+                    await services_catalog.get_service(service, published) if _visible(service, published) else None
+                )
 
                 # Validate the service exists
                 if not schema:
                     raise ValueError(f"Service '{service}' not found. Please check the service name and try again.")
             else:
                 # The cached summary view: display fields + inline icons
-                schema = await services_catalog.get_summary()
+                summary = await services_catalog.get_summary(published)
+                services = {name: entry for name, entry in summary['services'].items() if _visible(name, published)}
+                schema = {**summary, 'services': services}
 
             # Return successful response with service definition(s)
             return self.build_response(request, body=schema)
@@ -383,6 +398,10 @@ class MiscCommands(DAPConn):
             submitted = pipeline
             pipeline = resolve_pipeline_env(pipeline, merged_env)
 
+            # A published node validates only for a caller it is published to
+            components = pipeline.get('components') or [pipeline.get('component') or {}]
+            custom = node_store.custom(await node_deploy.nodes_for(self, components))
+
             # The node config panel validates one component at a time and sends
             # {version, component} — the IComponentValidatePayload shape the
             # shell contract declares this endpoint accepts (shell/src/types/
@@ -395,9 +414,7 @@ class MiscCommands(DAPConn):
             if 'component' in pipeline and 'components' not in pipeline:
                 # This payload is the validator's root, where it writes its own
                 # errors and warnings, so ones the caller sent are not passed in.
-                data = validatePipeline(
-                    {k: v for k, v in pipeline.items() if k not in _DIAGNOSTICS}, node_store.custom()
-                )
+                data = validatePipeline({k: v for k, v in pipeline.items() if k not in _DIAGNOSTICS}, custom)
                 # When anything was substituted, the reply is rebuilt from the
                 # caller's own input so it returns the config as submitted: the
                 # echoed component comes from a second pass over it (the
@@ -409,7 +426,7 @@ class MiscCommands(DAPConn):
                     echo = {'version': submitted.get('version', 1), 'components': [original]}
                     echoed = original
                     if _can_validate_echo(echo):
-                        echoed = validatePipeline({'pipeline': echo}, node_store.custom())['pipeline']['components'][0]
+                        echoed = validatePipeline({'pipeline': echo}, custom)['pipeline']['components'][0]
                     ids = _submitted_ids([pipeline['component']], [original])
                     root = {k: v for k, v in submitted.items() if k not in _DIAGNOSTICS}
                     data = {**root, 'component': echoed, **_restored_diagnostics(data, substituted, ids)}
@@ -432,7 +449,7 @@ class MiscCommands(DAPConn):
 
                 # Same envelope pipe_Validate (modules/pipe) builds — the version
                 # rides INSIDE the wrapped config (see the FILE-form note above).
-                data = validatePipeline({'pipeline': inner}, node_store.custom())
+                data = validatePipeline({'pipeline': inner}, custom)
                 # Rebuilt from the caller's own input, as above. A message the
                 # second pass gives too keeps its text, so the wiring errors
                 # still name the ids, providers and lanes that are wrong.
@@ -444,9 +461,7 @@ class MiscCommands(DAPConn):
                     if echo_source:
                         echo['source'] = echo_source
                     second = (
-                        validatePipeline({'pipeline': echo}, node_store.custom())
-                        if _can_validate_echo(echo)
-                        else {'pipeline': echo}
+                        validatePipeline({'pipeline': echo}, custom) if _can_validate_echo(echo) else {'pipeline': echo}
                     )
                     ids = _submitted_ids(pipeline.get('components'), submitted.get('components'))
                     data = {'pipeline': second['pipeline'], **_restored_diagnostics(data, substituted, ids, second)}
@@ -466,7 +481,10 @@ class MiscCommands(DAPConn):
                 message = 'Pipeline has multiple source components, please specify one explicitly. ' + message
             self.debug_message(f'Pipeline validation failed: {message}')
             if substituted:
-                raise RuntimeError(message) from None
+                redacted = RuntimeError(message)
+                # A node error keeps its code, NODE_NOT_ENTITLED for one
+                redacted.code = getattr(e, 'code', None)
+                raise redacted from None
             raise
 
     async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -510,7 +528,9 @@ class MiscCommands(DAPConn):
             if not isinstance(config, dict):
                 raise ValueError('config must be an object')
 
-            resolved = Config.getNodeConfig(provider, config, node_store.served(provider))
+            # A node published to the caller resolves too; one they cannot run is refused
+            published = await node_deploy.nodes_for(self, [{'provider': provider}])
+            resolved = Config.getNodeConfig(provider, config, node_store.served(provider, published))
             profile = config.get('profile')
 
             # Report the keys the resolver discarded rather than leaving the author
@@ -529,7 +549,7 @@ class MiscCommands(DAPConn):
                 # and Rule 6); telling an author to move them inside the profile would
                 # break the component. An unselected profile's own sub-object is the
                 # other: an editor-saved config keeps one per profile.
-                profiles = _service_profile_names(provider)
+                profiles = _service_profile_names(provider, published)
                 dropped = [k for k in config if k != profile and k not in _STRUCTURAL_CONFIG_KEYS and k not in profiles]
 
             body = {

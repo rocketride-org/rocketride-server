@@ -147,7 +147,7 @@ async def test_build_runs_once_until_invalidated(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_the_nodes_eaas_serves_join_the_catalogue_with_their_inline_icon(monkeypatch, tmp_path):
     served = [{'protocol': 'provider_x://'}]
-    monkeypatch.setattr(services_catalog.node_store, 'custom', lambda: served)
+    monkeypatch.setattr(services_catalog.node_store, 'custom', lambda published=None: served)
     raw = _fake_definitions(tmp_path)
     raw['services']['provider_x'] = {
         'title': 'X',
@@ -161,6 +161,47 @@ async def test_the_nodes_eaas_serves_join_the_catalogue_with_their_inline_icon(m
 
     assert asked == [served]
     assert summary['icons'][summary['services']['provider_x']['icon']] == '<svg id="x"/>'
+
+
+@pytest.mark.asyncio
+async def test_a_callers_published_nodes_get_a_catalogue_of_their_own_kept_per_digest(monkeypatch, tmp_path):
+    raw = _fake_definitions(tmp_path)
+    asked = []
+    monkeypatch.setattr(services_catalog.node_store, 'custom', lambda published=None: asked.append(published) or [])
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
+    rows = {'acme.echo': {'snapshot': {'sha256': 'v1'}}}
+
+    await services_catalog.get_summary()
+    await services_catalog.get_summary(rows)
+    await services_catalog.get_service('ocr', rows)
+    assert asked == [None, rows]
+
+    # Another version is another catalogue
+    await services_catalog.get_summary({'acme.echo': {'snapshot': {'sha256': 'v2'}}})
+    assert len(asked) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_published_catalogue_an_invalidate_overtook_answers_its_caller_but_is_not_kept(monkeypatch, tmp_path):
+    raw = _fake_definitions(tmp_path)
+    builds = []
+
+    def custom(published=None):
+        builds.append(published)
+        if len(builds) == 1:
+            # A node changed while this build ran
+            services_catalog.invalidate()
+        return []
+
+    monkeypatch.setattr(services_catalog.node_store, 'custom', custom)
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
+    rows = {'acme.echo': {'snapshot': {'sha256': 'v1'}}}
+
+    assert (await services_catalog.get_summary(rows))['services']
+    await services_catalog.get_summary(rows)
+    await services_catalog.get_summary(rows)
+
+    assert len(builds) == 2
 
 
 def test_an_inline_icon_that_is_not_base64_is_read_too():

@@ -28,6 +28,7 @@ Global Resources:
 """
 
 import os
+import re
 import asyncio
 import inspect
 import contextlib
@@ -63,7 +64,9 @@ from ai.constants import (
     CONST_CHANNEL_MAX_INFLIGHT,
     CONST_CHANNEL_REDIAL_DELAY,
 )
+from ai.account import node_deploy
 from ai.account.base import OutOfCreditsError
+from ai.proc_privacy import CONST_PROC_PRIVATE_ENV
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.model_gateway import GATEWAY_ENV, PASS_RENEW_INTERVAL_S, no_pass_marker, wants_hosted_openai
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
@@ -228,22 +231,36 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'PROCESSOR_IDENTIFIER',
         'PROCESSOR_LEVEL',
         'PROCESSOR_REVISION',
-        # RocketRide services the child reaches itself: the object store
-        # behind tool_filesystem (Store.create reads the URL and secret), the
-        # public address + signing key FileStore.get_url needs to mint fetch
-        # URLs the engine will accept, the child's own web server CORS policy,
-        # and the OAuth broker the Google/Microsoft nodes dial directly.
-        'RR_STORE_URL',
-        'RR_STORE_SECRET_KEY',
+        # Non-secret RocketRide settings: the public address, the child's own
+        # web server CORS policy and the OAuth broker the Google/Microsoft nodes dial
         'RR_BASE_URL',
-        'RR_SIGNING_KEY',
         'RR_CORS_ORIGINS',
         'RR_OAUTH_BROKER_URL',
         # Operator opt-in that makes task processes hide their /proc entries
         # (ai.proc_privacy); non-secret, and tasks must see it to act on it
         'RR_PROC_PRIVATE',
-        # Executable override for the media toolkit nodes
+        # Executable override for the media toolkit nodes, and their ffmpeg time limit
         'MEDIA_TOOLKIT_FFMPEG',
+        'ROCKETRIDE_MEDIA_FFMPEG_TIMEOUT',
+        # Where the child engine reports a crash (minidump.hpp)
+        'ROCKETRIDE_CRASHPAD_HANDLER',
+        'ROCKETRIDE_CRASHDB_DIR',
+        # The test harness's mock switch (ai.node)
+        'ROCKETRIDE_MOCK',
+    }
+)
+
+# Credentials and addresses of RocketRide services and of the host. A run whose
+# pipeline names a published node, code from outside the catalog, gets none.
+CONST_SUBPROCESS_SERVICE_ENV_NAMES = frozenset(
+    {
+        # RocketRide services the child reaches itself: the object store
+        # behind tool_filesystem (Store.create reads the URL and secret) and
+        # the signing key FileStore.get_url needs to mint fetch URLs the
+        # engine will accept.
+        'RR_STORE_URL',
+        'RR_STORE_SECRET_KEY',
+        'RR_SIGNING_KEY',
         # Bare names individual node READMEs document as engine-host fallbacks
         # for their API keys (directly, or through the vendor SDK's own
         # default). New nodes should read ROCKETRIDE_* instead.
@@ -266,10 +283,18 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
     }
 )
 
-CONST_SUBPROCESS_ENV_PREFIXES = (
+CONST_SUBPROCESS_SERVICE_ENV_PREFIXES = (
     # The pipeline-facing namespace (same rule as ${VAR} expansion, see
-    # pipeline.ALLOWED_ENV_PREFIX)
+    # pipeline.ALLOWED_ENV_PREFIX); the engine's own API key is in it
     'ROCKETRIDE_',
+    # The S3 store backend authenticates through boto3's environment chain —
+    # static keys, or the web-identity role Kubernetes injects — and the
+    # child opens the store itself (tool_filesystem), so it needs the same
+    # AWS identity the engine has.
+    'AWS_',
+)
+
+CONST_SUBPROCESS_ENV_PREFIXES = (
     # Interpreter and package tooling
     'PYTHON',
     'UV_',
@@ -278,11 +303,6 @@ CONST_SUBPROCESS_ENV_PREFIXES = (
     # Locale and XDG base dirs
     'LC_',
     'XDG_',
-    # The S3 store backend authenticates through boto3's environment chain —
-    # static keys, or the web-identity role Kubernetes injects — and the
-    # child opens the store itself (tool_filesystem), so it needs the same
-    # AWS identity the engine has.
-    'AWS_',
     # ML runtime caches and thread tuning
     'HF_',
     'HUGGINGFACE_',
@@ -336,22 +356,44 @@ CONST_SUBPROCESS_ENV_NEVER = frozenset(
 )
 
 
-def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
+# A name word that marks a credential (HF_TOKEN, UV_INDEX_<NAME>_PASSWORD), and the user:password@ of a URL
+CONST_CREDENTIAL_WORDS = frozenset({'TOKEN', 'KEY', 'SECRET', 'PASSWORD', 'PASSWD', 'CREDENTIALS'})
+_URL_CREDENTIALS = re.compile(r'(?i)\b([a-z][a-z0-9+.-]*://)[^/@\s]*@')
+
+
+def filter_subprocess_env(environ: Mapping[str, str], published: bool = False) -> Dict[str, str]:
     """Return the subset of ``environ`` a task subprocess may inherit.
 
     Names are matched case-insensitively: Windows treats them that way, and the
     POSIX proxy variables are conventionally lowercase. Original spelling is
     kept in the result. Names in CONST_SUBPROCESS_ENV_NEVER are never passed.
+
+    Args:
+        environ: The engine's environment.
+        published: The pipeline names a published node: only the process
+            runtime passes, no service credential and no operator opt-in. A
+            name with a credential word is dropped, and a URL loses its
+            ``user:password@``.
+
+    Returns:
+        Dict[str, str]: What the child inherits.
     """
-    opt_names, opt_prefixes = _subprocess_env_opt_in(environ)
-    prefixes = CONST_SUBPROCESS_ENV_PREFIXES + opt_prefixes
+    names = CONST_SUBPROCESS_ENV_NAMES
+    prefixes = CONST_SUBPROCESS_ENV_PREFIXES
+    if not published:
+        opt_names, opt_prefixes = _subprocess_env_opt_in(environ)
+        names = names | CONST_SUBPROCESS_SERVICE_ENV_NAMES | opt_names
+        prefixes = prefixes + CONST_SUBPROCESS_SERVICE_ENV_PREFIXES + opt_prefixes
     allowed: Dict[str, str] = {}
     for name, value in environ.items():
         key = name.upper()
         if key in CONST_SUBPROCESS_ENV_NEVER:
             continue
-        if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
-            allowed[name] = value
+        # A credential under an allowed prefix stays with the server; words, so TOKENIZERS_* still passes
+        if published and not CONST_CREDENTIAL_WORDS.isdisjoint(key.split('_')):
+            continue
+        if key in names or key.startswith(prefixes):
+            allowed[name] = _URL_CREDENTIALS.sub(r'\1', value) if published else value
     return allowed
 
 
@@ -679,6 +721,7 @@ class Task(DAPBase):
         owner_kind: str = '',
         trigger: str = 'manual',
         env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
+        node_reach: Optional[Tuple[str, str, List[str]]] = None,
         **kwargs,
     ) -> None:
         """
@@ -703,6 +746,8 @@ class Task(DAPBase):
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
+            node_reach: (org id, user id, team ids) the run's published nodes are
+                resolved for at each start, from the expanded pipeline; None resolves none
             **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication
@@ -714,6 +759,9 @@ class Task(DAPBase):
         self.client_id = client_id
         self.team_id = team_id
         self.org_id = org_id
+        self.node_reach = node_reach
+        # Published node id -> the publish row resolved at the last start; exactly these are unpacked
+        self.node_versions: Dict[str, Dict[str, Any]] = {}
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds
@@ -893,6 +941,7 @@ class Task(DAPBase):
 
         # Values a restart loaded before stopping the old process, for the next start only
         self._restart_env: Optional[Dict[str, str]] = None
+        self._restart_versions: Optional[Dict[str, Dict[str, Any]]] = None
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
@@ -1205,7 +1254,10 @@ class Task(DAPBase):
         identity provider, platform database, encryption keys — stays behind.
         Note the allowlist deliberately includes RR_STORE_SECRET_KEY,
         RR_SIGNING_KEY and AWS_*: the child opens the object store and mints
-        fetch URLs itself, so pipeline code can read those values.
+        fetch URLs itself, so pipeline code can read those values. A run that
+        loads a published node gets only the process runtime (filter_subprocess_env
+        with ``published``): that node's code is not the server's, so the run has
+        no object store, no service credential and no operator opt-in.
 
         Credential hygiene for the RocketRide cloud DB path (these live in the
         ROCKETRIDE_* namespace, so the allowlist alone does not cover them):
@@ -1221,7 +1273,13 @@ class Task(DAPBase):
         through the environment (it rides the task file's 'identity' block —
         the ROCKETRIDE_* env namespace is caller-influenced by design).
         """
-        subprocess_env = filter_subprocess_env(os.environ)
+        subprocess_env = filter_subprocess_env(os.environ, published=bool(self.node_versions))
+        if self.node_versions:
+            # Never the default local folder: a store the user cannot see
+            subprocess_env['RR_STORE_URL'] = 'channel://'
+        if node_deploy.rail_enabled():
+            # A published node runs as the server's OS user: no task may read another's /proc
+            subprocess_env[CONST_PROC_PRIVATE_ENV] = '1'
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
@@ -1389,10 +1447,15 @@ class Task(DAPBase):
             # A node EaaS serves is not in the engine's registry, and the gate must see it too
             problem = saas_pipeline_violation(
                 pipeline,
-                lambda provider: getServiceDefinition(provider) or node_store.served(provider),
-                lambda provider, config: Config.getNodeConfig(provider, config, node_store.served(provider)),
+                lambda provider: getServiceDefinition(provider) or node_store.served(provider, self.node_versions),
+                lambda provider, config: Config.getNodeConfig(
+                    provider, config, node_store.served(provider, self.node_versions)
+                ),
                 shared_host=self._shares_host(),
             )
+            # A published node is one developer's code; a shared host would run it beside every other tenant
+            if not problem and self.node_versions and self._shares_host():
+                problem = 'Published nodes are not available on RocketRide Cloud yet.'
             if problem:
                 raise ValueError(problem)
 
@@ -1995,6 +2058,10 @@ class Task(DAPBase):
                     self._task_metrics = None
         except Exception as e:
             self.debug_message(f'Error cleaning up metrics: {e}')
+
+        # Another version of the published nodes it used may be unpacked now
+        # In a thread: it waits for the lock a launch holds while it unpacks
+        await asyncio.to_thread(node_store.release, self.token)
 
         try:
             # Give back what the launch holds: the task file and port, or the container
@@ -2995,6 +3062,7 @@ class Task(DAPBase):
         provider: str,
         *,
         credential: Optional[str] = None,
+        node_reach: Optional[Tuple[str, str, List[str]]] = None,
     ) -> None:
         """
         Restart the task with new pipeline configuration.
@@ -3011,6 +3079,8 @@ class Task(DAPBase):
                 this new pipeline (the restarter, not the original starter),
                 used only to authorize its cloud databases. Passed on to
                 ``start_task`` as an argument; never stored.
+            node_reach: Whom the new pipeline's published nodes are resolved for
+                (the restarter); kept only once the restart goes ahead.
 
         Raises:
             RuntimeError: If debugger attached or restart fails
@@ -3040,6 +3110,11 @@ class Task(DAPBase):
             # nothing has changed yet: a failed load leaves the task as it was
             stops_before = self._stop_count
             self._restart_env = await self._load_env(pipeline)
+            # Its published nodes too, from the pipeline as it will run: a node it cannot use refuses it here
+            reach = node_reach or self.node_reach
+            self._restart_versions = await node_deploy.resolve_pipeline_nodes(
+                reach, resolve_pipeline_env(pipeline, self._restart_env)
+            )
 
             # A stop that arrived while the values loaded wins: nothing has
             # changed yet, so the task stays stopped instead of starting again
@@ -3051,6 +3126,7 @@ class Task(DAPBase):
 
             # Update internal task configuration
             self._pipeline = pipeline
+            self.node_reach = reach
             # The new pipeline's databases are not known until it starts
             self._db_seen = None
             self._pipeline['source'] = source
@@ -3086,12 +3162,16 @@ class Task(DAPBase):
 
         except Exception as e:
             self._server.debug_message(f'Task "{self.id}" restart failed: {str(e)}')
-            raise RuntimeError(f'Failed to restart task: {str(e)}')
+            failed = RuntimeError(f'Failed to restart task: {str(e)}')
+            # A node error keeps its code, NODE_NOT_ENTITLED for one
+            failed.code = getattr(e, 'code', None)
+            raise failed
 
         finally:
             # Always reset these
             self._is_restarting = False
             self._restart_env = None
+            self._restart_versions = None
             self._restart_in_progress = False
 
     async def start_task(self, *, credential: Optional[str] = None) -> None:
@@ -3147,6 +3227,12 @@ class Task(DAPBase):
             # so secrets are not retained in memory beyond the launch.
             resolved = await self._resolve_pipeline(self._pipeline)
 
+            # The published nodes it names once expanded; a restart resolved them before it stopped the old run
+            versions, self._restart_versions = self._restart_versions, None
+            if versions is None:
+                versions = await node_deploy.resolve_pipeline_nodes(self.node_reach, resolved)
+            self.node_versions = versions
+
             # Check it - throws on error
             self._check_pipeline(resolved)
 
@@ -3172,9 +3258,15 @@ class Task(DAPBase):
 
             # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
             try:
-                await asyncio.to_thread(node_store.place, resolved)
+                published = await node_deploy.published_packages(
+                    self.org_id or 'local', self.client_id, self.node_versions
+                )
+                await asyncio.to_thread(node_store.place, resolved, published, self.token)
             except Exception as e:
-                raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
+                refused = RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})")
+                # A node error keeps its code, NODE_VERSION_IN_USE for one
+                refused.code = getattr(e, 'code', None)
+                raise refused from e
             del resolved
 
             # VS Code subprocess debugging goes through the python shim (subprocess runtime)

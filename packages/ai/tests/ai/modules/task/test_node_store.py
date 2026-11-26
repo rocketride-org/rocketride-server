@@ -363,7 +363,7 @@ def test_a_copy_an_earlier_release_unpacked_that_this_release_does_not_list_is_n
 def test_nested_providers_are_named_in_lower_case_at_any_depth():
     config = {'store': {'provider': 'Vector_X', 'inner': [{'provider': 'embed_y'}, 'text']}, 'provider': 1}
 
-    assert sorted(node_store._nested_providers(config)) == ['embed_y', 'vector_x']
+    assert sorted(node_store.node_packages.nested_providers(config)) == ['embed_y', 'vector_x']
 
 
 def test_an_install_writable_only_in_nodes_serves_its_nodes(server, monkeypatch):
@@ -385,4 +385,84 @@ def test_the_autopipe_filters_are_the_ones_autopipe_inserts():
     source = pathlib.Path(__file__).resolve().parents[6] / 'nodes' / 'src' / 'nodes' / 'autopipe' / 'IGlobal.py'
     inserted = set(re.findall(r"getFilter\('[^']+', '([^']+)'", source.read_text(encoding='utf-8')))
 
-    assert inserted and inserted == set(node_store._AUTOPIPE_FILTERS)
+    assert inserted and inserted == set(node_store.node_packages.AUTOPIPE_FILTERS)
+
+
+@pytest.fixture
+def in_use(monkeypatch):
+    monkeypatch.setattr(node_store, '_in_use', {})
+
+
+def test_a_published_node_another_run_uses_at_another_version_refuses_the_launch(server, in_use):
+    node_store.place({'components': []}, {'acme__echo': ('v1', b'one')}, 'tk_a')
+
+    with pytest.raises(node_store.node_packages.NodeVersionInUse) as refused:
+        node_store.place({'components': []}, {'acme__echo': ('v2', b'two')}, 'tk_b')
+    assert refused.value.code == 'NODE_VERSION_IN_USE'
+    assert [args[:3] for args in server['unpacked']] == [('acme__echo', b'one', 'v1')]
+
+    # The same version is shared, and the run that used another can start once it ends
+    node_store.place({'components': []}, {'acme__echo': ('v1', b'one')}, 'tk_c')
+    node_store.release('tk_a')
+    node_store.release('tk_c')
+    node_store.place({'components': []}, {'acme__echo': ('v2', b'two')}, 'tk_b')
+    assert server['unpacked'][-1][:3] == ('acme__echo', b'two', 'v2')
+
+
+def test_a_published_node_is_deleted_when_no_live_run_uses_it(server, in_use):
+    node_store.place({'components': []}, {'acme__echo': ('v1', b'one')}, 'tk_a')
+    node_store.place({'components': []}, {'acme__echo': ('v1', b'one')}, 'tk_b')
+    _unpacked_before(server, 'acme__echo', 'v1')
+
+    node_store.release('tk_a')
+    assert os.path.isdir(os.path.join(server['nodes'], 'acme__echo'))
+    node_store.release('tk_b')
+    assert not os.path.exists(os.path.join(server['nodes'], 'acme__echo'))
+
+
+def test_a_restart_keeps_the_published_nodes_it_still_names(server, in_use):
+    node_store.place({'components': []}, {'acme__echo': ('v1', b'one'), 'acme__ping': ('p1', b'p')}, 'tk_a')
+    _unpacked_before(server, 'acme__echo', 'v1')
+    _unpacked_before(server, 'acme__ping', 'p1')
+
+    node_store.place({'components': []}, {'acme__echo': ('v1', b'one')}, 'tk_a')
+
+    assert os.path.isdir(os.path.join(server['nodes'], 'acme__echo'))
+    assert not os.path.exists(os.path.join(server['nodes'], 'acme__ping'))
+
+
+def test_a_published_node_an_earlier_run_left_is_deleted_at_start(server):
+    _unpacked_before(server, 'acme__echo', 'v1')
+
+    node_store.start()
+
+    assert not os.path.exists(os.path.join(server['nodes'], 'acme__echo'))
+    assert server['warnings'] == []
+
+
+def test_a_published_node_the_run_was_not_resolved_for_is_refused_even_nested(server, in_use):
+    autopipe = {'provider': 'autopipe', 'config': {'steps': [{'provider': 'Acme.Other'}]}}
+
+    with pytest.raises(node_store.node_packages.NodeNotEntitled) as refused:
+        node_store.place({'components': [{'provider': 'acme.echo'}, autopipe]}, {'acme__echo': ('v1', b'one')}, 'tk_a')
+    assert refused.value.code == 'NODE_NOT_ENTITLED' and 'acme.other' in str(refused.value)
+    assert server['unpacked'] == []
+
+    # Named as resolved, whatever the case
+    node_store.place({'components': [{'provider': 'ACME.echo'}]}, {'acme__echo': ('v1', b'one')}, 'tk_a')
+
+
+def test_a_launch_that_fails_to_unpack_one_published_node_leaves_none_behind(server, in_use, monkeypatch):
+    def unpack(name, data, sha256, nodes_dir):
+        if name == 'acme__ping':
+            raise OSError('disk full')
+        _unpacked_before(server, name, sha256)
+
+    monkeypatch.setattr(node_store.node_packages, 'unpack', unpack)
+
+    with pytest.raises(OSError):
+        node_store.place({'components': []}, {'acme__echo': ('v1', b'one'), 'acme__ping': ('p1', b'p')}, 'tk_a')
+    node_store.release('tk_a')
+
+    assert not os.path.exists(os.path.join(server['nodes'], 'acme__echo'))
+    assert node_store._in_use == {}

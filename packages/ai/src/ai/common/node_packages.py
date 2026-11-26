@@ -35,11 +35,11 @@ import shutil
 import tempfile
 import time
 import zipfile
-from typing import Optional
+from typing import Any, Dict, Iterable, Iterator, Optional, Set
 
 
 class NodePackageInvalid(RuntimeError):
-    """A package whose digest is not the one it was announced with."""
+    """A package whose digest is not the one it was announced with, or one the rail refuses."""
 
     code = 'NODE_PACKAGE_INVALID'
 
@@ -49,6 +49,10 @@ _STAGING = '.rrnode-staging-'
 
 # Written into an unpacked node: the digest of the package it came from
 DIGEST_FILE = '.rrnode.sha256'
+
+# Filters autopipe inserts while it runs (nodes/src/nodes/autopipe/IGlobal.py, getFilter), besides the
+# providers its own config names; a test keeps the two in step
+AUTOPIPE_FILTERS = ('parse', 'ocr', 'indexer')
 
 
 def _sweep(nodes_dir: str) -> None:
@@ -66,6 +70,51 @@ def digest_of(node_dir: str) -> Optional[str]:
             return file.read().strip()
     except OSError:
         return None
+
+
+class NodeNotFound(RuntimeError):
+    """No node by that name is published anywhere the caller can see."""
+
+    code = 'NODE_NOT_FOUND'
+
+
+class NodeNotEntitled(RuntimeError):
+    """The node exists, but not on any rung the caller is on."""
+
+    code = 'NODE_NOT_ENTITLED'
+
+
+class NodeRegistryUnavailable(RuntimeError):
+    """The rail could not be read, so a published node cannot be resolved."""
+
+    code = 'NODE_REGISTRY_UNAVAILABLE'
+
+
+class NodeVersionMismatch(RuntimeError):
+    """A package or index built for a node contract this engine does not speak."""
+
+    code = 'NODE_VERSION_MISMATCH'
+
+
+class NodeVersionInUse(RuntimeError):
+    """Another live run on this server uses another version of the same published node."""
+
+    code = 'NODE_VERSION_IN_USE'
+
+
+def module_of(node_id: str) -> str:
+    """The Python module name of a node: acme.my_node imports as nodes.acme__my_node."""
+    return node_id.replace('.', '__')
+
+
+def node_of(module: str) -> str:
+    """The node id a module name stands for; the inverse of module_of."""
+    return module.replace('__', '.', 1)
+
+
+def is_published(module: str) -> bool:
+    """A published node's module (<developerId>__<name>); a release node's name holds no '__'."""
+    return '__' in module.strip('_')
 
 
 def content_digest(files: dict) -> str:
@@ -140,3 +189,27 @@ def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     return node_dir
+
+
+def nested_providers(value: Any) -> Iterator[str]:
+    """Every provider named inside a config value, in lower case."""
+    if isinstance(value, dict):
+        if isinstance(value.get('provider'), str):
+            yield value['provider'].lower()
+        for item in value.values():
+            yield from nested_providers(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from nested_providers(item)
+
+
+def providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
+    """Every provider a pipeline names, with the filters autopipe would insert."""
+    found: Set[str] = set()
+    for component in components:
+        provider = str(component.get('provider', '')).lower()
+        found.add(provider)
+        if provider == 'autopipe':
+            found.update(AUTOPIPE_FILTERS)
+            found.update(nested_providers(component.get('config', {})))
+    return found

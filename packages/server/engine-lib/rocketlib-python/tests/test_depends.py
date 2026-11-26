@@ -481,6 +481,16 @@ class TestPreinstallHooks:
             pending=pending,
         )
 
+    def test_a_hook_in_a_node_unpacked_at_run_time_is_not_loaded(self, exe_dir):
+        _write(exe_dir / 'nodes' / 'demo' / '_depends_hooks.py', 'def excludes(packages): pass\n')
+        _write(exe_dir / 'nodes' / 'acme__echo' / '.rrnode.sha256', 'abc')
+        _write(exe_dir / 'nodes' / 'acme__echo' / '_depends_hooks.py', 'def excludes(packages): pass\n')
+        _write(exe_dir / 'nodes' / 'acme__echo' / 'sub' / '_depends_hooks.py', 'def excludes(packages): pass\n')
+
+        found = {os.path.relpath(f, exe_dir) for f in depends._find_hook_files()}
+
+        assert found == {os.path.join('nodes', 'demo', '_depends_hooks.py')}
+
     def test_finds_hooks_anywhere_the_globs_reach(self, exe_dir):
         _write(exe_dir / '_depends_hooks.py', 'def excludes(packages): pass\n')
         _write(exe_dir / 'nodes' / 'demo' / '_depends_hooks.py', 'def excludes(packages): pass\n')

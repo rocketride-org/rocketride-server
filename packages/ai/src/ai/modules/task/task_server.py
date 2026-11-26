@@ -80,7 +80,7 @@ import uuid
 from typing import List
 from fastapi import WebSocket
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, Any, Mapping, Optional, Set
+from typing import Awaitable, Callable, Dict, Any, Mapping, Optional, Set, Tuple
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
@@ -249,6 +249,22 @@ def _owner_identity(control: 'TASK_CONTROL') -> tuple:
     """The owner a run's token is scoped by: (owner kind, owner id, run kind)."""
     kind = control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user')
     return (kind, control.owner_id, control.run_kind)
+
+
+def _node_reach(control: 'TASK_CONTROL', conn: Optional['TaskConn']) -> Tuple[str, str, List[str]]:
+    """Whom a run's published nodes are resolved for: (org id, user id, team ids)."""
+    from ai.account.app_deploy import _team_ids_of
+
+    info = getattr(conn, '_account_info', None)
+    if control.owner_kind == 'team':
+        # A team's run uses what is published to the team, whoever started it
+        user_id, team_ids = '', [control.teamId]
+    elif info:
+        # Whoever runs it now: a restart takes the restarter's reach, not the launcher's
+        user_id, team_ids = info.userId, list(_team_ids_of(conn).values())
+    else:
+        user_id, team_ids = control.client_id, [control.teamId]
+    return (control.orgId or 'local', user_id, team_ids)
 
 
 class TaskServer(DAPBase):
@@ -1798,6 +1814,7 @@ class TaskServer(DAPBase):
                 run_kind=run_kind,
                 owner_kind=control.owner_kind,
                 trigger=trigger,
+                node_reach=_node_reach(control, conn),
             )
 
             # Register task in central registry
@@ -1984,6 +2001,8 @@ class TaskServer(DAPBase):
                 # The restarter supplied this pipeline, so the restarter's
                 # credential, not the original starter's, authorizes its databases.
                 credential=self._presenting_credential(conn),
+                # And the restarter's reach picks its published nodes
+                node_reach=_node_reach(control, conn),
             )
 
             # The control now describes the pipeline that is running: without this the

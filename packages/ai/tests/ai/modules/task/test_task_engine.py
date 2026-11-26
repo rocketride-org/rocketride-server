@@ -82,6 +82,9 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t.client_id = 'user-1'
     t.team_id = 'team-1'
     t.org_id = 'org-1'
+    t.node_versions = {}
+    t.node_reach = None
+    t._restart_versions = None
     t.source = source
     # Real tasks always carry their project id; _forward_task_event stamps
     # it into every forwarded body (identity safety net).
@@ -1309,12 +1312,12 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('available', [True, False])
+@pytest.mark.parametrize('available', [True, False, 'in use', 'not entitled'])
 async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypatch, available):
     """The nodes a pipeline names that the server lacks are unpacked before the
     engine starts, so its start-up scan loads them; one that cannot be had
-    refuses the launch and nothing is spawned. The pipeline placed is the
-    resolved one: ${...} can name the provider.
+    refuses the launch and nothing is spawned. The pipeline resolved and placed
+    is the expanded one: ${...} can name the provider.
     """
     import ai.modules.task.task_engine as engine
 
@@ -1322,12 +1325,27 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
     order = []
 
-    def place(pipeline):
-        order.append(('place', [c['provider'] for c in pipeline['components']]))
+    def place(pipeline, published, run):
+        order.append(('place', [c['provider'] for c in pipeline['components']], published, run))
+        if available == 'in use':
+            raise engine.node_store.node_packages.NodeVersionInUse('Another run uses another version of acme.echo')
         if not available:
             raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
 
+    async def published_packages(org_id, user_id, rows):
+        return {row['snapshot']['module']: (row['snapshot']['sha256'], b'zip') for row in rows.values()}
+
+    resolved_from = []
+
+    async def resolve(reach, pipeline):
+        resolved_from.append((reach, [c['provider'] for c in pipeline['components']]))
+        if available == 'not entitled':
+            raise engine.node_store.node_packages.NodeNotEntitled('acme.echo is not published to you')
+        return {'acme.echo': {'snapshot': {'module': 'acme__echo', 'sha256': 'v1'}}}
+
     monkeypatch.setattr(engine.node_store, 'place', place)
+    monkeypatch.setattr(engine.node_deploy, 'published_packages', published_packages)
+    monkeypatch.setattr(engine.node_deploy, 'resolve_pipeline_nodes', resolve)
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
     t.source = 'src'
     t._env_source = AsyncMock(return_value={'ROCKETRIDE_NODE': 'llm_x'})
@@ -1342,6 +1360,8 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
     t._terminated = AsyncMock()
     t._launcher = SubprocessLauncher(t._server)
     monkeypatch.setattr(SubprocessLauncher, 'task_data_path', tempfile.gettempdir())
+    t.org_id, t.client_id, t.token = 'org1', 'u1', 'tk_run'
+    t.node_reach = ('org1', 'u1', [])
 
     class Launched(Exception):
         pass
@@ -1351,10 +1371,18 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
         raise Launched()
 
     monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
-    with pytest.raises(Launched if available else RuntimeError, match=None if available else "pipeline's nodes"):
+    refused = engine.node_store.node_packages.NodeNotEntitled
+    with pytest.raises({True: Launched, 'not entitled': refused}.get(available, RuntimeError)) as raised:
         await Task.start_task(t)
 
-    assert order == ([('place', ['llm_x']), ('spawn',)] if available else [('place', ['llm_x'])])
+    assert resolved_from == [(('org1', 'u1', []), ['llm_x'])]
+    placed = ('place', ['llm_x'], {'acme__echo': ('v1', b'zip')}, 'tk_run')
+    assert order == {True: [placed, ('spawn',)], 'not entitled': []}.get(available, [placed])
+    if available in (False, 'in use'):
+        assert "pipeline's nodes" in str(raised.value)
+    # A node error keeps its code for the caller
+    codes = {'in use': 'NODE_VERSION_IN_USE', 'not entitled': 'NODE_NOT_ENTITLED'}
+    assert getattr(raised.value, 'code', None) == codes.get(available)
 
 
 # ---------------------------------------------------------------------------
@@ -1413,6 +1441,123 @@ def test_filter_subprocess_env_is_an_allowlist():
         'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
         'NOTION_API_KEY': 'notion',
     }
+
+
+def test_a_run_naming_a_published_node_inherits_only_the_process_runtime():
+    """Code from outside the catalog never sees a RocketRide or host credential:
+    no store or signing key, no AWS identity, no ROCKETRIDE_* (the engine's own
+    API key lives there), no host API key, and no operator opt-in.
+    """
+    env = filter_subprocess_env(
+        {
+            'PATH': '/usr/bin',
+            'http_proxy': 'http://proxy:3128',
+            'PYTHONPATH': '/opt/rocketride/ai',
+            'HF_HOME': '/cache/hf',
+            'RR_BASE_URL': 'https://engine.example',
+            'RR_PROC_PRIVATE': '1',
+            'ROCKETRIDE_CRASHPAD_HANDLER': '/opt/rocketride/crashpad_handler',
+            'ROCKETRIDE_APIKEY': 'engine-key',
+            'ROCKETRIDE_OPENAI_KEY': 'sk-operator',
+            'RR_STORE_URL': 's3://bucket',
+            'RR_STORE_SECRET_KEY': 'store',
+            'RR_SIGNING_KEY': 'sign',
+            'RR_OAUTH_BROKER_URL': 'https://broker.example',
+            'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
+            'AWS_WEB_IDENTITY_TOKEN_FILE': '/var/run/secrets/token',
+            'OPENAI_API_KEY': 'sk-host',
+            'aws_secret_access_key': 'lower-aws',
+            'rocketride_openai_key': 'lower-operator',
+            'RR_SUBPROCESS_ENV': 'SLACK_BOT_TOKEN, gh_*',
+            'SLACK_BOT_TOKEN': 'xoxb',
+            'gh_token': 'ghp',
+            'RR_MASTER_KEY': 'fernet',
+            'HF_TOKEN': 'hf_gated',
+            'NVIDIA_API_KEY': 'nvapi',
+            'UV_INDEX_PRIVATE_PASSWORD': 'index-pass',
+            'TOKENIZERS_PARALLELISM': 'false',
+            'PIP_INDEX_URL': 'https://user:index-pass@pypi.example/simple',
+            'https_proxy': 'http://proxyuser:proxy-pass@proxy:3128',
+        },
+        published=True,
+    )
+    assert env == {
+        'PATH': '/usr/bin',
+        'http_proxy': 'http://proxy:3128',
+        'TOKENIZERS_PARALLELISM': 'false',
+        'PIP_INDEX_URL': 'https://pypi.example/simple',
+        'https_proxy': 'http://proxy:3128',
+        'PYTHONPATH': '/opt/rocketride/ai',
+        'HF_HOME': '/cache/hf',
+        'RR_BASE_URL': 'https://engine.example',
+        'RR_PROC_PRIVATE': '1',
+        'ROCKETRIDE_CRASHPAD_HANDLER': '/opt/rocketride/crashpad_handler',
+        'RR_OAUTH_BROKER_URL': 'https://broker.example',
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_task_with_a_published_node_builds_the_runtime_only_env(monkeypatch):
+    service = {
+        'RR_SIGNING_KEY': 'sign',
+        'ROCKETRIDE_APIKEY': 'engine-key',
+        'AWS_ROLE_ARN': 'arn',
+        'OPENAI_API_KEY': 'sk',
+    }
+    for key, value in service.items():
+        monkeypatch.setenv(key, value)
+    catalogue, published = _env_task(), _env_task()
+    published.node_versions = {'acme.echo': {'version': 1}}
+
+    assert set(service) <= set(await _build_env(catalogue))
+    assert not set(service) & set(await _build_env(published))
+
+
+@pytest.mark.asyncio
+async def test_with_the_rail_on_every_task_hides_its_proc_entries(monkeypatch):
+    monkeypatch.delenv('RR_PROC_PRIVATE', raising=False)
+    monkeypatch.delenv('RR_NODE_RAIL_ENABLED', raising=False)
+    assert 'RR_PROC_PRIVATE' not in await _build_env(_env_task())
+
+    monkeypatch.setenv('RR_NODE_RAIL_ENABLED', '1')
+    assert (await _build_env(_env_task()))['RR_PROC_PRIVATE'] == '1'
+
+
+@pytest.mark.asyncio
+async def test_a_task_with_a_published_node_still_resolves_the_keys_its_pipeline_names():
+    t = _env_task(
+        {'components': [{'id': 'llm', 'provider': 'llm_openai', 'config': {'apikey': '${ROCKETRIDE_OPENAI_KEY}'}}]}
+    )
+    t._restart_env = {'ROCKETRIDE_OPENAI_KEY': 'sk-user'}
+    t.node_versions = {'acme.echo': {'version': 1}}
+
+    assert (await Task._resolve_pipeline(t, t._pipeline))['components'][0]['config']['apikey'] == 'sk-user'
+
+
+@pytest.mark.asyncio
+async def test_a_task_with_a_published_node_never_falls_back_to_a_local_store(monkeypatch):
+    from ai.account.store import Store
+
+    monkeypatch.setenv('RR_STORE_URL', 's3://bucket')
+    t = _env_task()
+    t.node_versions = {'acme.echo': {'version': 1}}
+
+    env = await _build_env(t)
+
+    assert env['RR_STORE_URL'] == 'channel://'
+    with pytest.raises(ValueError, match='published node has no direct access to the file store'):
+        Store.create(url=env['RR_STORE_URL'])
+
+
+@pytest.mark.asyncio
+async def test_a_task_with_a_published_node_still_gets_the_databases_authorized_for_it(monkeypatch):
+    _fake_db_account(monkeypatch)
+    t = _env_task(_SCOPED_PIPELINE)
+    t.node_versions = {'acme.echo': {'version': 1}}
+
+    env = await _build_env(t)
+
+    assert 'ROCKETRIDE_DB_DSNS' in env
 
 
 def test_filter_subprocess_env_opt_in_names_and_prefixes():
@@ -2090,6 +2235,97 @@ async def test_a_second_restart_while_one_runs_is_refused():
 
 
 @pytest.mark.asyncio
+async def test_a_restart_resolves_its_nodes_once_expanded_for_the_restarter_and_a_refused_one_changes_none(
+    monkeypatch,
+):
+    """A restart resolves the new pipeline's published nodes before it stops the old run, from the
+    pipeline as it will run and for the restarter; a second restart refused meanwhile changes neither.
+    """
+    import ai.modules.task.task_engine as engine
+
+    resolved = []
+
+    async def resolve(reach, pipeline):
+        resolved.append((reach, [c['provider'] for c in pipeline['components']]))
+        return {'acme.echo': {'restarter': reach[1]}}
+
+    monkeypatch.setattr(engine.node_deploy, 'resolve_pipeline_nodes', resolve)
+    pipeline = {'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]}
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline=dict(pipeline),
+        env_source=AsyncMock(return_value={'ROCKETRIDE_NODE': 'acme.echo'}),
+        node_reach=('org1', 'launcher', []),
+    )
+    task.has_attached_debugger = lambda: False
+    task.is_task_complete = lambda: True
+    task._reset_status = lambda: None
+    stopping, release = asyncio.Event(), asyncio.Event()
+
+    async def stop():
+        stopping.set()
+        await release.wait()
+
+    seen = []
+
+    async def start(*, credential=None):
+        seen.append(task._restart_versions)
+
+    task.stop_task = stop
+    task.start_task = start
+
+    first = asyncio.ensure_future(
+        task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools', node_reach=('org1', 'a', []))
+    )
+    await stopping.wait()
+    with pytest.raises(RuntimeError, match='already in progress'):
+        await task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools', node_reach=('org1', 'b', []))
+    release.set()
+    await first
+
+    assert resolved == [(('org1', 'a', []), ['acme.echo'])]
+    assert seen == [{'acme.echo': {'restarter': 'a'}}]
+    assert task.node_reach == ('org1', 'a', [])
+
+
+@pytest.mark.asyncio
+async def test_a_restart_to_a_node_the_restarter_cannot_run_stops_nothing_and_keeps_the_code(monkeypatch):
+    import ai.modules.task.task_engine as engine
+
+    async def refuse(reach, pipeline):
+        raise engine.node_store.node_packages.NodeNotEntitled('acme.echo is not published to you')
+
+    monkeypatch.setattr(engine.node_deploy, 'resolve_pipeline_nodes', refuse)
+    old = {'components': [{'id': 'src', 'provider': 'webhook'}]}
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline=old,
+        node_reach=('org1', 'launcher', []),
+    )
+    task.has_attached_debugger = lambda: False
+    task.stop_task = AsyncMock()
+
+    with pytest.raises(RuntimeError, match='not published to you') as refused:
+        new = {'components': [{'id': 'src', 'provider': 'acme.echo'}]}
+        await task.restart_task(new, 'p-1', 's-1', 'tools', node_reach=('org1', 'other', []))
+
+    assert refused.value.code == 'NODE_NOT_ENTITLED'
+    task.stop_task.assert_not_awaited()
+    assert task._pipeline is old and task.node_reach == ('org1', 'launcher', [])
+    assert task._restart_versions is None and not task._restart_in_progress
+
+
+@pytest.mark.asyncio
 async def test_task_loads_placeholder_values_at_each_resolve():
     """A Task given an env_source calls it every time it resolves the pipeline
     and keeps no copy of the values; a plain env dict still works.
@@ -2454,6 +2690,27 @@ def test_saas_gate_sees_a_nosaas_node_that_only_eaas_serves(monkeypatch):
         Task._check_pipeline(t, {'components': [{'id': 'src', 'provider': 'text_output'}]})
 
 
+def test_a_shared_host_refuses_a_run_that_names_a_published_node(monkeypatch):
+    """A published node is one developer's code: a hosted engine would run it beside every other tenant."""
+    import rocketlib
+
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: {'capabilities': []})
+    pipeline = {'components': [{'id': 'src', 'provider': 'acme.echo'}]}
+    t = _task(source='src')
+    t.node_versions = {'acme.echo': {'version': 1}}
+    t._shares_host = lambda: True
+    with pytest.raises(ValueError, match='Published nodes are not available on RocketRide Cloud'):
+        Task._check_pipeline(t, pipeline)
+
+    t._shares_host = lambda: False
+    Task._check_pipeline(t, pipeline)
+    t._shares_host, t.node_versions = (lambda: True), {}
+    Task._check_pipeline(t, pipeline)
+
+
 def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():
     def violation(component):
         return saas_pipeline_violation({'components': [component]}, _get_service, _mcp_node_config, shared_host=False)
@@ -2628,6 +2885,60 @@ async def test_a_reported_crash_ends_the_task(stop_requested, status, exit_code,
     await Task._terminated(t)
     assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (status, exit_code, exit_message)
     assert run_log.end_run.await_args.args[0] == outcome
+
+
+@pytest.mark.asyncio
+async def test_an_ended_run_releases_its_published_nodes(monkeypatch):
+    import ai.modules.task.task_engine as engine
+
+    released = []
+    monkeypatch.setattr(engine.node_store, 'release', released.append)
+    t = _ending_task(0)
+    t._stop_requested = True
+    t._run_log = AsyncMock()
+    t.token = 'tk_run'
+
+    await Task._terminated(t)
+
+    assert released == ['tk_run']
+
+
+@pytest.mark.asyncio
+async def test_an_ended_run_waits_for_a_launch_that_is_unpacking_without_stopping_the_server(monkeypatch):
+    import threading
+
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine.node_store, '_in_use', {})
+    t = _ending_task(0)
+    t._stop_requested = True
+    t._run_log = AsyncMock()
+    t.token = 'tk_run'
+    unpacking = threading.Event()
+
+    def launch():
+        # Another launch unpacking a node, as place does
+        with engine.node_store._unpacking:
+            unpacking.set()
+            threading.Event().wait(0.3)
+
+    worker = threading.Thread(target=launch)
+    worker.start()
+    unpacking.wait()
+    ticks = []
+
+    async def ticker():
+        while worker.is_alive():
+            ticks.append(asyncio.get_running_loop().time())
+            await asyncio.sleep(0.01)
+
+    beat = asyncio.ensure_future(ticker())
+    await Task._terminated(t)
+    await beat
+    worker.join()
+
+    # The loop kept turning while the end of the run waited for the lock
+    assert max(b - a for a, b in zip(ticks, ticks[1:])) < 0.15
 
 
 # ---------------------------------------------------------------------------

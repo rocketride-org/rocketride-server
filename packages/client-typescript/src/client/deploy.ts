@@ -113,9 +113,11 @@ export class DeployApi {
 	 *   may serve it; the developer submits it for review to reach the public
 	 *   store).
 	 *
-	 * @param options.kind - 'pipe' (default) | 'app'.
+	 * - `kind: 'node'` — pass `data` (the node's `.rrnode`). It is added as a
+	 *   new private version; `rrext_deploy_node` publishes it.
+	 * @param options.kind - 'pipe' (default) | 'app' | 'node'.
 	 * @param options.pipeline - The pipeline definition (kind 'pipe').
-	 * @param options.data - The source zip bytes (kind 'app').
+	 * @param options.data - The source zip bytes (kind 'app'), or the .rrnode (kind 'node').
 	 * @param options.metadata - Optional metadata blob (e.g. projectId
 	 *   provenance, appRoot for workspace-relative app zips).
 	 * @param options.comment - "What changed" note kept in the registry.
