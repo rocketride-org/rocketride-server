@@ -11,7 +11,7 @@ only one package has:
 | `app dev`, `app publish`, `app unpublish`, `app disable`, `app versions`, `app where`, `app log`, `app submit`, `app withdraw`, `app reply`, `app developer status`, `app developer register` | Yes | No |
 | `deploy source-config` | Yes | No |
 | `app verify --store`, `app deploy --publish`, `init --deploy` | Yes | No |
-| `diff`, `otel` | No | Yes |
+| `diff`, `eval`, `otel` | No | Yes |
 
 Both packages ship every other command and flag in this document, so a
 recipe that uses only those ports between languages unchanged. With only
@@ -320,12 +320,13 @@ rocketride profile tree [--token TOKEN] [--thread ID] [--min-pct 0.1] [--max-dep
 
 ## Python-only commands
 
-`diff` and `otel` ship with the Python package only.
+`diff`, `eval` and `otel` ship with the Python package only.
 
 ```bash
 rocketride diff old.pipe new.pipe                # semantic diff: nodes, edges, config; canvas moves collapse to one line
 rocketride diff --git HEAD pipelines/rag.pipe    # working-tree file against a git ref
 rocketride diff old.pipe new.pipe --markdown     # PR-comment form (or --json)
+rocketride eval evals/*.eval.json --junit reports/evals.xml   # golden-dataset evals; CI exit codes
 rocketride otel --endpoint https://collector.example.com --no-metrics   # stream traces to an OTLP collector until Ctrl+C
 ```
 
@@ -334,6 +335,12 @@ rocketride otel --endpoint https://collector.example.com --no-metrics   # stream
   changed, 1 when something did, 2 on a usage error or an unreadable file.
   `--exit-zero` makes a run that finds changes exit 0, and
   `--include-layout` counts canvas moves as changes.
+- `eval` runs each `<name>.eval.json` spec against the pipeline it names
+  and checks the answers. It takes `--uri` and `--apikey` (no `--token` or
+  `--pipeline`: the spec names the pipeline), `--case` to filter cases by
+  name, `--fail-fast`, `--json [FILE]`, and `--junit PATH`. Exit 0 when every
+  case passed, 1 when a case failed or a spec could not finish, 2 on a usage,
+  spec, connection or report-write error, or when no case produced a result.
 - `otel` needs `pip install 'rocketride[otel]'`. It subscribes to every
   task your API key owns and exports spans and metrics over OTLP until you
   stop it. It has no `--json`. Pass collector secrets through
@@ -341,8 +348,8 @@ rocketride otel --endpoint https://collector.example.com --no-metrics   # stream
   history. Per-component spans appear only for runs started with a
   `pipelineTraceLevel`.
 
-The site's Python SDK guides, Pipeline Diff and OpenTelemetry Bridge,
-cover every flag.
+The site's CLI reference (for `eval`) and its Python SDK guides, Pipeline
+Diff and OpenTelemetry Bridge, cover every flag.
 
 ## MCP, if your harness has a client for it
 

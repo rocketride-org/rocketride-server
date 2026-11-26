@@ -36,51 +36,14 @@ Exit codes (the ``validate-pipes`` GitHub Action depends on these):
        verdict for it)
 """
 
-import glob
 import json
 import os
 import sys
 from typing import Any, Dict, List, Optional
 
 from ..utils.common import connect_client, run_cli_command
+from ..utils.file_utils import expand_file_patterns
 from ..utils.output import Output
-
-
-def _expand_files(patterns: List[str]) -> List[str]:
-    """
-    Expand file arguments into a deduplicated, ordered list of paths.
-
-    Literal paths are kept as-is; anything else is treated as a glob pattern.
-    Patterns that match nothing are kept verbatim so they can be reported as
-    unreadable files.
-
-    Args:
-        patterns: File paths and/or glob patterns from the command line.
-
-    Returns:
-        Expanded file paths, deduplicated, preserving order.
-    """
-    expanded: List[str] = []
-    for pattern in patterns:
-        if os.path.isfile(pattern):
-            expanded.append(pattern)
-            continue
-        # Not a literal file — try shell-style glob expansion
-        matches = sorted(path for path in glob.glob(pattern, recursive=True) if os.path.isfile(path))
-        if matches:
-            expanded.extend(matches)
-        else:
-            # Keep the unmatched pattern so it is reported per-file below
-            expanded.append(pattern)
-
-    # step: dedupe while preserving order
-    seen = set()
-    unique_files = []
-    for file_path in expanded:
-        if file_path not in seen:
-            seen.add(file_path)
-            unique_files.append(file_path)
-    return unique_files
 
 
 def _load_pipeline(file_path: str) -> Dict[str, Any]:
@@ -150,7 +113,7 @@ async def run_validate(args) -> int:
 
     async def action(out: Output) -> int:
         # step: expand globs and literal paths into the working file list
-        files = _expand_files(args.files)
+        files = expand_file_patterns(args.files)
 
         # step: parse every file up front; parse failures are per-file errors
         pipelines: Dict[str, Optional[Dict[str, Any]]] = {}
