@@ -8,6 +8,7 @@ and calling its ``register(registry)`` from ``register_all``.
 """
 
 from ..tooling import ToolRegistry
+from . import account
 from . import capability
 from . import execution
 from . import integrations
@@ -31,7 +32,8 @@ def register_all(registry: ToolRegistry) -> None:
     `deploy_remove`), the visibility tools
     (`monitor`, `list_running_pipelines`), the DVR run-log tools
     (`log_chapters`, `log_read`, `log_traces`, `log_trace`), the node
-    scaffolding tool (`scaffold_node`), and the
+    scaffolding tool (`scaffold_node`), the account readiness tool
+    (`account_status`), and the
     integration-discovery tool (`list_integrations`) -- registered last so
     it always trails the surface it discovers.
     """
@@ -41,4 +43,5 @@ def register_all(registry: ToolRegistry) -> None:
     visibility.register(registry)
     logs.register(registry)
     scaffold.register(registry)
+    account.register(registry)
     integrations.register(registry)

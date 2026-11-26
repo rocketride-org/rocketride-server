@@ -1,9 +1,15 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 """Tests for the integration-discovery tool (`tools/integrations.py`):
-`list_integrations`.
+`list_integrations`, and the account readiness tool (`tools/account.py`):
+`account_status`, which reads saved keys through the same credentials catalog.
 """
 
+import copy
+
 import pytest
+
+from ai.constants import CONST_ACCOUNT_WAITLISTED, CONST_NO_DEV_TEAM
+from ai.modules.mcp.tools import account as account_tool
 
 from ai.modules.mcp import credentials as credentials_mod
 from ai.modules.mcp.tooling import ToolRegistry
@@ -326,3 +332,244 @@ def test_shipped_tool_github_still_asks_for_a_token_without_env():
 
     assert result['status'] != 'configured'
     assert result['missing'] == ['ROCKETRIDE_GITHUB_TOKEN']
+
+
+# ---------------------------------------------------------------------------
+# account_status (tools/account.py), with the shipped credentials catalog
+# ---------------------------------------------------------------------------
+
+# The rrext_account_status body of a funded, active cloud account.
+_CLOUD = {
+    'edition': 'cloud',
+    'waitlisted': False,
+    'organization': {'name': 'Example Workspace'},
+    'devTeam': {'selected': True, 'name': 'Development', 'canRun': True},
+    'credits': {'applies': True, 'canSpend': True, 'tokens': 12500.0},
+    'envKeys': ['ROCKETRIDE_OPENAI_KEY'],
+    'capabilities': ['saas'],
+}
+_BILLING = (
+    "In RocketRide, a workspace admin can open Account > Billing to manage this workspace's compute credits. "
+    "If you're not one, ask a workspace admin to do it."
+)
+_RETRY = 'Ask me to check the compute credits again in a moment.'
+
+
+def _body(base=None, **changes):
+    body = copy.deepcopy(base or _CLOUD)
+    for key, value in changes.items():
+        body[key] = {**body[key], **value} if isinstance(value, dict) and isinstance(body.get(key), dict) else value
+    return body
+
+
+async def _status(body):
+    registry = ToolRegistry()
+    account_tool.register(registry)
+    return await registry.handler('account_status')(FakeEngineClient(account_status=body), None, {})
+
+
+def _row(result, check_id):
+    return next(row for row in result['checks'] if row['id'] == check_id)
+
+
+async def test_account_status_ready_cloud_account_says_so_in_every_row():
+    assert await _status(_body()) == {
+        'ok': True,
+        'ready': True,
+        'edition': 'cloud',
+        'summary': 'This RocketRide account is ready to run pipelines.',
+        'checks': [
+            {'id': 'access', 'ok': True, 'detail': 'This RocketRide account is active.'},
+            {
+                'id': 'team',
+                'ok': True,
+                'detail': 'Your development team is "Development". Pipelines you run belong to it.',
+            },
+            {'id': 'credits', 'ok': True, 'detail': 'This workspace has 12,500 compute credits.', 'tokens': 12500.0},
+            {
+                'id': 'model_key',
+                'ok': True,
+                'detail': 'RocketRide has a saved AI model key for OpenAI.',
+                'blocking': False,
+            },
+        ],
+    }
+
+
+async def test_account_status_inactive_account_never_promises_that_waiting_helps():
+    """Waitlisted also covers an account an operator turned off, so no row says to wait."""
+    result = await _status(
+        _body(
+            waitlisted=True, organization=None, devTeam={'selected': False, 'name': '', 'canRun': False}, envKeys=None
+        )
+    )
+
+    assert result['ready'] is False
+    assert result['summary'] == "This account isn't active, so it can't run pipelines."
+    assert _row(result, 'access') == {
+        'id': 'access',
+        'ok': False,
+        'detail': "This account isn't active, so it can't run pipelines.",
+        'next_step': "If you just signed up, you'll get an email when it's activated.",
+    }
+    assert [_row(result, c)['ok'] for c in ('team', 'credits', 'model_key')] == [None, None, None]
+    # The run and deploy refusals repeat the tool's sentences word for word.
+    assert CONST_ACCOUNT_WAITLISTED == f'{account_tool.WAITLISTED} {account_tool.WAITLISTED_NEXT}'
+    assert CONST_NO_DEV_TEAM == f'{account_tool.TEAM_NONE} {account_tool.TEAM_NONE_NEXT}'
+
+
+@pytest.mark.parametrize(
+    ('changes', 'summary', 'team_next'),
+    [
+        (
+            {
+                'devTeam': {'selected': False, 'name': '', 'canRun': False},
+                'credits': {'canSpend': False, 'tokens': 0.0},
+            },
+            "This RocketRide account can't run pipelines right now. No development team is selected, and every "
+            'pipeline you run needs one. This workspace has no compute credits left.',
+            'In RocketRide, open Account > Profile and choose your development team. '
+            'If no team is listed, ask a workspace admin to add you to one.',
+        ),
+        (
+            {'devTeam': {'canRun': False}},
+            "This RocketRide account can't run pipelines right now. You don't have permission to run pipelines in "
+            'your development team, "Development".',
+            'In RocketRide, open Account > Profile and choose another development team, '
+            'or ask a workspace admin for permission to run pipelines on this one.',
+        ),
+    ],
+)
+async def test_account_status_summary_names_every_blocker(changes, summary, team_next):
+    result = await _status(_body(**changes))
+
+    assert result['ready'] is False
+    assert result['summary'] == summary
+    assert _row(result, 'team')['next_step'] == team_next
+
+
+@pytest.mark.parametrize(
+    ('credits', 'row'),
+    [
+        # The raw balance decides; rounding is for display only.
+        ({'tokens': 0.04}, {'ok': True, 'detail': 'This workspace has less than 0.1 compute credits.', 'tokens': 0.04}),
+        (
+            {'tokens': 12499.64},
+            {'ok': True, 'detail': 'This workspace has 12,499.6 compute credits.', 'tokens': 12499.64},
+        ),
+        (
+            {'tokens': -40.0},
+            {
+                'ok': True,
+                'detail': 'This workspace has no compute credits left, but it can still run pipelines for now.',
+                'next_step': _BILLING,
+            },
+        ),
+        (
+            {'canSpend': False, 'tokens': 0.0},
+            {
+                'ok': False,
+                'detail': "This workspace has no compute credits left, so pipelines can't run.",
+                'next_step': _BILLING,
+            },
+        ),
+        # The spend check answers from a short cache: a refusal next to a positive balance is not trusted.
+        (
+            {'canSpend': False, 'tokens': 500.0},
+            {
+                'ok': None,
+                'detail': "RocketRide couldn't check this workspace's compute credits just now.",
+                'next_step': _RETRY,
+                'tokens': 500.0,
+            },
+        ),
+        (
+            {'canSpend': None, 'tokens': None, 'reason': 'readFailed'},
+            {
+                'ok': None,
+                'detail': "RocketRide couldn't check this workspace's compute credits just now.",
+                'next_step': _RETRY,
+            },
+        ),
+        # No workspace: nothing to retry.
+        (
+            {'canSpend': None, 'tokens': None, 'reason': 'noOrganization'},
+            {'ok': None, 'detail': "This account isn't part of a workspace, so it has no compute credits to check."},
+        ),
+    ],
+)
+async def test_account_status_credits_row(credits, row):
+    result = await _status(_body(credits=credits))
+
+    assert _row(result, 'credits') == {'id': 'credits', **row}
+
+
+async def test_account_status_model_keys_use_catalog_names_and_never_overclaim():
+    catalog = credentials_mod.load_catalog()
+    assert [name for name, spec in catalog.items() if name.startswith('llm_') and spec.title == name] == []
+
+    cases = [
+        # Either of Gemini's two suggested names is a saved key.
+        (['ROCKETRIDE_GEMINI_GEMINI_APIKEY'], True, 'RocketRide has a saved AI model key for Gemini.', None),
+        # Display names, and one shared OpenAI key named once.
+        (
+            ['ROCKETRIDE_DEEPSEEK_APIKEY', 'ROCKETRIDE_OPENAI_KEY'],
+            True,
+            'RocketRide has saved AI model keys for Deepseek and OpenAI.',
+            None,
+        ),
+        # A custom name is a candidate: never "saved", never "none".
+        (
+            ['ROCKETRIDE_MY_OPENAI_SECRET'],
+            None,
+            "RocketRide can't tell whether a saved variable is an AI model key for OpenAI.",
+            account_tool.MODEL_CONFIRM_HINT,
+        ),
+        ([], False, 'No AI model key is saved.', account_tool.MODEL_HINT),
+    ]
+    for env_keys, ok, detail, hint in cases:
+        result = await _status(_body(envKeys=env_keys))
+        assert (_row(result, 'model_key')['ok'], _row(result, 'model_key')['detail']) == (ok, detail), env_keys
+        assert result.get('hint') == hint, env_keys
+        assert result['ready'] is True
+
+
+async def test_account_status_hosted_models_tag():
+    """The tool reads the engine's one constant for the tag the hosted backend sends."""
+    assert account_tool.HOSTED_MODELS_CAPABILITY is credentials_mod.HOSTED_MODELS_CAPABILITY
+    assert credentials_mod.HOSTED_MODELS_CAPABILITY == 'hosted-models:openai'
+
+    result = await _status(_body(capabilities=['saas', 'hosted-models:openai'], envKeys=['ROCKETRIDE_ANTHROPIC_KEY']))
+
+    assert _row(result, 'model_key') == {
+        'id': 'model_key',
+        'ok': True,
+        'detail': "Some OpenAI models can run on RocketRide without a key of your own. They use this workspace's "
+        'compute credits. RocketRide has a saved AI model key for Anthropic. Other OpenAI models and any other AI '
+        'provider need your own key, saved in RocketRide under Settings > Environment Variables.',
+        'blocking': False,
+    }
+    assert 'hint' not in result
+
+
+async def test_account_status_self_hosted_engine():
+    result = await _status(
+        _body(edition='self-hosted', credits={'applies': False}, capabilities=['oss'], envKeys=['ROCKETRIDE_APIKEY'])
+    )
+
+    assert result['ready'] is True
+    assert _row(result, 'access')['detail'] == 'This is a self-hosted RocketRide engine. It has no waitlist.'
+    assert _row(result, 'credits') == {
+        'id': 'credits',
+        'ok': True,
+        'detail': "Compute credits don't apply to a self-hosted engine.",
+    }
+    assert result['summary'] == 'This RocketRide account is ready to run pipelines. No AI model key is saved yet.'
+
+
+@pytest.mark.parametrize('answer', [RuntimeError('Unsupported command: rrext_account_status'), {'edition': 'x'}])
+async def test_account_status_engine_without_the_command(answer):
+    result = await _status(answer)
+
+    assert result['error_type'] == 'Unavailable'
+    assert result['ok'] is False

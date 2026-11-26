@@ -2,12 +2,12 @@
 
 The tool-name/result-shape contract between these skills and the RocketRide HTTP MCP server.
 Derived from the registrations in `rocketride-server`'s `packages/ai/src/ai/modules/mcp/tools/*.py`
-on `develop` (merged in PR #2315), where `register_all` wires **33 tools** — every
+on `develop` (merged in PR #2315), where `register_all` wires **34 tools** — every
 one of them listed below. Deploy tools are on the deploy-2 SDK API.
 **Maintainer note:** this file is regenerated from the registrations, not pinned to a commit. The
 previous `origin/develop @ eb67ddea` pin was already inaccurate; if a pin is wanted, use the
 PR #2315 merge commit or a later one. The check that actually matters is `register_all` still
-registering exactly these 33 names.
+registering exactly these 34 names.
 The skills reference **only** names and shapes in this file; anything not listed here does not
 exist — never invent a tool.
 
@@ -89,6 +89,12 @@ chapters/console but **empty traces**.
 | Tool | Purpose |
 |---|---|
 | `list_integrations` | Bare: per-integration readiness rows. With `{name}`: field detail + `setup` instructions to relay to the user. Secret **values never transit MCP** — there is no `set_env`; credentials are configured out-of-band (env/account), and pipelines still reference `${ROCKETRIDE_*}`. |
+
+## Account
+
+| Tool | Input | Result |
+|---|---|---|
+| `account_status` | — | `{ok, ready, edition, summary, checks: [{id, ok, detail, next_step?}]}` for the caller's own account. `checks` are `access` (whether the account is active), `team` (development team), `credits` (compute credits, cloud only, adds `tokens` when the balance is above zero) and `model_key` (advice, `blocking: false`). `ok: null` means the check could not run. `ready` is `access`, `team` and `credits` all true. Call it when the user asks about the account's readiness, whether it is active, its team, credits or model keys, before the first run in a conversation, and when `run_pipeline` or `run_dropper_pipe` comes back `NoDevelopmentTeam` or is refused for credits or a denied `task.control` permission. Relay `summary` and every `next_step` as written, plus the `detail` of the check the user asked about (the balance is in the `credits` detail); when `ready` is false, leave out the `model_key` advice unless the pipeline uses a model or the user asked about model keys. A call that comes back `AccountWaitlisted` (the account isn't active: a new sign-up, an account that was turned off, or a revoked key) needs no call; relay its message, and never say the user only has to wait. With no model key saved, the result's `hint` says how to find the variable name a provider needs. |
 
 ## Gaps the skills must compensate for (server-verified, current)
 

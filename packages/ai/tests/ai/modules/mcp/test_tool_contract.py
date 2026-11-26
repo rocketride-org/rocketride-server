@@ -51,6 +51,7 @@ EXPECTED_HINTS = {
     'log_traces': (True, False, False),
     'log_trace': (True, False, False),
     'scaffold_node': (True, False, False),
+    'account_status': (True, False, False),
     'list_integrations': (True, False, False),
 }
 

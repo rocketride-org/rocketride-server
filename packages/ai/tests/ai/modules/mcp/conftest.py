@@ -8,7 +8,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[4] / 'src'))
 import pytest
 
 # The full expected MCP tool surface, in registration order (register_all:
-# introspection, execution, capability, visibility, logs, integrations).
+# introspection, execution, capability, visibility, logs, scaffold, account,
+# integrations).
 # Single source of truth for the suite — assert against this instead of
 # copying the list or hard-coding its count in individual test files.
 # This is the LOCAL-engine (loopback-bound) surface; a deployed engine omits
@@ -55,6 +56,8 @@ EXPECTED_TOOL_NAMES = (
     'log_trace',
     # scaffold
     'scaffold_node',
+    # account
+    'account_status',
     # integrations
     'list_integrations',
 )
@@ -86,6 +89,7 @@ class FakeEngineClient:
         env_keys=None,
         auth=None,
         capabilities=None,
+        account_status=None,
     ):
         self._tasks = (
             tasks
@@ -186,6 +190,10 @@ class FakeEngineClient:
         # The capability tags of the engine's sign-in result (or an exception to raise)
         self._capabilities = capabilities if capabilities is not None else []
         self.get_capabilities_calls = 0
+        # -- account_status --
+        # The rrext_account_status body to answer with (an Exception is raised).
+        self.account_status = account_status if account_status is not None else {}
+        self.get_account_status_calls = 0
         self.closed = False
         self.close_calls = 0
 
@@ -392,6 +400,12 @@ class FakeEngineClient:
         if isinstance(self._capabilities, Exception):
             raise self._capabilities
         return list(self._capabilities)
+
+    async def get_account_status(self):
+        self.get_account_status_calls += 1
+        if isinstance(self.account_status, Exception):
+            raise self.account_status
+        return copy.deepcopy(self.account_status)
 
     async def close(self):
         self.close_calls += 1

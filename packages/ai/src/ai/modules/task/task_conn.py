@@ -64,7 +64,7 @@ import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
 from ai.common.dap import DAPConn, TransportBase
-from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
+from ai.constants import CONST_ACCOUNT_WAITLISTED, CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
 from .commands.cmd_monitor import MonitorCommands
@@ -767,12 +767,22 @@ class TaskConn(
             raise PermissionError(f'Access denied: no permissions for team {team_id!r}')
         return org_id
 
+    def refuse_if_waitlisted(self) -> None:
+        """Refuse the request when the hosted backend has not enabled this account.
+
+        The one place a waitlisted identity is turned away: runs (``execute``,
+        ``launch``), deployments (``_org_id``) and the account commands
+        (``require_zitadel_auth``) all call it, so every one of them gives the
+        same plain message, which the MCP layer types as ``AccountWaitlisted``.
+        """
+        if getattr(self._account_info, 'waitlisted', False):
+            raise PermissionError(CONST_ACCOUNT_WAITLISTED)
+
     def require_zitadel_auth(self) -> None:
         """Verify the connection is authenticated and not waitlisted."""
         if not self._authenticated or not self._account_info:
             raise PermissionError('Not authenticated')
-        if self._account_info.waitlisted:
-            raise PermissionError('Account is waitlisted')
+        self.refuse_if_waitlisted()
 
     def verify_plans(self, account_info: AccountInfo, pipeline: Dict[str, Any]) -> bool:
         """

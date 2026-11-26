@@ -182,7 +182,7 @@ Claude Code:
 claude mcp add --transport http rocketride-local http://localhost:5565/mcp --header "Authorization: Bearer rr_local"
 ```
 
-On engine image 3.6.0 and earlier, when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on a Docker engine (or any engine not bound to localhost), `initialize` and `tools/list` still work, but every tool call connects to RocketRide Cloud and fails with `Invalid or revoked API key`. Start the engine with the command above to avoid this. A local Docker engine offers 32 tools (`send_files` needs a loopback bind).
+On engine image 3.6.0 and earlier, when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on a Docker engine (or any engine not bound to localhost), `initialize` and `tools/list` still work, but every tool call connects to RocketRide Cloud and fails with `Invalid or revoked API key`. Start the engine with the command above to avoid this. A local Docker engine offers 33 tools (`send_files` needs a loopback bind).
 
 ## Use the hosted server
 
