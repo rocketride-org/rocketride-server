@@ -47,6 +47,7 @@ import shlex
 import sys
 import tarfile
 import time
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -2009,11 +2010,14 @@ async def test_a_dsns_value_that_is_no_map_of_strings_passes_as_it_is(value):
 # ---------------------------------------------------------------------------
 
 
-def _pod_metrics(*usages, pod='rr-x-abc'):
-    """What the metrics API answers for the namespace: here one pod, one usage per container."""
+def _pod_metrics(*usages, pod='rr-x-abc', **timestamp):
+    """What the metrics API answers for the namespace: here one pod, one usage per container, and a ``timestamp``."""
     containers = [{'name': f'c{i}', 'usage': usage} for i, usage in enumerate(usages)]
     return json.dumps(
-        {'kind': 'PodMetricsList', 'items': [{'metadata': {'name': pod}, 'window': '15s', 'containers': containers}]}
+        {
+            'kind': 'PodMetricsList',
+            'items': [{'metadata': {'name': pod}, **timestamp, 'window': '15s', 'containers': containers}],
+        }
     )
 
 
@@ -2025,15 +2029,33 @@ def _sampler(cli, pod='rr-x-abc'):
 async def test_metrics_sampler_reads_cpu_and_memory():
     """Nanocores to percent summed over cores, the way psutil reports it."""
     cli = FakeKubectl(get=CliResult(0, _pod_metrics({'cpu': '1502500000n', 'memory': '262144Ki'}), ''))
-    assert await _sampler(cli).sample() == (pytest.approx(150.25), 256 * 1024**2)
+    assert await _sampler(cli).sample() == (pytest.approx(150.25), 256 * 1024**2, None)
     assert cli.calls[0].args == ['get', '--raw', METRICS_PATH]
+
+
+@pytest.mark.parametrize(
+    'timestamp, end',
+    [
+        ('2026-11-26T10:00:15Z', datetime(2026, 11, 26, 10, 0, 15, tzinfo=timezone.utc).timestamp()),
+        ('2026-11-26T12:00:15.5+02:00', datetime(2026, 11, 26, 10, 0, 15, 500000, tzinfo=timezone.utc).timestamp()),
+        # No time zone, no time, no string, null: the end is unknown, the usage still reads (no key: the tests below)
+        ('2026-11-26T10:00:15', None),
+        ('yesterday', None),
+        (1764151215, None),
+        (None, None),
+    ],
+)
+async def test_a_reading_carries_when_its_window_ended(timestamp, end):
+    """The API averages the usage over [timestamp - window, timestamp]: the reading says when that window ended."""
+    cli = FakeKubectl(get=CliResult(0, _pod_metrics({'cpu': '1', 'memory': '1Mi'}, timestamp=timestamp), ''))
+    assert await _sampler(cli).sample() == (pytest.approx(100.0), 2**20, end)
 
 
 async def test_metrics_sampler_adds_up_the_containers():
     cli = FakeKubectl(
         get=CliResult(0, _pod_metrics({'cpu': '250m', 'memory': '1Mi'}, {'cpu': '1', 'memory': '1024'}), '')
     )
-    assert await _sampler(cli).sample() == (pytest.approx(125.0), 2**20 + 1024)
+    assert await _sampler(cli).sample() == (pytest.approx(125.0), 2**20 + 1024, None)
 
 
 async def test_one_metrics_request_serves_every_task(monkeypatch):
@@ -2048,9 +2070,9 @@ async def test_one_metrics_request_serves_every_task(monkeypatch):
     metrics = PodMetrics(cli, 'rocketride-tasks', SELECTOR)
     a, b = K8sMetricsSampler(metrics, 'rr-a'), K8sMetricsSampler(metrics, 'rr-b')
     assert await asyncio.gather(a.sample(), b.sample(), a.sample()) == [
-        (pytest.approx(100.0), 2**20),
-        (pytest.approx(50.0), 2 * 2**20),
-        (pytest.approx(100.0), 2**20),
+        (pytest.approx(100.0), 2**20, None),
+        (pytest.approx(50.0), 2 * 2**20, None),
+        (pytest.approx(100.0), 2**20, None),
     ]
     assert cli.commands() == ['get']
     monkeypatch.setattr(PodMetrics, 'min_interval', 0.0)
@@ -2088,7 +2110,7 @@ async def test_a_pod_that_cannot_be_read_does_not_cost_the_others_their_reading(
         ]
     }
     cli = FakeKubectl(get=CliResult(0, json.dumps(listed), ''))
-    assert await _sampler(cli).sample() == (pytest.approx(100.0), 2**20)
+    assert await _sampler(cli).sample() == (pytest.approx(100.0), 2**20, None)
     # The pod whose usage is not an object has no reading, the same listing still serves the other
     assert await _sampler(cli, pod='rr-bad').sample() is None
     # A usage that is there but not an object is not kept; one the API left out still lists the container
@@ -2112,7 +2134,7 @@ async def test_a_listing_that_fails_is_taken_again_by_the_next_task(monkeypatch)
     with pytest.raises(RuntimeError):
         await sampler.sample()
     cli.run = answer
-    assert await sampler.sample() == (pytest.approx(100.0), 2**20)
+    assert await sampler.sample() == (pytest.approx(100.0), 2**20, None)
 
 
 async def test_metrics_sampler_returns_none_when_kubectl_times_out():

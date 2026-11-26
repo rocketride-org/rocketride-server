@@ -56,6 +56,7 @@ import socket
 import tarfile
 import time
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
 
@@ -472,6 +473,25 @@ def parse_quantity(text: str) -> Optional[float]:
     if not match or match.group(2) not in _QUANTITY_UNITS:
         return None
     return float(match.group(1)) * _QUANTITY_UNITS[match.group(2)]
+
+
+def parse_time(text: Any) -> Optional[float]:
+    """
+    A Kubernetes time such as ``2026-11-26T10:00:15Z`` as ``time.time()`` seconds.
+
+    Args:
+        text: The time text.
+
+    Returns:
+        The seconds, or None when it cannot be read or names no time zone.
+    """
+    if not isinstance(text, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return moment.timestamp() if moment.tzinfo is not None else None
 
 
 # The kubectl processes nothing ends with the engine: a watch and a port-forward have no stdin to see it go
@@ -969,6 +989,8 @@ class PodMetrics:
         )
         # Each pod's containers' usage, as last listed, and when
         self._usages: Dict[str, List[Dict[str, Any]]] = {}
+        # When the window each pod's usage is averaged over ended, where the API said
+        self._ends: Dict[str, float] = {}
         self._listed: Optional[float] = None
         # The listing in progress, shared by every task that asks meanwhile
         self._listing: Optional[asyncio.Future] = None
@@ -991,9 +1013,22 @@ class PodMetrics:
             await asyncio.shield(self._listing)
         return self._usages.get(pod, [])
 
+    def window_end(self, pod: str) -> Optional[float]:
+        """
+        When the window of a pod's listed usage ended.
+
+        Args:
+            pod: The pod's name.
+
+        Returns:
+            ``time.time()`` seconds, or None when the API did not say.
+        """
+        return self._ends.get(pod)
+
     async def _list(self) -> None:
         """List the pods once; a list that cannot be read leaves every task without a reading until the next one."""
         usages: Dict[str, List[Dict[str, Any]]] = {}
+        ends: Dict[str, float] = {}
         started = time.monotonic()
         try:
             result = await self._cli.run(['get', '--raw', self._path], check=False)
@@ -1004,7 +1039,12 @@ class PodMetrics:
                         pod = [container.get('usage', {}) for container in containers]
                         if not all(isinstance(usage, dict) for usage in pod):
                             continue
-                        usages[item['metadata']['name']] = pod
+                        name = item['metadata']['name']
+                        usages[name] = pod
+                        # The usage is an average over [timestamp - window, timestamp]
+                        end = parse_time(item.get('timestamp'))
+                        if end is not None:
+                            ends[name] = end
                     except (AttributeError, KeyError, TypeError):
                         # One pod that cannot be read does not cost the others their reading
                         continue
@@ -1013,11 +1053,11 @@ class PodMetrics:
                 self._refused = True
                 debug(f'[k8s] the pod metrics cannot be listed, tasks read no CPU or memory: {result.stderr.strip()}')
         except (OSError, ValueError, AttributeError, K8sError):
-            usages = {}
+            usages, ends = {}, {}
         finally:
             # Whatever happened, the next task that asks starts a new listing. Its age counts from
             # the request, so a task that samples once an interval finds the list due again
-            self._usages = usages
+            self._usages, self._ends = usages, ends
             self._listed = started
             self._listing = None
 
@@ -1038,13 +1078,15 @@ class K8sMetricsSampler:
         self._metrics = metrics
         self._pod = pod
 
-    async def sample(self) -> Optional[Tuple[float, int]]:
+    async def sample(self) -> Optional[Tuple[float, int, Optional[float]]]:
         """
         One reading.
 
         Returns:
-            ``(cpu_percent, memory_bytes)``, or None when the cluster has no
-            metrics API or no sample of this pod yet.
+            ``(cpu_percent, memory_bytes, window_end)``: the usage is an average
+            over a window, and ``window_end`` is when it ended (None when the API
+            did not say). None when the cluster has no metrics API or no sample
+            of this pod yet.
         """
         usages = await self._metrics.usages(self._pod)
         cpus = [parse_quantity(usage.get('cpu')) for usage in usages]
@@ -1052,7 +1094,7 @@ class K8sMetricsSampler:
         if not usages or None in cpus or None in memories:
             return None
         # Cores to percent summed over cores, the way psutil reports it
-        return sum(cpus) * 100.0, int(sum(memories))
+        return sum(cpus) * 100.0, int(sum(memories)), self._metrics.window_end(self._pod)
 
 
 class K8sLaunch(Launch):

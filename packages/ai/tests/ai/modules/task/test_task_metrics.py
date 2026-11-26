@@ -1213,3 +1213,34 @@ async def test_a_spawn_task_bills_its_last_values_when_a_sample_fails(fake_psuti
 
     assert tm._duration_seconds == pytest.approx(3 * _TICK)
     assert tm._cpu_seconds == pytest.approx(40.0 * 3 * _TICK / 100.0)
+
+
+@pytest.mark.parametrize(
+    'window_end, cpu_seconds',
+    [
+        # Ended before ready (0.5): nothing billed at 400 %, the next reading bills 0.5 + 1 at 80 %
+        (0.2, 0.8 * 1.5),
+        # Ended after ready: 0.5 billed at 400 %, then 1 at 80 %
+        (0.7, 4.0 * 0.5 + 0.8 * 1.0),
+    ],
+)
+async def test_a_window_that_ended_before_ready_is_not_billed(
+    fake_psutil, no_gpu, monkeypatch, window_end, cpu_seconds
+):
+    """A pod's reading averages a past window: one that ended before ready is shown and in the peaks, not billed."""
+    tm, status, _, _ = _on_clock(
+        fake_psutil,
+        monkeypatch,
+        [
+            (_TICK, (400.0, 256 * 1024 * 1024, 1000.0 + window_end * _TICK), 0.5 * _TICK),
+            (_TICK, (80.0, 256 * 1024 * 1024, 1000.0 + 1.9 * _TICK)),
+        ],
+    )
+
+    tm.start_monitoring()
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    assert tm._duration_seconds == pytest.approx(1.5 * _TICK)
+    assert tm._cpu_seconds == pytest.approx(cpu_seconds * _TICK)
+    assert status.metrics.peak_cpu_percent == pytest.approx(100.0)
+    assert status.metrics.cpu_percent == pytest.approx(20.0)

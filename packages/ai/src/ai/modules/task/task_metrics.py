@@ -24,7 +24,7 @@ import time
 import uuid
 import psutil
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol, TYPE_CHECKING, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, TYPE_CHECKING, Tuple, Union
 from rocketlib import debug, error
 from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
@@ -247,19 +247,26 @@ class UsageSink:
         return self._unconfirmed
 
 
+# A sampler's reading: (cpu_percent, memory_bytes), and the window's end when it is an average over a past window
+SamplerReading = Union[Tuple[float, int], Tuple[float, int, Optional[float]]]
+
+
 class MetricsSampler(Protocol):
     """CPU and memory of a task that is not a local process (a container)."""
 
     # The shortest interval the sampler can serve; a docker stats call takes about a second
     min_interval: float
 
-    async def sample(self) -> Optional[Tuple[float, int]]:
+    async def sample(self) -> Optional[SamplerReading]:
         """
         One reading.
 
         Returns:
             ``(cpu_percent, memory_bytes)`` — CPU percent summed over cores, the
-            way psutil reports it — or None when nothing could be read.
+            way psutil reports it — or None when nothing could be read. A reading
+            averaged over a past window (a pod's) adds as a third item when that
+            window ended, ``time.time()`` seconds or None when unknown: a window
+            that ended before readiness is not billed.
         """
         ...
 
@@ -516,6 +523,19 @@ class TaskMetrics:
             return 0.0
         return max(0.0, end - max(start, self._billing_opened_at))
 
+    def _ended_before_ready(self, reading: SamplerReading) -> bool:
+        """
+        Whether a reading is an average over a window that ended before the billing gate opened.
+
+        Args:
+            reading: The sampler's reading.
+
+        Returns:
+            True only when the reading names its window's end and the gate opened after it.
+        """
+        window_end = reading[2] if len(reading) > 2 else None
+        return window_end is not None and self._billing_opened_at is not None and window_end < self._billing_opened_at
+
     def _sample_cpu_memory(self) -> None:
         """
         Sample current CPU and memory usage for process tree.
@@ -558,16 +578,16 @@ class TaskMetrics:
             # Process died or no access
             pass
 
-    def _apply_sampler_reading(self, reading: Optional[Tuple[float, int]]) -> None:
+    def _apply_sampler_reading(self, reading: Optional[SamplerReading]) -> None:
         """
         Record one reading from the runtime's sampler, as _sample_cpu_memory does for psutil.
 
         Args:
-            reading: ``(cpu_percent, memory_bytes)``, or None to keep the last values.
+            reading: ``(cpu_percent, memory_bytes)`` and maybe its window's end, or None to keep the last values.
         """
         if reading is None:
             return
-        cpu_percent, memory_bytes = reading
+        cpu_percent, memory_bytes = reading[:2]
         self._status.metrics.cpu_percent = cpu_percent / self._cpu_count if self._cpu_count > 0 else cpu_percent
         self._status.metrics.cpu_memory_mb = memory_bytes / (1024 * 1024)
         self._cpu_percent_raw = cpu_percent
@@ -960,11 +980,15 @@ class TaskMetrics:
 
                     # Accumulate into totals; a sampler with no reading left the last
                     # values in place, which are not billed again: the next reading bills
-                    # the gap. Readiness may have come during the wait or the read: only
-                    # the time after it is billed
-                    billed = self._sampler is None or reading is not None
+                    # the gap. So does a pod's reading averaged over a window that ended
+                    # before readiness; its values are shown and kept in the peaks.
+                    # Readiness may have come during the wait or the read: only the time
+                    # after it is billed
+                    billed = self._sampler is None or (reading is not None and not self._ended_before_ready(reading))
                     if billed:
                         self._accumulate_sample(self._ready_seconds(last_sample_time, current_time))
+                    elif reading is not None:
+                        self._accumulate_sample(0.0)
 
                     # Check if 5 minutes have elapsed since last billing report
                     time_since_last_report = current_time - self._last_report_time
