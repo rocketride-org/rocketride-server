@@ -136,7 +136,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 	override render(): ReactNode {
 		if (this.state.hasError) {
 			return (
-				<div style={styles.errorContainer}>
+				<div style={styles.errorContainer} data-rr-private="">
 					<div style={styles.errorTitle}>
 						{this.props.appName} encountered an error
 					</div>
