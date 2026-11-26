@@ -57,8 +57,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 list(APPEND CMAKE_MODULE_PATH
-    ${ROCKETRIDE_SERVER_DIR}/cmake
-    ${ROCKETRIDE_SERVER_DIR}/engine-core/cmake)
+    ${ROCKETRIDE_SERVER_DIR}/cmake)
 
 include(${ROCKETRIDE_SERVER_DIR}/cmake/setup_vcpkg.cmake)
 include(${ROCKETRIDE_SERVER_DIR}/cmake/setup.cmake)
@@ -76,36 +75,34 @@ message(STATUS "========================================")
 
 # The engine module a node imports its ABI from, as the dist has it
 # On Windows the link needs the import library beside the dll
-add_library(engineMod SHARED IMPORTED GLOBAL)
+add_library(engine_abi SHARED IMPORTED GLOBAL)
 
 if(ROCKETRIDE_PLAT_WIN)
-    set_target_properties(engineMod PROPERTIES
+    set_target_properties(engine_abi PROPERTIES
         IMPORTED_LOCATION "${ROCKETRIDE_DIST_DIR}/engine.dll"
         IMPORTED_IMPLIB "${ROCKETRIDE_DIST_DIR}/engine.lib")
 else()
-    set_target_properties(engineMod PROPERTIES
+    set_target_properties(engine_abi PROPERTIES
         IMPORTED_LOCATION
             "${ROCKETRIDE_DIST_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}engine${CMAKE_SHARED_LIBRARY_SUFFIX}")
 endif()
 
-get_target_property(engineModFile engineMod IMPORTED_IMPLIB)
-if(NOT engineModFile)
-    get_target_property(engineModFile engineMod IMPORTED_LOCATION)
+get_target_property(engineAbiFile engine_abi IMPORTED_IMPLIB)
+if(NOT engineAbiFile)
+    get_target_property(engineAbiFile engine_abi IMPORTED_LOCATION)
 endif()
 
-if(NOT EXISTS "${engineModFile}")
+if(NOT EXISTS "${engineAbiFile}")
     message(FATAL_ERROR
-        "The engine module a node links is not there: ${engineModFile}\n"
+        "The engine module a node links is not there: ${engineAbiFile}\n"
         "Build the server, or download one - `builder server:build`")
 endif()
 
-message(STATUS "Engine module   : ${engineModFile}")
+message(STATUS "Engine module   : ${engineAbiFile}")
 
-target_include_directories(engineMod INTERFACE "${ROCKETRIDE_SERVER_DIR}/engine-mod/include")
-
-# What engLib and apLib put on their INTERFACE for whatever links them. A node
+# What infra and core put on their INTERFACE for whatever links them. A node
 # reads it from here instead of from those targets, which a build without the
-# server does not have. Only engLib's definitions - apLib's would flip the node
+# server does not have. Only infra's definitions - core's would flip the node
 # back into export mode
 set(ROCKETRIDE_JDK_DIR "${ROCKETRIDE_SERVER_BUILD_DIR}/java/jdk")
 
@@ -122,9 +119,9 @@ elseif(ROCKETRIDE_PLAT_MAC)
 endif()
 
 set(ROCKETRIDE_ENGINE_INCLUDE_DIRS
-    "${ROCKETRIDE_SERVER_DIR}/engine-lib"
-    "${ROCKETRIDE_SERVER_DIR}/engine-core"
-    "${ROCKETRIDE_SERVER_DIR}/engine-core/include"
+    "${ROCKETRIDE_SERVER_DIR}/infra/src"
+    "${ROCKETRIDE_SERVER_DIR}/core/src"
+    "${ROCKETRIDE_SERVER_DIR}/core/include"
     "${VCPKG_INSTALLED_TRIPLET_DIR}/include"
     "${VCPKG_INSTALLED_TRIPLET_DIR}/include/FastPFor/headers"
     "${ROCKETRIDE_JDK_DIR}/include"
@@ -134,7 +131,7 @@ set(ROCKETRIDE_ENGINE_DEFINITIONS _TURN_OFF_PLATFORM_STRING=1)
 
 #
 # rocketride_add_node - Builds a C++ node as a shared library importing the
-# engine ABI from engineMod
+# engine ABI from engine_abi
 #
 # Usage, from nodes/src/nodes/<node-dir>/CMakeLists.txt:
 #   rocketride_add_node(cppExample)
@@ -161,19 +158,19 @@ function(rocketride_add_node targetName)
 
     set_property(TARGET ${targetName} PROPERTY FOLDER "nodes")
 
-    # Import mode; see ROCKETRIDE_CORE_API in apLib/ap.h
+    # Import mode; see ROCKETRIDE_CORE_API in core/src/core.h
     target_compile_definitions(${targetName} PRIVATE
         ROCKETRIDE_CORE_IMPORT
         JSON_DLL)
 
-    target_link_libraries(${targetName} PRIVATE engineMod)
+    target_link_libraries(${targetName} PRIVATE engine_abi)
 
-    # engLib's and apLib's header usage requirements, which engineMod links
+    # infra's and core's header usage requirements, which engine_abi links
     # PRIVATE - interface only, the archives themselves are never linked
     target_include_directories(${targetName} PRIVATE ${ROCKETRIDE_ENGINE_INCLUDE_DIRS})
     target_compile_definitions(${targetName} PRIVATE ${ROCKETRIDE_ENGINE_DEFINITIONS})
 
-    # Third-party libraries engineMod does not re-export, so the node links its
+    # Third-party libraries engine_abi does not re-export, so the node links its
     # own copy. Python/pybind11 are required even for a node holding no python
     # code - filter.hpp puts pybind11 types on its virtual interface
     find_package(Python3 COMPONENTS Development REQUIRED)
@@ -188,11 +185,11 @@ function(rocketride_add_node targetName)
         target_link_libraries(${targetName} PRIVATE Boost::stacktrace_windbg)
     endif()
 
-    # Unity and PCH, as every other target gets them. engLib's headers are
+    # Unity and PCH, as every other target gets them. infra's headers are
     # force-included ahead of the node's own sources - a fresh PCH, not
-    # REUSE_FROM engLib, since that one is in export mode
+    # REUSE_FROM infra, since that one is in export mode
     rocketride_pch(${targetName}
-        PCH ${ROCKETRIDE_PACKAGES_DIR}/server/engine-lib/engLib/headers.h)
+        PCH ${ROCKETRIDE_PACKAGES_DIR}/server/infra/src/headers.h)
 
     if(ROCKETRIDE_PLAT_WIN)
         # C4275: dll-interface classes deriving from non-dll-interface std bases
@@ -211,7 +208,7 @@ function(rocketride_add_node targetName)
             COMMENT "Copying $<TARGET_FILE_NAME:${targetName}> to dist/server/nodes/${nodeDir}")
     endif()
 
-    # On *nix the node resolves engineMod out of the engine's own directory,
+    # On *nix the node resolves engine_abi out of the engine's own directory,
     # two levels up from nodes/<node-dir>
     if(ROCKETRIDE_PLAT_LIN)
         set_target_properties(${targetName} PROPERTIES

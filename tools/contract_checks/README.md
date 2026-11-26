@@ -10,7 +10,7 @@ This tool catches the next one in CI instead.
 
 ## What it does
 
-For every `.py` file in `nodes/`, `packages/ai/`, `packages/client-python/`, and `packages/server/engine-lib/rocketlib-python/`, the framework:
+For every `.py` file in `nodes/`, `packages/ai/`, `packages/client-python/`, and `packages/server/python/`, the framework:
 
 1. Walks the AST to find every third-party `import` and every attribute chain you use on the imported objects.
 2. Builds a per-component contract automatically, no manual work needed for ~90% of code.

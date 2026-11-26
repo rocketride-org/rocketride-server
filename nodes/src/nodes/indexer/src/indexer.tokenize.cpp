@@ -26,7 +26,7 @@
 //	Defines the splitter
 //
 //-----------------------------------------------------------------------------
-#include <engLib/eng.h>
+#include <infra.h>
 
 #include "indexer.hpp"
 

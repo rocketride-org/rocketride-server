@@ -20,7 +20,7 @@ from ai.common.avi.descriptor import (
 from ai.common.schema import DocMetadata
 
 # Canonical key fixture — a cross-language contract in the shared testdata corpus (also
-# synced into the engtest `datasets` folder, so the C++ builder-conformance test reads the
+# synced into the infra_tests `datasets` folder, so the C++ builder-conformance test reads the
 # same file). From this test, parents[6] is the repo root.
 _FIXTURE = Path(__file__).resolve().parents[6] / 'testdata' / 'contracts' / 'descriptor_keys.json'
 

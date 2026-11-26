@@ -7,7 +7,7 @@
 Delivery-count regression tests for the lane-forwarding contract (#2041).
 
 The engine forwards a lane handler's incoming argument after the handler returns,
-unless it raised Ec.PreventDefault (__checkCallParent, engLib/python/call.hpp).
+unless it raised Ec.PreventDefault (__checkCallParent, infra/src/python/call.hpp).
 Seven handlers across five nodes forwarded explicitly and returned normally, so the
 payload they forwarded reached downstream twice. For the nodes that forward an enriched or converted
 copy, the second delivery was the unmodified original. context_optimizer, added later, had the

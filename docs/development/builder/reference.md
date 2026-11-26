@@ -166,7 +166,7 @@ only.
 ### C++ build type: `--cmake-config`
 
 `--cmake-config=<type>` sets the CMake build type (`CMAKE_BUILD_TYPE`) of the
-engine, its test programs (`aptest`, `engtest`, `nodetest`) and the C++ nodes.
+engine, its test programs (`core_tests`, `infra_tests`, `engine_tests`) and the C++ nodes.
 
 | Value | What it builds |
 | ----- | -------------- |

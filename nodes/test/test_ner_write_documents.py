@@ -42,7 +42,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(TEST_DIR))
 SRC_PATH = os.path.join(REPO_ROOT, 'nodes', 'src')
 AI_PATH = os.path.join(REPO_ROOT, 'packages', 'ai', 'src')
 CLIENT_PATH = os.path.join(REPO_ROOT, 'packages', 'client-python', 'src')
-ENGINE_PATH = os.path.join(REPO_ROOT, 'packages', 'server', 'engine-lib', 'rocketlib-python', 'lib')
+ENGINE_PATH = os.path.join(REPO_ROOT, 'packages', 'server', 'python', 'src')
 
 for path in [SRC_PATH, AI_PATH, CLIENT_PATH, ENGINE_PATH]:
     if path not in sys.path:

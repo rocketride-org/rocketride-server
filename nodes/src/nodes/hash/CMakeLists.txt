@@ -11,6 +11,6 @@ include(${ROCKETRIDE_PACKAGES_DIR}/server/cmake/rocketride-node.cmake)
 rocketride_add_node(hash)
 
 # ap::crypto::Sha512 is header-inline over OpenSSL, so this node emits its own
-# SHA512_* references rather than resolving them through engineMod
+# SHA512_* references rather than resolving them through engine_abi
 find_package(OpenSSL REQUIRED)
 target_link_libraries(hash PRIVATE OpenSSL::Crypto)
