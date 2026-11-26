@@ -20,11 +20,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 """
-OSS authentication: ``Account.authenticate`` against ROCKETRIDE_APIKEY, and
+OSS authentication: ``Account.authenticate`` against ROCKETRIDE_APIKEY,
 ``Account.init_account`` refusing to start an engine that is reachable from
-the network while no key is set (any credential would be accepted as admin).
+the network while no key is set (any credential would be accepted as admin),
+and ``update_env`` / ``set_env`` refusing to remove that key afterwards.
 """
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -99,3 +101,59 @@ async def test_empty_key_counts_as_no_key(monkeypatch):
 async def test_key_on_a_network_address_starts(monkeypatch):
     monkeypatch.setenv('ROCKETRIDE_APIKEY', 'the-right-key')
     await _account(monkeypatch).init_account(SimpleNamespace(config={'host': '0.0.0.0'}))
+
+
+class _Conn:
+    def build_response(self, request, body=None):
+        return {'ok': True, 'body': body or {}}
+
+    def build_error(self, request, message):
+        return {'ok': False, 'message': message}
+
+
+def _env_request(sub, **args):
+    return {'command': 'rrext_account_me', 'arguments': {'subcommand': sub, **args}}
+
+
+@pytest.fixture
+def started(monkeypatch, tmp_path):
+    """An OSS Account started on 0.0.0.0 with a key, its .env beside a fake executable."""
+    for key in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+        monkeypatch.delenv(key)
+    monkeypatch.setattr('sys.executable', str(tmp_path / 'engine'))
+    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'the-right-key')
+    account = _account(monkeypatch)
+
+    async def start():
+        await account.init_account(SimpleNamespace(config={'host': '0.0.0.0'}))
+        return account
+
+    return start
+
+
+@pytest.mark.parametrize('sub', ['update_env', 'set_env'])
+@pytest.mark.parametrize('value', [None, ''])
+async def test_a_network_engine_keeps_its_key(started, sub, value):
+    account = await started()
+    resp = await account.handle_account(_Conn(), _env_request(sub, env={'ROCKETRIDE_APIKEY': value}))
+    assert resp['ok'] is False and 'ROCKETRIDE_APIKEY' in resp['message']
+    assert os.environ['ROCKETRIDE_APIKEY'] == 'the-right-key'
+
+
+async def test_a_network_engine_can_rotate_its_key(started):
+    account = await started()
+    resp = await account.handle_account(_Conn(), _env_request('update_env', env={'ROCKETRIDE_APIKEY': 'a-new-key'}))
+    assert resp == {'ok': True, 'body': {'updated': True}}
+    assert os.environ['ROCKETRIDE_APIKEY'] == 'a-new-key'
+
+
+async def test_a_loopback_engine_can_drop_its_key(monkeypatch, tmp_path):
+    for key in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+        monkeypatch.delenv(key)
+    monkeypatch.setattr('sys.executable', str(tmp_path / 'engine'))
+    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'the-right-key')
+    account = _account(monkeypatch)
+    await account.init_account(SimpleNamespace(config={'host': '127.0.0.1'}))
+    resp = await account.handle_account(_Conn(), _env_request('update_env', env={'ROCKETRIDE_APIKEY': None}))
+    assert resp == {'ok': True, 'body': {'updated': True}}
+    assert 'ROCKETRIDE_APIKEY' not in os.environ

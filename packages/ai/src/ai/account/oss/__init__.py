@@ -326,6 +326,8 @@ class Account(AccountBase):
                 f'Refusing to listen on {host!r} without ROCKETRIDE_APIKEY: without a key the engine '
                 'accepts any credential as an admin. Set ROCKETRIDE_APIKEY, or bind to 127.0.0.1.'
             )
+        # update_env / set_env check it: a network-facing engine must keep a key
+        self._bind_host = host
 
         try:
             await self._seed_builtin_apps()
@@ -591,6 +593,14 @@ class Account(AccountBase):
                 env, error = _merged_env(changes, os.name == 'nt')
                 if error:
                     return conn.build_error(request, error)
+                # Removing or emptying the key would reopen keyless access on a
+                # network-facing engine (init_account refuses to start that way)
+                if not env.get('ROCKETRIDE_APIKEY') and not _is_loopback(getattr(self, '_bind_host', 'localhost')):
+                    return conn.build_error(
+                        request,
+                        'ROCKETRIDE_APIKEY cannot be removed or emptied while the engine listens beyond localhost; '
+                        'nothing was saved.',
+                    )
 
                 # Step 1: Persist to the .env file first, so a file that cannot be
                 # read or written leaves memory as it was. Use sys.executable
