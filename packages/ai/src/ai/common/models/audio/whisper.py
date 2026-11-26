@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
+from ..extract import raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.whisper')
 
@@ -1215,7 +1216,7 @@ class Whisper:
             self._model,
             raw_output,
             1,
-            self.output_fields,
+            with_error_field(self.output_fields),
             language=language,
         )
         t_post = (time.perf_counter() - t0) * 1000
@@ -1232,7 +1233,18 @@ class Whisper:
             }
         )
 
-        return results[0] if results else {}
+        return self._checked_result(results[0]) if results else {}
+
+    def _checked_result(self, result: Dict[str, Any], output_fields: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Raise when the loader reported a failed inference; otherwise return the result.
+
+        The result carries ``error`` only when the caller asked for it: in ``output_fields``
+        when a call gave its own list, in the instance's list otherwise.
+        """
+        raise_on_error('Whisper', result)
+        if 'error' not in (self.output_fields if output_fields is None else output_fields):
+            return {key: value for key, value in result.items() if key != 'error'}
+        return result
 
     def _transcribe_remote(
         self,
@@ -1249,6 +1261,12 @@ class Whisper:
         `language` travels with the request rather than the load, so every language
         shares one server-side copy of the weights.
         """
+        # A call can give its own output_fields through **kwargs, which replaces the
+        # instance's list in the request (None or an empty list keeps the instance's, as
+        # in the constructor). `error` is added to the list that applies, and after
+        # **kwargs, so that list cannot drop it and hide a failed inference.
+        output_fields = kwargs.get('output_fields') or self.output_fields
+
         result = self._client.send_command(
             'rrext_ms_inference',
             {
@@ -1258,14 +1276,14 @@ class Whisper:
                 'vad_parameters': vad_parameters,
                 'language': language,
                 'word_timestamps': word_timestamps,
-                'output_fields': self.output_fields,
                 **kwargs,
+                'output_fields': with_error_field(output_fields),
             },
         )
 
         results = result.get('result', [])
         if results and len(results) > 0:
-            return results[0]
+            return self._checked_result(results[0], output_fields)
         return {}
 
     def disconnect(self) -> None:

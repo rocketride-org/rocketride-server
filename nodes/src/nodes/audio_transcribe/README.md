@@ -118,6 +118,14 @@ so setting one leaves the others alone. `vad_threshold` and
 
 ## Notes
 
+### Inference failures
+
+A transcription that fails inside Whisper, for example CUDA out of memory,
+fails the object with `Whisper inference failed: <cause>` instead of passing
+it on with an empty transcript. This holds in-process and with
+`--modelserver`: any deployed model server returns the error. A recording
+with no speech still completes with empty text.
+
 ### Segmentation and documents
 
 Transcription calls are guarded per run mode: with in-process inference a
