@@ -2867,6 +2867,40 @@ async def test_what_the_runtime_saw_is_not_asked_of_a_task_that_reported_or_was_
     assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'exit_code, reported, stop_reason, state, status',
+    [
+        (-6, _SEGV, None, TASK_STATE.CANCELLED, 'Stopped unexpectedly'),
+        (0, None, None, TASK_STATE.COMPLETED, 'Completed'),
+        (0, None, 'user', TASK_STATE.CANCELLED, 'Stopped'),
+    ],
+    ids=['crash', 'clean-end', 'stop'],
+)
+async def test_completed_is_set_with_the_end_state(exit_code, reported, stop_reason, state, status):
+    """A status sent while the launch cleans up reads Stopping, not completed; the final status reads both."""
+    t = _ending_task(exit_code)
+    t._stop_reason = stop_reason
+    if reported:
+        await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(reported)})
+    t._an_open_by_pipe = {}
+    t._an_idle_total = t._an_idle_longest = t._an_idle_longest_at = t._an_idle_since = 0.0
+    t._send_status_update = TaskEngine._send_status_update.__get__(t)
+    # The periodic status loop sends while the launch is still cleaning up
+    t._launch = MagicMock(lost=None, cleanup=t._send_status_update)
+    await TaskEngine._terminated(t)
+
+    sent = [
+        (call.args[1]['body']['state'], call.args[1]['body']['completed'])
+        for call in t._forward_task_event.await_args_list
+        if call.args[1]['event'] == 'apaevt_status_update'
+    ]
+    stopping = (TASK_STATE.STOPPING.value, False)
+    # The teardown's first status, the one during the cleanup, the final one
+    assert sent == [stopping, stopping, (state.value, True)]
+    assert t._status.status == status
+
+
 # ---------------------------------------------------------------------------
 # TaskData — the engine's data channel to the task
 # ---------------------------------------------------------------------------

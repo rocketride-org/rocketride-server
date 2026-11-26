@@ -2248,7 +2248,6 @@ class TaskEngine(DAPBase):
                 EVENT_TYPE.OUTPUT, self.build_event('output', body={'category': 'console', 'output': output})
             )
 
-        self._status.completed = True
         self._status.endTime = time.time()
 
         # NOTE: the final zeroed status and the run-log close happen at the
@@ -2350,7 +2349,9 @@ class TaskEngine(DAPBase):
         except Exception as e:
             self.debug_message(f'Error cleaning up update task: {e}')
 
-        # Set final state
+        # Set final state; completed goes with it, so a status sent during the
+        # cleanup above reads Stopping, not completed
+        self._status.completed = True
         if stop_reason is not None:
             self._status.status = 'Stopped'
             self._status.state = TASK_STATE.CANCELLED.value
