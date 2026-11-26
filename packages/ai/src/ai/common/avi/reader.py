@@ -347,10 +347,10 @@ class AVIReader(ABC):
         process = getattr(self, '_ffmpeg_process', None)
         if process is not None and process.poll() is None:
             debug(f'[Reader] {self._name}: decoding ended early by its consumer')
-            # Recorded BEFORE the terminate: the watcher then sees a nonzero exit, and
+            # Recorded BEFORE the kill: the watcher then sees a nonzero exit, and
             # write() must tell this stop from a decoder that failed
             self._ended_by_consumer = True
-            process.terminate()
+            process.kill()
 
     def stop(self):
         """

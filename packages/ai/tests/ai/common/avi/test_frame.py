@@ -413,12 +413,12 @@ def test_end_decoding_from_the_frame_callback_stops_ffmpeg_and_the_stream_still_
 
 
 def test_writes_after_end_decoding_are_dropped_but_a_failed_decoder_still_raises():
-    """end_decoding's terminate exits nonzero by design; only an unrequested exit is an error."""
+    """end_decoding's kill exits nonzero by design; only an unrequested exit is an error."""
     extractor = _extractor([])
     # A started stream without ffmpeg: write() checks only these, and no real process
     # is involved; _started is cleared after, so __del__'s stop() has nothing to stop
     extractor._started = True
-    extractor._ffmpeg_process = SimpleNamespace(poll=lambda: None, terminate=lambda: None)
+    extractor._ffmpeg_process = SimpleNamespace(poll=lambda: None, kill=lambda: None)
     try:
         extractor.end_decoding()
         extractor._done, extractor._exit_code = True, 1  # what the watcher records next
@@ -475,8 +475,8 @@ def test_end_decoding_terminates_only_a_running_process():
     """No process yet, or one that already exited: nothing to end."""
     extractor = _extractor([])
     terminated = []
-    running = SimpleNamespace(poll=lambda: None, terminate=lambda: terminated.append('running'))
-    exited = SimpleNamespace(poll=lambda: 0, terminate=lambda: terminated.append('exited'))
+    running = SimpleNamespace(poll=lambda: None, kill=lambda: terminated.append('running'))
+    exited = SimpleNamespace(poll=lambda: 0, kill=lambda: terminated.append('exited'))
 
     extractor.end_decoding()
     extractor._ffmpeg_process = exited
