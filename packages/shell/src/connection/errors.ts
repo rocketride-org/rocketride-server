@@ -30,6 +30,9 @@
  */
 export const AUTH_REJECTED_MESSAGE = 'Authentication failed: unknown user or invalid credentials.';
 
+/** Shown when a blank key ("Connect without a key") is rejected by a key-protected server. */
+export const KEY_REQUIRED_MESSAGE = 'This server requires an API key. Enter your key to connect.';
+
 /** A connection failure whose kind determines the UI recovery action. */
 export class ConnectionFailure extends Error {
 	constructor(
