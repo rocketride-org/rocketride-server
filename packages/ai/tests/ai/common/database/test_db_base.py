@@ -20,7 +20,6 @@ subclass that supplies SQLite-compatible stubs, then exercise:
 
 from __future__ import annotations
 
-import time
 from datetime import datetime
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -543,14 +542,33 @@ def test_format_db_error_leaves_text_that_resembles_a_clickhouse_echo_alone(base
 
 @pytest.mark.parametrize('filler', [' ', ' \n', '\n '])
 def test_format_db_error_time_does_not_grow_with_whitespace(base, filler):
-    # Small first: a cubic pattern takes ~0.5 s here and would take an hour at 20,000.
-    for size, limit in ((1000, 0.1), (20000, 1)):
-        exc = _wrapped(_FakeDriverError(f'bad{filler * size}value [SQL: SELECT 1]'), 'SELECT 1', {})
+    """Four times the input must not approach quadratic (16x) CPU growth.
 
-        start = time.perf_counter()
-        base._format_db_error(exc)
+    Thread CPU time and medians of alternating samples keep a busy machine out of the ratio.
+    """
+    from statistics import median
+    from time import thread_time
 
-        assert time.perf_counter() - start < limit
+    def measure(exc, repetitions):
+        started = thread_time()
+        for _ in range(repetitions):
+            base._format_db_error(exc)
+        return thread_time() - started
+
+    errors = [
+        _wrapped(_FakeDriverError(f'bad{filler * size}value [SQL: SELECT 1]'), 'SELECT 1', {}) for size in (250, 1000)
+    ]
+    for exc in errors:
+        measure(exc, 1)
+    repetitions = 1
+    while measure(errors[0], repetitions) < 0.125:
+        repetitions *= 2
+    samples = [[], []]
+    for _ in range(3):
+        for index, exc in enumerate(errors):
+            samples[index].append(measure(exc, repetitions))
+    small, large = (median(sample) for sample in samples)
+    assert large < 8 * small, (small, large)
 
 
 # ---------------------------------------------------------------------------

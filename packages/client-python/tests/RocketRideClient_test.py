@@ -1904,21 +1904,13 @@ Line 3: random data {random.random()}"""
 
             assert len(large_text) > 10000
 
-            start_time = time.time()
             large_result = await client.send(token, large_text, {}, 'text/plain')
-            end_time = time.time()
 
             # Validate large data processing
             assert large_result is not None
             assert 'Line 1:' in large_result['text'][0]
             assert 'Line 1000:' in large_result['text'][0]
             assert len(large_result['text'][0]) > 10000
-
-            # Check processing time (should complete reasonably quickly)
-            processing_time = end_time - start_time
-            assert processing_time < 10.0  # Less than 10 seconds
-
-            print(f'Large data workflow: Processed {len(large_text)} bytes in {processing_time * 1000:.0f}ms')
 
             # Get final status to verify task completed
             final_status = await client.get_task_status(token)

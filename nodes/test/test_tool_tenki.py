@@ -1071,10 +1071,9 @@ def test_calls_queued_behind_a_resume_refused_for_the_whole_budget_ask_once_each
     session = _Session()
     inst, _ = _used(monkeypatch, session)
     session.state, session.resume_refusals, session.barrier = 'PAUSED', 10**6, threading.Barrier(4)
-    started = time.monotonic()
     results = _parallel(*[lambda: inst.list_files({})] * 4)
     assert all('still being torn down' in result['error'] for result in results)
-    assert time.monotonic() - started < 3.0 and session.calls.count('resume') <= 1.0 / 0.01 + 4
+    assert session.calls.count('resume') <= 1.0 / 0.01 + 4
 
 
 def test_calls_queued_behind_a_given_up_resume_that_tenki_carried_out_are_resumed(monkeypatch, logs):

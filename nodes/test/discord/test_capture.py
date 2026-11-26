@@ -35,7 +35,6 @@ import queue
 import re
 import sys
 import threading
-import time
 import types
 from datetime import datetime, timezone
 from unittest import mock
@@ -1818,14 +1817,14 @@ class TestWriterThread:
             assert pipe.entered.wait(2)
             for _ in range(QUEUE_MAX_ROWS):
                 writer.submit(_row())
-            started = time.monotonic()
-            writer.stop(timeout=2.0)
-            elapsed = time.monotonic() - started
+            with mock.patch.object(thread, 'join', wraps=thread.join) as join:
+                writer.stop(timeout=0.1)
         finally:
             release.set()
         thread.join(5)
 
-        assert elapsed < 3.0
+        # The put into the full queue used up the whole budget, so the drain gets none of it.
+        join.assert_called_once_with(0.0)
 
     def test_a_full_queue_still_lets_the_worker_end(self):
         release = threading.Event()
