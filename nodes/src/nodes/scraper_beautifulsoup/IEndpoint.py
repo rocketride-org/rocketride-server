@@ -49,7 +49,7 @@ from typing import Any, Callable, Dict, List
 
 from ai.common.schema import Answer
 from ai.common.utils import config_int
-from rocketlib import IEndpointBase, warning
+from rocketlib import IEndpointBase, IJson, warning
 
 from .IGlobal import DEFAULT_MAX_BODY_CHARS, build_fetcher
 from .scrape_fetch import Fetcher
@@ -74,7 +74,10 @@ class IEndpoint(IEndpointBase):
 
     def _params(self) -> Dict[str, Any]:
         try:
-            return self.endpoint.serviceConfig['parameters'] or {}
+            # The engine delivers config arrays as IJson, not native list/dict.
+            # Unwrap recursively so compile_patterns()/parse_sources() see native
+            # types; otherwise urlAllowList raises "must be a list ... got IJson".
+            return IJson.toDict(self.endpoint.serviceConfig['parameters']) or {}
         except Exception:
             return {}
 
