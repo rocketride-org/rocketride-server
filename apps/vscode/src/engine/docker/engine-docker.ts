@@ -20,7 +20,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { EngineBackend, type StatusEmitter, type EngineInfo, type EngineBackendStatus, type IoControlResult, type IoProgressCallback } from '../engine-backend';
 import type { ConnectionMode } from '../../config';
-import { DockerManager, CONTAINER_PORT } from './docker-manager';
+import { DockerManager, CONTAINER_APIKEY, CONTAINER_PORT } from './docker-manager';
 import type { ConnectionGroupConfig } from '../../config';
 import { cachedDockerTags } from '../../extension';
 import { getSystemInstallDir } from '../config/config-migration';
@@ -233,8 +233,8 @@ export class EngineDocker extends EngineBackend {
 					// Dynamic require — avoids bundling the SDK into the webview; only used at runtime
 					const { RocketRideClient } = require('rocketride');
 					const client = new RocketRideClient({ persist: false });
-					// Local Docker doesn't need a real API key — any non-empty string works
-					await client.connect('MYAPIKEY', { uri: `http://localhost:${CONTAINER_PORT}`, timeout: 10000 });
+					// The container is started with CONTAINER_APIKEY (see docker-manager.ts)
+					await client.connect(CONTAINER_APIKEY, { uri: `http://localhost:${CONTAINER_PORT}`, timeout: 10000 });
 					const version = client.getServerVersion?.() ?? null;
 					await client.disconnect();
 					return { success: true, data: { version } };

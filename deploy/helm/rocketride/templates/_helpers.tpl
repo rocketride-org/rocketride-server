@@ -76,10 +76,17 @@ Return the secret name for engine credentials
 Validate that engine secrets are configured.
 Users must provide credentials via engine.existingSecret or engine.secrets.
 This prevents deploying with missing API keys.
+
+engine.secrets must include ROCKETRIDE_APIKEY: the engine binds 0.0.0.0 in the
+pod and refuses to start without a key. An engine.existingSecret is not readable
+from here, so it must carry ROCKETRIDE_APIKEY itself (the engine enforces it).
 */}}
 {{- define "rocketride.validateSecrets" -}}
 {{- if and (not .Values.engine.existingSecret) (not .Values.engine.secrets) }}
 {{- fail "Engine secrets must be configured. Set engine.secrets with your API keys or provide engine.existingSecret referencing a pre-created Kubernetes Secret." }}
+{{- end }}
+{{- if and (not .Values.engine.existingSecret) (not (get (.Values.engine.secrets | default dict) "ROCKETRIDE_APIKEY")) }}
+{{- fail "Set engine.secrets.ROCKETRIDE_APIKEY (or put ROCKETRIDE_APIKEY in engine.existingSecret): the engine refuses to listen beyond localhost without an API key." }}
 {{- end }}
 {{- end }}
 

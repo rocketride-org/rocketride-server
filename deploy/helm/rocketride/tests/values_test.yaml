@@ -46,6 +46,7 @@ engine:
   existingSecret: ''
 
   secrets:
+    ROCKETRIDE_APIKEY: 'apikey-test-placeholder'
     OPENAI_API_KEY: 'openai-test-placeholder'
     ANTHROPIC_API_KEY: 'anthropic-test-placeholder'
     RR_STORE_SECRET_KEY: '{"access_key_id": "test-key-id", "secret_access_key": "test-secret"}'

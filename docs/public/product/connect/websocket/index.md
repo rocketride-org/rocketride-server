@@ -26,7 +26,8 @@ send so you can debug, trace, or build your own client.
   task request carries the task `token` returned by `execute` (the SDK's `use()`)
   in its `arguments`.
   Cloud requires a key. The SDKs and the CLI also need one for a local engine;
-  an engine started without a key accepts any non-empty value.
+  an engine started without a key accepts any non-empty value, and only starts
+  that way on `127.0.0.1` or `localhost`.
 
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.

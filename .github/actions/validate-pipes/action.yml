@@ -32,8 +32,9 @@ inputs:
     default: '5565'
   api-key:
     description: >-
-      Optional API key for the engine (passed to the CLI via the
-      ROCKETRIDE_APIKEY environment variable, never via argv).
+      Optional API key for the engine. The engine container is started with it
+      and the CLI sends it (both via the ROCKETRIDE_APIKEY environment
+      variable, never via argv). Empty = a random key for this run.
     required: false
     default: ''
   python-version:
@@ -87,15 +88,22 @@ runs:
       env:
         ENGINE_IMAGE: ${{ inputs.engine-image }}
         ENGINE_PORT: ${{ inputs.engine-port }}
+        RR_API_KEY_INPUT: ${{ inputs.api-key }}
       run: |
         set -euo pipefail
+        # The engine refuses to listen on 0.0.0.0 (as it does in the container)
+        # without a key: use the given one, or a random one for this run.
+        ROCKETRIDE_APIKEY="${RR_API_KEY_INPUT:-rr-validate-$(openssl rand -hex 16)}"
+        echo "::add-mask::${ROCKETRIDE_APIKEY}"
+        echo "RR_ENGINE_APIKEY=${ROCKETRIDE_APIKEY}" >> "${GITHUB_ENV}"
+        export ROCKETRIDE_APIKEY
         if ! [[ "${ENGINE_PORT}" =~ ^[0-9]+$ ]]; then
           echo "::error::engine-port must be a number, got '${ENGINE_PORT}'"
           exit 2
         fi
         # The engine always listens on 5565 inside the container
         # (see docker/docker-compose.yml).
-        cid="$(docker run -d -p "${ENGINE_PORT}:5565" "${ENGINE_IMAGE}")"
+        cid="$(docker run -d -p "127.0.0.1:${ENGINE_PORT}:5565" -e ROCKETRIDE_APIKEY "${ENGINE_IMAGE}")"
         echo "cid=${cid}" >> "${GITHUB_OUTPUT}"
         echo "Started engine container ${cid} (${ENGINE_IMAGE}) on host port ${ENGINE_PORT}."
 
@@ -177,10 +185,8 @@ runs:
           exit 0
         fi
 
-        # Pass the API key via the environment only when set, never via argv.
-        if [[ -n "${RR_API_KEY_INPUT}" ]]; then
-          export ROCKETRIDE_APIKEY="${RR_API_KEY_INPUT}"
-        fi
+        # The key the engine was started with, via the environment, never via argv.
+        export ROCKETRIDE_APIKEY="${RR_ENGINE_APIKEY}"
 
         echo "Validating ${#files[@]} file(s) against ${ROCKETRIDE_URI}:"
         printf '  %s\n' "${files[@]}"

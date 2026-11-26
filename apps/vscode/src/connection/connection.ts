@@ -62,6 +62,7 @@ import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared
 import { applyManagedComments, envKeysForGroup, mergeEnvText, resolveConnectionEnv } from '../shared/util/envFile';
 import { getIdeName } from '../shared/util/ide';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
+import { CONTAINER_APIKEY } from '../engine/docker/docker-manager';
 import {
 	ConnectionGenerationController,
 	GenerationOwnedOperationSlot,
@@ -341,7 +342,8 @@ export class ConnectionManager extends EventEmitter {
 	 * Auth resolution strategy (in priority order):
 	 *   1. Cloud mode -> OAuth token from CloudAuthProvider
 	 *   2. On-prem mode -> API key from secure storage
-	 *   3. Local/docker/service -> default key (self-hosted, no real auth)
+	 *   3. Docker -> configured API key, else CONTAINER_APIKEY (the key the container is started with)
+	 *   4. Local/service -> default key (self-hosted, loopback only)
 	 *
 	 * @param uri - The WebSocket URI to connect to (from EngineManager 'ready' event).
 	 * @throws If cloud mode and no token is available (user must sign in).
@@ -453,7 +455,9 @@ export class ConnectionManager extends EventEmitter {
 		if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
 			return groupConfig.apiKey;
 		}
-		// Local, service, docker: use default key
+		// Docker: the container is started with CONTAINER_APIKEY unless its key was changed to the configured one
+		if (mode === 'docker') return groupConfig.apiKey || CONTAINER_APIKEY;
+		// Local, service: use default key
 		return groupConfig.apiKey || 'MYAPIKEY';
 	}
 

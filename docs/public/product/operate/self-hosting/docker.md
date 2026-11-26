@@ -25,6 +25,7 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
   -p 127.0.0.1:5565:5565 \
   -v rocketride-data:/opt/data \
   --restart unless-stopped \
+  -e ROCKETRIDE_APIKEY=rr_local \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
 
@@ -33,8 +34,10 @@ command in [MCP on this engine](#mcp-on-this-engine) instead, which adds two `-e
 settings. Both commands carry `--platform linux/amd64`, which Apple Silicon needs
 and Intel and AMD machines ignore (see [The image](#the-image)).
 
-Point any client at it and go. A client needs a non-empty key, and an engine
-started without one accepts any value:
+Point any client at it and go. The client sends the key the engine was started
+with. The engine in the image listens on every interface inside the container, so
+it refuses to start without `ROCKETRIDE_APIKEY`; pick your own value instead of
+`rr_local` if anything but this machine can reach the port:
 
 ```bash
 export ROCKETRIDE_URI=ws://localhost:5565
@@ -42,8 +45,7 @@ export ROCKETRIDE_APIKEY=rr_local
 ```
 
 The `127.0.0.1:` prefix keeps the engine reachable only from the machine
-itself — the right default, since an engine started without a key accepts any
-non-empty one. Widen it only behind TLS and authentication (see
+itself. Widen it only behind TLS and with a strong key (see
 [Security](/operate/security)).
 
 ## The image
