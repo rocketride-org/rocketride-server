@@ -1,10 +1,10 @@
 """Tests for ``tools/list`` pagination in the MCP client transports.
 
 Covers:
-- ``fetch_all_tool_entries`` (pure): cursor handling, limits, malformed pages and
-  transport failures.
+- ``fetch_all_tool_entries`` (pure): single-page requests, cursor handling, limits,
+  malformed pages and transport failures.
 - All three transports against a scripted ``_request``: every page is converted,
-  single-page traffic is unchanged, and refusals use the transport's own error type.
+  and refusals use the transport's own error type.
 - The real stdio transport against the stub server in paged mode.
 """
 
@@ -124,18 +124,23 @@ class TestFetchAllToolEntries:
         assert fetch_all_tool_entries(request) == ['a', 'b']
         assert request.calls[1] == ('tools/list', {'cursor': cursor})
 
-    def test_empty_string_cursor_is_forwarded_and_page_two_is_discovered(self):
-        request = _Scripted({None: {'tools': ['a'], 'nextCursor': ''}, '': {'tools': ['b']}})
+    def test_empty_string_next_cursor_ends_traversal(self):
+        request = _Scripted(
+            {
+                None: {'tools': ['a'], 'nextCursor': 'c1'},
+                'c1': {'tools': ['b'], 'nextCursor': ''},
+                '': {'tools': ['a'], 'nextCursor': ''},
+            }
+        )
 
         assert fetch_all_tool_entries(request) == ['a', 'b']
-        assert request.calls == [('tools/list', {}), ('tools/list', {'cursor': ''})]
+        assert request.calls == [('tools/list', {}), ('tools/list', {'cursor': 'c1'})]
 
-    def test_repeated_empty_string_cursor_raises_without_partial_return(self):
-        request = _Scripted({None: {'tools': ['a'], 'nextCursor': ''}, '': {'tools': ['b'], 'nextCursor': ''}})
+    def test_empty_string_next_cursor_on_the_first_page_ends_traversal(self):
+        request = _Scripted({None: {'tools': ['a'], 'nextCursor': ''}})
 
-        with pytest.raises(ValueError, match='page 2 repeated'):
-            fetch_all_tool_entries(request, error_cls=ValueError)
-        assert len(request.calls) == 2
+        assert fetch_all_tool_entries(request) == ['a']
+        assert request.calls == [('tools/list', {})]
 
     def test_empty_page_with_cursor_continues(self):
         request = _Scripted(
@@ -341,39 +346,12 @@ class TestTransportsFollowPagination:
         assert tools[1].has_synthesized_noop_arg is True
         assert tools[0].has_synthesized_noop_arg is False
 
-    def test_single_page_traffic_is_unchanged(self, module, make_client, monkeypatch):
-        client = make_client()
-        schema = {'type': 'object', 'properties': {'x': {'type': 'string'}}}
-        request = _Scripted({None: {'tools': [{'name': 'only', 'description': 'd', 'inputSchema': schema}]}})
-        monkeypatch.setattr(client, '_request', request)
-
-        assert client.list_tools() == [module.McpToolDef(name='only', description='d', inputSchema=schema)]
-        assert request.calls == [('tools/list', {})]
-
-    def test_empty_string_cursor_is_followed(self, module, make_client, monkeypatch):
-        client = make_client()
-        request = _Scripted(
-            {None: {'tools': [{'name': 'first'}], 'nextCursor': ''}, '': {'tools': [{'name': 'second'}]}}
-        )
-        monkeypatch.setattr(client, '_request', request)
-
-        assert [t.name for t in client.list_tools()] == ['first', 'second']
-        assert request.calls[1] == ('tools/list', {'cursor': ''})
-
     def test_bad_later_page_raises_the_transport_protocol_error(self, module, make_client, monkeypatch):
         client = make_client()
         request = _Scripted({None: {'tools': [{'name': 'first'}], 'nextCursor': 'c1'}, 'c1': 'not an object'})
         monkeypatch.setattr(client, '_request', request)
 
         with pytest.raises(module.McpProtocolError, match='page 2'):
-            client.list_tools()
-
-    def test_repeated_cursor_raises_the_transport_protocol_error(self, module, make_client, monkeypatch):
-        client = make_client()
-        request = _Scripted({None: {'tools': [], 'nextCursor': 'c1'}, 'c1': {'tools': [], 'nextCursor': 'c1'}})
-        monkeypatch.setattr(client, '_request', request)
-
-        with pytest.raises(module.McpProtocolError, match='repeated'):
             client.list_tools()
 
 
