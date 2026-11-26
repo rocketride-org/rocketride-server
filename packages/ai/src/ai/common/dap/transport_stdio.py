@@ -163,11 +163,7 @@ class TransportStdio(TransportBase):
         self._process = subprocess
         self._stdout_task: Optional[asyncio.Task] = None
         self._stderr_task: Optional[asyncio.Task] = None
-        # The disconnect an >EXIT asked for, held until stdout has been read to its end
-        self._exit_disconnect: Optional[tuple] = None
-        # Ends the process if stdout is still open this long after its >EXIT
-        self._exit_timer: Optional[asyncio.Task] = None
-        self._exit_seen = False
+        self._reset_exit_state()
 
     # How long stdout is read after >EXIT before the process is ended. A crash dump
     # on Linux and macOS is announced (>DUMP) after >EXIT; ending the task at >EXIT
@@ -203,6 +199,7 @@ class TransportStdio(TransportBase):
 
         try:
             self._debug_message('Starting subprocess stdio monitoring')
+            self._reset_exit_state()
             self._connected = True
 
             # Get process info for connection callback
@@ -277,6 +274,7 @@ class TransportStdio(TransportBase):
 
         try:
             self._debug_message('Accepting subprocess for stdio monitoring')
+            self._reset_exit_state()
             self._connected = True
 
             # Get process info for connection callback
@@ -526,8 +524,19 @@ class TransportStdio(TransportBase):
     def _cancel_exit_timer(self) -> None:
         """Cancel the timer started at >EXIT, unless it is the task running this."""
         timer = getattr(self, '_exit_timer', None)
-        if timer is not None and timer is not asyncio.current_task() and not timer.done():
-            timer.cancel()
+        if timer is not None and timer is not asyncio.current_task():
+            if not timer.done():
+                timer.cancel()
+            self._exit_timer = None
+
+    def _reset_exit_state(self) -> None:
+        """Forget a previous session's >EXIT, so a reused transport starts clean."""
+        self._cancel_exit_timer()
+        # The disconnect an >EXIT asked for, held until stdout has been read to its end
+        self._exit_disconnect: Optional[tuple] = None
+        # Ends the process if stdout is still open exit_output_timeout after its >EXIT
+        self._exit_timer: Optional[asyncio.Task] = None
+        self._exit_seen = False
 
     async def _read_stream(self, stream: asyncio.StreamReader, stream_name: str) -> None:
         """

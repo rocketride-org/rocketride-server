@@ -642,7 +642,8 @@ async def _run_child(script, *, exit_output_timeout=5.0, then=None):
     Args:
         script: The child's source; it writes protocol lines to stdout.
         exit_output_timeout: How long stdout is read after >EXIT.
-        then: Optional coroutine function run with the transport once it is connected.
+        then: Optional coroutine function run with the transport and an event set
+            once its ``apaevt_exit`` has arrived.
 
     Returns:
         tuple: (timeline, disconnects, process). The timeline lists the console output
@@ -663,10 +664,13 @@ async def _run_child(script, *, exit_output_timeout=5.0, then=None):
     transport.exit_output_timeout = exit_output_timeout
     timeline, disconnects = [], []
     gone = asyncio.Event()
+    exited = asyncio.Event()
 
     async def on_receive(message):
         if message.get('event') == 'output':
             timeline.append(message['body']['output'].strip())
+        elif message.get('event') == 'apaevt_exit':
+            exited.set()
 
     async def on_disconnected(reason, has_error):
         timeline.append('disconnected')
@@ -685,7 +689,7 @@ async def _run_child(script, *, exit_output_timeout=5.0, then=None):
     )
     await transport.connect()
     if then is not None:
-        await then(transport)
+        await then(transport, exited)
     await asyncio.wait_for(gone.wait(), timeout=10)
     # Let a second, unwanted disconnect show itself, then keep what the transport sent
     # on its own: the cleanup below reports its own 'Disconnected by request'
@@ -737,13 +741,59 @@ async def test_a_disconnect_requested_after_exit_still_sends_the_exit():
     """Stopping the transport while it reads past >EXIT ends it at once with the exit's reason first."""
     script = "import time; print('>EXIT*0*bye*', flush=True); time.sleep(60)"
 
-    async def stop_soon(transport):
-        await asyncio.sleep(0.3)
+    async def stop_after_exit(transport, exited):
+        # Stop only once the >EXIT has been read, however long the child takes to start
+        await asyncio.wait_for(exited.wait(), timeout=10)
         await transport.disconnect()
 
     started = asyncio.get_running_loop().time()
-    _, disconnects, process = await _run_child(script, exit_output_timeout=30, then=stop_soon)
+    _, disconnects, process = await _run_child(script, exit_output_timeout=30, then=stop_after_exit)
 
     assert asyncio.get_running_loop().time() - started < 10
     assert process.returncode is not None
     assert disconnects == [('Process exited: bye (code: 0)', False), ('Disconnected by request', False)]
+
+
+@pytest.mark.asyncio
+async def test_a_reused_transport_sends_the_next_sessions_disconnect():
+    """The exit a finished session read does not carry over to the next session."""
+    import sys
+
+    transport = TransportStdio()
+    transport.exit_output_timeout = 5.0
+    disconnects = []
+    gone = asyncio.Event()
+
+    async def on_disconnected(reason, has_error):
+        disconnects.append(reason)
+        gone.set()
+
+    async def nothing(*_args):
+        pass
+
+    transport.bind(
+        on_debug_message=lambda *_: None,
+        on_debug_protocol=lambda *_: None,
+        on_receive=nothing,
+        on_connected=nothing,
+        on_disconnected=on_disconnected,
+    )
+
+    for script in ("print('>EXIT*0*first*', flush=True)", "print('second session', flush=True)"):
+        transport._process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            '-c',
+            script,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        gone.clear()
+        await transport.connect()
+        await asyncio.wait_for(gone.wait(), timeout=10)
+        await asyncio.sleep(0.2)
+        await transport.disconnect()
+
+    # Each session's own reason, then the requested disconnect after it
+    assert disconnects[0] == 'Process exited: first (code: 0)'
+    assert 'stdout terminated' in disconnects
