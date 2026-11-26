@@ -913,7 +913,11 @@ class TaskMetrics:
                 return
 
         # Wait one interval before first real sample
-        await asyncio.sleep(self.sample_interval)
+        try:
+            await asyncio.wait_for(self._stop_monitoring.wait(), timeout=self.sample_interval)
+            return  # Stop signal received
+        except asyncio.TimeoutError:
+            pass  # Take the first sample
 
         while not self._stop_monitoring.is_set():
             current_time = time.time()

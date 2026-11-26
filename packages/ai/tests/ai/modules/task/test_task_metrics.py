@@ -1019,6 +1019,22 @@ async def test_monitoring_loop_bills_nothing_without_a_reading(fake_psutil, no_g
     assert status.metrics.cpu_memory_mb == pytest.approx(256.0)
 
 
+async def test_a_stop_in_the_first_interval_ends_the_loop_at_once(fake_psutil, no_gpu):
+    """A pod sampler's 15 s first interval does not hold the stop for CONST_METRICS_STOP_TIMEOUT."""
+    sampler = _Sampler([(80.0, 256 * 1024 * 1024)], min_interval=15.0)
+    tm, _ = _make_sampled(fake_psutil, sampler)
+    tm._report_to_billing_system = MagicMock(side_effect=lambda: asyncio.sleep(0))
+    tm._audit_task_usage = MagicMock(side_effect=lambda: asyncio.sleep(0))
+
+    tm.start_monitoring()
+    await asyncio.sleep(0)  # the loop is in its first wait
+    loop_task = tm._monitoring_task
+    await tm.stop_monitoring()
+
+    assert loop_task.done() and not loop_task.cancelled()
+    assert sampler.calls == 0
+
+
 async def test_monitoring_loop_counts_the_time_a_reading_takes(fake_psutil, no_gpu, monkeypatch):
     """The interval ends when the reading arrives: a stop asked for during a slow read still bills it."""
     clock = [1000.0]
