@@ -48,12 +48,31 @@ from depends import depends as _depends
 # requirements.txt before importing anything else from this module.
 _depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
+import hmac
+import ipaddress
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketlib import debug
 
 from ..base import ENV_MASK, AccountBase, env_changes
+
+
+def _is_loopback(host: str) -> bool:
+    """
+    Whether a bind address only accepts connections from this machine.
+
+    ``localhost`` and loopback IPs (127.0.0.0/8, ::1) do. Anything else,
+    including an empty host, 0.0.0.0, :: and other hostnames, is treated as
+    reachable from the network.
+    """
+    host = (host or '').strip().strip('[]')
+    if host.lower() == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _env_line(name: str, value: str) -> str:
@@ -161,8 +180,11 @@ class Account(AccountBase):
         """
         Authenticate a credential against the ``ROCKETRIDE_APIKEY`` environment variable.
 
-        Uses ``hmac.compare_digest`` for a constant-time comparison that avoids
-        leaking the secret key length or content via timing side-channels.
+        With ``ROCKETRIDE_APIKEY`` set, the credential must equal it, compared
+        with ``hmac.compare_digest`` so the comparison takes the same time
+        whatever the credential. With it unset, any credential is accepted:
+        that is the local developer mode, and ``init_account`` refuses to start
+        an engine bound beyond loopback in it.
 
         Args:
             credential (str): The raw API key supplied by the connecting client.
@@ -170,8 +192,8 @@ class Account(AccountBase):
         Returns:
             AccountInfo: A fully-populated AccountInfo for the local developer
                 identity if the credential matches.
-            Tuple[int, str]: A ``(401, message)`` error tuple if authentication
-                fails or no key has been configured.
+            Tuple[int, str]: A ``(401, message)`` error tuple if a key is
+                configured and the credential does not match it.
         """
         # Import AccountInfo here (not at module level) to avoid a circular
         # import because ai.account.__init__ imports this module.
@@ -181,9 +203,7 @@ class Account(AccountBase):
         # authentication has not been configured at all.
         oss_key = os.environ.get('ROCKETRIDE_APIKEY', '')
 
-        # OSS is a lot looser on the key -- whatever is specified in ROCKETRIDE_APIKEY
-        # on the server env is what we expect. Up to 3rd part and key rotation
-        if oss_key and oss_key != credential:
+        if oss_key and not hmac.compare_digest(oss_key.encode('utf-8'), (credential or '').encode('utf-8')):
             # Key is configured but the credential doesn't match — reject.
             return (401, 'Invalid API key')
 
@@ -279,16 +299,34 @@ class Account(AccountBase):
 
     async def init_account(self, server) -> None:
         """
-        OSS startup: seed the built-in apps from apps.json into the registry.
+        OSS startup: refuse an unauthenticated network bind, then seed the
+        built-in apps from apps.json into the registry.
+
+        Without ``ROCKETRIDE_APIKEY``, ``authenticate`` accepts any credential
+        as the full-admin local developer. That is only safe when nothing but
+        this machine can connect, so an engine bound to any other address
+        (``--host=0.0.0.0``, as the Docker image does) refuses to start until
+        a key is set. The SaaS account refuses to start without Zitadel in the
+        same way.
 
         Single process, so seeding rides the init sequence directly (SaaS
         runs the shared seeder from its pod-deploy tool instead — many pods
-        must not race at boot). Failures never block startup: the engine is
-        useful without the app rail.
+        must not race at boot). Seeding failures never block startup: the
+        engine is useful without the app rail.
 
         Args:
-            server: ``WebServer`` instance (unused by OSS).
+            server: ``WebServer`` instance; its ``config['host']`` is the bind address.
+
+        Raises:
+            RuntimeError: The bind address is not loopback and ``ROCKETRIDE_APIKEY`` is unset.
         """
+        host = (getattr(server, 'config', None) or {}).get('host', 'localhost')
+        if not os.environ.get('ROCKETRIDE_APIKEY') and not _is_loopback(host):
+            raise RuntimeError(
+                f'Refusing to listen on {host!r} without ROCKETRIDE_APIKEY: without a key the engine '
+                'accepts any credential as an admin. Set ROCKETRIDE_APIKEY, or bind to 127.0.0.1.'
+            )
+
         try:
             await self._seed_builtin_apps()
         except Exception as exc:

@@ -109,6 +109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **server**: a task whose engine exits during the start, for example on a `--log.file` in a folder that does not exist, no longer stays starting. A start that waits for the task now fails at once with the task's exit message instead of after 300 s with "Task stuck in state 2", a launch no longer leaves the task starting, and the next start of the pipeline no longer fails with "Pipeline is already running" (#3370)
 - **tool_tenki**: a pipeline whose **Allowed outbound domains** or private repositories' URL prefix (`allow_domains`, `git_auth_url`) named an IP address, in any form (`10.0.0.5`, `127.1`, `0x7f000001`), started and its sandbox then reached nothing, since the egress filter matches hostnames only. It now stops at startup with an error that says so; an allowlist with both an IP address and an entry Luxor refuses names both in one error (#2950)
 
+### Security
+- **server**: an engine without `ROCKETRIDE_APIKEY` now refuses to start unless it listens on loopback (`127.0.0.1` or `localhost`); before, it accepted any credential as the admin on every address it listened on. The key is compared in constant time. Breaking: the Docker image listens on `0.0.0.0`, so `docker run` and `docker compose` need `ROCKETRIDE_APIKEY`; docker compose publishes the engine on 127.0.0.1 by default (`ENGINE_BIND` widens it), the Helm chart requires `engine.secrets.ROCKETRIDE_APIKEY` (or the key in `engine.existingSecret`), and the VS Code extension starts its Docker engine with a key. Update the extension before pulling the new image into its Docker engine.
 ## [3.6.0] - 2026-11-04
 
 ### Added

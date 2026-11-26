@@ -27,9 +27,14 @@ services:
         ENGINE_BASE: engine-base
       additional_contexts:
         engine-base: service:engine-base
+    # Published on loopback only by default. Set ENGINE_BIND=0.0.0.0 to reach it
+    # from other machines, and only behind TLS.
     ports:
-      - '${ENGINE_PORT:-5565}:5565'
+      - '${ENGINE_BIND:-127.0.0.1}:${ENGINE_PORT:-5565}:5565'
     environment:
+      # Required: the engine binds 0.0.0.0 inside the container and refuses to
+      # start without a key. Clients send the same value.
+      - ROCKETRIDE_APIKEY=${ROCKETRIDE_APIKEY:-}
       - ROCKETRIDE_LOG_LEVEL=${ROCKETRIDE_LOG_LEVEL:-info}
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-rocketride}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rocketride}
       - MILVUS_HOST=milvus

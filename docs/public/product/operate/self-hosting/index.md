@@ -104,8 +104,10 @@ curl http://localhost:5565/version
 ## Connect a client
 
 Point any [SDK](/clients/typescript) or the [CLI](/connect/cli) at the engine. The
-client must send a key. Use the key the engine was started with; an engine started
-without `ROCKETRIDE_APIKEY` accepts any non-empty value:
+client must send a key. Use the key the engine was started with. An engine started
+without `ROCKETRIDE_APIKEY` accepts any non-empty value, and only starts that way when
+it listens on `127.0.0.1` or `localhost`; on any other address it refuses to start
+until the key is set:
 
 ```bash
 ROCKETRIDE_URI=ws://localhost:5565

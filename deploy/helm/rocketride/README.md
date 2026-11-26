@@ -61,9 +61,12 @@ Key parameters:
 ```yaml
 engine:
   secrets:
+    ROCKETRIDE_APIKEY: 'a-long-random-value'
     OPENAI_API_KEY: 'sk-...'
     POSTGRES_PASSWORD: 'my-password'
 ```
+
+`ROCKETRIDE_APIKEY` is required: the engine listens on all interfaces in the pod and refuses to start without it. Clients send the same value. With `engine.existingSecret`, put `ROCKETRIDE_APIKEY` in that Secret.
 
 **Production (recommended)**: use `engine.existingSecret` to reference a Secret you manage externally (Vault, AWS Secrets Manager, Sealed Secrets, etc.):
 

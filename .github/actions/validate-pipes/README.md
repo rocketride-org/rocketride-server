@@ -67,12 +67,13 @@ jobs:
 ## Running the same check locally
 
 ```bash
-docker run -d --name rocketride-engine -p 5565:5565 \
+docker run -d --name rocketride-engine -p 127.0.0.1:5565:5565 \
+  -e ROCKETRIDE_APIKEY=rr_local \
   ghcr.io/rocketride-org/rocketride-engine:latest
 curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://127.0.0.1:5565/version
 
 pip install rocketride
-ROCKETRIDE_URI=http://127.0.0.1:5565 rocketride validate examples/*.pipe
+ROCKETRIDE_URI=http://127.0.0.1:5565 ROCKETRIDE_APIKEY=rr_local rocketride validate examples/*.pipe
 
 docker rm -f rocketride-engine
 ```

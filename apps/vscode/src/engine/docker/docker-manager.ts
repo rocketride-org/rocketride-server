@@ -26,6 +26,14 @@ export const IMAGE_BASE = 'ghcr.io/rocketride-org/rocketride-engine';
 /** The fixed port the engine container exposes and binds to localhost. */
 export const CONTAINER_PORT = 5565;
 
+/**
+ * API key the engine container is started with. The engine in the image binds
+ * all interfaces inside the container and refuses to start without a key; the
+ * port is published on 127.0.0.1 only, and the extension connects with this
+ * key (connection.ts falls back to it for docker mode, as does the 'test' command).
+ */
+export const CONTAINER_APIKEY = 'MYAPIKEY';
+
 /** Possible states of the Docker-managed engine. */
 export type DockerState = 'not-installed' | 'no-docker' | 'starting' | 'running' | 'stopping' | 'stopped';
 
@@ -148,6 +156,7 @@ export class DockerManager {
 			Image: fullImage,
 			...(this.needsPlatformOverride ? { platform: 'linux/amd64' } : {}),
 			ExposedPorts: { [`${CONTAINER_PORT}/tcp`]: {} },
+			Env: [`ROCKETRIDE_APIKEY=${CONTAINER_APIKEY}`],
 			HostConfig: {
 				PortBindings: {
 					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT), HostIp: '127.0.0.1' }]
@@ -247,6 +256,7 @@ export class DockerManager {
 			Image: fullImage,
 			...(this.needsPlatformOverride ? { platform: 'linux/amd64' } : {}),
 			ExposedPorts: { [`${CONTAINER_PORT}/tcp`]: {} },
+			Env: [`ROCKETRIDE_APIKEY=${CONTAINER_APIKEY}`],
 			HostConfig: {
 				PortBindings: {
 					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT), HostIp: '127.0.0.1' }]

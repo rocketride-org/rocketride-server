@@ -161,7 +161,8 @@ jobs:
           set -u
           # -i is load-bearing: with no stdin the engine's watcher thread
           # busy-polls /dev/null and pins a core (diagnosed in saas #280).
-          docker run -d -i --name rr-smoke -p 5565:5565 "${IMAGE}@${DIGEST}"
+          # The engine refuses to listen on 0.0.0.0 without a key; any value will do here.
+          docker run -d -i --name rr-smoke -p 127.0.0.1:5565:5565 -e ROCKETRIDE_APIKEY=rr-smoke "${IMAGE}@${DIGEST}"
 
           fail() {
             echo "::error::$1"
