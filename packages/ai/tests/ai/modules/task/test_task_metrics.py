@@ -1060,3 +1060,74 @@ async def test_monitoring_loop_counts_the_time_a_reading_takes(fake_psutil, no_g
 
     assert sampler.calls == 1
     assert tm._duration_seconds == pytest.approx(5.0)
+
+
+# One sample interval, in real seconds for the loop's wait and in fake seconds on the clock
+_TICK = 0.05
+
+
+class _ClockSampler(_Sampler):
+    """Readings on a fake clock: each arrives a given time after the last pass; the last one stops the loop."""
+
+    def __init__(self, clock, steps):
+        """``steps``: ``(seconds, reading)``, or ``(seconds, reading, ready_after)`` to open billing during the read."""
+        super().__init__([step[1] for step in steps])
+        self.clock = clock
+        self.steps = list(steps)
+        self.metrics = None
+
+    async def sample(self):
+        """Move the clock to the reading's arrival, calling set_service_up(True) on the way when the step says."""
+        seconds, _, *ready_after = self.steps.pop(0)
+        if ready_after:
+            self.clock[0] += ready_after[0]
+            self.metrics.set_service_up(True)
+            seconds -= ready_after[0]
+        self.clock[0] += seconds
+        if not self.steps:
+            self.metrics._stop_monitoring.set()
+        return await super().sample()
+
+
+def _on_clock(fake_psutil, monkeypatch, steps):
+    """A sampled TaskMetrics on a fake clock at 1000.0, its interval _TICK, with no billing report."""
+    clock = [1000.0]
+    monkeypatch.setattr(task_metrics, 'time', SimpleNamespace(time=lambda: clock[0]))
+    sampler = _ClockSampler(clock, steps)
+    tm, status = _make_sampled(fake_psutil, sampler, sample_interval=_TICK)
+    sampler.metrics = tm
+    tm._report_to_billing_system = MagicMock(side_effect=lambda: asyncio.sleep(0))
+    tm._audit_task_usage = MagicMock(side_effect=lambda: asyncio.sleep(0))
+    return tm, status, clock, sampler
+
+
+async def test_readiness_during_a_read_bills_only_the_time_after_it(fake_psutil, no_gpu, monkeypatch):
+    """Ready 0.5 into a read of 2 intervals: 1.5 are billed, not 2; a second ready signal later cuts nothing."""
+    reading = (80.0, 256 * 1024 * 1024)
+    tm, _, _, _ = _on_clock(
+        fake_psutil,
+        monkeypatch,
+        [(_TICK, reading), (2 * _TICK, reading, 0.5 * _TICK), (_TICK, reading, 0.5 * _TICK)],
+    )
+
+    tm.start_monitoring()
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    # Gated first interval: 0; then 1.5 of the second and the whole third
+    assert tm._duration_seconds == pytest.approx(2.5 * _TICK)
+    assert tm._cpu_seconds == pytest.approx(80.0 * 2.5 * _TICK / 100.0)
+
+
+async def test_readiness_during_the_wait_bills_only_the_time_after_it(fake_psutil, no_gpu, monkeypatch):
+    """Ready 0.4 into the loop's wait: the reading at 1.0 bills 0.6 of the interval, not all of it."""
+    tm, _, clock, sampler = _on_clock(fake_psutil, monkeypatch, [(0.6 * _TICK, (80.0, 256 * 1024 * 1024))])
+
+    tm.start_monitoring()
+    await asyncio.sleep(0)  # the loop is in its first wait
+    clock[0] += 0.4 * _TICK
+    tm.set_service_up(True)
+    assert sampler.calls == 0
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    assert sampler.calls == 1
+    assert tm._duration_seconds == pytest.approx(0.6 * _TICK)

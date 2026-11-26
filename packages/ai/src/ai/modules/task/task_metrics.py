@@ -424,6 +424,9 @@ class TaskMetrics:
         # suppressed until set_service_up(True) is called. Resource metrics
         # (peaks, averages) are still tracked so the dashboard shows live usage.
         self._billing_gated: bool = True
+        # When the gate last opened (time.time()), None while it is closed: an
+        # interval that the gate opened in is billed only from that moment
+        self._billing_opened_at: Optional[float] = None
 
         # Subprocess-reported metrics (absolute snapshots from >MET* protocol)
         self._subprocess_counters: dict[str, float] = {}
@@ -487,12 +490,31 @@ class TaskMetrics:
     def set_service_up(self, value: bool) -> None:
         """Signal that the pipeline is ready (or no longer ready) to accept data.
 
-        When the pipeline signals serviceUp, billing accumulation begins.
+        When the pipeline signals serviceUp, billing accumulation begins, from
+        this moment on: the interval it lands in is billed only after it.
         Resource metrics (peaks, averages) are tracked regardless of this flag.
         """
         if value and self._billing_gated:
             debug('[TaskMetrics] Pipeline ready — billing accumulation started')
+            self._billing_opened_at = time.time()
+        elif not value:
+            self._billing_opened_at = None
         self._billing_gated = not value
+
+    def _ready_seconds(self, start: float, end: float) -> float:
+        """
+        The seconds of ``[start, end]`` after the billing gate opened.
+
+        Args:
+            start: The start of the stretch, as ``time.time()``.
+            end: Its end.
+
+        Returns:
+            The seconds, never below zero; zero while the gate is closed.
+        """
+        if self._billing_opened_at is None:
+            return 0.0
+        return max(0.0, end - max(start, self._billing_opened_at))
 
     def _sample_cpu_memory(self) -> None:
         """
@@ -651,7 +673,7 @@ class TaskMetrics:
         startup time (model loading, dependency installation).
 
         Args:
-            interval: Time elapsed since last sample (seconds)
+            interval: The seconds to bill: the time since the last sample, from readiness on
         """
         # Track peaks (user-facing — always, regardless of billing gate)
         self._status.metrics.peak_cpu_percent = max(
@@ -927,7 +949,6 @@ class TaskMetrics:
                 reading = await self._sampler.sample() if self._sampler is not None else None
                 # The interval ends when the reading arrives, so the read itself is counted
                 current_time = time.time()
-                interval = current_time - last_sample_time
 
                 async with self._metrics_lock:
                     # Sample current metrics
@@ -938,9 +959,10 @@ class TaskMetrics:
                     self._sample_gpu()
 
                     # Accumulate into totals; a sampler with no reading left the last
-                    # values in place, which are not billed again
+                    # values in place, which are not billed again. Readiness may have come
+                    # during the wait or the read: only the time after it is billed
                     if self._sampler is None or reading is not None:
-                        self._accumulate_sample(interval)
+                        self._accumulate_sample(self._ready_seconds(last_sample_time, current_time))
 
                     # Check if 5 minutes have elapsed since last billing report
                     time_since_last_report = current_time - self._last_report_time
