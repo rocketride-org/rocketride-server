@@ -9,6 +9,7 @@ from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
 from ai.common.llm_tools import InvalidTurn, ToolsUnsupported, is_turn
 from ai.common.model_gateway import HostedModelError
+from ai.common.utils import error_text
 
 
 def _turn_error(e: Exception) -> AnswerError:
@@ -27,9 +28,14 @@ def _turn_error(e: Exception) -> AnswerError:
     return AnswerError(code='provider_error', message=f'the model provider call failed ({type(e).__name__})')
 
 
-def _shown_error(e: Exception) -> str:
-    """The error as a text answer and the log show it: a hosted refusal is already a sentence."""
-    return str(e) if isinstance(e, HostedModelError) else f'{type(e).__name__}: {e}'
+def _shown_error(e: Exception, *, answer: bool = False) -> str:
+    """The error as the log shows it, or with *answer* as a text answer shows it.
+
+    A hosted refusal is already a sentence. An answer carries no engine source path.
+    """
+    if isinstance(e, HostedModelError):
+        return str(e)
+    return error_text(e, with_type=True) if answer else f'{type(e).__name__}: {e}'
 
 
 class LLMBase(IInstanceBase):
@@ -123,7 +129,8 @@ class LLMBase(IInstanceBase):
                 if is_turn(question):
                     answer = Answer(error=_turn_error(e))
                 else:
-                    err_msg = f'**LLM error** — {_shown_error(e)}'
+                    # The answer is shown to the user: no engine source path. The log keeps it.
+                    err_msg = f'**LLM error** — {_shown_error(e, answer=True)}'
                     answer = Answer()
                     answer.setAnswer(err_msg)
                 # A turn that failed after burning tokens still spent them: the adapters

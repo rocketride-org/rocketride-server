@@ -3,6 +3,8 @@ Small shared utility modules.
 
 Public surface:
 - ``safe_str`` — convert any value to a string without raising.
+- ``error_text`` — an exception's message for user-facing text, without the engine's
+  source location.
 - ``flatten_content_blocks`` — split a provider response's ``content``
   (string, or Anthropic-style typed blocks) into visible text and reasoning.
 - ``normalize_tool_input``, ``validate_tool_input_schema``, and the
@@ -60,7 +62,7 @@ from .image_utils import (
 )
 from .debugger_utils import register_debugger_thread
 from .pinned_http import HostResolutionError, pinned_session, resolve_public_addresses
-from .string_utils import safe_str
+from .string_utils import error_text, safe_str
 from .tool_args import (
     int_arg,
     normalize_tool_input,
@@ -92,6 +94,7 @@ __all__ = [
     'int_arg',
     'decode_ndarray',
     'encode_ndarray',
+    'error_text',
     'image_to_bytes',
     'langchain_messages_to_transcript',
     'matched_quality',

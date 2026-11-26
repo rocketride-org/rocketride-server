@@ -140,3 +140,10 @@ def test_an_event_field_named_run_id_does_not_lose_the_event(dispatch: Any) -> N
 
 def test_an_event_that_cannot_be_read_still_carries_the_run_id(dispatch: Any) -> None:
     assert dispatch(_UnreadableEvent({})) == [('thinking', {'message': 'Task started', 'run_id': _RUN_ID})]
+
+
+def test_a_failure_event_error_has_no_engine_path(dispatch: Any) -> None:
+    """CrewAI puts str() of the exception in a failure event's error, and the client gets it."""
+    sent = dispatch(_Event({'error': 'Exception: Invalid API key. at (/opt/rocketride/ai/common/chat.py:412)'}))
+
+    assert sent[0][1]['error'] == 'Exception: Invalid API key.'

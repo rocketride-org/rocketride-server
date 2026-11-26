@@ -36,7 +36,7 @@ import time
 from typing import Any, Dict, List, Tuple
 
 from ai.common.schema import Answer, Question
-from ai.common.utils import normalize_tool_input
+from ai.common.utils import error_text, normalize_tool_input
 from rocketlib import IInstanceBase, debug, error, tool_function, warning
 from rocketlib.types import IInvokeLLM
 
@@ -858,7 +858,8 @@ ORDER BY table_schema, table_name, ordinal_position"""
             return
         except Exception as e:
             error(f'db_hotdata: error handling question: {e}')
-            self._emitError(str(e), lanes)
+            # The error is the answer: no engine source path (the log keeps it).
+            self._emitError(error_text(e), lanes)
             return
 
         rows = result.get('rows') or []

@@ -84,6 +84,7 @@ def _install_stubs():
 
     stubs['rocketlib'].ToolDescriptor = object
     stubs['rocketlib'].error = lambda *a, **kw: None
+    stubs['rocketlib'].debug = lambda *a, **kw: None
     stubs['ai.common.agent'].AgentBase = object
     stubs['ai.common.agent'].AgentContext = object
     stubs['ai.common.agent.types'].AgentRunResult = object
@@ -91,6 +92,7 @@ def _install_stubs():
     stubs['ai.common.utils'].langchain_messages_to_transcript = lambda m: ''
     stubs['ai.common.utils'].normalize_bound_tools = lambda t: t
     stubs['ai.common.utils'].safe_str = lambda v: '' if v is None else str(v)
+    stubs['ai.common.utils'].error_text = str
     stubs['langchain_core.messages'].AIMessage = FakeAIMessage
 
     for name, stub in stubs.items():

@@ -23,7 +23,7 @@ from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.llm_adapter import turn_usage
 
-from ai.common.utils import parse_bool, safe_str
+from ai.common.utils import error_text, parse_bool, safe_str
 
 from ._internal.host import AgentContext, AgentHostServices
 from ._internal.utils import (
@@ -284,8 +284,9 @@ class AgentBase(ABC):
 
             except Exception as e:
                 error_type = type(e).__name__
-                error_message = str(e)
-                error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
+                # The answer is shown to the user: no engine source path. The log keeps it.
+                error_message = error_text(e)
+                error(f'agent base _run failed run_id={run_id} type={error_type} message={safe_str(e)}')
                 # A driver can raise before it sends any status (agent_rocketride checks its
                 # verify_tool first), so this exit must report its stop reason itself. A
                 # sub-agent does not: its failure is its parent's tool result.
