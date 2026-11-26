@@ -22,6 +22,7 @@ import zlib
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from rocketlib import AVI_ACTION
 from ai.common.avi.descriptor import build_stream_descriptor
 
@@ -227,3 +228,45 @@ def test_frames_are_counted_with_only_the_image_lane_wired():
 
     assert inst.instance.docs == []
     assert _begin_names(inst) == ['clip.frame0.png', 'clip.frame1.png', 'clip.frame2.png', 'clip.frame3.png']
+
+
+class _FailingCapture(_Capture):
+    """A binding whose image END raises for one frame, as a failing downstream node does.
+
+    The engine raises a node's error back through ``writeImage`` (END is where vision
+    nodes run inference), after the documents lane has already taken the frame.
+    """
+
+    def __init__(self, fail_frame, listeners):
+        """Raise on the image END of frame `fail_frame` (0-based, in the order written)."""
+        super().__init__(listeners)
+        self._fail_frame = fail_frame
+        self._begins = 0
+
+    def writeImage(self, action, mime, buffer=None):  # noqa: N802 (engine method name)
+        """Record the write; raise on the chosen frame's END."""
+        super().writeImage(action, mime, buffer)
+        if action == AVI_ACTION.BEGIN:
+            self._begins += 1
+        if action == AVI_ACTION.END and self._begins - 1 == self._fail_frame:
+            raise RuntimeError('downstream node failed the frame')
+
+
+def test_a_frame_a_downstream_node_failed_keeps_its_ordinal():
+    """The frame after a failed one gets the next number, not the failed frame's.
+
+    The ordinal used to advance only after every lane write returned, so a raise from
+    a downstream node left it where it was and the next frame reused the failed frame's
+    chunk id, name and table row number.
+    """
+    inst = _instance(listeners=('table', 'documents', 'image'))
+    inst.instance = _FailingCapture(fail_frame=1, listeners=('table', 'documents', 'image'))
+
+    inst._frame_callback(_png(), 0, 0.0)
+    with pytest.raises(RuntimeError, match='downstream node failed'):
+        inst._frame_callback(_png(), 1, 1.0)
+    inst._frame_callback(_png(), 2, 2.0)
+
+    assert [row[0] for row in inst._start_times] == [0, 1, 2]
+    assert [doc.metadata.chunkId for doc in inst.instance.docs] == [0, 1, 2]
+    assert _begin_names(inst) == ['clip.frame0.png', 'clip.frame1.png', 'clip.frame2.png']
