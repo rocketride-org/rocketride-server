@@ -431,7 +431,8 @@ What the publication that answers `address` offers a front end: its callable nod
 
 ```python
 answer = await client.interfaces('acme.docBrain')
-databases = answer['interfaces'].get('acme.docBrain', {}).get('database', [])   # [{'nodeId': 'db_main', 'name': 'Ops DB'}]
+databases = answer['interfaces'].get('acme.docBrain', {}).get('database', [])
+# [{'nodeId': 'db_main', 'name': 'Ops DB'}]
 dialect = await client.tool(address='acme.docBrain', node_id=databases[0]['nodeId'], tool='dialect')
 ```
 
