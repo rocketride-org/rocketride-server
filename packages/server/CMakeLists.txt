@@ -193,3 +193,5 @@ include_directories(SYSTEM ${VCPKG_INSTALLED_TRIPLET_DIR})
 # -----------------------------------------------------------------------------
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+
+# DEBUG (#3102 measurement, drop before merge): changes the server source hash, so CI compiles the engine.
