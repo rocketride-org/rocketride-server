@@ -430,28 +430,47 @@ def test_10000_bindings_on_one_slot_leave_no_instance_behind(endpoint):
 
 
 def test_binding_construction_stays_cheap(endpoint):
-    """Constructing a node's instance for a binding costs under 50 us on the C++ path."""
-    import time
+    """A binding that constructs the node's instance costs under 120x the thread CPU of a bare one.
+
+    Alternating samples of both cycles cancel what load adds. The bound is relative to
+    a bare getPipe/putPipe cycle, so a change there moves it; it catches a construction
+    several times slower, not a per-binding class probe, and not one that blocks instead
+    of computing. Each variant is batched to at least 0.125 s of CPU (Windows ticks in
+    15.6 ms steps); the per-test timeout catches a construction that never returns.
+    """
+    from statistics import median
+    from time import thread_time
 
     pipe = endpoint.getPipe('none')
     node = _node(pipe, 'response_1')
     endpoint.putPipe(pipe)
 
-    def cycle(touch, n=2000):
-        started = time.perf_counter()
-        for _ in range(n):
+    def measure(touch, repetitions):
+        started = thread_time()
+        for _ in range(repetitions):
             pipe = endpoint.getPipe('none')
             if touch:
                 node.pyInstance
             endpoint.putPipe(pipe)
-        return (time.perf_counter() - started) / n
+        return thread_time() - started
 
-    # Warm up, then measure the difference the construction makes
-    cycle(True, 200)
-    without = cycle(False)
-    with_instance = cycle(True)
-
-    assert with_instance - without < 50e-6, f'{(with_instance - without) * 1e6:.1f} us per instance'
+    for touch in (False, True):
+        measure(touch, 1)
+    counts = []
+    for touch in (False, True):
+        repetitions = 1
+        while measure(touch, repetitions) < 0.125:
+            repetitions *= 2
+        counts.append(repetitions)
+    samples = [[], []]
+    for _ in range(3):
+        for index, touch in enumerate((False, True)):
+            samples[index].append(measure(touch, counts[index]) / counts[index])
+    without, with_instance = (median(sample) for sample in samples)
+    assert with_instance < 120 * without, (
+        f'{with_instance / without:.1f}x a bare cycle: '
+        f'{without * 1e6:.2f} us bare, {with_instance * 1e6:.2f} us with the construction'
+    )
 
 
 def test_a_failing_end_instance_is_the_puts_error_and_the_slot_is_still_free(monkeypatch):
