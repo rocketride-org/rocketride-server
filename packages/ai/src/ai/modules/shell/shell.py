@@ -56,7 +56,6 @@ derived from request headers.
 
 import hashlib
 import math
-import mimetypes
 import os
 import posixpath
 import re
@@ -458,6 +457,99 @@ async def _authorize_app(token: str, app_id: str) -> bool:
 _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _BUNDLE_CACHE = 'private, max-age=3600'
+
+# A version's dist/ is THIRD-PARTY code served on the MAIN origin (#1022).
+# The shell loads only subresources from it (JS, CSS, JSON, fonts, images,
+# wasm); anything a browser would render as a document when its URL is opened
+# directly (HTML, SVG, XML, PDF, an unknown type) would run the developer's
+# script with the shell's origin and the signed-in user's storage. Those are
+# served as a download inside an opaque-origin sandbox. The type keeps its
+# real value, so an <img> (which ignores both headers) still shows an SVG icon.
+# Only the listed subresource types serve inline, and they get no sandbox
+# policy: a worker started from a dist script takes its CSP from the script's
+# response, and a sandbox there would break it.
+_INLINE_BUNDLE_TYPES = frozenset(
+    {
+        'text/javascript',
+        'application/javascript',
+        'application/x-javascript',
+        'text/css',
+        'application/json',
+        'application/wasm',
+        'text/plain',
+    }
+)
+_INLINE_BUNDLE_PREFIXES = ('font/', 'audio/', 'video/', 'image/')
+_DOCUMENT_HEADERS = {'Content-Security-Policy': 'sandbox', 'Content-Disposition': 'attachment'}
+# Scripts are never stored: a service-worker registration with
+# updateViaCache: 'all' may be answered from the HTTP cache, and a script
+# cached from an ordinary fetch would then skip _serve_versioned's
+# Service-Worker refusal. Vary: Service-Worker on every response keeps any
+# cache that does store a bundle from mixing the two kinds of fetch.
+_SCRIPT_BUNDLE_TYPES = frozenset({'text/javascript', 'application/javascript', 'application/x-javascript'})
+
+
+# The type of each file a dist may ship, fixed here rather than read from the
+# host's mimetypes table: on Windows that table comes from the registry, which
+# may not know .mjs or .woff2 and may register .js as text/plain, so the same
+# file would get different headers on different hosts. Any other extension is
+# served as application/octet-stream, which is a sandboxed download.
+_BUNDLE_TYPES_BY_EXTENSION = {
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.cjs': 'text/javascript',
+    '.css': 'text/css',
+    '.json': 'application/json',
+    '.map': 'application/json',
+    '.wasm': 'application/wasm',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.otf': 'font/otf',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.avif': 'image/avif',
+    '.ico': 'image/vnd.microsoft.icon',
+    '.svg': 'image/svg+xml',
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.txt': 'text/plain',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.xml': 'application/xml',
+    '.xhtml': 'application/xhtml+xml',
+    '.pdf': 'application/pdf',
+}
+
+
+def _bundle_media_type(name: str) -> str:
+    """The served type of one dist file, the same on every host (see above)."""
+    dot = name.rfind('.')
+    known = _BUNDLE_TYPES_BY_EXTENSION.get(name[dot:].lower()) if dot > 0 else None
+    return known or 'application/octet-stream'
+
+
+def _bundle_headers(media_type: str) -> dict:
+    """Response headers for one dist file of the given type (see above)."""
+    headers = {
+        'Cache-Control': 'no-store' if media_type in _SCRIPT_BUNDLE_TYPES else _BUNDLE_CACHE,
+        'Vary': 'Service-Worker',
+        'X-Content-Type-Options': 'nosniff',
+    }
+    inline = media_type in _INLINE_BUNDLE_TYPES or (
+        media_type.startswith(_INLINE_BUNDLE_PREFIXES) and 'svg' not in media_type and 'xml' not in media_type
+    )
+    if not inline:
+        headers.update(_DOCUMENT_HEADERS)
+    return headers
+
+
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
 # 'resolvedAt', 'floor', 'appId'} — HARD expiry (like _app_auth_cache); a
 # resolution whose authentication failed is not cached; every deploy change
@@ -578,6 +670,12 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     # Path discipline: these segments become STORE paths.
     if not _APP_ID_SEG.match(app_id):
         raise HTTPException(status_code=404, detail='Not found')
+    # Never a service worker: the browser marks a registration fetch with
+    # `Service-Worker: script`. A dist script registered as one would sit on
+    # the MAIN origin and intercept the app's later requests even after the
+    # app is pulled or revoked (#1022). Same oracle-free 404 as a miss.
+    if 'service-worker' in request.headers:
+        raise HTTPException(status_code=404, detail='Not found')
     for seg in rest:
         if not seg or seg in ('.', '..') or '\\' in seg or ':' in seg:
             raise HTTPException(status_code=404, detail='Not found')
@@ -593,8 +691,8 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         data = await Store.instance()._store.read_bytes(f'{dist_dir}/{"/".join(rest)}')
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
-    media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
-    headers = {'Cache-Control': _BUNDLE_CACHE}
+    media_type = _bundle_media_type(rest[-1])
+    headers = _bundle_headers(media_type)
     if media_type == 'text/html':
         # Pages reach search through the shell; an HTML file of the build (a snapshot's raw template, wherever
         # the manifest put it, .htm or any case included) is never one to index.
