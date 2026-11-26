@@ -1418,6 +1418,9 @@ importers:
       '@rsbuild/plugin-type-check':
         specifier: ~1.3.5
         version: 1.3.5(@rsbuild/core@2.2.12(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.51.0))(@rspack/core@2.2.8(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))(tslib@2.8.1)(typescript@5.9.3)
+      '@types/jsdom':
+        specifier: 20.0.1
+        version: 20.0.1
       '@types/node':
         specifier: ^20.19.41
         version: 20.19.41
@@ -1430,6 +1433,9 @@ importers:
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
+      jsdom:
+        specifier: 20.0.3
+        version: 20.0.3
       tsx:
         specifier: ~4.23.1
         version: 4.23.1
@@ -19179,9 +19185,13 @@ snapshots:
     dependencies:
       acorn: 8.16.0
 
+  acorn-jsx@5.3.2(acorn@8.18.0):
+    dependencies:
+      acorn: 8.18.0
+
   acorn-walk@8.3.5:
     dependencies:
-      acorn: 8.16.0
+      acorn: 8.18.0
 
   acorn@8.16.0: {}
 
@@ -20911,7 +20921,7 @@ snapshots:
   esast-util-from-js@2.0.1:
     dependencies:
       '@types/estree-jsx': 1.0.5
-      acorn: 8.16.0
+      acorn: 8.18.0
       esast-util-from-estree: 2.0.0
       vfile-message: 4.0.3
 
@@ -23882,8 +23892,8 @@ snapshots:
 
   micromark-extension-mdxjs@3.0.0:
     dependencies:
-      acorn: 8.16.0
-      acorn-jsx: 5.3.2(acorn@8.16.0)
+      acorn: 8.18.0
+      acorn-jsx: 5.3.2(acorn@8.18.0)
       micromark-extension-mdx-expression: 3.0.1
       micromark-extension-mdx-jsx: 3.0.2
       micromark-extension-mdx-md: 2.0.0
@@ -26873,7 +26883,7 @@ snapshots:
   terser@5.48.0:
     dependencies:
       '@jridgewell/source-map': 0.3.11
-      acorn: 8.16.0
+      acorn: 8.18.0
       commander: 2.20.3
       source-map-support: 0.5.21
 

@@ -2511,6 +2511,95 @@ describe('RocketRideClient lifecycle operations', () => {
 		expect(onConnected).toHaveBeenCalledTimes(1);
 	});
 
+
+	it('keeps a newer account update received while restoring monitors', async () => {
+		let accountAtConnected: ReturnType<RocketRideClient['getAccountInfo']>;
+		const client: RocketRideClient = makeClient({
+			onConnected: async () => { accountAtConnected = client.getAccountInfo(); },
+		});
+		await client.addMonitor({ token: 'task-1' }, ['output']);
+
+		const login = loginOutcome(client.login('monitor-account-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'account update socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'account update auth');
+		const account = connectResult('monitor-account');
+		const organization = { id: 'org_monitor-account', name: 'Monitor account', teams: [] };
+		socket.respond(lifecycleRequests('auth', socket)[0].message, {
+			...account,
+			organization: { ...organization, permissions: ['org.admin'] },
+		});
+		await waitForLifecycle(() => lifecycleRequests('rrext_monitor', socket).length === 1, 'held monitor restoration');
+
+		const updated = { ...account, organization: { ...organization, permissions: [] } };
+		await socket.onmessage?.({
+			data: JSON.stringify({ type: 'event', seq: 20_000, event: 'apaext_account', body: updated }),
+		} as MessageEvent);
+		await waitForLifecycle(() => client.getAccountInfo()?.organization?.permissions.length === 0, 'account update');
+		socket.respond(lifecycleRequests('rrext_monitor', socket)[0].message, {});
+
+		await expect(login).resolves.toEqual({ status: 'resolved', value: updated });
+		expect(accountAtConnected).toEqual(updated);
+		expect(client.getAccountInfo()).toEqual(updated);
+	});
+
+	it('keeps the auth isNewUser flag when a buffered account update pushes null', async () => {
+		const client: RocketRideClient = makeClient();
+		await client.addMonitor({ token: 'task-1' }, ['output']);
+
+		const login = loginOutcome(client.login('monitor-new-user-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'new user socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'new user auth');
+		const account = connectResult('monitor-new-user');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, { ...account, isNewUser: true });
+		await waitForLifecycle(() => lifecycleRequests('rrext_monitor', socket).length === 1, 'held monitor restoration');
+
+		const updated = { ...account, isNewUser: null, displayName: 'Refreshed' };
+		await socket.onmessage?.({
+			data: JSON.stringify({ type: 'event', seq: 20_001, event: 'apaext_account', body: updated }),
+		} as MessageEvent);
+		socket.respond(lifecycleRequests('rrext_monitor', socket)[0].message, {});
+
+		await expect(login).resolves.toEqual({ status: 'resolved', value: { ...updated, isNewUser: true } });
+		expect(client.getAccountInfo()).toMatchObject({ displayName: 'Refreshed', isNewUser: true });
+	});
+
+	it('keeps the auth session token when account pushes blank it, during and after login', async () => {
+		const client: RocketRideClient = makeClient();
+		await client.addMonitor({ token: 'task-1' }, ['output']);
+		const apikey = () => (client as unknown as { _apikey?: string })._apikey;
+
+		// A one-shot code-exchange credential: the session token only exists in the auth response.
+		const login = loginOutcome(client.login('cd_one-shot-code'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'blank token socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'blank token auth');
+		const account = connectResult('blank-token');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, account);
+		await waitForLifecycle(() => lifecycleRequests('rrext_monitor', socket).length === 1, 'held monitor restoration');
+
+		// The server blanks userToken on every push (ai/account/models.py to_push_result).
+		const pushed = { ...account, userToken: '', displayName: 'Pushed' };
+		await socket.onmessage?.({
+			data: JSON.stringify({ type: 'event', seq: 20_002, event: 'apaext_account', body: pushed }),
+		} as MessageEvent);
+		socket.respond(lifecycleRequests('rrext_monitor', socket)[0].message, {});
+
+		await expect(login).resolves.toEqual({ status: 'resolved', value: { ...pushed, userToken: account.userToken } });
+		expect(client.getAccountInfo()?.userToken).toBe(account.userToken);
+		expect(apikey()).toBe(account.userToken);
+
+		await socket.onmessage?.({
+			data: JSON.stringify({ type: 'event', seq: 20_003, event: 'apaext_account', body: { ...pushed, displayName: 'Later' } }),
+		} as MessageEvent);
+		expect(client.getAccountInfo()).toMatchObject({ displayName: 'Later', userToken: account.userToken });
+		expect(apikey()).toBe(account.userToken);
+	});
+
 	it('coalesces equivalent PKCE credentials regardless of property insertion order', async () => {
 		const client = makeClient();
 		const firstCredential = {
