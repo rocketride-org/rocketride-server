@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { groupReports, main, normalize, parseLog, renderSummary } from './sanitizer-report.mjs';
+import { KNOWN_THIRD_PARTY, groupReports, main, normalize, parseLog, renderSummary } from './sanitizer-report.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./sanitizer-report.mjs', import.meta.url));
 const ROOT = '/home/u/src/rocketride-server';
@@ -130,6 +130,41 @@ const NO_RETURN_WARNING = (size) =>
 	`==123==WARNING: ASan is ignoring requested __asan_handle_no_return: stack type: default top: 0x7ffd5d5e2000; ` +
 	`bottom 0x7f0b4c3fe000; size: 0x00f1115e4000 (${size})`;
 
+// libc++abi frees the message of a caught std::range_error with its own free; ASan reports an operator new vs
+// free mismatch because the message came from `operator new` through libc++'s std::runtime_error.
+const PYBIND_CALLER = [
+	`    #3 0x7fdb1241f9cc in pybind11::cpp_function::dispatcher(_object*) ${ROOT}/build/pybind11/pybind11.h:1:1`,
+	`    #4 0x7fdb1241f9cd in scan() ${ROOT}/packages/server/engine-lib/engLib/store/python/endpoint.cpp:110:9`,
+];
+const APTEST_CALLER = [`    #3 0x55bd9de5f426 in ap::error::callCheck() ${ROOT}/packages/server/call.hpp:75:13`];
+const knownFree = ({
+	sanitizer = 'AddressSanitizer',
+	header = 'alloc-dealloc-mismatch (operator new vs free)',
+	freeLib = 'libc++abi.so.1',
+	allocLib = 'libc++.so.1',
+	caller = PYBIND_CALLER,
+	after = [],
+	summary = true,
+	allocatedBy = 'allocated by thread T143 here:',
+} = {}) =>
+	text(
+		SEPARATOR,
+		`==18255==ERROR: ${sanitizer}: ${header} on 0x5080058674a0`,
+		`    #0 0x563bc010a2f6 in free (${binary('engine')}+0xc62f6)`,
+		`    #1 0x7fdb16e44bdb in std::range_error::~range_error() (${binary(freeLib)}+0x27bdb)`,
+		`    #2 0x7fdb16e46f63 in __cxa_end_catch (${binary(freeLib)}+0x29f63)`,
+		...caller,
+		'',
+		allocatedBy,
+		`    #0 0x563bc01478ed in operator new(unsigned long) (${binary('engine')}+0x1038ed)`,
+		`    #1 0x7fdb1115859f in std::runtime_error::runtime_error(char const*) (${binary(allocLib)}+0x5259f)`,
+		'',
+		...(summary
+			? [`SUMMARY: AddressSanitizer: alloc-dealloc-mismatch (${binary('e')}+0xc62f6) in free`, '==1==HINT: x']
+			: []),
+		...after
+	);
+
 /** Run main() on a directory and capture its exit code, summary and output. */
 async function run(dir, summaryPath, env = { GITHUB_STEP_SUMMARY: summaryPath, GITHUB_WORKSPACE: ROOT }) {
 	const out = [];
@@ -196,6 +231,54 @@ describe('sanitizer report parsing', () => {
 		);
 	});
 
+	/** A SEGV in a worker thread: the thread trailer comes after `SUMMARY:` and the shadow dump. */
+	const segv = (pid) =>
+		text(
+			SEPARATOR,
+			`==${pid}==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000008 (pc 0x5f0c1b2d3e4f)`,
+			`    #0 0x5f0c1b2d3e4f in ap::Worker::run() ${ROOT}/packages/server/engine-core/Worker.cpp:10:5`,
+			'',
+			`SUMMARY: AddressSanitizer: SEGV ${ROOT}/packages/server/engine-core/Worker.cpp:10:5 in ap::Worker::run()`,
+			'Shadow byte legend (one shadow byte represents 8 application bytes):',
+			'  Addressable:           00'
+		);
+	const trailer = (thread) =>
+		text(
+			`Thread T${thread} created by T0 here:`,
+			`    #0 0x5f0c1b2d0001 in pthread_create ${RUNTIME}/asan_interceptors.cpp:245:3`,
+			`    #1 0x5f0c1b2d0002 in ap::Pool::start() ${ROOT}/packages/server/engine-core/Pool.cpp:20:7`
+		);
+
+	it('treats the thread trailer after a crash report as part of it, one group for every thread', () => {
+		const one = parseLog(segv(11) + trailer(5) + text('==11==ABORTING'), 'asan.11', ROOT);
+		const two = parseLog(segv(12) + trailer(7) + text('==12==ABORTING'), 'asan.12', ROOT);
+		assert.equal(one.length + two.length, 2);
+		const groups = groupReports([...one, ...two]);
+		assert.equal(groups.length, 1);
+		assert.equal(groups[0].count, 2);
+	});
+
+	it('still starts a new report at an error header right after a thread trailer', () => {
+		const log = segv(13) + trailer(5) + ASAN_MISMATCH;
+		const reports = parseLog(log, 'asan.13', ROOT);
+		assert.deepEqual(
+			reports.map((report) => report.kind),
+			['SEGV', 'alloc-dealloc-mismatch']
+		);
+	});
+
+	it('counts the end of a fatal report with no report before it as other output', () => {
+		const reports = parseLog(text('', SEPARATOR, '==77==ABORTING'), 'asan.77', ROOT);
+		assert.equal(reports.length, 1);
+		assert.equal(reports[0].kind, 'other-output');
+	});
+
+	it('counts a thread trailer with no report before it as other output', () => {
+		const reports = parseLog(trailer(5), 'asan.14', ROOT);
+		assert.equal(reports.length, 1);
+		assert.equal(reports[0].kind, 'other-output');
+	});
+
 	it('counts output without a recognizable report as one report', () => {
 		const log = text('==77==AddressSanitizer CHECK failed: asan_allocator.cpp:190 (0x0, 0x3)');
 		const reports = parseLog(log, 'asan.77');
@@ -219,7 +302,7 @@ describe('sanitizer report parsing', () => {
 });
 
 describe('sanitizer report location', () => {
-	it('groups one defect reached through third-party frames in two programs at our first frame', () => {
+	it('groups one defect reached through Catch2 frames in two programs at our first frame', () => {
 		for (const root of [ROOT, '']) {
 			const reports = Object.keys(PROGRAMS).flatMap((program) =>
 				parseLog(
@@ -467,5 +550,161 @@ describe('sanitizer report summary', () => {
 		assert.match(markdown, /<summary>#1 odd&lt;kind&gt;&amp;x: 1 report\(s\), example ub&lt;1&gt;<\/summary>/);
 		assert.match(markdown, /^````text\n\/src\/a\|b`c\.cpp:1:1: runtime error: x\n {3}in ```quoted``` text\n\nSUMMARY: /m);
 		assert.match(markdown, /a\|b`c\.cpp:1:1\n````\n/);
+	});
+
+	it('keeps two locations as two groups when both stacks stop inside a system library', async () => {
+		const append = (source) =>
+			text(
+				'==1==ERROR: AddressSanitizer: heap-use-after-free on address 0x1 at pc 0x2 bp 0x3 sp 0x4',
+				`    #0 0x1 in memmove ${COMMON}/sanitizer_common_interceptors_memintrinsics.inc:98:3`,
+				`    #1 0x2 in std::__1::basic_string<char>::append(char const*) (${binary('lib/libc++.so.1')}+0x1234)`,
+				`    #2 0x3 in ap::Name::set() ${ROOT}/packages/server/engine-core/apLib/${source}:12:3`,
+				'',
+				`SUMMARY: AddressSanitizer: heap-use-after-free (${binary('engtest')}+0x10) in memmove`
+			);
+		await fs.writeFile(path.join(dir, 'asan.1'), append('A.cpp'));
+		await fs.writeFile(path.join(dir, 'asan.2'), append('B.cpp'));
+		const result = await run(dir, summaryPath);
+		assert.equal(result.code, 1);
+		assert.match(result.summary, /2 report\(s\) in 2 group\(s\)/);
+		assert.match(result.summary, /A\.cpp:12:3 in ap::Name::set\(\)` \| 1 \| `asan\.1` \|\n/);
+		assert.match(result.summary, /B\.cpp:12:3 in ap::Name::set\(\)` \| 1 \| `asan\.2` \|\n/);
+	});
+
+	describe('known third-party errors', () => {
+		const write = (name, content) => fs.writeFile(path.join(dir, name), content);
+
+		it('passes on known reports of both variants, as one group with its reason', async () => {
+			await write('report.1', knownFree());
+			await write('report.2', knownFree({ freeLib: 'lib/libc++abi.so.1', caller: APTEST_CALLER }));
+			const result = await run(dir, summaryPath);
+			assert.equal(result.code, 0);
+			assert.equal(result.stderr, '');
+			assert.match(result.summary, /2 report\(s\) in 1 group\(s\), from 2 file\(s\)/);
+			assert.match(result.summary, /`libcxxabi-exception-free` \| 2 \| `report\.1` \|\n/);
+			assert.match(result.summary, /### Known third-party\n\n- `libcxxabi-exception-free`: 2 report\(s\)\. .*issues\/3338/);
+			const row = ['2', 'AddressSanitizer', 'alloc-dealloc-mismatch', 'libcxxabi-exception-free'];
+			assert.equal(result.stdout, `${row.join('\t')}\n`);
+		});
+
+		it('reads the allocating stack under a heading with the thread name', () => {
+			const log = knownFree({ allocatedBy: 'allocated by thread T143 (worker) here:' });
+			assert.equal(parseLog(log, 'report.1', ROOT)[0].known, KNOWN_THIRD_PARTY[0].id);
+		});
+
+		it('matches a release path other than __cxa_end_catch', () => {
+			const log = knownFree().replace('__cxa_end_catch', 'std::exception_ptr::~exception_ptr()');
+			assert.equal(parseLog(log, 'report.1', ROOT)[0].known, KNOWN_THIRD_PARTY[0].id);
+		});
+
+		it('fails when exactly one condition of the entry does not hold', () => {
+			const variants = {
+				'another sanitizer': knownFree({ sanitizer: 'LeakSanitizer' }),
+				'another header': knownFree({ header: 'alloc-dealloc-mismatch (operator new [] vs operator delete)' }),
+				'freed outside libc++abi': knownFree({ freeLib: 'libap.so' }),
+				'allocated outside libc++': knownFree({ allocLib: 'libap.so' }),
+				'no summary': knownFree({ summary: false }),
+			};
+			for (const [name, log] of Object.entries(variants)) {
+				const [report] = parseLog(log, 'report.1', ROOT);
+				assert.equal(report.known, null, name);
+			}
+		});
+
+		it('fails on another libc++abi function that frees a libc++ block (__cxa_demangle shape)', async () => {
+			const log = text(
+				SEPARATOR,
+				'==18255==ERROR: AddressSanitizer: alloc-dealloc-mismatch (operator new vs free) on 0x5080058674a0',
+				`    #0 0x563bc010a2f6 in realloc (${binary('engine')}+0xc62f6)`,
+				`    #1 0x7fdb16e44bdb in __cxa_demangle (${binary('libc++abi.so.1')}+0x27bdb)`,
+				`    #2 0x55bd9de5f426 in ap::demangle() ${ROOT}/packages/server/demangle.cpp:20:5`,
+				'',
+				'allocated by thread T1 here:',
+				`    #0 0x563bc01478ed in operator new(unsigned long) (${binary('engine')}+0x1038ed)`,
+				'    #1 0x7fdb1115859f in std::__1::basic_string<char>::__init(char const*, unsigned long) ' +
+					`(${binary('libc++.so.1')}+0x5259f)`,
+				`    #2 0x55bd9de5f400 in ap::demangle() ${ROOT}/packages/server/demangle.cpp:18:5`,
+				'',
+				`SUMMARY: AddressSanitizer: alloc-dealloc-mismatch (${binary('e')}+0xc62f6) in realloc`
+			);
+			assert.equal(parseLog(log, 'report.1', ROOT)[0].known, null);
+			await fs.writeFile(path.join(dir, 'report.1'), log);
+			const result = await run(dir, summaryPath);
+			assert.equal(result.code, 1);
+		});
+
+		it('fails on a libc++abi free of the right shape but a function that is not an exception destructor', () => {
+			const log = knownFree().replace(
+				'std::range_error::~range_error()',
+				'std::__1::basic_string<char>::~basic_string()'
+			);
+			assert.equal(parseLog(log, 'report.1', ROOT)[0].known, null);
+		});
+
+		it('matches the destructor and constructor names with libc++ inline namespace', () => {
+			const log = knownFree()
+				.replace('std::range_error::~range_error()', 'std::__1::logic_error::~logic_error()')
+				.replace(
+					'std::runtime_error::runtime_error(char const*)',
+					'std::__1::logic_error::logic_error(std::__1::__libcpp_refstring const&)'
+				);
+			assert.equal(parseLog(log, 'report.1', ROOT)[0].known, KNOWN_THIRD_PARTY[0].id);
+		});
+
+		it('fails on a group of ours next to a known one, and counts only the failing ones', async () => {
+			await write('report.1', knownFree());
+			await write('ub.300', UBSAN_FUNCTION);
+			const result = await run(dir, summaryPath);
+			assert.equal(result.code, 1);
+			assert.match(result.summary, /2 report\(s\) in 2 group\(s\)/);
+			assert.match(result.stderr, /^::error::1 sanitizer report\(s\) in 1 group\(s\), not counting 1 known third-party report\(s\): /);
+		});
+
+		it('does not excuse sanitizer output that follows a known report', async () => {
+			const after = {
+				'a failed check': '==18255==AddressSanitizer CHECK failed: asan_allocator.cpp:190 (0x0, 0x3)',
+				'a failed allocation': '==18255==ERROR: AddressSanitizer failed to allocate 0x1000 (4096) bytes',
+				'a nested bug': 'AddressSanitizer: nested bug in the same thread, aborting.',
+				'a warning': '==18255==WARNING: Symbolizer buffer too small',
+			};
+			for (const [name, line] of Object.entries(after)) {
+				await write('report.1', knownFree({ after: [line] }));
+				const result = await run(dir, summaryPath);
+				assert.equal(result.code, 1, name);
+				assert.match(result.summary, /1 report\(s\) are known third-party errors/, name);
+			}
+		});
+
+		it('fails on an orphan DEADLYSIGNAL line next to a known report', async () => {
+			const log = `AddressSanitizer:DEADLYSIGNAL\n${knownFree()}`;
+			const reports = parseLog(log, 'report.1', ROOT);
+			assert.equal(reports.length, 2);
+			assert.ok(reports.some((report) => report.known));
+			assert.ok(reports.some((report) => !report.known));
+			await write('report.1', log);
+			const result = await run(dir, summaryPath);
+			assert.equal(result.code, 1);
+			assert.match(result.stderr, /not counting 1 known third-party report\(s\)/);
+		});
+
+		it('folds the DEADLYSIGNAL lead-in into the failing report that follows it', () => {
+			const reports = parseLog(`AddressSanitizer:DEADLYSIGNAL\n${ASAN_MISMATCH}`, 'report.1', ROOT);
+			assert.equal(reports.length, 1);
+			assert.equal(reports[0].kind, 'alloc-dealloc-mismatch');
+			const next = parseLog(`${knownFree()}AddressSanitizer:DEADLYSIGNAL\n${ASAN_MISMATCH}`, 'report.1', ROOT);
+			assert.equal(next.length, 2);
+		});
+
+		it('names a known entry that matched nothing, and still passes', async () => {
+			const result = await run(dir, summaryPath);
+			const note =
+				'known third-party entry libcxxabi-exception-free matched no report ' +
+				'\\(the tests may not have run\\); remove it';
+			assert.equal(result.code, 0);
+			assert.match(result.stdout, new RegExp(`^::notice::${note}`, 'm'));
+			assert.doesNotMatch(result.stdout, /\t/);
+			const plain = await run(dir, summaryPath, { GITHUB_WORKSPACE: ROOT });
+			assert.match(plain.stdout, new RegExp(`^note: ${note}`, 'm'));
+		});
 	});
 });

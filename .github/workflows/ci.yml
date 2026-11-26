@@ -239,13 +239,13 @@ jobs:
   # ---------------------------------------------------------------------------
   #  Sanitizers — the engine, its C++ test programs and the C++ nodes built
   #  with ASan and UBSan, then server:test and nodes:test against them.
-  #  Opt-in while the engine still has known sanitizer reports: a pull request
-  #  that changes C++ code (`cpp` above) runs it only with the ci:sanitize
-  #  label. Like ci:test, the label is read when the pull request is opened or
-  #  pushed to, so add the label, then push. Manual runs always run it; push,
-  #  schedule and the merge queue never do (a red CI on develop would hold
-  #  back the prerelease). Not in CI OK's needs: it reports sanitizer errors
-  #  without blocking merges.
+  #  Runs on every pull request that changes C++ code (`cpp` above), on the
+  #  weekly schedule (C++ paths that a change outside `cpp` reaches, and
+  #  develop as merged) and on manual runs. Never on push (a red CI on
+  #  develop would hold back the prerelease) and never in the merge queue
+  #  (`changes` runs on pull requests only). In CI OK's needs, so a pull
+  #  request that changes C++ code merges only with no sanitizer report
+  #  outside the report script's known list.
   # ---------------------------------------------------------------------------
   sanitize:
     name: Sanitizers (ASan + UBSan)
@@ -253,9 +253,8 @@ jobs:
     if: >-
       !cancelled() &&
       needs.init.result == 'success' &&
-      (github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && needs.changes.outputs.cpp == 'true' &&
-      contains(github.event.pull_request.labels.*.name, 'ci:sanitize')))
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && needs.changes.outputs.cpp == 'true'))
     uses: ./.github/workflows/_sanitize.yaml
     permissions:
       contents: read
@@ -480,7 +479,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, eslint-scripts, gitleaks, shell-contract]
+    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, eslint-scripts, gitleaks, shell-contract, sanitize]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -494,7 +493,7 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}, sanitize=${{ needs.sanitize.result }}"
             exit 1
           fi
           # A stacked pull request builds without tests, so CI OK stays red and it
@@ -504,7 +503,7 @@ jobs:
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}, sanitize=${{ needs.sanitize.result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.
