@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 import asyncio
 import threading
@@ -27,6 +28,10 @@ from engLib import debug, warning
 
 class TaskNotPrivateError(RuntimeError):
     """The task should be private and is not; __main__ exits non-zero on it."""
+
+
+class TaskRequirementsError(RuntimeError):
+    """The nodes the pipeline names cannot be installed together; __main__ exits non-zero on it."""
 
 
 # Total budget for the shared WebServer to come up: the startup callback plus
@@ -320,6 +325,43 @@ def _announce_channel(server: Optional[Any]) -> None:
     _channel_signal('2')
 
 
+def _solve_pipeline_requirements() -> None:
+    """With the node rail on, solve the requirements of the nodes the pipeline names, and only those, before they load.
+
+    Raises:
+        TaskRequirementsError: Two of them, or one and the server, cannot be installed together.
+    """
+    from depends import RequirementsConflict, ensure_run_constraints, rail_enabled
+
+    from ai.common.node_packages import providers_of
+
+    if not rail_enabled():
+        return
+    with open(sys.argv[1], encoding='utf-8') as file:
+        components = json.load(file)['config']['pipeline'].get('components', [])
+    try:
+        ensure_run_constraints(_node_dirs(providers_of(components)))
+    except RequirementsConflict as e:
+        message = f'Refusing to run: {e}'
+        warning(message)
+        raise TaskRequirementsError(message) from e
+
+
+def _node_dirs(providers: set) -> list:
+    """The folders of the Python nodes behind these providers; a C++ node and an unknown provider have none."""
+    import importlib.util
+
+    from rocketlib import getServiceDefinition
+
+    dirs = set()
+    for provider in providers:
+        module = (getServiceDefinition(provider) or {}).get('path') or ''
+        spec = importlib.util.find_spec(module) if module.startswith('nodes.') else None
+        if spec and spec.submodule_search_locations:
+            dirs.add(list(spec.submodule_search_locations)[0])
+    return sorted(dirs)
+
+
 def require_shared_web_server(node_name: str) -> Any:
     """Return the shared WebServer, or explain why there isn't one.
 
@@ -448,6 +490,9 @@ def run():
     # Let the engine connect now, before the pipeline exists
     _announce_channel(shared_web_server)
 
+    # The run's nodes are on disk (EaaS placed them); solve their requirements before they load
+    _solve_pipeline_requirements()
+
     # Block direct GPU library imports (torch, tensorflow, etc.) when running
     # in model server mode — all GPU inference goes through ModelClient RPC
     from ai.common.models.gpu_guard import install_gpu_guard
@@ -483,7 +528,7 @@ if __name__ == '__main__':
     try:
         run()
 
-    except TaskNotPrivateError:
+    except (TaskNotPrivateError, TaskRequirementsError):
         # Non-zero exit with no >EXIT event: the engine records the task as
         # ended abnormally rather than completed.
         sys.exit(1)

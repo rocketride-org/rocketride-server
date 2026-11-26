@@ -139,6 +139,15 @@ def test_a_server_with_the_node_rail_on_is_private(monkeypatch):
     assert pp.should_make_private() is True
 
 
+def test_privacy_reads_the_rail_switch_where_depends_does(monkeypatch):
+    """A run solves its nodes and the server hides its entries on the same reading of the switch."""
+    import depends
+
+    monkeypatch.delenv(pp.CONST_NODE_RAIL_ENV, raising=False)
+    monkeypatch.setattr(depends, 'rail_enabled', lambda: True, raising=False)
+    assert pp.node_rail_enabled() is True
+
+
 def test_set_failure_raises_oserror(monkeypatch):
     monkeypatch.setattr(pp, '_prctl', lambda option, arg2=0: -1)
     with pytest.raises(OSError, match='PR_SET_DUMPABLE'):

@@ -32,6 +32,7 @@ satisfy:
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import threading
 import time
@@ -749,3 +750,94 @@ def test_setup_installs_the_authenticator_and_the_close_signal(monkeypatch):
     config = server.use.call_args.args[1]
     config['on_closed']('0123abcd')
     assert calls == [('CHN', '1*0123abcd')]
+
+
+# ---------------------------------------------------------------------------
+# _solve_pipeline_requirements — with the node rail on, a run solves its own nodes
+# ---------------------------------------------------------------------------
+
+
+def _task_file(tmp_path, monkeypatch, components):
+    """Write the task file the engine hands the run, as argv[1]."""
+    path = tmp_path / 'task.json'
+    path.write_text(json.dumps({'config': {'pipeline': {'components': components}}}), encoding='utf-8')
+    monkeypatch.setattr(sys, 'argv', ['node.py', str(path)])
+
+
+@pytest.mark.parametrize('rail', [None, '0', '1'])
+def test_a_run_solves_the_requirements_of_the_nodes_it_names_only_with_the_rail_on(monkeypatch, tmp_path, rail):
+    import depends
+
+    if rail is None:
+        monkeypatch.delenv('RR_NODE_RAIL_ENABLED', raising=False)
+    else:
+        monkeypatch.setenv('RR_NODE_RAIL_ENABLED', rail)
+    autopipe = {'provider': 'autopipe', 'config': {'steps': [{'provider': 'store_q'}]}}
+    _task_file(tmp_path, monkeypatch, [{'provider': 'webhook'}, {'provider': 'LLM_X'}, autopipe])
+    solved = []
+    monkeypatch.setattr(node, '_node_dirs', lambda providers: [f'/nodes/{name}' for name in sorted(providers)])
+    monkeypatch.setattr(depends, 'ensure_run_constraints', solved.append)
+
+    node._solve_pipeline_requirements()
+
+    expected = ['autopipe', 'indexer', 'llm_x', 'ocr', 'parse', 'store_q', 'webhook']
+    assert solved == ([[f'/nodes/{name}' for name in expected]] if rail == '1' else [])
+
+
+def test_a_run_whose_nodes_cannot_be_installed_together_stops_and_names_them(monkeypatch, tmp_path):
+    import depends
+
+    monkeypatch.setenv('RR_NODE_RAIL_ENABLED', '1')
+    _task_file(tmp_path, monkeypatch, [{'provider': 'store_a'}, {'provider': 'store_b'}])
+    monkeypatch.setattr(node, '_node_dirs', lambda providers: [])
+
+    def conflict(dirs):
+        raise depends.RequirementsConflict('store_a and store_b cannot be installed together: Because shared==1')
+
+    monkeypatch.setattr(depends, 'ensure_run_constraints', conflict)
+    warned = []
+    monkeypatch.setattr(node, 'warning', warned.append)
+
+    with pytest.raises(node.TaskRequirementsError):
+        node._solve_pipeline_requirements()
+
+    assert warned == ['Refusing to run: store_a and store_b cannot be installed together: Because shared==1']
+
+
+def test_the_folders_of_a_pipelines_python_nodes_are_found_and_cpp_ones_skipped(monkeypatch, tmp_path):
+    import rocketlib
+
+    (tmp_path / 'nodes' / 'llm_q').mkdir(parents=True)
+    (tmp_path / 'nodes' / 'llm_q' / '__init__.py').write_text('')
+    monkeypatch.syspath_prepend(str(tmp_path))
+    definitions = {'llm_q': {'path': 'nodes.llm_q'}, 'parse': {'path': 'parse', 'node': 'cpp'}}
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', definitions.get, raising=False)
+
+    dirs = node._node_dirs({'llm_q', 'parse', 'unknown'})
+
+    assert dirs == [str(tmp_path / 'nodes' / 'llm_q')]
+
+
+def test_a_run_solves_its_requirements_before_the_engine_loads_its_nodes(monkeypatch):
+    import types
+
+    import rocketlib
+
+    order = []
+    # The real guard imports the model stack; only its install call matters here
+    monkeypatch.setitem(
+        sys.modules, 'ai.common.models.gpu_guard', types.SimpleNamespace(install_gpu_guard=lambda: None)
+    )
+    monkeypatch.setattr(node, '_proc_private_error', None)
+    monkeypatch.setattr(node, '_start_event_loop', lambda: None)
+    monkeypatch.setattr(node, '_stop_event_loop', lambda: None)
+    monkeypatch.setattr(node, '_setup_shared_web_server', lambda: (None, None))
+    monkeypatch.setattr(node, '_teardown_shared_web_server', lambda server, future: None)
+    monkeypatch.setattr(node, '_announce_channel', lambda server: order.append('announce'))
+    monkeypatch.setattr(node, '_solve_pipeline_requirements', lambda: order.append('solve'))
+    monkeypatch.setattr(rocketlib, 'monitorStatus', lambda message: None, raising=False)
+    monkeypatch.setattr(rocketlib, 'processArguments', lambda argv: order.append('load'), raising=False)
+
+    node.run()
+
+    assert order == ['announce', 'solve', 'load']

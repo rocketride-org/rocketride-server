@@ -293,7 +293,11 @@ standalone catalog nodes.
 
    No theme flag, no manifest list to maintain.
 
-5. Add `requirements.txt` for dependencies.
+5. Add `requirements.txt` for dependencies. By default the server solves every
+   node's requirements together. On a server started with `RR_NODE_RAIL_ENABLED=1`,
+   a run solves them with the server's own and those of the other nodes its
+   pipeline names, and only those: two nodes whose pins cannot coexist stop only a
+   pipeline that names both, with a message naming them.
 6. Optionally add a `test` section to `services.json` for automated testing (see
    [Node Testing](testing.md)).
 
