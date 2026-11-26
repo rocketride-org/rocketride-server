@@ -188,7 +188,7 @@
 			"title": "Type of Pinecone Connection",
 			"description": "Connect to...",
 			"type": "string",
-			"default": "pod-based",
+			"default": "serverless-dense",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
