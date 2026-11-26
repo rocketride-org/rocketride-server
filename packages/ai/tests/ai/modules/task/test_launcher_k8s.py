@@ -1771,6 +1771,7 @@ async def test_a_stop_whose_deletes_the_cluster_refuses_lets_go_and_a_later_stop
     assert launch.returncode is None and engine.state is EngineState.STOPPING
     assert not engine._termination_lock.locked()
     assert len(said) == 1 and 'left running' in said[0]
+    assert engine.left_running
     assert cli.attach_process.stdin.closed is True
 
     await asyncio.wait_for(TaskEngine.stop_task(engine, reason='user'), timeout=5)
@@ -1779,6 +1780,7 @@ async def test_a_stop_whose_deletes_the_cluster_refuses_lets_go_and_a_later_stop
         ['delete', 'pod', cli.pod, '--grace-period=0', '--force', '--wait=false'],
     ]
     assert cli.deletes('pod') == signals * 2
+    assert engine.left_running
 
 
 async def test_a_task_that_has_ended_is_not_signalled():

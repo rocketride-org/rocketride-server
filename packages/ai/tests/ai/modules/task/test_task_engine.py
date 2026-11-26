@@ -2747,6 +2747,39 @@ async def test_a_spawn_stop_ends_by_its_term_and_waits_for_the_teardown(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_a_spawn_stop_that_lets_go_after_its_child_ended_holds_no_key(monkeypatch):
+    """The child ends on its TERM, but its teardown never starts (no output reader here): the stop lets go.
+
+    Only a launch that still runs is left running; this one has its exit code.
+    """
+    monkeypatch.setattr('ai.modules.task.task_engine.CONST_STOP_WAIT_TIMEOUT', 0.05)
+    monkeypatch.setattr('ai.modules.task.task_engine.warning', MagicMock())
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        '-c',
+        'import time; time.sleep(60)',
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    t = _ending_task(None)
+    t._termination_lock = asyncio.Lock()
+    t._stop_count = 0
+    t._given_up_on = None
+    t._launch = SubprocessLaunch(process, 0, None, SimpleNamespace(release_port=MagicMock()))
+
+    try:
+        await asyncio.wait_for(TaskEngine.stop_task(t, reason='user'), timeout=10)
+
+        assert process.returncode is not None and t.state is EngineState.STOPPING
+        assert not t.left_running
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+
+@pytest.mark.asyncio
 async def test_a_crash_before_running_is_a_failed_start():
     """An engine that crashed before it confirmed running failed its start and is not retried."""
     t = _ending_task(-6, was_running=False)
@@ -3169,7 +3202,7 @@ async def test_start_task_retries_a_run_log_open_that_failed_in_the_previous_run
 
 
 async def test_start_task_clears_the_previous_runs_crash_state(monkeypatch):
-    """A crash and a kill by the server belong to the run they happened in: the next launch starts without them.
+    """A crash, a kill by the server and a stop that gave up belong to the run they happened in: the next launch starts without them.
 
     A relaunch reuses the engine object. A crash left on it would refuse the next run its `Completed`
     and record `error`; a kill flag left on it would hide the next run's own crash.
@@ -3177,12 +3210,14 @@ async def test_start_task_clears_the_previous_runs_crash_state(monkeypatch):
     t, _ = _startable_task(monkeypatch)
     t._crash = 'SIGSEGV (code 11)'
     t._process_killed = True
+    t._given_up_on = MagicMock(returncode=None)
 
     with pytest.raises(_LaunchStop):
         await TaskEngine.start_task(t)
 
     assert t._crash is None
     assert t._process_killed is False
+    assert t._given_up_on is None
 
 
 async def test_an_engine_that_ends_while_the_run_log_opens_ends_the_start(monkeypatch):

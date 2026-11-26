@@ -1042,6 +1042,7 @@ class TaskEngine(DAPBase):
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         shared: bool = False,
+        self_driven: bool = True,
         threads: int = CONST_DEFAULT_MAX_THREADS,
         trace_level: Optional[str] = None,
         client_id: str = '',
@@ -1079,6 +1080,10 @@ class TaskEngine(DAPBase):
             launch_type: Task creation mode (launch/attach)
             shared: True for a shared engine: it has no single owner, so
                 unclaimed work on it reaches no one's state or files (S13)
+            self_driven: Whether the shape's entry source drives itself (a
+                listener, a poller, a scan; ``EngineContent.self_driven``): a
+                second engine of it would take the same input. True unless the
+                server says otherwise, the conservative reading.
             threads: The engine's thread count (policy outside @spec)
             trace_level: The engine's DEFAULT trace level for work outside any
                 binding (``'none'`` on a shared engine, the starting
@@ -1127,6 +1132,7 @@ class TaskEngine(DAPBase):
         self.team_id = team_id
         self.org_id = org_id
         self.shared = shared
+        self.self_driven = self_driven
 
         # Holds: the key of every control that holds this engine, with that
         # control's idle ttl. A hold ENTITLES its control to the engine but
@@ -1228,6 +1234,8 @@ class TaskEngine(DAPBase):
         # Bumped by every stop_task, so a restart can tell whether a stop arrived
         # while it loaded, even on a task whose last run was already stopped
         self._stop_count = 0
+        # The launch a stop gave up on, its signals not taken (left_running)
+        self._given_up_on: Optional[Launch] = None
         # WHY the stop was requested ('user' | 'ttl'); None until requested.
         # A ttl-window expiry is SUCCESS (the run stayed up exactly as
         # configured), so the run-log outcome derives from this.
@@ -3394,6 +3402,12 @@ class TaskEngine(DAPBase):
         """True while a control may take a hold: built, starting or running; never once a stop began."""
         return self.state in (EngineState.NEW, EngineState.STARTING, EngineState.RUNNING)
 
+    @property
+    def left_running(self) -> bool:
+        """True from a stop's give-up until the launch it gave up on has an exit code or the engine has ended."""
+        given_up_on = self._given_up_on
+        return self.state is EngineState.STOPPING and given_up_on is not None and given_up_on.returncode is None
+
     async def wait_for_running(self) -> None:
         """
         Wait until task reaches RUNNING state with sliding timeout.
@@ -3750,11 +3764,12 @@ class TaskEngine(DAPBase):
             self._teardown_done = asyncio.Event()
             self._exit_event_seen = False
             self._exit_event_stop = None
-            # A crash, and a kill by the server, belong to the run they
-            # happened in: a relaunch that exits cleanly must read Completed,
-            # and one that crashes must be classified on its own exit
+            # A crash, a kill by the server and a stop that gave up belong to
+            # the run they happened in: a relaunch that exits cleanly must read
+            # Completed, and one that crashes must be classified on its own exit
             self._crash = None
             self._process_killed = False
+            self._given_up_on = None
             self._stop_reason = None
             self.dormant_reason = None
             self.db_approved = {}
@@ -3986,7 +4001,8 @@ class TaskEngine(DAPBase):
 
         Returns when the run has ended, or ``CONST_STOP_WAIT_TIMEOUT`` after
         the signals when its runtime did not take them: the engine then stays
-        stopping, the task runs on, and a later stop signals it again.
+        stopping (``left_running``), the task runs on, and a later stop signals
+        it again.
 
         Args:
             reason: WHY the stop happens — 'user' (explicit request) or
@@ -4047,6 +4063,7 @@ class TaskEngine(DAPBase):
                         )
                         warning(message)
                         self.debug_message(message)
+                        self._given_up_on = self._launch
                         return
                     await asyncio.sleep(0.1)
 

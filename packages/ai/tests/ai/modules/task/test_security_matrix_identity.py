@@ -153,6 +153,7 @@ def _control(
     control.task.is_task_complete.return_value = False
     control.task.dormant_reason = None
     control.task.stop_task = AsyncMock()
+    control.task.left_running = False
     control.task.wait_terminated = AsyncMock()
     ts._task_control[control.key] = control
     return control
@@ -599,6 +600,7 @@ async def test_s6_start_task_returns_the_control_id_in_the_token_slot_and_the_ad
         task.start_task = AsyncMock()
         task.wait_for_running = AsyncMock()
         task.is_live = True
+        task.left_running = False
         task.release.return_value = 0
         result = await ts.start_task(
             _launch_request(_pipeline('parsePDF')),
@@ -624,6 +626,7 @@ async def _start(ts: TaskServer, request: dict, *, user_id='user-a', developer_i
         task.wait_for_running = AsyncMock()
         task.is_task_complete.return_value = False
         task.is_live = True
+        task.left_running = False
         task.release.return_value = 0
         task.dormant_reason = None
 

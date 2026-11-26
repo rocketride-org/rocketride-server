@@ -171,9 +171,11 @@ left behind.
   `Stopped unexpectedly`, with what happened in its console. A node whose own
   code ends the process with exit code 0 reads the same.
 - A stop that the daemon refuses or does not answer gives up about 40 s after
-  it was asked for, with a warning. The task runs on until it ends, and a later
-  stop signals it again. Under k8s a kill also closes the task's input, so a
-  task ends without the `delete` right on pods.
+  it was asked for, with a warning. The task runs on until it ends; meanwhile a
+  start of the same listener, poller or scan is refused
+  (`TASK_ENGINE_UNAVAILABLE`, reason `stopping`), and a later stop signals it
+  again. Under k8s a kill also closes the task's input, so a task ends without
+  the `delete` right on pods.
 - Task containers can reach whatever the Docker network allows. Restrict
   egress on the host if tasks must not reach your internal network. On Docker
   Desktop they can also reach services on the host's loopback, the engine's

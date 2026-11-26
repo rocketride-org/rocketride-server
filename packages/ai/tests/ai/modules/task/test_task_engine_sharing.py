@@ -1276,6 +1276,7 @@ async def test_a_restart_carries_the_stopped_engines_shape(catalog, engines, clo
     assert engine.engine_key == stopped.engine_key and not engine.shared
     assert engine._threads == 4
     assert engine._env_source is stopped._env_source
+    assert stopped.self_driven is False and engine.self_driven is False
 
 
 @pytest.mark.asyncio
@@ -2161,6 +2162,272 @@ async def test_stopping_an_unknown_engine_says_so():
     with pytest.raises(TaskError) as err:
         await ts.stop_engine('nope')
     assert err.value.code == TaskError.NOT_REGISTERED
+
+
+# =============================================================================
+# A STOP ITS RUNTIME DID NOT TAKE
+# =============================================================================
+
+
+@pytest.fixture
+def unkillable(monkeypatch):
+    """Engines that start as ``engines`` do, in a container whose runtime refuses every stop signal.
+
+    The real ``stop_task`` runs with its waits cut short: it gives up, the
+    engine stays stopping, and its launch runs on (``returncode`` None) until
+    a test ends it. Returns the engines started, in order.
+    """
+    started: List[TaskEngine] = []
+
+    async def runs_on():
+        await asyncio.Event().wait()
+
+    async def start(self, *, credential=None):
+        # The subprocess reports its service up at once; docker wait never answers
+        self.state = EngineState.STARTING
+        self._confirm_running()
+        self._launch = MagicMock(returncode=None, lost=None, wait=AsyncMock(side_effect=runs_on), cleanup=AsyncMock())
+        started.append(self)
+
+    monkeypatch.setattr(TaskEngine, 'start_task', start)
+    monkeypatch.setattr(task_engine, 'CONST_CANCEL_WAIT_TIMEOUT_SECONDS', 0.01)
+    monkeypatch.setattr(task_engine, 'CONST_STOP_WAIT_TIMEOUT', 0.05)
+    monkeypatch.setattr(task_engine, 'warning', MagicMock())
+    monkeypatch.setattr(task_server, 'CONST_TEARDOWN_WAIT_TIMEOUT', 0.01)
+    return started
+
+
+async def _stop_left_running(ts, control) -> TaskEngine:
+    """The user's terminate of ``control``, which its runtime does not take: the engine is left running."""
+    engine = control.task
+    await asyncio.wait_for(ts.stop_task(control.key), timeout=5)
+    assert engine.left_running and engine._launch.kill.call_count == 1
+    return engine
+
+
+def _listener(**kwargs):
+    """A self-driven shape: the prompt as the entry source (no door classType), as a listener's."""
+    return {**_pipeline(**kwargs), 'source': 'prompt_1'}
+
+
+async def _give_up(clock, stop) -> None:
+    """Move the clock past the stop's bound until it gives up; its TERM and KILL waits are real but short."""
+
+    async def until_done():
+        while not stop.done():
+            clock.advance(task_engine.CONST_STOP_WAIT_TIMEOUT)
+            await asyncio.sleep(0.01)
+        await stop
+
+    await asyncio.wait_for(until_done(), timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_a_start_beside_an_engine_left_running_is_refused(catalog, unkillable):
+    """Run a listener, stop it (docker refuses the kill), run it again: no second engine of the key takes its input."""
+    ts = _server()
+    first = await _start(ts, _listener(), user='user-a')
+    engine = await _stop_left_running(ts, first)
+
+    with pytest.raises(TaskError) as refused:
+        await _start(ts, _listener(), user='user-a')
+
+    assert (refused.value.code, refused.value.reason) == (TaskError.ENGINE_UNAVAILABLE, 'stopping')
+    assert refused.value.engineKey == engine.engine_key and 'still runs' in str(refused.value)
+    assert refused.value.address == first.address
+    assert unkillable == [engine]
+    assert ts._engines[engine.engine_key] is engine
+    assert list(ts._task_control) == [first.key]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'pipeline',
+    [
+        pytest.param(_listener(instructions='second draft'), id='same_shape'),
+        # The tool is fed by the prompt: a component nothing feeds is outside the engine's shape
+        pytest.param(
+            _listener(
+                extra={
+                    'id': 'tool_1',
+                    'provider': 'local_tool',
+                    'config': {},
+                    'input': [{'lane': 'text', 'from': 'prompt_1'}],
+                }
+            ),
+            id='changed_shape',
+        ),
+    ],
+)
+async def test_a_restart_over_an_engine_left_running_is_refused_and_keeps_its_predecessor(
+    catalog, unkillable, pipeline
+):
+    """Play on a run whose stop its runtime did not take: the successor is refused, the predecessor stays as it was."""
+    ts = _server()
+    first = await _start(ts, _listener(), user='user-a')
+    engine = await _stop_left_running(ts, first)
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    with pytest.raises(TaskError) as refused:
+        await ts.restart_task({'arguments': {'token': first.control_id, 'pipeline': pipeline}}, conn=conn)
+
+    assert (refused.value.code, refused.value.reason) == (TaskError.ENGINE_UNAVAILABLE, 'stopping')
+    assert unkillable == [engine]
+    assert ts._task_control[first.key] is first and not first.restarting
+    assert first.task is engine and engine.holds == {first.key}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('newer', ['live', 'finished', 'ending'])
+async def test_an_engine_left_running_takes_its_key_back_unless_another_serves_it(catalog, unkillable, clock, newer):
+    """
+    A start during a stop that has not given up builds anew; at the give-up
+    the old engine takes its key back unless that one still serves.
+    """
+    ts = _server()
+    first = await _start(ts, _listener(), user='user-a')
+    old = first.task
+    stopping = asyncio.ensure_future(ts.stop_task(first.key))
+    await asyncio.wait({stopping}, timeout=0)
+
+    second = await _start(ts, _listener(project_id='docBrainCopy'), user='user-a')
+    assert second.task is not old and ts._engines[old.engine_key] is second.task
+    if newer == 'finished':
+        second.task._launch.returncode = 0
+        await _crash(second.task, exit_code=0)  # a clean end: Completed, not dormant
+    elif newer == 'ending':
+        second.task.state = EngineState.STOPPING  # its own teardown runs; it is still in the pool
+    await _give_up(clock, stopping)
+    assert old.left_running
+
+    third = _start(ts, _listener(project_id='docBrainThird'), user='user-a')
+    if newer == 'live':
+        assert (await third).task is second.task and ts._engines[old.engine_key] is second.task
+    else:
+        with pytest.raises(TaskError) as refused:
+            await third
+        assert refused.value.reason == 'stopping' and ts._engines[old.engine_key] is old
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('end', ['exit_code', 'teardown_without_one'])
+async def test_once_the_launch_left_running_ends_the_key_starts_again(catalog, unkillable, end):
+    """
+    The container ended (its exit code, before the teardown), or the teardown
+    ended without one: a start builds anew.
+    """
+    ts = _server()
+    engine = await _stop_left_running(ts, await _start(ts, _listener(), user='user-a'))
+    if end == 'exit_code':
+        engine._launch.returncode = 137
+        assert engine.state is EngineState.STOPPING
+    else:
+        await asyncio.wait_for(engine._terminated(), timeout=5)
+        assert engine.is_task_complete() and engine._launch.returncode is None
+
+    again = await _start(ts, _listener(), user='user-a')
+
+    assert again.task is not engine and ts._engines[engine.engine_key] is again.task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('later', ['terminate', 'operator'])
+async def test_a_later_stop_signals_an_engine_left_running_again_and_holds_its_key_meanwhile(
+    catalog, unkillable, monkeypatch, later
+):
+    """
+    The run's terminate or rrext_engine_stop signals it again; no start slips
+    in while it waits; once it ends it leaves the pool.
+    """
+    ts = _server()
+    first = await _start(ts, _listener(), user='user-a')
+    engine = await _stop_left_running(ts, first)
+    monkeypatch.setattr(task_engine, 'CONST_STOP_WAIT_TIMEOUT', 60)
+    again = asyncio.ensure_future(
+        ts.stop_task(first.key) if later == 'terminate' else ts.stop_engine(engine.engine_key, 'ops')
+    )
+    await asyncio.wait({again}, timeout=0)
+    assert engine._launch.terminate.call_count == 2
+
+    with pytest.raises(TaskError) as refused:
+        await _start(ts, _listener(project_id='docBrainCopy'), user='user-a')
+    assert refused.value.reason == 'stopping' and unkillable == [engine]
+
+    engine._launch.returncode = 137  # the signals are taken at last
+    await asyncio.wait_for(engine._terminated(), timeout=5)  # its teardown ends the stop
+    await asyncio.wait_for(again, timeout=5)
+    assert engine.engine_key not in ts._engines
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('rung', ['spec', 'public'])
+async def test_a_door_engine_left_running_does_not_hold_its_key(catalog, unkillable, rung):
+    """
+    A webhook's requests reach only the engine their control holds: the next
+    start, any org's on a published rung, builds anew.
+    """
+    ts = _server()
+    if rung == 'spec':
+        first = await _start(ts, _pipeline(), user='user-a')
+    else:
+        first = await _publish(ts, _pipeline(), user='user-a', org='org-a')
+    engine = await _stop_left_running(ts, first)
+
+    if rung == 'spec':
+        again = await _start(ts, _pipeline(), user='user-a')
+    else:
+        again = await _publish(ts, _pipeline(), user='user-b', org='org-b')
+
+    assert again.task is not engine and ts._engines[engine.engine_key] is again.task
+    assert unkillable == [engine, again.task]
+
+
+@pytest.mark.asyncio
+async def test_a_dormant_control_stays_dormant_while_an_engine_of_its_key_is_left_running(catalog, unkillable):
+    """
+    A crashed listener's next request is refused while another engine of its
+    key runs on; it stays dormant for the next one.
+    """
+    ts = _server()
+    dormant = await _start(ts, _listener(), user='user-a')
+    crashed = dormant.task
+    await _crash(crashed)
+    assert dormant.dormant
+    engine = await _stop_left_running(ts, await _start(ts, _listener(project_id='docBrainCopy'), user='user-a'))
+
+    with pytest.raises(TaskError) as refused:
+        await ts.ensure_engine(dormant)
+
+    assert refused.value.reason == 'stopping'
+    assert dormant.task is crashed and dormant.dormant and unkillable == [crashed, engine]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reason', ['ttl', 'user'])
+async def test_the_last_stop_after_an_inactivity_stop_gave_up_leaves_no_control_dormant(
+    catalog, unkillable, clock, reason
+):
+    """A deploy control whose engine's inactivity stop gave up is not left dormant by its own last stop."""
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='=user/user-a', project_id='docBrain')
+    control = await _start(
+        ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment, ttl=24 * 3600
+    )
+    engine = control.task
+
+    clock.advance(CONST_ENGINE_IDLE_TTL)
+    await ts._ttl_cycle()
+    await _give_up(clock, next(iter(ts._ttl_stops)))
+    assert engine.left_running and engine.dormant_reason == 'ttl'
+
+    stop = asyncio.ensure_future(ts.stop_task(control.key, reason=reason))
+    await asyncio.wait({stop}, timeout=0)
+    engine._launch.returncode = 137  # the signals are taken this time
+    await asyncio.wait_for(engine._terminated(), timeout=5)
+    await asyncio.wait_for(stop, timeout=5)
+
+    assert engine.state is EngineState.STOPPED and not control.dormant
 
 
 # =============================================================================

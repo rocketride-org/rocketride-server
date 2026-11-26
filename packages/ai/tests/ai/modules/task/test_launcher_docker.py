@@ -1032,6 +1032,7 @@ def _running_engine(launch):
     engine._launch = launch
     engine._termination_lock = asyncio.Lock()
     engine._stop_count = 0
+    engine._given_up_on = None
     engine.debug_message = MagicMock()
     return engine
 
@@ -1063,10 +1064,12 @@ async def test_a_stop_whose_kills_the_daemon_refuses_lets_go_and_a_later_stop_si
     assert launch.returncode is None and engine.state is EngineState.STOPPING
     assert not engine._termination_lock.locked()
     assert len(said) == 1 and 'left running' in said[0]
+    assert engine.left_running
 
     await asyncio.wait_for(TaskEngine.stop_task(engine, reason='user'), timeout=5)
     kills = [c.args for c in cli.calls if c.args[0] == 'kill']
     assert kills == [['kill', '-s', 'TERM', 'c0ffee'], ['kill', 'c0ffee']] * 2
+    assert engine.left_running
     gate.set()
 
 
