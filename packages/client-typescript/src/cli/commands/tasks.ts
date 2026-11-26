@@ -108,17 +108,20 @@ export function registerTaskCommands(program: Command): void {
 	const startCmd = program
 		.command('start')
 		.description('Start a new pipeline')
+		.argument('[pipeline]', 'Path to pipeline configuration file')
 		.option('--pipeline <file>', 'Path to pipeline configuration file (can use ROCKETRIDE_PIPELINE in .env or env var)', process.env.ROCKETRIDE_PIPELINE)
 		.option('--token <token>', 'Optional existing task token for pipeline resume/control (can use ROCKETRIDE_TOKEN in .env or env var)', process.env.ROCKETRIDE_TOKEN)
 		.option('--threads <num>', 'Number of threads to use for pipeline execution', '4')
 		.option('--args <args...>', 'Additional arguments to pass to pipeline execution')
-		.action(async (options) => {
+		.action(async (pipelineArg, cmdOptions) => {
+			const options = typeof pipelineArg === 'object' && pipelineArg !== null && !cmdOptions ? pipelineArg : (cmdOptions || {});
+			const pipelinePath = (typeof pipelineArg === 'string' ? pipelineArg : undefined) || options.pipeline;
 			await runCliCommand(options, async (out) => {
-				if (!options.pipeline) {
-					return out.fail('Pipeline file is required for the start command', 'pass --pipeline or set ROCKETRIDE_PIPELINE in .env');
+				if (!pipelinePath) {
+					return out.fail('Pipeline file is required for the start command', 'pass --pipeline, a pipeline file path, or set ROCKETRIDE_PIPELINE in .env');
 				}
-				const pipelineData = loadPipelineConfig(options.pipeline);
-				out.line(`Starting pipeline from ${options.pipeline}...`);
+				const pipelineData = loadPipelineConfig(pipelinePath);
+				out.line(`Starting pipeline from ${pipelinePath}...`);
 				const client = await connectClient(options);
 				const result = await client.use({
 					pipeline: pipelineData,
