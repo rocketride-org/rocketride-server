@@ -40,6 +40,7 @@ target resolution, the scope walk, the entitlement checks) runs for real.
 
 import io
 import json
+import time
 import zipfile
 from types import SimpleNamespace
 
@@ -246,6 +247,10 @@ class _FakeRegistry:
                 'snapshot': dict(snapshot or {}),
                 'publishedAt': 4000,
             }
+            previous = self.publishes.get((app_id, self._key(audience)))
+            # Both real backends keep createdAt across a repoint and stamp
+            # now on a brand-new row.
+            row['createdAt'] = previous['createdAt'] if previous and 'createdAt' in previous else time.time()
             self.publishes[(app_id, self._key(audience))] = row
             self.set_calls.append({'audience': dict(audience), 'version': version, 'snapshot': snapshot})
             return row
@@ -1876,6 +1881,391 @@ def test_publisher_of_never_returns_empty(app_id, manifest, snapshot, expected):
 
 
 # =============================================================================
+# MODULE ID — one Module Federation container name per app (#1022)
+# =============================================================================
+# The shell registers every manifest entry's moduleId as an MF remote name
+# with force: true, so two entries sharing one name are one container: the
+# later registration replaces the earlier, and the earlier app's tile loads
+# the other app's code. The moduleId is therefore derived from the app id
+# (which the developer namespace makes unique), never taken from the
+# developer's manifest, and the manifest scope walk never hands the shell two
+# apps that claim one container name.
+
+
+@pytest.mark.asyncio
+async def test_add_rejects_a_moduleid_not_derived_from_the_app_id(registry, content_store):
+    """A manifest naming another app's container (here a first-party one) is
+    refused before anything is recorded or written.
+    """
+    conn = _FakeConn()
+    data = _app_zip(manifest={'id': 'acme.brandy', 'name': 'Brandy', 'moduleId': 'rocketride_pipeBuilder'})
+
+    result = await handle_app_add(conn, _add_request(data=data))
+
+    assert result['success'] is False
+    assert 'moduleId' in result['message']
+    assert 'acme_brandy' in result['message']
+    assert registry.publish_calls == []
+    assert _written(content_store) == {}
+
+
+@pytest.mark.asyncio
+async def test_add_accepts_the_derived_moduleid(registry, content_store):
+    """Declaring the derived name explicitly is fine (control)."""
+    conn = _FakeConn()
+    data = _app_zip(manifest={'id': 'acme.brandy', 'name': 'Brandy', 'moduleId': 'acme_brandy'})
+
+    result = await handle_app_add(conn, _add_request(data=data))
+
+    assert result['success'] is True
+    assert registry.publish_calls[0]['artifact']['moduleId'] == 'acme_brandy'
+
+
+@pytest.mark.asyncio
+async def test_add_derives_the_moduleid_when_absent(registry, content_store):
+    """No declared moduleId: the server derives it, with the same rule the
+    scaffold, the pack and the shell use (every non-identifier char -> '_').
+    """
+    conn = _FakeConn()
+    data = _app_zip(manifest={'id': 'acme.my-app', 'name': 'Mine'})
+
+    result = await handle_app_add(conn, _add_request(data=data))
+
+    assert result['success'] is True
+    assert registry.publish_calls[0]['artifact']['moduleId'] == 'acme_my_app'
+
+
+def _install_pins(monkeypatch, apps):
+    """Serve one enabled, ready, built public binding per (app_id, module_id, org_id)."""
+    rows = [
+        {
+            'orgId': org_id,
+            'appId': app_id,
+            'audience': dict(AUD_PUBLIC),
+            'version': 1,
+            'state': 'enabled',
+            'artifactState': 'ready',
+            'artifactBuild': 'ok',
+            'snapshot': {'name': app_id},
+            'publishedAt': 2000,
+        }
+        for app_id, _module_id, org_id, *_ in apps
+    ]
+    for row, (_app_id, _module_id, _org_id, *created) in zip(rows, apps):
+        if created:
+            row['createdAt'] = created[0]
+    artifacts = {
+        (org_id, app_id): {'kind': 'app', 'appId': app_id, 'moduleId': module_id, 'appVersion': '1.0.0'}
+        for app_id, module_id, org_id, *_ in apps
+    }
+
+    async def publish_list(org_id, kind, audiences):
+        return [dict(r) for r in rows]
+
+    async def deployments_artifact(org_id, project_id, version):
+        return artifacts[(org_id, project_id)]
+
+    monkeypatch.setattr(account_singleton, 'publish_list', publish_list, raising=False)
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', deployments_artifact, raising=False)
+
+
+@pytest.mark.asyncio
+async def test_resolve_drops_an_app_claiming_another_apps_container(registry, monkeypatch):
+    """A stored artifact whose moduleId is another app's derived name (deployed
+    before the receipt check) never reaches the shell beside that app: the
+    rightful owner keeps the name.
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('rocketride.pipeBuilder', 'rocketride_pipeBuilder', 'org-platform'),
+            ('xyz.lookalike', 'rocketride_pipeBuilder', 'org-xyz'),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [(e['id'], e['moduleId']) for e in resolved] == [('rocketride.pipeBuilder', 'rocketride_pipeBuilder')]
+
+
+@pytest.mark.asyncio
+async def test_resolve_fails_closed_when_two_apps_derive_one_container(registry, monkeypatch):
+    """Two app ids that derive the same name (acme.foo_bar and acme_foo.bar,
+    from two developer namespaces) cannot be told apart, so neither is handed
+    to the shell rather than letting one load under the other's tile.
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('acme.foo_bar', 'acme_foo_bar', 'org-acme'),
+            ('acme_foo.bar', 'acme_foo_bar', 'org-acmefoo'),
+            ('acme.brandy', 'acme_brandy', 'org-acme'),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.brandy']
+
+
+@pytest.mark.asyncio
+async def test_resolve_keeps_distinct_and_legacy_moduleids(registry, monkeypatch):
+    """Control: distinct names all serve, including a legacy non-derived name
+    that collides with nothing (existing builds keep working).
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('acme.brandy', 'acme_brandy', 'org-acme'),
+            ('acme.legacy', 'acmeLegacyRemote', 'org-acme'),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert sorted((e['id'], e['moduleId']) for e in resolved) == [
+        ('acme.brandy', 'acme_brandy'),
+        ('acme.legacy', 'acmeLegacyRemote'),
+    ]
+
+
+# ── Receipt: a new app may not derive an existing app's container name ──────
+
+
+def _existing_apps(monkeypatch, app_ids, fail=False, stored=None, state='enabled'):
+    """publish_list answers one public row per existing app id (enabled and
+    serving unless ``state`` says otherwise); each row's artifact stores
+    ``stored[app_id]`` as its moduleId (default: the derived name).
+    """
+    from ai.account.app_deploy import module_id_of
+
+    stored = stored or {}
+
+    async def publish_list(org_id, kind, audiences):
+        if fail:
+            raise RuntimeError('registry down')
+        return [
+            {
+                'orgId': 'org-other',
+                'appId': app_id,
+                'audience': dict(AUD_PUBLIC),
+                'version': 1,
+                'state': state,
+                'artifactState': 'ready',
+                'artifactBuild': 'ok',
+            }
+            for app_id in app_ids
+        ]
+
+    async def deployments_artifact(org_id, project_id, version):
+        return {'kind': 'app', 'appId': project_id, 'moduleId': stored.get(project_id) or module_id_of(project_id)}
+
+    monkeypatch.setattr(account_singleton, 'publish_list', publish_list, raising=False)
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', deployments_artifact, raising=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'existing, developer_id, new_app_id',
+    [
+        # Bare slug: developer 'acme_foo' ships app id 'acme_foo' -> 'acme_foo'.
+        ('acme.foo', 'acme_foo', 'acme_foo'),
+        # Underscore: 'acme_foo.bar' and 'acme.foo_bar' both derive 'acme_foo_bar'.
+        ('acme.foo_bar', 'acme_foo', 'acme_foo.bar'),
+        # Hyphen: 'acme.foo-bar' derives the same name as 'acme.foo_bar'.
+        ('acme.foo-bar', 'acme', 'acme.foo_bar'),
+    ],
+)
+async def test_add_refuses_a_name_another_app_already_derives(
+    registry, content_store, monkeypatch, existing, developer_id, new_app_id
+):
+    """A newcomer whose app id derives an existing app's container name is
+    refused at receipt, so it can never make the resolve-time backstop hide
+    the existing app.
+    """
+    _existing_apps(monkeypatch, [existing])
+    conn = _FakeConn(developer_id=developer_id)
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip(manifest={'id': new_app_id, 'name': 'New'})))
+
+    assert result['success'] is False
+    assert existing in result['message']
+    assert registry.publish_calls == []
+    assert _written(content_store) == {}
+
+
+@pytest.mark.asyncio
+async def test_add_allows_redeploying_the_same_app_id(registry, content_store, monkeypatch):
+    """Control: the app's own existing rows are not a collision."""
+    _existing_apps(monkeypatch, ['acme.brandy', 'acme.other'])
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_add_fails_closed_when_the_collision_check_cannot_run(registry, content_store, monkeypatch):
+    """A registry error refuses the deploy rather than skipping the check."""
+    _existing_apps(monkeypatch, [], fail=True)
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is False
+    assert registry.publish_calls == []
+
+
+# ── Resolve: reserved names never reach the shell ──────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'app_id, module_id',
+    [
+        # The shell host's own Module Federation name.
+        ('xyz.host', 'rocketride_shell'),
+        # The shell's shared-module keys, as a stored (non-derived) name.
+        ('xyz.a', 'shell'),
+        ('xyz.b', 'rocketride'),
+        # A first-party-looking name on a non-platform app, stored ...
+        ('xyz.c', 'rocketride_store'),
+        # ... or derived from a lookalike developer id.
+        ('rocketride_home', 'rocketride_home'),
+    ],
+)
+async def test_resolve_withholds_reserved_names_even_when_unclaimed(registry, monkeypatch, app_id, module_id):
+    """A reserved name is withheld even when nothing else claims it, so a
+    lone impostor cannot shadow the host or a first-party app that the
+    caller has not loaded yet.
+    """
+    _install_pins(monkeypatch, [(app_id, module_id, 'org-xyz'), ('acme.brandy', 'acme_brandy', 'org-acme')])
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.brandy']
+
+
+@pytest.mark.asyncio
+async def test_resolve_keeps_first_party_rocketride_names(registry, monkeypatch):
+    """Control: platform apps keep their names, derived or legacy."""
+    _install_pins(
+        monkeypatch,
+        [
+            ('rocketride.home', 'rocketride_home', 'org-platform'),
+            ('rocketride.legacy', 'rocketride_oldName', 'org-platform'),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert sorted(e['id'] for e in resolved) == ['rocketride.home', 'rocketride.legacy']
+
+
+@pytest.mark.asyncio
+async def test_resolve_fallback_name_uses_the_derivation(registry, monkeypatch):
+    """An artifact with no stored moduleId gets the derived name (the same
+    rule the build used), so '-' maps to '_' like everywhere else.
+    """
+    _install_pins(monkeypatch, [('acme.my-app', None, 'org-acme')])
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['moduleId'] for e in resolved] == ['acme_my_app']
+
+
+# ── Round 2: incumbents keep their names; stored names count; publish re-checks
+
+
+@pytest.mark.asyncio
+async def test_add_refuses_a_name_an_older_artifact_stores(registry, content_store, monkeypatch):
+    """An older app whose artifact STORES the name (a legacy, non-derived
+    moduleId) holds it too: a newcomer deriving it would hide that app.
+    """
+    _existing_apps(monkeypatch, ['xyz.old'], stored={'xyz.old': 'acme_brandy'})
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is False
+    assert 'xyz.old' in result['message']
+    assert registry.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_add_never_locks_out_an_incumbent(registry, content_store, monkeypatch):
+    """An org that already deploys this app id keeps deploying it, even when a
+    later app derives the same name.
+    """
+    registry.add_version(1, '1.0.0')  # org1 already has acme.brandy on its rail
+    _existing_apps(monkeypatch, ['acme_brandy'])
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_add_does_not_exempt_an_app_id_whose_rail_holds_only_a_pipe(registry, content_store, monkeypatch):
+    """A pipe version can share the project id; it is not an existing
+    deployment of the app, so the name check still runs for the new app id.
+    """
+    registry.add_version(1, '1.0.0', kind='pipe')
+    _existing_apps(monkeypatch, ['acme_brandy'])
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_add_ignores_a_holder_whose_binding_is_disabled(registry, content_store, monkeypatch):
+    """Resolve drops a disabled binding, so it holds no name for the check."""
+    _existing_apps(monkeypatch, ['acme_brandy'], state='disabled')
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is True
+
+
+def _foreign_public_row(registry, app_id, created_at, version=1):
+    """A public binding of another org's app, visible through publish_list."""
+    registry.publishes[(app_id, 'public~')] = {
+        'orgId': 'org-other',
+        'appId': app_id,
+        'audience': dict(AUD_PUBLIC),
+        'version': version,
+        'state': 'enabled',
+        'snapshot': {'name': app_id},
+        'publishedAt': created_at,
+        'createdAt': created_at,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_a_name_an_earlier_app_holds(registry, quiet_push):
+    """The collision is re-checked at publish: a never-published app may not
+    bind while an earlier-bound app already holds its derived name (it may
+    have slipped past receipt while that app was not visible).
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+# =============================================================================
 # PUBLIC-PAGES GATE: publicPages/site validated on the public rung only
 # =============================================================================
 
@@ -1960,6 +2350,698 @@ async def test_third_party_public_pages_rejected_at_publish(registry, quiet_push
 
 
 @pytest.mark.asyncio
+async def test_publish_lets_the_earlier_app_republish(registry, quiet_push):
+    """Control: the app bound first keeps publishing (repoints included)."""
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 50.0
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_publish_does_not_count_an_earlier_binding_the_audience_cannot_see(registry, quiet_push):
+    """An earlier TEAM binding does not date a PUBLIC one: public-only viewers
+    see this app bound now, after the rival's public binding, so resolve would
+    withhold it. Publish compares both within the public scope and refuses.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_TEAM, 1)
+    registry.publishes[('acme.brandy', 'team~t1')]['createdAt'] = 50.0
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_counts_an_earlier_binding_the_audience_can_see(registry, quiet_push):
+    """Control: an earlier team binding still dates a repoint of that team's binding."""
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_TEAM, 1)
+    registry.publishes[('acme.brandy', 'team~t1')]['createdAt'] = 50.0
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@team/Development'))
+
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_publish_dates_a_rival_from_every_row_the_caller_sees(registry, quiet_push):
+    """A public binding's viewers include team members, so a rival's earlier
+    TEAM row (visible to the caller) dates the rival: resolve would withhold
+    the new public binding for those viewers, and publish refuses it.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    # Disabled: publishing re-enables it, so it is a claim (a serving row
+    # repointed under the same name claims nothing and is not checked).
+    registry.publishes[('acme.brandy', 'public~')]['state'] = 'disabled'
+    registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 80.0
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    registry.publishes[('acme_brandy', 'team~t1')] = {
+        'orgId': 'org-other',
+        'appId': 'acme_brandy',
+        'audience': dict(AUD_TEAM),
+        'version': 1,
+        'state': 'enabled',
+        'snapshot': {'name': 'acme_brandy'},
+        'publishedAt': 30.0,
+        'createdAt': 30.0,
+    }
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_personal_publish_ignores_own_rows_the_caller_cannot_see(registry, quiet_push):
+    """An @me publish is dated only from own rows the caller can see: a team
+    row of a team the caller is not in does not exist in the caller's resolve
+    view, so the earlier-bound rival wins and publish refuses.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.publishes[('acme.brandy', 'team~t2')] = {
+        'orgId': 'org1',
+        'appId': 'acme.brandy',
+        'audience': {'type': 'team', 'id': 't2'},
+        'version': 1,
+        'state': 'enabled',
+        'snapshot': {'name': 'Brandy'},
+        'publishedAt': 50.0,
+        'createdAt': 50.0,
+    }
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@me'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_accepts_the_platform_home_container_name(registry, quiet_push, no_published_pages, monkeypatch):
+    """rocketride_home is the one rocketride_* name that stays eligible at publish."""
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'rocketride_home'
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+
+    assert result['success'] is True
+    assert len(registry.set_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_ignores_a_rival_whose_binding_is_disabled(registry, quiet_push):
+    """A disabled rival binding is not served, so it holds nothing at publish."""
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    _foreign_public_row(registry, 'acme_brandy', 1.0)
+    registry.publishes[('acme_brandy', 'public~')]['state'] = 'disabled'
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('app_id, module_id', [('acme.host', 'rocketride_shell'), ('acme.x', 'rocketride_store')])
+async def test_publish_refuses_a_reserved_name_before_any_binding(registry, quiet_push, app_id, module_id):
+    """A reserved container name is refused up front: no claim lookup, no row."""
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = module_id
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+    request = _request('publish', version=1, target='@public')
+    request['arguments']['appId'] = app_id
+
+    result = await handle_deploy_app(owner, request)
+
+    assert result['success'] is False
+    assert 'reserved' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_serializes_claim_check_and_binding_per_container_name(registry, quiet_push, monkeypatch):
+    """Two first publishes of different apps deriving one name cannot both pass:
+    the claim check and the binding write run under the name's lock, so the
+    second sees the first's row and is refused.
+    """
+    import asyncio
+
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    original = account_singleton.publish_set
+    gate = asyncio.Event()
+
+    async def slow_publish_set(*args, **kwargs):
+        # Yield while holding the lock, so a racing publish reaches its check.
+        await asyncio.sleep(0)
+        await gate.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(account_singleton, 'publish_set', slow_publish_set, raising=False)
+    a = _FakeConn(teams=_TEAMS, developer_id='acme')
+    b = _FakeConn(teams=_TEAMS, developer_id='acme_foo')
+    req_a = _request('publish', version=1, target='@public')
+    req_a['arguments']['appId'] = 'acme.foo_bar'
+    req_b = _request('publish', version=1, target='@public')
+    req_b['arguments']['appId'] = 'acme_foo.bar'
+
+    first = asyncio.ensure_future(handle_deploy_app(a, req_a))
+    await asyncio.sleep(0.01)
+    second = asyncio.ensure_future(handle_deploy_app(b, req_b))
+    await asyncio.sleep(0.01)
+    gate.set()
+    results = await asyncio.gather(first, second)
+
+    assert [r['success'] for r in results].count(True) == 1
+    assert len(registry.set_calls) == 1
+
+
+async def _race_two_engines(registry, monkeypatch, created, undo_together=False, undo_error=None):
+    """Publish two apps that derive one container name from two 'engines'.
+
+    The per-name lock is process-local, so two engines each hold their own:
+    here every publish gets a fresh lock, which serializes nothing. Both
+    pre-checks run before either write (the first write waits for both
+    arrivals) and both writes land before either re-check can read (each
+    publish_set returns only once both rows exist). ``created`` maps app id
+    to the createdAt its row gets, as the backend would stamp it. With
+    ``undo_together`` neither back-out takes effect until both racers have
+    reached it, so both re-checks read both rows (as two engines would).
+    """
+    import asyncio
+
+    from ai.account import app_deploy
+
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    monkeypatch.setattr(app_deploy, '_container_lock', lambda module_id: asyncio.Lock())
+    original = account_singleton.publish_set
+    arrived = asyncio.Event()
+    written = asyncio.Event()
+    counts = {'arrived': 0, 'written': 0}
+
+    async def racing_publish_set(org_id, kind, app_id, audience, *rest):
+        counts['arrived'] += 1
+        if counts['arrived'] == 2:
+            arrived.set()
+        await arrived.wait()
+        row = await original(org_id, kind, app_id, audience, *rest)
+        row['createdAt'] = created[app_id]
+        counts['written'] += 1
+        if counts['written'] == 2:
+            written.set()
+        await written.wait()
+        return row
+
+    monkeypatch.setattr(account_singleton, 'publish_set', racing_publish_set, raising=False)
+    original_state = account_singleton.publish_set_state
+    undoing = asyncio.Event()
+    undo_count = {'n': 0}
+
+    async def racing_publish_set_state(*args):
+        if undo_together:
+            undo_count['n'] += 1
+            if undo_count['n'] == 2:
+                undoing.set()
+            await undoing.wait()
+        if undo_error:
+            raise RuntimeError(undo_error)
+        return await original_state(*args)
+
+    monkeypatch.setattr(account_singleton, 'publish_set_state', racing_publish_set_state, raising=False)
+    a = _FakeConn(teams=_TEAMS, developer_id='acme')
+    b = _FakeConn(teams=_TEAMS, developer_id='acme_foo')
+    req_a = _request('publish', version=1, target='@public')
+    req_a['arguments']['appId'] = 'acme.foo_bar'
+    req_b = _request('publish', version=1, target='@public')
+    req_b['arguments']['appId'] = 'acme_foo.bar'
+    return await asyncio.gather(handle_deploy_app(a, req_a), handle_deploy_app(b, req_b))
+
+
+@pytest.mark.asyncio
+async def test_two_engines_first_publishes_for_one_container_name_cannot_both_bind(registry, quiet_push, monkeypatch):
+    """Two engines share one registry, so no process lock orders their first
+    publishes: both pass the pre-check before either write lands. The first
+    bound keeps the name; the other re-checks after writing, sees the rival,
+    backs its row out ('removed') and reports the holder error.
+    """
+    results = await _race_two_engines(registry, monkeypatch, {'acme.foo_bar': 100.0, 'acme_foo.bar': 200.0})
+
+    assert [r['success'] for r in results] == [True, False]
+    assert "'acme.foo_bar' already holds" in results[1]['message']
+    assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'enabled'
+    assert registry.publishes[('acme_foo.bar', 'public~')]['state'] == 'removed'
+
+
+@pytest.mark.asyncio
+async def test_two_engines_tied_first_publishes_both_back_out(registry, quiet_push, monkeypatch):
+    """A tie cannot be ordered (resolve would withhold both), so both
+    publishes see the other, back out and report the holder error: neither
+    reports success for a binding that serves nothing. A retry settles it.
+    """
+    results = await _race_two_engines(
+        registry, monkeypatch, {'acme.foo_bar': 100.0, 'acme_foo.bar': 100.0}, undo_together=True
+    )
+
+    assert [r['success'] for r in results] == [False, False]
+    assert "'acme_foo.bar' already holds" in results[0]['message']
+    assert "'acme.foo_bar' already holds" in results[1]['message']
+    assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'removed'
+    assert registry.publishes[('acme_foo.bar', 'public~')]['state'] == 'removed'
+
+
+@pytest.mark.asyncio
+async def test_a_failed_back_out_reports_that_the_binding_remains(registry, quiet_push, monkeypatch):
+    """When undoing the losing binding fails, the binding is still live: the
+    response must say so (and name the holder) instead of reading as a clean
+    refusal.
+    """
+    results = await _race_two_engines(
+        registry, monkeypatch, {'acme.foo_bar': 100.0, 'acme_foo.bar': 200.0}, undo_error='store down'
+    )
+
+    assert results[0]['success'] is True
+    assert results[1]['success'] is False
+    assert 'could not be removed' in results[1]['message']
+    assert "'acme.foo_bar'" in results[1]['message']
+    assert registry.publishes[('acme_foo.bar', 'public~')]['state'] == 'enabled'
+
+
+@pytest.mark.asyncio
+async def test_a_first_public_claim_is_re_checked_though_a_team_row_already_serves(registry, quiet_push, monkeypatch):
+    """Serving in a team is not holding the name for the public: publishing to
+    @public for the first time is a new claim in that scope, so a rival that
+    landed meanwhile (bound earlier) backs it out.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    registry.publishes[('acme.foo_bar', 'team~t1')] = {
+        'orgId': 'org1',
+        'appId': 'acme.foo_bar',
+        'audience': {'type': 'team', 'id': 't1'},
+        'version': 1,
+        'state': 'enabled',
+        'snapshot': {},
+        'publishedAt': 10,
+        'createdAt': 500.0,
+    }
+    original = account_singleton.publish_set
+
+    async def publish_set_with_rival(org_id, kind, app_id, audience, *rest):
+        # Another engine's earlier-bound rival lands between check and write.
+        _foreign_public_row(registry, 'acme_foo.bar', 100.0)
+        row = await original(org_id, kind, app_id, audience, *rest)
+        row['createdAt'] = 200.0
+        return row
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_rival, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+    req = _request('publish', version=1, target='@public')
+    req['arguments']['appId'] = 'acme.foo_bar'
+
+    result = await handle_deploy_app(owner, req)
+
+    assert result['success'] is False
+    assert "'acme_foo.bar' already holds" in result['message']
+    assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'removed'
+
+
+@pytest.mark.asyncio
+async def test_a_republish_never_unpublishes_the_scope_it_already_serves(registry, quiet_push, monkeypatch):
+    """An incumbent already serving @public holds the name there: repointing
+    it claims nothing new, so no re-check runs and a registry hiccup during
+    one cannot turn the live binding into a 'removed' one.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 10.0
+    original = account_singleton.publish_list
+    calls = {'n': 0}
+
+    async def flaky(*args):
+        calls['n'] += 1
+        if calls['n'] == 2:  # what a post-write re-check would read
+            raise RuntimeError('transient')
+        return await original(*args)
+
+    monkeypatch.setattr(account_singleton, 'publish_list', flaky, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is True
+    row = registry.publishes[('acme.brandy', 'public~')]
+    assert (row['version'], row['state']) == (2, 'enabled')
+
+
+@pytest.mark.asyncio
+async def test_a_back_out_restores_a_disabled_prior_row_at_its_prior_version(registry, quiet_push, monkeypatch):
+    """A prior row that was disabled comes back disabled at its old version
+    when the new binding loses the name; the back-out does not write
+    'removed' over it, and the response says it was restored.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    registry.artifacts[2]['moduleId'] = 'acme_foo_bar'
+    registry.publishes[('acme.foo_bar', 'public~')] = {
+        'orgId': 'org1',
+        'appId': 'acme.foo_bar',
+        'audience': dict(AUD_PUBLIC),
+        'version': 1,
+        'state': 'disabled',
+        'snapshot': {'name': 'old'},
+        'publishedAt': 10,
+        'createdAt': 150.0,
+    }
+    original = account_singleton.publish_set
+
+    async def publish_set_with_rival(org_id, kind, app_id, audience, *rest):
+        if app_id == 'acme.foo_bar' and 'acme_foo.bar' not in {a for a, _ in registry.publishes}:
+            _foreign_public_row(registry, 'acme_foo.bar', 100.0)  # bound earlier, lands in the window
+        return await original(org_id, kind, app_id, audience, *rest)
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_rival, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+    req = _request('publish', version=2, target='@public')
+    req['arguments']['appId'] = 'acme.foo_bar'
+
+    result = await handle_deploy_app(owner, req)
+
+    assert result['success'] is False
+    assert "'acme_foo.bar' already holds" in result['message']
+    assert 'restored' in result['message']
+    row = registry.publishes[('acme.foo_bar', 'public~')]
+    assert (row['version'], row['state']) == (1, 'disabled')
+    assert row['snapshot'] == {'name': 'old'}
+
+
+@pytest.mark.asyncio
+async def test_a_restore_that_leaves_the_binding_enabled_says_to_disable_it(registry, quiet_push, monkeypatch):
+    """Restoring a disabled prior row is two writes: the version (which
+    re-enables the row), then the state. When the second fails, the owner's
+    disabled version is serving again: the response says that, not that the
+    new binding is still live.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    registry.artifacts[2]['moduleId'] = 'acme_foo_bar'
+    registry.publishes[('acme.foo_bar', 'public~')] = {
+        'orgId': 'org1',
+        'appId': 'acme.foo_bar',
+        'audience': dict(AUD_PUBLIC),
+        'version': 1,
+        'state': 'disabled',
+        'snapshot': {'name': 'old'},
+        'publishedAt': 10,
+        'createdAt': 150.0,
+    }
+    original = account_singleton.publish_set
+
+    async def publish_set_with_rival(org_id, kind, app_id, audience, *rest):
+        if app_id == 'acme.foo_bar' and 'acme_foo.bar' not in {a for a, _ in registry.publishes}:
+            _foreign_public_row(registry, 'acme_foo.bar', 100.0)
+        return await original(org_id, kind, app_id, audience, *rest)
+
+    async def state_down(*args):
+        raise RuntimeError('store down')
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_rival, raising=False)
+    monkeypatch.setattr(account_singleton, 'publish_set_state', state_down, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+    req = _request('publish', version=2, target='@public')
+    req['arguments']['appId'] = 'acme.foo_bar'
+
+    result = await handle_deploy_app(owner, req)
+
+    assert result['success'] is False
+    assert 'now enabled' in result['message']
+    assert 'disable it' in result['message']
+    assert 'v1' in result['message']
+    assert 'still live' not in result['message']
+    assert registry.publishes[('acme.foo_bar', 'public~')]['version'] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_first_claim_wins_its_re_check_against_a_rival_bound_later(registry, quiet_push, monkeypatch):
+    """The re-check dates a brand-new row from the backend's createdAt stamp:
+    a first claim that landed before a rival keeps the name. An undated row
+    would read as unknown and be backed out.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'acme_foo_bar'
+    original = account_singleton.publish_set
+
+    async def publish_set_with_later_rival(org_id, kind, app_id, audience, *rest):
+        _foreign_public_row(registry, 'acme_foo.bar', time.time() + 1000)  # binds after this publish
+        return await original(org_id, kind, app_id, audience, *rest)
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_later_rival, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+    req = _request('publish', version=1, target='@public')
+    req['arguments']['appId'] = 'acme.foo_bar'
+
+    result = await handle_deploy_app(owner, req)
+
+    assert result['success'] is True
+    assert registry.publishes[('acme.foo_bar', 'public~')]['state'] == 'enabled'
+
+
+@pytest.mark.asyncio
+async def test_a_republish_under_a_renamed_container_is_re_checked(registry, quiet_push, monkeypatch):
+    """A serving prior row holds only the name it served under. A legacy row
+    with a stored, non-derived moduleId republished under the derived name is
+    a new claim: a rival that landed meanwhile backs it out and the prior
+    binding is restored.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'legacy_name'
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 150.0
+    original = account_singleton.publish_set
+
+    async def publish_set_with_rival(org_id, kind, app_id, audience, *rest):
+        if 'acme_brandy' not in {a for a, _ in registry.publishes}:
+            _foreign_public_row(registry, 'acme_brandy', 100.0)
+        return await original(org_id, kind, app_id, audience, *rest)
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_rival, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is False
+    assert "'acme_brandy' already holds" in result['message']
+    assert registry.publishes[('acme.brandy', 'public~')]['version'] == 1
+
+
+def _break_artifacts(monkeypatch, broken):
+    """Make deployments_artifact raise for the (project_id, version) pairs in ``broken``.
+
+    The fake registry ignores project_id, so the wrapper discriminates by it.
+    """
+    original = account_singleton.deployments_artifact
+
+    async def artifact(org_id, project_id, version):
+        if (project_id, version) in broken or (project_id, None) in broken:
+            raise RuntimeError(f'{project_id} v{version} artifact missing')
+        return await original(org_id, project_id, version)
+
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', artifact, raising=False)
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_prior_artifact_never_blocks_a_repoint(registry, quiet_push, monkeypatch):
+    """The prior version's artifact is only read to see whether the name
+    changed. When that read fails the publish is not refused (the owner could
+    never repoint to a good version): it is treated as a new claim, re-checked
+    after the write, and the prior row is restored if it loses.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    _foreign_public_row(registry, 'zeta.other', 100.0)
+    _break_artifacts(monkeypatch, {('acme.brandy', 1)})
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is True
+    assert registry.publishes[('acme.brandy', 'public~')]['version'] == 2
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_prior_artifact_still_re_checks_and_restores(registry, quiet_push, monkeypatch):
+    """Fail closed: with the prior artifact unreadable, a rival that landed
+    meanwhile is still caught and the prior version comes back.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 150.0
+    _break_artifacts(monkeypatch, {('acme.brandy', 1)})
+    original = account_singleton.publish_set
+
+    async def publish_set_with_rival(org_id, kind, app_id, audience, *rest):
+        if 'acme_brandy' not in {a for a, _ in registry.publishes}:
+            _foreign_public_row(registry, 'acme_brandy', 100.0)
+        return await original(org_id, kind, app_id, audience, *rest)
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_rival, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is False
+    assert "'acme_brandy' already holds" in result['message']
+    assert registry.publishes[('acme.brandy', 'public~')]['version'] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stored_module_id', ['acme_brandy', None])
+async def test_a_same_name_repoint_ignores_an_unrelated_broken_artifact(
+    registry, quiet_push, monkeypatch, stored_module_id
+):
+    """A same-name repoint of a serving row claims nothing new, so the claim
+    lookup (one artifact read per other app) is skipped: another app's broken
+    artifact cannot refuse it. When the served artifact stores no moduleId the
+    derived name stands in for it (None case), which must also read as the same
+    name.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    if stored_module_id is None:
+        del registry.artifacts[1]['moduleId']
+    registry.seed_publish(AUD_PUBLIC, 1)
+    _foreign_public_row(registry, 'zeta.other', 100.0)
+    _break_artifacts(monkeypatch, {('zeta.other', None)})
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is True
+    assert registry.publishes[('acme.brandy', 'public~')]['version'] == 2
+
+
+@pytest.mark.asyncio
+async def test_resolve_keeps_the_earlier_bound_app_on_a_derived_collision(registry, monkeypatch):
+    """Two apps deriving one name: the one bound first keeps it, the later one
+    is withheld (a newcomer cannot hide an incumbent).
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('acme_foo.bar', 'acme_foo_bar', 'org-acmefoo', 200.0),
+            ('acme.foo_bar', 'acme_foo_bar', 'org-acme', 100.0),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.foo_bar']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('first, second', [(100.0, 100.0), (100.0, None)])
+async def test_resolve_fails_closed_on_a_tie_or_unknown_time(registry, monkeypatch, first, second):
+    """A tie, or a binding with no creation time, cannot be ordered: both are
+    withheld, as before.
+    """
+    pins = [('acme.foo_bar', 'acme_foo_bar', 'org-acme', first), ('acme_foo.bar', 'acme_foo_bar', 'org-acmefoo')]
+    if second is not None:
+        pins[1] = pins[1] + (second,)
+    _install_pins(monkeypatch, pins + [('acme.brandy', 'acme_brandy', 'org-acme', 1.0)])
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.brandy']
+
+
+@pytest.mark.asyncio
+async def test_resolve_derived_owner_beats_an_earlier_impostor(registry, monkeypatch):
+    """Time never helps a stored (non-derived) name against the app whose id
+    derives it.
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('xyz.lookalike', 'acme_brandy', 'org-xyz', 1.0),
+            ('acme.brandy', 'acme_brandy', 'org-acme', 900.0),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.brandy']
+
+
+# ── Round 3: publish uses resolve's ownership rule; unreadable claims fail closed
+
+
+@pytest.mark.asyncio
+async def test_add_fails_closed_when_an_existing_artifact_cannot_be_read(registry, content_store, monkeypatch):
+    """An unreadable artifact may store the name, so it is an unknown claim:
+    the deploy is refused rather than treating it as no claim.
+    """
+    _existing_apps(monkeypatch, ['xyz.old'])
+
+    async def unreadable(org_id, project_id, version):
+        raise RuntimeError('storage down')
+
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', unreadable, raising=False)
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is False
+    assert registry.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_fails_closed_when_an_existing_artifact_cannot_be_read(registry, quiet_push, monkeypatch):
+    """The publish re-check refuses too when another app's artifact is unreadable."""
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    _foreign_public_row(registry, 'xyz.old', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    async def unreadable(org_id, project_id, version):
+        if project_id == 'xyz.old':
+            raise RuntimeError('storage down')
+        return registry.artifacts[version]
+
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', unreadable, raising=False)
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
 async def test_third_party_site_alone_publishes(registry, quiet_push, no_published_pages):
     # A store app's generic 'site' key can never take effect, so it never blocks a publish.
     manifest = {'name': 'Brandy', 'site': {'title': 'Brandy', 'docsUrl': 'not a url'}}
@@ -1986,6 +3068,57 @@ async def test_public_pages_gate_fails_closed_on_storage_errors(registry, quiet_
     assert result['success'] is False
     assert result['message'] == 'Could not verify the publicPages claims of rocketride.home: store down'
     assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('theirs', [50.0, None], ids=['tie', 'unknown'])
+async def test_publish_refuses_a_tie_or_an_unknown_holder_time(registry, quiet_push, theirs):
+    """Two apps deriving one name with a tied or unknown first-bind time:
+    resolve would withhold both, so publish refuses rather than bind.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_TEAM, 1)
+    registry.publishes[('acme.brandy', 'team~t1')]['createdAt'] = 50.0
+    _foreign_public_row(registry, 'acme_brandy', 50.0)
+    if theirs is None:
+        del registry.publishes[('acme_brandy', 'public~')]['createdAt']
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_lets_the_derived_owner_bind_over_an_earlier_impostor(registry, quiet_push, monkeypatch):
+    """The publish mirror of test_resolve_derived_owner_beats_an_earlier_impostor:
+    an earlier app that only STORES the name does not block the app whose id
+    derives it, so the live owner can still update and roll back.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_TEAM, 1)
+    registry.publishes[('acme.brandy', 'team~t1')]['createdAt'] = 900.0
+    # xyz.lookalike's own v2 artifact stores 'acme_brandy' (a legacy claimant).
+    registry.add_version(2, '1.0.0', publisher_id='u2', state='ready')
+    registry.artifacts[2] = {'kind': 'app', 'appId': 'xyz.lookalike', 'moduleId': 'acme_brandy'}
+    _foreign_public_row(registry, 'xyz.lookalike', 1.0, version=2)
+    reads = []
+    original = account_singleton.deployments_artifact
+
+    async def spying_artifact(org_id, project_id, version):
+        reads.append((project_id, version))
+        return await original(org_id, project_id, version)
+
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', spying_artifact, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is True
+    # The stored-name claim check really read the legacy claimant's own artifact.
+    assert ('xyz.lookalike', 2) in reads
 
 
 @pytest.mark.asyncio

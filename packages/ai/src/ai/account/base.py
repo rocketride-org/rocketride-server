@@ -914,7 +914,19 @@ class AccountBase(ABC):
         snapshot: dict,
         actor: dict,
     ) -> dict:
-        """Create or repoint one audience's binding (pure pointer, born enabled)."""
+        """Create or repoint one audience's binding (pure pointer, born enabled).
+
+        Backend contract (app_deploy relies on it to keep one container name
+        from binding twice when several engines share one registry): a
+        returned write is visible to every engine's next publish_list /
+        publish_of_app (read-your-writes), and the row's ``createdAt`` is set
+        once and survives repoints. The re-check also compares ``createdAt``
+        across engines, so those timestamps must be comparable: a clock shared
+        by all engines, or store-assigned timestamps. A back-out restores the
+        audience's prior row (publish_set with its version and snapshot, then
+        publish_set_state with its state, so a disabled row stays disabled) and
+        writes 'removed' only when no prior row existed.
+        """
         return await self._deployment_backend().publish_set(org_id, kind, app_id, audience, version, snapshot, actor)
 
     async def set_artifact_state(self, org_id: str, project_id: str, version: int, new_state: str, actor: dict) -> dict:
@@ -938,7 +950,12 @@ class AccountBase(ABC):
         return await self._deployment_backend().publish_of_app(org_id, kind, app_id)
 
     async def publish_list(self, org_id: str, kind: str, audiences: list) -> list:
-        """Every live publish row matching ANY audience, across apps."""
+        """Every live publish row matching ANY audience, across apps.
+
+        Reads see every write already returned to any engine (read-your-writes
+        across engines). A 'removed' row is not live: it is not listed and
+        holds no container name.
+        """
         return await self._deployment_backend().publish_list(org_id, kind, audiences)
 
     async def publish_set_state(

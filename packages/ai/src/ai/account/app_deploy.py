@@ -63,11 +63,15 @@ Shared platform infrastructure: works on the OSS local engine (single implicit
 org/user 'local') and SaaS alike — no marketplace dependency.
 """
 
+import asyncio
 import hashlib
+import re
 import time
+import weakref
+from contextlib import AsyncExitStack
 from typing import Any, Dict, List, Optional
 
-from rocketlib import debug
+from rocketlib import debug, warning
 
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
 from ai.account.app_rows import (
@@ -316,6 +320,308 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
         )
 
 
+# Every char that cannot appear in a JS identifier. The shell's own fallback
+# (appLoader), the scaffold and the pack all derive with this same rule.
+_NON_IDENTIFIER = re.compile(r'[^A-Za-z0-9_$]')
+
+
+def module_id_of(app_id: str) -> str:
+    """The Module Federation container name an app is built and loaded under.
+
+    DERIVED from the app id, never taken from the developer's manifest: the
+    shell registers each manifest entry's moduleId as a remote name with
+    ``force: true``, so an app that could choose its own name could take over
+    another app's container (a first-party one included) and run its code
+    under that app's tile (#1022). The app id is unique by the developer
+    namespace, so the derived name is the app's own.
+    """
+    return _NON_IDENTIFIER.sub('_', app_id)
+
+
+# Container names no third-party app may load under, even unclaimed: the
+# shell host's own Module Federation name, and the shell's shared-module keys.
+_HOST_CONTAINER = 'rocketride_shell'
+_SHARED_KEYS = frozenset({'shell', 'rocketride'})
+# The platform's namespace; every first-party app id is 'rocketride' or
+# 'rocketride.<name>', which no other developer can hold.
+_PLATFORM_NAMESPACE = 'rocketride'
+
+
+def _is_first_party(app_id: str) -> bool:
+    """True for an app id in the platform's developer namespace."""
+    return app_id == _PLATFORM_NAMESPACE or app_id.startswith(f'{_PLATFORM_NAMESPACE}.')
+
+
+def _reserved_container(app_id: str, module_id: str) -> bool:
+    """True when ``module_id`` may never serve for ``app_id`` (see above).
+
+    ``rocketride_shell`` never serves; the shared keys never serve as a
+    stored (non-derived) name; and any ``rocketride_`` name serves only for a
+    first-party app — a lookalike developer id ('rocketride_home') would
+    otherwise derive a first-party app's name.
+    """
+    if module_id == _HOST_CONTAINER:
+        return True
+    if module_id in _SHARED_KEYS and module_id != module_id_of(app_id):
+        return True
+    return module_id.startswith(f'{_PLATFORM_NAMESPACE}_') and not _is_first_party(app_id)
+
+
+def _first_bound_at(rows: List[Dict[str, Any]]) -> Optional[float]:
+    """When an app was FIRST bound: the earliest ``createdAt`` of its rows.
+
+    ``createdAt`` is set once per binding (both backends keep it across
+    repoints), unlike ``publishedAt``, which every repoint moves forward and
+    would let a newcomer overtake an incumbent that merely shipped an update.
+    None when no row carries a number (unknown: callers fail closed).
+    """
+    times = [r.get('createdAt') for r in rows]
+    known = [float(t) for t in times if isinstance(t, (int, float)) and not isinstance(t, bool)]
+    return min(known) if known else None
+
+
+def _scope_sees(scope: Optional[Dict[str, str]], row: Dict[str, Any]) -> bool:
+    """True when EVERY viewer of a binding in ``scope`` also sees ``row``.
+
+    ``scope`` is the audience of the binding being checked. Public rows are
+    seen by everyone; a team row only by that team's viewers. A public
+    binding's viewers include team and user members, so only public rows are
+    common to all of them. A personal scope sees the rows its owner sees;
+    _caller_sees limits those to the caller's own.
+    """
+    if scope is None or scope.get('type') == 'user':
+        return True
+    kind = (row.get('audience') or {}).get('type', '')
+    if kind == 'public':
+        return True
+    if kind == 'team':
+        return scope.get('type') == 'team' and (row.get('audience') or {}).get('id') == scope.get('id')
+    return False
+
+
+def _caller_sees(conn: Any, row: Dict[str, Any]) -> bool:
+    """True when the caller can see ``row``: a public row, a row of a team the
+    caller belongs to, or the caller's own user row (resolve's audience walk).
+    """
+    audience = row.get('audience') or {}
+    kind = audience.get('type', '')
+    if kind == 'public':
+        return True
+    if kind == 'team':
+        return str(audience.get('id') or '') in set(_team_ids_of(conn).values())
+    if kind == 'user':
+        user_id = conn._account_info.userId
+        return bool(user_id) and audience.get('id') == user_id
+    return False
+
+
+async def _container_claims(
+    account: Any,
+    org_id: str,
+    conn: Any,
+    app_id: str,
+    module_id: str,
+) -> Dict[str, Any]:
+    """Other visible app ids holding ``module_id`` -> when each was first bound.
+
+    An app holds a name when its id derives it OR an artifact of it stores it
+    (a legacy, non-derived moduleId), and only through a binding resolve would
+    serve (serving_block_of): a disabled, failed or unapproved binding holds
+    nothing, exactly as the resolver drops it. First-bind time still reads ALL
+    of the app's rows, as the resolver does. Reads every caller-visible
+    publish row (public rows from every org, plus the caller's team and user
+    rows): the engine cannot see other orgs' private apps. A rival is dated
+    from ALL of those rows, whatever the audience of the binding being
+    checked: a public binding's viewers include team and user members, so any
+    row the caller sees can make resolve withhold the new binding. A
+    disabled binding gives up the name only until it is re-enabled, after
+    which the app bound first wins again. A
+    stored name that is reserved for the claimant (_reserved_container) is
+    withheld at resolve anyway and holds nothing. Raises on a registry error,
+    an artifact read included, so callers refuse rather than skip the check.
+    """
+    rows = await account.publish_list(org_id, 'app', _audiences_of(conn))
+    by_app: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows or []:
+        other = str(row.get('appId') or '')
+        if other and other != app_id:
+            by_app.setdefault(other, []).append(row)
+    claims: Dict[str, Any] = {}
+    for other, other_rows in by_app.items():
+        serving = [r for r in other_rows if not serving_block_of(r, account.review_ladder)]
+        if not serving:
+            continue
+        holds = module_id_of(other) == module_id
+        if not holds:
+            for row in serving:
+                # No try/except: an unreadable artifact is an unknown claim,
+                # not an absent one. Skipping it would let a newcomer take a
+                # legacy holder's name while its artifact read is failing.
+                artifact = await account.deployments_artifact(
+                    str(row.get('orgId') or org_id), other, int(row.get('version') or 0)
+                )
+                stored = str(artifact.get('moduleId') or '') if isinstance(artifact, dict) else ''
+                if stored == module_id and not _reserved_container(other, stored):
+                    holds = True
+                    break
+        if holds:
+            claims[other] = _first_bound_at(other_rows)
+    return claims
+
+
+# One lock per container name: the claim check and the binding write must be
+# one step, or two first publishes for different apps both pass the check
+# before either row lands. Process-local: it serializes publishes within one
+# engine process only. Across engines on one registry the same step is
+# closed by re-checking the claim AFTER the first write and backing the
+# binding out on a new rival (see the publish handler); that relies on the
+# backend contract on Account.publish_set/publish_list (read-your-writes).
+# Weak so idle names do not accumulate.
+_container_locks: 'weakref.WeakValueDictionary[str, asyncio.Lock]' = weakref.WeakValueDictionary()
+
+
+def _container_lock(module_id: str) -> asyncio.Lock:
+    """The lock serializing claim-check-then-bind for one container name."""
+    lock = _container_locks.get(module_id)
+    if lock is None:
+        lock = _container_locks[module_id] = asyncio.Lock()
+    return lock
+
+
+def _container_holder(
+    app_id: str, module_id: str, own_first: Optional[float], claims: Dict[str, Optional[float]]
+) -> Optional[str]:
+    """The claimant that keeps ``module_id`` over ``app_id``, or None when ``app_id`` keeps it.
+
+    The publish-time mirror of _unique_containers, so publishing never binds
+    an app that resolve would then withhold (or that would make resolve
+    withhold an incumbent): when exactly one contender's id derives the name,
+    that app keeps it; otherwise the contenders (the deriving ones, or all of
+    them when none derives) are ordered by first-bind time, and ``app_id``
+    keeps the name only when its own time is known and strictly earlier than
+    every other contender's. A tie or an unknown time on either side blocks
+    (resolve would withhold both). ``claims`` maps each other holder to its
+    first-bind time (_container_claims).
+    """
+    if not claims:
+        return None
+    deriving = sorted(o for o in claims if module_id_of(o) == module_id)
+    if module_id_of(app_id) == module_id:
+        if not deriving:
+            return None
+        contenders = deriving
+    elif deriving:
+        return deriving[0]
+    else:
+        contenders = sorted(claims)
+    for other in contenders:
+        theirs = claims[other]
+        if own_first is None or theirs is None or theirs <= own_first:
+            return other
+    return None
+
+
+def _holder_error(app_id: str, module_id: str, holder: str) -> str:
+    """The refusal naming the app that keeps ``module_id`` over ``app_id``."""
+    return (
+        f'{app_id} loads under the container name {module_id!r}, which {holder!r} already '
+        'holds (its app id derives that name, or it was published first). '
+        'Deploy it under a different app id.'
+    )
+
+
+async def _container_holder_now(
+    account: Any, org_id: str, conn: Any, app_id: str, module_id: str, audience: Dict[str, str]
+) -> Optional[str]:
+    """The app that keeps ``module_id`` over ``app_id``, judged from the registry as it is now.
+
+    The same rule as the pre-write check, run after the binding exists, so the
+    app is dated from its own freshly written row. A rival that outranks it,
+    seen only now, is named; one it outranks cannot make resolve withhold it.
+    """
+    claims = await _container_claims(account, org_id, conn, app_id, module_id)
+    own_rows = [
+        r
+        for r in await account.publish_of_app(org_id, 'app', app_id)
+        if _scope_sees(audience, r) and _caller_sees(conn, r)
+    ]
+    own_first = _first_bound_at(own_rows) if claims else None
+    return _container_holder(app_id, module_id, own_first, claims)
+
+
+async def _back_out(
+    account: Any, org_id: str, conn: Any, app_id: str, audience: Dict[str, str], prior: Optional[Dict[str, Any]]
+) -> str:
+    """Undo a binding written just now and say how.
+
+    Returns 'restored' (the prior row is back as it was), 'removed' (a
+    brand-new row written 'removed', which holds no name), 'restored-enabled'
+    (the prior version is back but its disabled state could not be rewritten,
+    so the owner's disabled version is serving) or '' (nothing was undone).
+    ``prior`` is the audience's row before the write: its version and snapshot
+    are put back, then its state, so a disabled row stays disabled. Failures
+    are logged at warning so the caller never reports a clean refusal.
+    """
+    actor = _actor_of(conn)
+    if prior is None:
+        try:
+            await account.publish_set_state(org_id, 'app', app_id, audience, 'removed', actor)
+        except Exception as exc:
+            warning(f'[app_deploy] could not back out the binding of {app_id} for {audience}: {exc}')
+            return ''
+        return 'removed'
+    try:
+        await account.publish_set(
+            org_id, 'app', app_id, audience, int(prior.get('version') or 0), prior.get('snapshot') or {}, actor
+        )
+    except Exception as exc:
+        warning(f'[app_deploy] could not restore the prior binding of {app_id} for {audience}: {exc}')
+        return ''
+    if prior.get('state') != 'enabled':
+        try:
+            await account.publish_set_state(org_id, 'app', app_id, audience, str(prior.get('state')), actor)
+        except Exception as exc:
+            warning(
+                f'[app_deploy] restored the prior version of {app_id} for {audience} but could not '
+                f'rewrite its {prior.get("state")!r} state: {exc}'
+            )
+            return 'restored-enabled'
+    return 'restored'
+
+
+def _back_out_note(app_id: str, undone: str, prior: Optional[Dict[str, Any]]) -> str:
+    """What the response adds about a back-out, beyond why it happened."""
+    if undone == 'restored-enabled':
+        version = (prior or {}).get('version')
+        if (prior or {}).get('state') == 'removed':
+            return (
+                f'The previous binding v{version} of this audience was restored but is now enabled: '
+                'remove it (rrext_deploy_app remove) if it should stay off.'
+            )
+        return (
+            f'The previous binding v{version} of this audience was restored but is now '
+            'enabled: disable it (rrext_deploy_app disable) if it should stay off.'
+        )
+    if undone == 'restored':
+        return 'The previous binding of this audience was restored.'
+    return ''
+
+
+def _same_audience(row: Dict[str, Any], audience: Dict[str, str]) -> bool:
+    """True when ``row`` is the binding of ``audience`` (type and id)."""
+    other = row.get('audience') or {}
+    return other.get('type') == audience.get('type') and (other.get('id') or '') == (audience.get('id') or '')
+
+
+def _back_out_failed_error(app_id: str, module_id: str, holder: str) -> str:
+    """The refusal when the losing binding could not be removed: it is still live."""
+    return (
+        f'{app_id} loads under the container name {module_id!r}, which {holder!r} holds, and the new '
+        'binding could not be removed: it is still live and may be withheld. Remove it '
+        f'(rrext_deploy_app remove) or publish {app_id} again.'
+    )
+
+
 async def assert_pipe_id_outside_app_namespace(conn: Any, account: Any, org_id: str, project_id: str) -> None:
     """GUARANTEE a pipe's project id is not inside the caller's app namespace.
 
@@ -468,12 +774,40 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     guard_error = _zip_guard(archive)
     if guard_error:
         return conn.build_error(request, guard_error)
+    # The container name is the app id's, full stop: a declared moduleId may
+    # only restate it (see module_id_of).
+    module_id = module_id_of(app_id)
+    declared = manifest.get('moduleId')
+    if declared not in (None, '') and str(declared) != module_id:
+        return conn.build_error(
+            request,
+            f'appManifest.moduleId {str(declared)!r} is not allowed: the moduleId is derived from the '
+            f'app id ({module_id!r} for {app_id!r}). Remove moduleId from package.json, or set it to '
+            f'{module_id!r}.',
+        )
+    # A name another visible app already holds (acme.foo vs the bare
+    # acme_foo, acme.foo_bar vs acme_foo.bar, or a legacy stored name) is
+    # refused, fail closed, so a newcomer cannot contest an existing app's
+    # container. An org that already deploys this app id is the incumbent and
+    # is never locked out (publish re-checks by first-bind time).
+    try:
+        incumbent = bool(_app_rows(await account.deployments_versions(org_id, app_id)))
+        claims = {} if incumbent else await _container_claims(account, org_id, conn, app_id, module_id)
+    except Exception as exc:
+        debug(f'[app_deploy] container-name check failed: {exc}')
+        return conn.build_error(request, 'could not check the app id against existing apps; try again')
+    if claims:
+        return conn.build_error(
+            request,
+            f'App id {app_id!r} derives the container name {module_id!r}, which the existing app '
+            f'{sorted(claims)[0]!r} already uses. Choose a different app id.',
+        )
 
     # ── Registry row first: version allocation names the content paths ────
     artifact = {
         'kind': 'app',
         'appId': app_id,
-        'moduleId': str(manifest.get('moduleId') or app_id.replace('.', '_').replace('-', '_')),
+        'moduleId': module_id,
         'name': str(manifest.get('name') or app_id),
         'appVersion': app_version,
         'bundleSha256': hashlib.sha256(data).hexdigest(),
@@ -873,6 +1207,19 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         # the pointer would mint URLs to an empty directory.
         if not _is_built(entry):
             return conn.build_error(request, _not_built_error(app_id, version, entry))
+        # Container-name re-check (#1022): an app that slipped past receipt
+        # (the holder was not visible then) may not bind unless resolve would
+        # hand it the name. A reserved name (_reserved_container) is refused
+        # first, before any claim lookup or binding write.
+        module_id = ''
+        if developer:
+            module_id = str(artifact.get('moduleId') or module_id_of(app_id))
+            if _reserved_container(app_id, module_id):
+                return conn.build_error(
+                    request,
+                    f'{app_id} loads under the container name {module_id!r}, which is reserved and can '
+                    'never serve for this app id. Deploy it under a different app id.',
+                )
         # PUBLIC-PAGES gate (the trust boundary of the public-page surface):
         # the public rung is the only one the page aggregate reads, so a
         # manifest declaring publicPages/site is validated here, before the
@@ -900,9 +1247,91 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                     request, f'Version {version} of {app_id} cannot go public: ' + '; '.join(page_errors)
                 )
 
-        row = await account.publish_set(
-            home, 'app', app_id, audience, version, manifest_snapshot(entry, artifact), _actor_of(conn)
-        )
+        async with AsyncExitStack() as stack:
+            # Claim check and binding write are ONE step under the name's lock
+            # (_container_lock): _container_holder applies resolve's rule (the
+            # app whose id derives the name keeps it, else the one bound
+            # strictly first; a tie or an unknown time blocks). The publisher is
+            # dated from the rows every viewer of the binding sees, each
+            # rival from every row the caller sees.
+            if developer:
+                await stack.enter_async_context(_container_lock(module_id))
+                try:
+                    mine = await account.publish_of_app(home, 'app', app_id)
+                    # This audience's row before the write. One that already serves
+                    # holds the name in this scope, so repointing it under the same
+                    # name claims nothing new: createdAt survives the repoint, so
+                    # resolve's outcome is unchanged, and neither a claim lookup (one
+                    # artifact read per other app) nor a re-check is needed, which a
+                    # failing read could only turn into a refusal or a back-out of a
+                    # live binding. A new scope, or a row that did not serve, is a
+                    # claim: check it, re-check it after the write, and put the prior
+                    # row back on a back-out.
+                    prior = next((r for r in mine if _same_audience(r, audience)), None)
+                    needs_recheck = prior is None or bool(serving_block_of(prior, account.review_ladder))
+                    if not needs_recheck:
+                        # A serving row holds only the name it served under: a version
+                        # that changes the container name is a new claim. An unreadable
+                        # prior artifact cannot show the name, so it counts as one too
+                        # (the re-check fails closed) rather than refusing the publish.
+                        try:
+                            served = await account.deployments_artifact(
+                                str(prior.get('orgId') or home), app_id, int(prior.get('version') or 0)
+                            )
+                            served_name = str(served.get('moduleId') or '') if isinstance(served, dict) else ''
+                            needs_recheck = (served_name or module_id_of(app_id)) != module_id
+                        except Exception as exc:
+                            warning(f'[app_deploy] could not read the served artifact of {app_id}: {exc}')
+                            needs_recheck = True
+                    claims: Dict[str, Any] = {}
+                    own_first = None
+                    if needs_recheck:
+                        claims = await _container_claims(account, home, conn, app_id, module_id)
+                        # Only the publisher's own rows every viewer of the proposed
+                        # binding sees, and that the caller can see, date it.
+                        own_rows = [r for r in mine if _scope_sees(audience, r) and _caller_sees(conn, r)]
+                        own_first = _first_bound_at(own_rows) if claims else None
+                except Exception as exc:
+                    debug(f'[app_deploy] container-name check failed: {exc}')
+                    return conn.build_error(request, 'could not check the app id against existing apps; try again')
+                holder = _container_holder(app_id, module_id, own_first, claims) if needs_recheck else None
+                if holder:
+                    return conn.build_error(request, _holder_error(app_id, module_id, holder))
+            row = await account.publish_set(
+                home, 'app', app_id, audience, version, manifest_snapshot(entry, artifact), _actor_of(conn)
+            )
+            if developer and needs_recheck:
+                # The lock is process-local, so a publish on ANOTHER engine can have
+                # landed between the check above and this write. Re-read the claims
+                # (the backend reads its own writes, so whichever racer looks last
+                # sees both rows) and back this binding out when resolve would not
+                # hand it the name. Only a NEW claim re-checks (see needs_recheck);
+                # it fails closed, and when both racers back out a retry settles it.
+                try:
+                    holder = await _container_holder_now(account, home, conn, app_id, module_id, audience)
+                except Exception as exc:
+                    debug(f'[app_deploy] container-name re-check failed: {exc}')
+                    undone = await _back_out(account, home, conn, app_id, audience, prior)
+                    if not undone:
+                        return conn.build_error(
+                            request,
+                            'could not check the app id against existing apps, and the new binding could '
+                            'not be removed: it is still live; remove it',
+                        )
+                    note = _back_out_note(app_id, undone, prior)
+                    return conn.build_error(
+                        request,
+                        'could not check the app id against existing apps; '
+                        + (note + ' Try again.' if note else 'the new binding was removed and needs publishing again'),
+                    )
+                if holder:
+                    undone = await _back_out(account, home, conn, app_id, audience, prior)
+                    if not undone:
+                        return conn.build_error(request, _back_out_failed_error(app_id, module_id, holder))
+                    note = _back_out_note(app_id, undone, prior)
+                    return conn.build_error(
+                        request, _holder_error(app_id, module_id, holder) + (' ' + note if note else '')
+                    )
 
         # Refresh the acting user's manifest (data + signal); other audience
         # members pick the row up on their next account rebuild/login.
@@ -1428,6 +1857,10 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
     # Precedence: sorted so each app id's winner lands LAST and the blind
     # dict-overwrite below keeps it (see precedence_sorted).
     resolved: Dict[str, Dict[str, Any]] = {}
+    # app id -> its caller-visible rows, for first-bind ordering of containers.
+    rows_of: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        rows_of.setdefault(str(row.get('appId') or ''), []).append(row)
     for row in precedence_sorted(rows):
         # The SERVING gate (binding live, deployment serveable for the rung,
         # build 'ok') — shared with the owner's where-list so App Builder
@@ -1470,7 +1903,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             app_status = 'deployed'
         entry = {
             'id': app_id,
-            'moduleId': artifact.get('moduleId') or app_id.replace('.', '_'),
+            'moduleId': artifact.get('moduleId') or module_id_of(app_id),
             'name': snapshot.get('name') or artifact.get('name') or app_id,
             'publisher': _publisher_of(app_id, artifact_manifest, snapshot),
             'description': snapshot.get('description') or '',
@@ -1500,7 +1933,64 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if snapshot.get('configuration'):
             entry['configuration'] = snapshot.get('configuration')
         resolved[app_id] = entry
-    return list(resolved.values())
+    first_bound = {app_id: _first_bound_at(rows_of.get(app_id, [])) for app_id in resolved}
+    return _unique_containers(list(resolved.values()), first_bound)
+
+
+def _unique_containers(
+    entries: List[Dict[str, Any]], first_bound: Optional[Dict[str, Optional[float]]] = None
+) -> List[Dict[str, Any]]:
+    """The entries with no two apps sharing one Module Federation container name.
+
+    The shell registers every entry's moduleId with ``force: true``, so two
+    entries with one name are one container and one app would load the
+    other's code (#1022). Receipt now derives the name (module_id_of), but
+    artifacts stored before that carry whatever the manifest said. When a
+    name is claimed more than once, the one app whose id derives it keeps
+    it. If no app, or more than one, derives it, the contender bound FIRST
+    (``first_bound``: earliest binding creation time) keeps it and the later
+    ones are withheld, so a newcomer cannot hide an incumbent; a tie or an
+    unknown time cannot be ordered, and every claimant is withheld (fail
+    closed). A name
+    claimed once is kept even when it is not derived, so a legacy build
+    with its own name still loads — unless it is reserved
+    (_reserved_container), which is withheld first, claimed or not.
+    """
+    reserved = [e for e in entries if _reserved_container(str(e.get('id') or ''), str(e.get('moduleId') or ''))]
+    for entry in reserved:
+        debug(f'[app_deploy] app {entry.get("id")!r} withheld: moduleId {entry.get("moduleId")!r} is reserved')
+    entries = [e for e in entries if not any(e is r for r in reserved)]
+    claimants: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in entries:
+        claimants.setdefault(str(entry.get('moduleId') or ''), []).append(entry)
+    keep = []
+    for entry in entries:
+        group = claimants[str(entry.get('moduleId') or '')]
+        if len(group) == 1:
+            keep.append(entry)
+            continue
+        owners = [e for e in group if module_id_of(str(e.get('id') or '')) == e.get('moduleId')]
+        if len(owners) == 1:
+            winner = owners[0]
+        else:
+            winner = _first_bound_of(owners or group, first_bound or {})
+        if winner is entry:
+            keep.append(entry)
+        else:
+            debug(f'[app_deploy] app {entry.get("id")!r} withheld: moduleId {entry.get("moduleId")!r} is shared')
+    return keep
+
+
+def _first_bound_of(
+    contenders: List[Dict[str, Any]], first_bound: Dict[str, Optional[float]]
+) -> Optional[Dict[str, Any]]:
+    """The one contender bound strictly first, or None (a tie or an unknown time)."""
+    times = [first_bound.get(str(e.get('id') or '')) for e in contenders]
+    if any(t is None for t in times):
+        return None
+    earliest = min(times)
+    winners = [e for e, t in zip(contenders, times) if t == earliest]
+    return winners[0] if len(winners) == 1 else None
 
 
 # =============================================================================

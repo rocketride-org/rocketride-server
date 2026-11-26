@@ -793,6 +793,11 @@ class FileDeploymentBackend:
         on the deployment, not here (the caller has already gated the audience
         against the deployment's state). Repointing updates the target version
         + manifest snapshot and re-enables the binding.
+
+        Contract with app_deploy's container-name re-check: the write must be
+        visible to every engine's next publish_list/publish_of_app
+        (read-your-writes), and ``createdAt`` (time.time() here) must be
+        comparable across engines.
         """
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
@@ -905,6 +910,10 @@ class FileDeploymentBackend:
 
     async def publish_list(self, org_id: str, kind: str, audiences: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         """Every live publish row matching ANY of the audiences, across apps.
+
+        Read-your-writes: a publish_set already returned to any engine is
+        listed here (app_deploy's container-name re-check depends on it). A
+        'removed' row is not live and holds no container name.
 
         The scope-walk / store-browse feed. Scans the org's project metas
         (same pattern as list_team) — the SaaS DB edition answers this with
