@@ -47,7 +47,7 @@ HOSTED_INTEGRATIONS = frozenset({'llm_openai'})
 HOSTED_NOTE = (
     "Runs on RocketRide-hosted models without a key of your own, using this workspace's compute credits. "
     'Not for team deployments: a pipeline deployed to a team needs its own key. Otherwise leave apikey empty. '
-    'To use your own OpenAI key, first save it in RocketRide under Settings > Variables as '
+    'To use your own OpenAI key, first save it in RocketRide under Settings > Environment Variables as '
     'ROCKETRIDE_OPENAI_KEY, then set apikey to ${ROCKETRIDE_OPENAI_KEY}.'
 )
 
@@ -55,14 +55,13 @@ HOSTED_NOTE = (
 TEAM_DEPLOY_WARNING = (
     "This pipeline has an OpenAI node with no API key. Hosted models aren't available for team deployments "
     'yet, so the node will fail when the pipeline runs on this team. Add your own OpenAI key to the node: save '
-    'it in RocketRide under Settings > Variables as ROCKETRIDE_OPENAI_KEY, then set apikey to '
+    'it in RocketRide under Settings > Environment Variables as ROCKETRIDE_OPENAI_KEY, then set apikey to '
     '${ROCKETRIDE_OPENAI_KEY}.'
 )
 
 SETUP_HOW = (
-    'Set these variables in RocketRide: VS Code extension -> RocketRide: '
-    'Settings -> Variables, or https://app.rocketride.ai/settings/variables. '
-    'Then re-run list_integrations - the node becomes usable immediately.'
+    'Set these variables in RocketRide under Settings > Environment Variables, in the web app or the '
+    'VS Code extension. Then re-run list_integrations - the node becomes usable immediately.'
 )
 
 

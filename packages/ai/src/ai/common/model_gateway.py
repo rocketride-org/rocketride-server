@@ -77,11 +77,12 @@ _SERVER_HOSTED_FLAG = '--saas'
 _NO_KEY_HOSTED = (
     "{node}: no API key is set, and RocketRide-hosted models aren't available for this run. "
     'Add your OpenAI key in the node settings. To keep the key out of the pipeline, save it in RocketRide '
-    "under Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter ${{ROCKETRIDE_OPENAI_KEY}} as the node's API key."
+    'under Settings > Environment Variables as ROCKETRIDE_OPENAI_KEY and enter ${{ROCKETRIDE_OPENAI_KEY}} '
+    "as the node's API key."
 )
 _NO_KEY_SELF_HOSTED = (
     '{node}: no API key is set. Add your OpenAI key in the node settings. To keep the key out of the '
-    'pipeline, save it in RocketRide under Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter '
+    'pipeline, save it in RocketRide under Settings > Environment Variables as ROCKETRIDE_OPENAI_KEY and enter '
     "${{ROCKETRIDE_OPENAI_KEY}} as the node's API key."
 )
 # A compatible node with an endpoint of its own never runs on hosted models.
@@ -99,6 +100,10 @@ REFUSAL_SENTENCES = {
         "This workspace doesn't have enough compute credits left for this request on RocketRide-hosted models. "
         'Add your own OpenAI key in the node settings. A workspace admin can also manage compute credits '
         'under Account > Billing in RocketRide.'
+    ),
+    'spend_limit_reached': (
+        "This request would go over this workspace's rolling 24-hour usage limit for RocketRide-hosted models. "
+        'Try again later, or add your own OpenAI key in the node settings.'
     ),
     'rate_limited': (
         'This run has too many requests running at once on RocketRide-hosted models. '
