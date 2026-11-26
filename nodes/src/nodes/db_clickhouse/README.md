@@ -161,6 +161,25 @@ transaction for it to commit or roll back. Enable it only for trusted callers
 that need writes or dialect-specific SQL; use `get_data` for ordinary
 read-only retrieval.
 
+### Connection resilience
+
+All of these are optional node config keys.
+
+- `pool_pre_ping`: the pool checks a pooled connection before handing it out and
+  replaces one the server closed, so the first statement after a pooler restart
+  or a failover does not fail on a dead connection.
+- No `connect_timeout` on this node: it applies to PostgreSQL and MySQL/MariaDB only.
+- `connect_retries` (default 3, at most 10) and `connect_retry_budget` (seconds,
+  default 10, at most 60): an attempt that fails because the server is unreachable
+  or not ready is retried with exponential backoff and jitter within these limits.
+  A bad role, password or database is reported at once.
+- Application SQL is never retried: only the opening of a connection is, so a
+  statement that was sent is never sent again.
+- ClickHouse retries only the transport open. The driver connects lazily, so the
+  retry wraps the open of its socket, which runs before anything is sent; a
+  connect timeout reported by the driver is retried too.
+- The ping watchdog runs on PostgreSQL on POSIX only, so there is none here.
+
 ## Limitations
 
 This node declares the `noremote` capability, so it cannot run in a remote

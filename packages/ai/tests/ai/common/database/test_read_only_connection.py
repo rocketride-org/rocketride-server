@@ -34,7 +34,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.sql_safety import is_sql_safe
-from ai.common.database.db_instance_base import DatabaseInstanceBase
+from ai.common.database.db_instance_base import DatabaseInstanceBase, DatabaseLaneError
 
 
 class _Global(DatabaseGlobalBase):
@@ -195,7 +195,8 @@ def test_generated_query_paths_use_the_read_only_connection(sqlite_global):
     inst.IGlobal = sqlite_global
 
     assert inst._executeSQLQuery('SELECT id FROM t ORDER BY id') == [{'id': 1}, {'id': 2}]
-    assert inst._executeSQLQuery('DELETE FROM t') is None
+    with pytest.raises(DatabaseLaneError):
+        inst._executeSQLQuery('DELETE FROM t')
     ok, _message = sqlite_global._validateQuery('SELECT id FROM t')
     assert ok
     assert _count(sqlite_global.engine) == 2
@@ -1062,10 +1063,11 @@ def _instance_over(exc):
 def test_a_clickhouse_refusal_is_a_failed_query():
     """ClickHouse refuses a write under readonly=1 with its own DatabaseException; that is a failed query, not a crash."""
     exc = _DriverError('Code: 164. DB::Exception: Cannot execute query in readonly mode')
-    assert _instance_over(exc)._executeSQLQuery('INSERT INTO t VALUES (1)') is None
+    with pytest.raises(DatabaseLaneError):
+        _instance_over(exc)._executeSQLQuery('INSERT INTO t VALUES (1)')
 
 
 def test_a_non_database_error_still_propagates():
-    """Only database failures become None: a dialect without a read-only mode still stops the query loudly."""
+    """Only database failures become DatabaseLaneError: a dialect without a read-only mode still stops the query loudly."""
     with pytest.raises(RuntimeError, match='No read-only mode'):
         _instance_over(RuntimeError('No read-only mode for the oracle dialect'))._executeSQLQuery('SELECT 1')

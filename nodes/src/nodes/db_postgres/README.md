@@ -131,6 +131,28 @@ Off by default — leave it off unless a trusted application explicitly needs to
 issue SQL directly, because enabled callers bypass the LLM translation, the
 SELECT-only check and the read-only transaction.
 
+### Connection resilience
+
+All of these are optional node config keys.
+
+- `pool_pre_ping`: the pool checks a pooled connection before handing it out and
+  replaces one the server closed, so the first statement after a pooler restart
+  or a failover does not fail on a dead connection.
+- `connect_timeout` (seconds, default 5, at most 60): bounds one connection
+  attempt, handshake and authentication included, per host or IP address. libpq
+  treats a value below 2 as 2 seconds. It takes precedence over one written in the
+  connection URL.
+- `connect_retries` (default 3, at most 10) and `connect_retry_budget` (seconds,
+  default 10, at most 60): an attempt that fails because the server is unreachable
+  or not ready is retried with exponential backoff and jitter within these limits.
+  A bad role, password or database is reported at once.
+- Application SQL is never retried: only the opening of a connection is, so a
+  statement that was sent is never sent again.
+- The ping watchdog (`ping_timeout`, default 5 s) bounds the `pool_pre_ping`
+  health check, including a pooler that keeps acknowledging but has stopped
+  answering. It runs on PostgreSQL on POSIX only; on Windows the ping is not
+  bounded.
+
 ## Limitations
 
 Declared `noremote`: this node runs on the local engine host only and is not
@@ -144,10 +166,14 @@ PostgreSQL server it queries.
 Generated SQL passes three gates:
 
 1. **Shape check**: only statements beginning with `SELECT` (optionally prefixed by `EXPLAIN`) are allowed, and a `SELECT` with `INTO` or a row lock (`FOR UPDATE`, `FOR SHARE`) is rejected. Literals and comments are masked first, under PostgreSQL quoting rules (with `standard_conforming_strings` on and off; a name may hold `$` and any non-ASCII character) and under MySQL quoting rules, so text inside them can neither hide a clause nor trip a check. Multi-statement input is rejected, and `WITH` (CTE) is deliberately excluded because PostgreSQL accepts CTE-into-mutation (e.g. `WITH x AS (...) DELETE ...`).
-2. **`EXPLAIN` validation**: the query is validated against the live database. If `EXPLAIN` rejects it, the rejected SQL and the database error are fed back to the LLM for a corrected query, up to `max_attempts` times (default 5).
+2. **`EXPLAIN` validation**: the query is validated against the live database. If `EXPLAIN` rejects it, the rejected SQL and the database error are fed back to the LLM for a corrected query, up to `max_attempts` times (default 5). This applies to a rejection only: when the database cannot be reached, nothing goes back to the LLM (see Failures on the questions lane below).
 3. **Read-only transaction**: the `EXPLAIN` and the query run in a `READ ONLY` transaction with `statement_timeout` set to 60 seconds. PostgreSQL refuses any write (`SELECT ... INTO`, `nextval`, `setval`, `FOR UPDATE`, a function that modifies data) and cancels a query that runs longer. The transaction covers one statement: psycopg2 sends a multi-statement input as one string, and a later statement in it could end the transaction (`COMMIT`) or lift the time limit (`set_config()`), so the shape check's refusal of multi-statement input is what stops such an input.
 
 Apart from multi-statement input, the shape check is a first pass, not the guarantee: a `SELECT` can call a function whose side effects its text does not show. The read-only transaction stops writes, but not reads of server files (`pg_read_file`, `lo_import`), signals to other sessions (`pg_terminate_backend`) or connections out of the database (`dblink`). The role the node connects as controls those: grant it `SELECT` on the tables it should answer from and nothing more, not superuser and not membership of `pg_read_server_files`, `pg_signal_backend` or `pg_execute_server_program`.
+
+### Failures on the questions lane
+
+When the database cannot be reached, or drops the connection while the query runs, the `questions` lane fails the step with a generic message and writes nothing to `text`, `table` or `answers`; the driver's own text is in the server log. A generated query that passes `EXPLAIN` and is then refused by a database that is up (a row cast failure, the `statement_timeout` cancelling it) is reported as `Query execution failed` on the `text` and `answers` lanes. The other failures that are not an outage are reported there too, each in its own words: an `EXPLAIN` rejection after the last attempt reports its final validation error, unsafe SQL reports `Generated query contains unsafe SQL`, and an LLM reply with neither a query nor an answer says so. A pipeline with only the `table` lane has no lane that carries an error, so every failure in this paragraph raises and fails the step. The `get_sql` and `get_data` tools never raise for an outage or a failed query: they return `valid: false` with an `error`, so check `valid`.
 
 Insert operations never go through SQL generation; they use the `answers` lane.
 
@@ -161,7 +187,7 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 - A `null` supplied for any column the database fills in itself — a generated primary key, a `DEFAULT`, an identity — counts as not carried, because the sender on this lane is an upstream node that may emit every schema key with `null` for the ones it has no value for. A `null` on a column with nothing behind it is inserted as `NULL` as given. (The `execute` tool is unaffected: a statement you write binds your `NULL`.)
 - A primary key PostgreSQL is not known to generate (a composite key, a text key with no default) that a row omits is left out of the statement too, and PostgreSQL decides. The node does not refuse the row: "generates it itself" is read from reflected metadata, which does not describe triggers, so a `uuid`/`CHAR(36)` key filled by a `BEFORE INSERT` trigger is indistinguishable from a key nobody supplies — omitting the column is what lets the trigger run. Where nothing fills it in, PostgreSQL rejects the row with `null value in column "..." violates not-null constraint` and the whole batch is rolled back. (SQLAlchemy emits a Python `SAWarning` — once per column per process under the default filter — for a statement that leaves a primary key unbound; it is expected here.)
 - Lists and dicts are serialised as JSON strings; booleans are stored as `0`/`1`.
-- Each batch is inserted in a single transaction: on failure every row of it is rolled back and the error is raised as `Insert into "<table>" failed:` followed by PostgreSQL's own primary message, with the statement echo stripped exactly as for `execute`. On the `answers` lane the error is logged, not returned, so check the server log when rows do not appear.
+- Each batch is inserted in a single transaction: on failure every row of it is rolled back and the error is raised as `Insert into "<table>" failed:` followed by PostgreSQL's own primary message, with the statement echo stripped exactly as for `execute`. On the `answers` lane the step fails with a generic message (the error text above goes to the server log), so check the server log for the cause when rows do not appear.
 
 ### Supabase preset
 
