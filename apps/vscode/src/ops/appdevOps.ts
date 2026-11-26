@@ -21,7 +21,7 @@ import type { AppDevOpMap } from 'shared/ops/appdevOps';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 import type { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
-import { DeveloperIdentity, IdentityFeed, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
+import { DeveloperIdentity, IdentityFeed, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, messageOf, toWizardIdentity } from '../appdev/developerIdentity';
 import { getLogger } from '../shared/util/output';
 
 /** What the registrations need from the host. */
@@ -42,11 +42,11 @@ interface IAppDevOpsDeps {
 export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void {
 	const { context, connectionManager, broadcast, closeWizard } = deps;
 
-	/** Resolves and claims the org's developer id (see appdev/developerIdentity). */
 	/** Logs an appdev failure to the RocketRide output channel. */
 	const logError = (message: string): void => {
 		getLogger().error(`[appdev] ${message}`);
 	};
+	/** Resolves and claims the org's developer id (see appdev/developerIdentity). */
 	const developer = new DeveloperIdentity(connectionManager, STATUS_TIMEOUT_MS, logError);
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
@@ -86,7 +86,7 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	// name — push the fresh identity to every realm.
 	const push = (): void => {
 		feed.refresh(true).catch((err: unknown) => {
-			logError(`identity refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+			logError(`identity refresh failed: ${messageOf(err)}`);
 		});
 	};
 	for (const event of ['shell:statusChange', 'shell:accountUpdate'] as const) {
