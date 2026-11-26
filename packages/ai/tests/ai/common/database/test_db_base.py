@@ -38,7 +38,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import DBAPIError
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
-from ai.common.database.db_instance_base import DatabaseInstanceBase, MissingLlmError
+from ai.common.database.db_instance_base import DatabaseInstanceBase, DatabaseLaneError, MissingLlmError
 from ai.common.schema import Question
 from ai.common.utils import parse_bool
 
@@ -878,11 +878,30 @@ def test_write_questions_emits_error_for_unsafe_sql_not_as_data():
     assert fake_instance.table_written is None
 
 
+def _execute_returning(rows):
+    """Return a stand-in ``_executeSQLQuery`` that returns ``rows``, or raises ``DatabaseLaneError`` when it is None.
+
+    Args:
+        rows: The row list to return, or None for a failed execution.
+
+    Returns:
+        The stand-in.
+    """
+
+    def execute(sql):
+        """Return ``rows`` or fail the way the real method does."""
+        if rows is None:
+            raise DatabaseLaneError('TestDB query failed (details are in the engine log)')
+        return rows
+
+    return execute
+
+
 def _executing_instance(rows, lanes):
     """Build an instance whose query passes EXPLAIN and whose execution returns ``rows``.
 
     Args:
-        rows: What ``_executeSQLQuery`` returns: a row list, or None for a failed execution.
+        rows: What ``_executeSQLQuery`` returns: a row list, or None to make it raise ``DatabaseLaneError``.
         lanes: The lanes wired to the node.
 
     Returns:
@@ -895,7 +914,7 @@ def _executing_instance(rows, lanes):
         'isValid': True,
         'query': 'SELECT 1',
     }
-    inst._executeSQLQuery = lambda sql: rows
+    inst._executeSQLQuery = _execute_returning(rows)
     fake_instance = _FakeInstance(lanes=lanes)
     inst.instance = fake_instance
     return inst, fake_instance
@@ -904,9 +923,10 @@ def _executing_instance(rows, lanes):
 def test_write_questions_reports_a_failed_execution_not_the_string_none():
     """A query that passes EXPLAIN but fails to run reports the failure, not the text 'None' (#1925).
 
-    ``_executeSQLQuery`` returns None when the database rejects the statement at
-    execution time; writeQuestions passed it to ``_emit``, which wrote ``str(None)``
-    to the text and answers lanes.
+    ``_executeSQLQuery`` used to return None when the database rejected the statement
+    at execution time, and writeQuestions wrote ``str(None)`` to the text and answers
+    lanes. It now raises ``DatabaseLaneError`` for a database that is up and refused
+    the statement, and writeQuestions keeps reporting it on the lanes (#2963).
     """
     inst, fake_instance = _executing_instance(None, ['text', 'table', 'answers'])
     question = Question()
@@ -966,7 +986,7 @@ def _question_instance(reply, lanes, *, explain_ok=True, rows=None):
         return dict(reply)
 
     inst._buildSQLQueryOnce = build
-    inst._executeSQLQuery = lambda sql: rows
+    inst._executeSQLQuery = _execute_returning(rows)
     fake_instance = _FakeInstance(lanes=lanes)
     inst.instance = fake_instance
     return inst, fake_instance
@@ -1122,7 +1142,7 @@ class _RaisingDatabase:
         raise self.exc
 
 
-def test_execute_sql_query_reports_a_clickhouse_failure_as_none():
+def test_execute_sql_query_reports_a_clickhouse_failure_as_a_lane_error():
     """clickhouse+native:// raises a DatabaseException that is not a SQLAlchemyError; it is still a failed query."""
     inst = _sql_instance(
         _RaisingDatabase(
@@ -1132,11 +1152,12 @@ def test_execute_sql_query_reports_a_clickhouse_failure_as_none():
         )
     )
 
-    assert inst._executeSQLQuery('SELECT * FROM widgets') is None
+    with pytest.raises(DatabaseLaneError):
+        inst._executeSQLQuery('SELECT * FROM widgets')
 
 
 def test_execute_sql_query_lets_a_non_database_error_through():
-    """Only database failures become None; anything else is a bug and propagates."""
+    """Only database failures become DatabaseLaneError; anything else is a bug and propagates unchanged."""
     inst = _sql_instance(_RaisingDatabase(RuntimeError('boom')))
 
     with pytest.raises(RuntimeError, match='boom'):
@@ -1203,7 +1224,7 @@ def _ask_for_widgets(fake_global):
 
 
 def test_execute_sql_query_returns_an_empty_list_when_no_row_matches(base):
-    """A query that matches no row ran: [] is its result, and only None means the query failed.
+    """A query that matches no row ran: [] is its result, and only DatabaseLaneError means the query failed.
 
     Args:
         base: A ``DatabaseGlobalBase`` on an in-memory SQLite engine, from the ``base`` fixture.

@@ -166,9 +166,24 @@ For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
 checking, under MySQL rules (backslash escapes, `#` and `-- ` comments) as well
 as PostgreSQL's, rejects comments MySQL runs (`/*! */`, `/*M! */`) and optimizer
 hints (`/*+ */`), and rejects multi-statement input and CTEs.
-It validates each safe candidate with `EXPLAIN` and feeds database errors to the
-LLM for the next attempt. If the LLM decides a question is not a database query, its text
+It validates each safe candidate with `EXPLAIN` and feeds the database's
+rejection to the LLM for the next attempt. If the LLM decides a question is not a database query, its text
 answer is emitted instead of executing SQL.
+
+When the database cannot be reached, or drops the connection while the query
+runs, nothing goes back to the LLM: the `questions` lane fails the step with a
+generic message and writes nothing to `text`, `table` or `answers`, and the
+driver's own text is in the server log. A generated query that passes `EXPLAIN`
+and is then refused by a database that is up (a row cast failure, a statement
+timeout) is reported as `Query execution failed` on the `text` and `answers`
+lanes. The other failures that are not an outage are reported there too, each
+in its own words: an `EXPLAIN` rejection after the last attempt reports its
+final validation error, unsafe SQL reports `Generated query contains unsafe
+SQL`, and an LLM reply with neither a query nor an answer says so. A pipeline
+with only the `table` lane has no lane that carries an error, so every failure in this paragraph
+raises and fails the step. The `get_sql`
+and `get_data` tools never raise for an outage or a failed query: they return
+`valid: false` with an `error`, so check `valid`.
 
 The `EXPLAIN` and the query run in a read-only session
 (`SET SESSION TRANSACTION READ ONLY`), which refuses writes and DDL, with
@@ -219,9 +234,9 @@ expected here.
 
 A failed insert raises `Insert into "<table>" failed:` followed by MySQL's own
 primary message, with SQLAlchemy's statement and parameter echo stripped the
-same way `execute` strips it. The `answers` lane logs that error rather than
-returning it, so the server log is where a batch that did not land is
-explained.
+same way `execute` strips it. The `answers` lane fails the step with a generic
+message and writes that error to the server log, so the server log is where a
+batch that did not land is explained.
 
 ### Connection checks and transactions
 

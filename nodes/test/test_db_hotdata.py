@@ -1303,6 +1303,129 @@ def test_questions_lane_emits_structured_error_on_failure():
     assert 'error' in payload, 'errors must be structurally distinguishable from prose'
 
 
+@pytest.mark.parametrize(
+    'failure',
+    [
+        client_mod.HotdataError('hotdata: cannot reach https://api.example: refused'),
+        client_mod.HotdataError('hotdata: POST /query failed with HTTP 503', status_code=503),
+        client_mod.HotdataError('hotdata: HTTP 401: invalid_api_key', status_code=401),
+    ],
+    ids=['unreachable', 'server-error', 'rejected-key'],
+)
+def test_questions_lane_fails_the_step_when_the_service_cannot_answer(failure):
+    """An outage is not a question the lanes can answer: the step fails and nothing is emitted."""
+    g = _loaded_global(max_attempts=3)
+    queries = []
+
+    def _query(**_kw):
+        queries.append(1)
+        raise failure
+
+    g.client = SimpleNamespace(information_schema=lambda **_kw: {'tables': []}, query=_query)
+    inst = _instance(g)
+    inst.instance = _FakeLaneInstance(['text', 'table', 'answers'])
+
+    with pytest.raises(iinstance_mod.HotdataLaneError) as raised:
+        inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+    # Generic: the client's own text (the API URL, the transport's wording) stays in the log.
+    message = str(raised.value)
+    assert 'could not answer the question' in message
+    assert 'api.example' not in message and 'refused' not in message and 'invalid_api_key' not in message
+    assert len(queries) == 1  # not retried as though the SQL were at fault
+    assert not (inst.instance.texts or inst.instance.tables or inst.instance.answers)
+
+
+@pytest.mark.parametrize(
+    'outcomes',
+    [
+        [{'status': 'interrupted'}, {'status': 'interrupted'}],
+        [{'status': 'cancelled'}],
+    ],
+    ids=['interrupted-twice', 'cancelled'],
+)
+def test_questions_lane_fails_the_step_when_the_run_ends_not_by_the_sql(outcomes):
+    """A run that is interrupted or cancelled is not the statement's fault: no rewrite, no lane error, the step fails."""
+    seen = []
+    g = _loaded_global(max_attempts=3)
+    g.client = _interrupting_client(outcomes, seen)
+    inst = _instance(g)
+    inst.instance = _FakeLaneInstance(['text', 'table', 'answers'])
+
+    with pytest.raises(iinstance_mod.HotdataLaneError, match='could not answer the question'):
+        inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+    assert len(seen) == len(outcomes)  # the same statement, never regenerated
+    assert not (inst.instance.texts or inst.instance.tables or inst.instance.answers)
+
+
+def test_a_run_that_outlives_the_job_timeout_is_a_run_failure():
+    """The poll deadline is about the run, not the SQL: raised as RunFailedError, which the lane turns into a step failure."""
+    g = _loaded_global()
+    g.job_timeout_secs = 0
+    g.client = SimpleNamespace(get_query_run=lambda _run_id, database_id='': {'status': 'running'})
+
+    with pytest.raises(iinstance_mod.RunFailedError, match='did not finish within'):
+        _instance(g)._await_run('run-1', 'db-1')
+    assert iinstance_mod._is_sql_fixable(iinstance_mod.RunFailedError('x')) is False
+
+
+def test_a_failed_run_is_the_statement_failing_even_when_it_carries_a_warning():
+    """`failed` is the statement failing (error_message says why); a warning_message does not turn it into a save failure.
+
+    A result that could not be saved arrives as a `succeeded` run with a
+    warning_message and no result_id, which _run_sql handles - never as `failed`.
+    """
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        get_query_run=lambda _run_id, database_id='': {
+            'status': 'failed',
+            'error_message': 'query execution failed: Arrow error: Divide by zero error',
+            'warning_message': 'result store unavailable',
+        }
+    )
+
+    with pytest.raises(iinstance_mod.SqlStatementError, match='Divide by zero'):
+        _instance(g)._await_run('run-1', 'db-1')
+
+
+def test_questions_lane_still_emits_an_error_for_a_statement_the_server_rejected():
+    """A real SQL rejection (the server minted a query run id) is the statement's fault: reported on the lanes."""
+    g = _loaded_global(max_attempts=1)
+    rejected = client_mod.HotdataError('hotdata: HTTP 400: no such table', status_code=400, query_run_id='qrun-1')
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=lambda **_kw: (_ for _ in ()).throw(rejected),
+    )
+    inst = _instance(g)
+    inst.instance = _FakeLaneInstance(['text', 'answers'])
+
+    inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+    assert 'error' in json.loads(inst.instance.answers[0].answer)
+
+
+@pytest.mark.parametrize('lane', ['text', 'table', 'answers'])
+def test_questions_lane_fails_the_step_when_a_downstream_write_fails(lane):
+    """A downstream node's failure reaches this caller as a plain Exception; it must not be swallowed."""
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=lambda **_kw: {'rows': [{'a': 1}]},
+    )
+    inst = _instance(g)
+    lanes = _FakeLaneInstance([lane])
+
+    def _boom(_value):
+        raise Exception('Exception: downstream write failed')
+
+    setattr(lanes, {'text': 'writeText', 'table': 'writeTable', 'answers': 'writeAnswers'}[lane], _boom)
+    inst.instance = lanes
+
+    with pytest.raises(Exception, match='downstream write failed'):
+        inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+
 def test_question_without_llm_names_the_cause_and_the_raw_sql_path():
     """With no llm connected, a question fails with a clear message, not an engine error.
 

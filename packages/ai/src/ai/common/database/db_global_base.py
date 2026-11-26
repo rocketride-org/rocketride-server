@@ -60,12 +60,126 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import (
+    DBAPIError,
+    InterfaceError as SAInterfaceError,
+    SQLAlchemyError,
+    TimeoutError as SAPoolTimeoutError,
+)
 
 from rocketlib import IGlobalBase, error, warning
 from ai.common.config import Config
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
+
+
+class DatabaseUnavailableError(RuntimeError):
+    """The database could not be reached, or dropped the connection, while serving a request.
+
+    Raised instead of reporting the failure as a property of the SQL: a
+    connection that was refused says nothing about the statement, so the caller
+    must neither feed it back to the LLM as "the database rejected your query"
+    nor carry on as if the question had been answered. The message is generic;
+    the driver's text is in the engine log.
+    """
+
+
+# PostgreSQL SQLSTATE classes and codes that mean the server cannot take the
+# request right now rather than that the statement is wrong:
+# 08 connection exception, 53 insufficient resources (too many connections),
+# 57P01 admin_shutdown, 57P02 crash_shutdown, 57P03 cannot_connect_now,
+# 57P05 idle_session_timeout (the server ended an idle session).
+_UNAVAILABLE_SQLSTATE_CLASSES = frozenset({'08', '53'})
+_UNAVAILABLE_SQLSTATES = frozenset({'57P01', '57P02', '57P03', '57P05'})
+
+# MySQL / MariaDB server error numbers (PyMySQL puts them in ``args[0]``) that mean
+# the server is going away: 1053 ER_SERVER_SHUTDOWN. The disconnects SQLAlchemy
+# already recognises (2006, 2013, ...) arrive as ``connection_invalidated``.
+_UNAVAILABLE_MYSQL_ERRNOS = frozenset({1053})
+
+# Deliberately NOT outages, so they keep the "the database rejected this statement"
+# path: PostgreSQL 55P03 lock_not_available and 57014 query_canceled (a statement or
+# lock timeout is about this query, not about the server), and ClickHouse 202
+# TOO_MANY_SIMULTANEOUS_QUERIES / 241 MEMORY_LIMIT_EXCEEDED (resource limits of the
+# query). `test_db_lane_failures.py` pins each as a rejection.
+
+# Driver exception classes, matched by name through the MRO, that say the link to
+# the server failed. Names rather than imports because this base must not depend
+# on one node's driver (clickhouse-driver's NetworkError is the reason).
+_UNAVAILABLE_DRIVER_CLASS_NAMES = frozenset({'InterfaceError', 'NetworkError', 'SocketTimeoutError'})
+
+
+def is_connection_failure(exc: BaseException) -> bool:
+    """Return True when ``exc``, raised while a statement ran, means the database is unreachable.
+
+    Decided by exception type and SQLSTATE, not by message text. Deliberately not
+    "any ``OperationalError``": PyMySQL raises one for an unknown column, which is
+    the SQL being wrong and is exactly what the LLM repair loop exists for.
+
+    * SQLAlchemy marked the connection invalid (``connection_invalidated``: the
+      dialect recognised a disconnect), raised ``InterfaceError``, or the pool
+      timed out handing out a connection;
+    * the driver's own error is a socket-level ``OSError`` (refused, reset,
+      timed out), a driver interface/network class, or carries an unavailable
+      SQLSTATE.
+
+    Only for a failure that happened *after* a connection was obtained: an error
+    while opening one is always a connection failure and callers separate that
+    phase themselves.
+    """
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+    if isinstance(exc, (SAInterfaceError, SAPoolTimeoutError)):
+        return True
+    orig = getattr(exc, 'orig', None) or exc
+    if isinstance(orig, OSError):
+        return True
+    if any(cls.__name__ in _UNAVAILABLE_DRIVER_CLASS_NAMES for cls in type(orig).__mro__):
+        return True
+    code = getattr(orig, 'pgcode', None)
+    if isinstance(code, str) and (code[:2] in _UNAVAILABLE_SQLSTATE_CLASSES or code in _UNAVAILABLE_SQLSTATES):
+        return True
+    args = getattr(orig, 'args', ())
+    if args and isinstance(args[0], int) and args[0] in _UNAVAILABLE_MYSQL_ERRNOS:
+        return True
+    return False
+
+
+def is_database_or_transport_failure(exc: BaseException) -> bool:
+    """Whether ``exc`` is a database or transport failure, as opposed to a bug such as a ``TypeError``."""
+    return isinstance(exc, (SQLAlchemyError, OSError)) or getattr(exc, 'orig', None) is not None
+
+
+def is_database_outage(exc: BaseException, *, connected: bool) -> bool:
+    """Return True when ``exc`` from a statement run on ``read_only_connection`` means the database is unreachable.
+
+    Shared by ``_validateQuery`` and ``_executeSQLQuery`` so the two classify a
+    failure identically: the one that was a rejection at EXPLAIN time cannot be an
+    outage a moment later, and the reverse.
+
+    Before the ``read_only_connection`` block is entered, the manager both opens
+    the connection and runs its read-only setup statements. Only a failure to open
+    it (no statement attached) is an outage by itself; a setup statement that
+    fails is judged like any other statement, and the ``RuntimeError`` of a
+    dialect with no read-only mode is a configuration fault, so both are not
+    outages. Neither is an exception that is not a database or transport failure
+    at all (it propagates unchanged). Once the block is entered, only ``is_connection_failure`` decides.
+
+    Args:
+        exc: The exception the statement raised.
+        connected: Whether the ``with read_only_connection()`` block was entered.
+    """
+    # Only a database or transport failure counts: a TypeError or KeyError raised
+    # while the connection is being opened is a bug, and must propagate as itself
+    # rather than read as "the database is unavailable".
+    opening_failed = (
+        not connected
+        and is_database_or_transport_failure(exc)
+        and getattr(exc, 'statement', None) is None
+        and not isinstance(exc, RuntimeError)
+    )
+    return opening_failed or is_connection_failure(exc)
+
 
 # Everything a driver or SQLAlchemy appends to its primary message that can
 # echo the executed statement or the values bound into it back to the caller:
@@ -415,13 +529,27 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # ------------------------------------------------------------------
 
     def _tableExists(self, table: str) -> bool:
-        """Return True if the table exists in the connected database."""
+        """Return True if the table exists in the connected database.
+
+        ``False`` means the table is not there (or the engine is not set up). A
+        database that cannot be reached raises ``DatabaseUnavailableError``
+        instead: reporting it as "no such table" sent ``_insertData`` down the
+        create-the-table path, whose failure then read as "could not be created"
+        for what was an outage.
+        """
         if not self.engine:
             return False
+        connected = False
         try:
-            inspector = inspect(self.engine)
-            return table in inspector.get_table_names()
-        except Exception:
+            with self.engine.connect() as conn:
+                connected = True
+                return table in inspect(conn).get_table_names()
+        except Exception as e:
+            # Failing to open the connection at all is an outage whatever the
+            # driver called it; after that, only the unavailable shapes are.
+            if not connected or is_connection_failure(e):
+                error(f'Database unavailable while checking for table "{table}": {e}')
+                raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
             return False
 
     def _is_datetime_string(self, value: str) -> bool:
@@ -589,15 +717,21 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         if not self.engine:
             raise ValueError('Database connection is not initialized.')
 
+        phase = 'before'
         try:
-            inspector = inspect(self.engine)
-
             # Return None (rather than raising) when the table is absent so
-            # callers can handle the missing-table case gracefully.
+            # callers can handle the missing-table case gracefully. An outage
+            # raises `DatabaseUnavailableError` from here instead.
             if not self._tableExists(table):
                 return None
 
-            columns = inspector.get_columns(table)
+            # An explicit connection, so "could not connect" is told apart from a
+            # reflection error: `inspect(engine)` connects inside itself, and the
+            # driver's refusal then looks like any other failure.
+            phase = 'connecting'
+            with self.engine.connect() as conn:
+                phase = 'connected'
+                columns = inspect(conn).get_columns(table)
             schema: Dict[str, Tuple[str, str]] = {}
             for column in columns:
                 col_name = column['name']
@@ -616,7 +750,12 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
             return [(col_name, str(col_type)) for col_name, (col_type, _comment) in schema.items()]
 
+        except DatabaseUnavailableError:
+            raise
         except Exception as e:
+            if phase == 'connecting' or (phase == 'connected' and is_connection_failure(e)):
+                error(f'Database unavailable while reflecting table "{table}": {e}')
+                raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
             warning(f'Unable to retrieve database schema for "{table}": {e}')
             return None
 
@@ -866,7 +1005,11 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         Runs ``EXPLAIN <query>`` inside ``read_only_connection``, so even a database that
         evaluated part of the query while planning it could not write.
-        Returns ``(True, '')`` on success or ``(False, error_message)`` on failure.
+        Returns ``(True, '')`` on success or ``(False, error_message)`` when the
+        database rejects the statement. Raises ``DatabaseUnavailableError`` when the
+        database cannot be reached: that is not a property of the SQL. An error raised
+        while the connection is opened that is neither a database nor a transport failure
+        (a ``TypeError`` and the like) propagates unchanged.
 
         ``EXPLAIN`` is standard SQL supported by MySQL and PostgreSQL; both
         engines raise an exception for syntactically or semantically invalid
@@ -889,11 +1032,31 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         """
         if not self.engine:
             return False, 'Database engine not initialized'
+        connected = False
         try:
             with self.read_only_connection() as conn:
+                connected = True
                 conn.execute(text(f'EXPLAIN {query}'))
             return True, ''
         except Exception as e:
+            # A database that cannot be reached is not a verdict on the SQL.
+            # Reporting it as "rejected" fed the connection error to the LLM as
+            # the reason its query was wrong, and let the lane finish as though
+            # the question had been answered. Raise it instead.
+            # Before the block is entered, read_only_connection both opens the
+            # connection and runs its read-only setup statements. Only a failure
+            # to open it (no statement attached) is an outage by itself; a setup
+            # statement that fails is judged like any other statement, and the
+            # RuntimeError of a dialect with no read-only mode is a configuration
+            # fault, so both keep the rejection path.
+            if is_database_outage(e, connected=connected):
+                error(f'Database unavailable during EXPLAIN validation: {e}')
+                raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
+            # Same rule as `_executeSQLQuery`: a bug raised while the connection is being
+            # opened (not a database or transport failure, not the dialect's RuntimeError)
+            # propagates as itself instead of being fed to the LLM repair loop as a rejection.
+            if not connected and not isinstance(e, RuntimeError) and not is_database_or_transport_failure(e):
+                raise
             warning(f'EXPLAIN validation failed for the generated query: {e}')
             return False, self._format_db_error(e)
 
