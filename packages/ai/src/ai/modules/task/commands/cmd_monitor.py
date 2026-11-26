@@ -169,10 +169,6 @@ class MonitorCommands(DAPConn):
             user_id: Optional user scope -- only deliver to this user.
             org_id: Optional org scope -- only deliver to connections in this org.
         """
-        # Step 0: platform authority verified recently (live re-check, #972)
-        authz = getattr(self._server, '_authz', None)
-        if authz is not None and not authz.gate_ok(self):
-            return
         # Step 1: must be subscribed to wildcard
         if '*' not in self._monitors:
             return
@@ -245,11 +241,6 @@ class MonitorCommands(DAPConn):
             # stamps the run log recorded, and the DAP envelope stays pure
             # protocol (each connection mints its own header seq).
             await self.send_event(evt_name, id=control.id, body=body)
-
-        # Platform authority verified recently (live re-check, #972)
-        authz = getattr(self._server, '_authz', None)
-        if authz is not None and not authz.gate_ok(self):
-            return
 
         # Get the task by token
         control = self._server.get_task_control(token)
@@ -363,11 +354,6 @@ class MonitorCommands(DAPConn):
             source (str, optional): Source component identifier used alongside
                 project_id when control is None.
         """
-        # Live authority re-check (#972): a stale gate gets no catch-up sends
-        authz = getattr(self._server, '_authz', None)
-        if authz is not None and not authz.gate_ok(self):
-            return
-
         # Figure out what was just turned on
         new = curr & ~prev  # Bits that are in curr but NOT in prev
 
@@ -399,10 +385,8 @@ class MonitorCommands(DAPConn):
             except Exception:
                 pass
 
-        # If we just turned on task (same permission as a live task event).
-        # The summary send above awaited, so re-check live authority here: the
-        # gate read at the top may have gone stale while it ran (#972).
-        if new & EVENT_TYPE.TASK and (authz is None or authz.gate_ok(self)) and self._may_monitor():
+        # If we just turned on task (same permission as a live task event)
+        if new & EVENT_TYPE.TASK and self._may_monitor():
             try:
                 # Loop through all active tasks the caller has access to
                 tasks: List[Dict[str, Any]] = []
