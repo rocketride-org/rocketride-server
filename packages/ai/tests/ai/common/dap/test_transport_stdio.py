@@ -629,3 +629,121 @@ async def test_chn_signal_names_the_closed_connection():
     assert _single_event(events)['body'] == {'state': '1', 'id': '0123abcd'}
     events, _ = await _drive('>CHN*2')
     assert _single_event(events)['body'] == {'state': '2', 'id': None}
+
+
+# ---------------------------------------------------------------------------
+# >EXIT with a live process: output after it is read before the disconnect (#3249)
+# ---------------------------------------------------------------------------
+
+
+async def _run_child(script, *, exit_output_timeout=5.0, then=None):
+    """Run ``script`` in a child Python under a real TransportStdio, until it disconnects.
+
+    Args:
+        script: The child's source; it writes protocol lines to stdout.
+        exit_output_timeout: How long stdout is read after >EXIT.
+        then: Optional coroutine function run with the transport once it is connected.
+
+    Returns:
+        tuple: (timeline, disconnects, process). The timeline lists the console output
+        and a ``'disconnected'`` entry in the order they happened; ``disconnects`` holds
+        each disconnect's (reason, has_error).
+    """
+    import sys
+
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        '-c',
+        script,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    transport = TransportStdio(process)
+    transport.exit_output_timeout = exit_output_timeout
+    timeline, disconnects = [], []
+    gone = asyncio.Event()
+
+    async def on_receive(message):
+        if message.get('event') == 'output':
+            timeline.append(message['body']['output'].strip())
+
+    async def on_disconnected(reason, has_error):
+        timeline.append('disconnected')
+        disconnects.append((reason, has_error))
+        gone.set()
+
+    async def nothing(*_args):
+        pass
+
+    transport.bind(
+        on_debug_message=lambda *_: None,
+        on_debug_protocol=lambda *_: None,
+        on_receive=on_receive,
+        on_connected=nothing,
+        on_disconnected=on_disconnected,
+    )
+    await transport.connect()
+    if then is not None:
+        await then(transport)
+    await asyncio.wait_for(gone.wait(), timeout=10)
+    # Let a second, unwanted disconnect show itself, then keep what the transport sent
+    # on its own: the cleanup below reports its own 'Disconnected by request'
+    await asyncio.sleep(0.2)
+    seen = (list(timeline), list(disconnects))
+    await transport.disconnect()
+    return (*seen, process)
+
+
+@pytest.mark.asyncio
+async def test_a_crash_dump_announced_after_exit_is_read_before_the_disconnect():
+    """On Linux and macOS a fatal error's >DUMP follows its >EXIT; ending at >EXIT lost it."""
+    script = "import time; print('>EXIT*0*Fatality*', flush=True); time.sleep(0.5); print('>DUMP*core.dmp', flush=True)"
+
+    timeline, disconnects, _ = await _run_child(script)
+
+    assert timeline[:2] == ['Crash dump: core.dmp', 'disconnected']
+    assert disconnects == [('Process exited: Fatality (code: 0)', False)]
+
+
+@pytest.mark.asyncio
+async def test_an_exit_with_nothing_after_it_disconnects_at_once():
+    """A process that ends right after >EXIT is not kept waiting for the limit."""
+    script = "print('>EXIT*FF*failed*', flush=True)"
+    started = asyncio.get_running_loop().time()
+
+    _, disconnects, _ = await _run_child(script, exit_output_timeout=30)
+
+    assert asyncio.get_running_loop().time() - started < 5
+    assert disconnects == [('Process exited: failed (code: 255)', True)]
+
+
+@pytest.mark.asyncio
+async def test_a_process_that_keeps_stdout_open_after_exit_is_ended_at_the_limit():
+    """A process that hangs after >EXIT is ended once the limit passes, and disconnects once."""
+    script = "import time; print('>EXIT*0*bye*', flush=True); time.sleep(60)"
+    started = asyncio.get_running_loop().time()
+
+    timeline, disconnects, process = await _run_child(script, exit_output_timeout=0.5)
+
+    assert asyncio.get_running_loop().time() - started < 5
+    assert process.returncode is not None  # ended by the transport, not left running
+    assert disconnects == [('Process exited: bye (code: 0)', False)]
+    assert timeline.count('disconnected') == 1
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_requested_after_exit_still_sends_the_exit():
+    """Stopping the transport while it reads past >EXIT ends it at once with the exit's reason first."""
+    script = "import time; print('>EXIT*0*bye*', flush=True); time.sleep(60)"
+
+    async def stop_soon(transport):
+        await asyncio.sleep(0.3)
+        await transport.disconnect()
+
+    started = asyncio.get_running_loop().time()
+    _, disconnects, process = await _run_child(script, exit_output_timeout=30, then=stop_soon)
+
+    assert asyncio.get_running_loop().time() - started < 10
+    assert process.returncode is not None
+    assert disconnects == [('Process exited: bye (code: 0)', False), ('Disconnected by request', False)]

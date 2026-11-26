@@ -92,7 +92,7 @@ Usage Patterns:
 import json
 import asyncio
 from typing import Dict, Any, Optional
-from ai.constants import CONST_TRANSPORT_PROCESS_WAIT_TIMEOUT
+from ai.constants import CONST_CANCEL_WAIT_TIMEOUT_SECONDS, CONST_TRANSPORT_PROCESS_WAIT_TIMEOUT
 from . import TransportBase
 
 
@@ -163,6 +163,16 @@ class TransportStdio(TransportBase):
         self._process = subprocess
         self._stdout_task: Optional[asyncio.Task] = None
         self._stderr_task: Optional[asyncio.Task] = None
+        # The disconnect an >EXIT asked for, held until stdout has been read to its end
+        self._exit_disconnect: Optional[tuple] = None
+        # Ends the process if stdout is still open this long after its >EXIT
+        self._exit_timer: Optional[asyncio.Task] = None
+        self._exit_seen = False
+
+    # How long stdout is read after >EXIT before the process is ended. A crash dump
+    # on Linux and macOS is announced (>DUMP) after >EXIT; ending the task at >EXIT
+    # stopped reading before that line came.
+    exit_output_timeout: float = CONST_CANCEL_WAIT_TIMEOUT_SECONDS
 
     async def connect(self, timeout: Optional[float] = None) -> None:
         """
@@ -347,6 +357,8 @@ class TransportStdio(TransportBase):
         try:
             self._debug_message('Disconnecting stdio transport')
 
+            self._cancel_exit_timer()
+
             # Cancel monitoring tasks
             if self._stderr_task and not self._stderr_task.done():
                 self._stderr_task.cancel()
@@ -460,6 +472,63 @@ class TransportStdio(TransportBase):
             self._debug_message(f'Failed to send message to subprocess: {e}')
             raise
 
+    async def _exit_received(self, reason: str, has_error: bool) -> None:
+        """Disconnect for an >EXIT once stdout has been read to its end.
+
+        The process can still write after >EXIT: on Linux and macOS a fatal error's
+        crash dump is announced (>DUMP) once Crashpad has written it. Disconnecting
+        here would end the task before that line is read, so while stdout is being
+        read the disconnect waits for its end. If stdout is still open after
+        ``exit_output_timeout``, the process is ended and the disconnect sent.
+
+        With no stdout reader running, nothing more can be read, so it is sent now.
+
+        Args:
+            reason: The disconnect reason the >EXIT gives.
+            has_error: Whether the >EXIT reports a failure.
+        """
+        self._exit_seen = True
+        self._exit_disconnect = (reason, has_error)
+
+        reader = getattr(self, '_stdout_task', None)
+        if reader is None or reader.done():
+            await self._send_exit_disconnect()
+            return
+
+        if self._exit_timer is None:
+            self._exit_timer = asyncio.create_task(self._end_after_exit())
+
+    async def _end_after_exit(self) -> None:
+        """End a process whose stdout is still open ``exit_output_timeout`` after its >EXIT."""
+        await asyncio.sleep(self.exit_output_timeout)
+        # From here on this task runs the disconnect, and with it the task's teardown,
+        # so the end of stdout that the kill causes must not cancel it
+        self._exit_timer = None
+        self._debug_message(f'stdout still open {self.exit_output_timeout}s after >EXIT; ending the process')
+
+        # Ended here, within the same limit, so the task does not wait for it again
+        if self._process and self._process.returncode is None:
+            try:
+                self._process.kill()
+            except ProcessLookupError:
+                pass
+        await self._send_exit_disconnect()
+
+    async def _send_exit_disconnect(self) -> None:
+        """Send the disconnect an >EXIT asked for, once, whichever path gets here first."""
+        held = self._exit_disconnect
+        if held is None:
+            return
+        self._exit_disconnect = None
+        reason, has_error = held
+        await self._transport_disconnected(reason, has_error=has_error)
+
+    def _cancel_exit_timer(self) -> None:
+        """Cancel the timer started at >EXIT, unless it is the task running this."""
+        timer = getattr(self, '_exit_timer', None)
+        if timer is not None and timer is not asyncio.current_task() and not timer.done():
+            timer.cancel()
+
     async def _read_stream(self, stream: asyncio.StreamReader, stream_name: str) -> None:
         """
         Asynchronously read and process lines from a subprocess stream.
@@ -535,8 +604,12 @@ class TransportStdio(TransportBase):
                 except Exception as e:
                     self._debug_message(f'Error during shutdown sequence: {e}')
 
-                # Signal disconnection
-                if exc is not None:
+                # Signal disconnection: after an >EXIT, the disconnect it asked for,
+                # now that everything the process wrote after it has been read
+                if self._exit_seen:
+                    self._cancel_exit_timer()
+                    await self._send_exit_disconnect()
+                elif exc is not None:
                     await self._transport_disconnected(f'{stream_name} read error: {exc}', has_error=True)
                 else:
                     await self._transport_disconnected(f'{stream_name} terminated', has_error=False)
@@ -919,7 +992,7 @@ class TransportStdio(TransportBase):
                         )
 
                     # TRIGGER ON_DISCONNECTED CALLBACK (process exit)
-                    await self._transport_disconnected(
+                    await self._exit_received(
                         f'Process exited: {exitMessage} (code: {exitCode})', has_error=(exitCode != 0)
                     )
 
@@ -938,9 +1011,7 @@ class TransportStdio(TransportBase):
                     )
 
                     # TRIGGER ON_DISCONNECTED CALLBACK (process exit)
-                    await self._transport_disconnected(
-                        f'Process exited with code: {exitCode}', has_error=(exitCode != 0)
-                    )
+                    await self._exit_received(f'Process exited with code: {exitCode}', has_error=(exitCode != 0))
 
                 else:
                     await self._transport_receive(
@@ -952,7 +1023,7 @@ class TransportStdio(TransportBase):
                     )
 
                     # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
-                    await self._transport_disconnected('Process exited with incomplete exit message', has_error=True)
+                    await self._exit_received('Process exited with incomplete exit message', has_error=True)
             except IndexError:
                 await self._transport_receive(
                     {
@@ -962,7 +1033,7 @@ class TransportStdio(TransportBase):
                     }
                 )
                 # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
-                await self._transport_disconnected('Process exited with malformed exit message', has_error=True)
+                await self._exit_received('Process exited with malformed exit message', has_error=True)
 
         # Parse crash dump notices: '>DUMP*file_name' (the name may hold '*')
         elif message.startswith('>DUMP*'):
