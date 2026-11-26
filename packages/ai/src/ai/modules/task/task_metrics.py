@@ -959,9 +959,11 @@ class TaskMetrics:
                     self._sample_gpu()
 
                     # Accumulate into totals; a sampler with no reading left the last
-                    # values in place, which are not billed again. Readiness may have come
-                    # during the wait or the read: only the time after it is billed
-                    if self._sampler is None or reading is not None:
+                    # values in place, which are not billed again: the next reading bills
+                    # the gap. Readiness may have come during the wait or the read: only
+                    # the time after it is billed
+                    billed = self._sampler is None or reading is not None
+                    if billed:
                         self._accumulate_sample(self._ready_seconds(last_sample_time, current_time))
 
                     # Check if 5 minutes have elapsed since last billing report
@@ -977,7 +979,8 @@ class TaskMetrics:
                             # Still update report time to avoid continuous retry
                             self._last_report_time = current_time
 
-                last_sample_time = current_time
+                if billed:
+                    last_sample_time = current_time
 
                 # Notify that metrics were updated
                 if self._on_update_callback:
