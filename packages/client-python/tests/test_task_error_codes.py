@@ -163,13 +163,74 @@ async def test_a_refused_restart_keeps_the_code():
 
 
 def test_a_refusal_crosses_a_process_boundary():
+    import copy
     import pickle
 
     from rocketride.core.exceptions import CommandException
 
-    e = pickle.loads(
-        pickle.dumps(CommandException({'message': 'acme.echo is not published to you', 'code': 'NODE_NOT_ENTITLED'}))
-    )
-    assert (
-        type(e) is CommandException and e.code == 'NODE_NOT_ENTITLED' and str(e) == 'acme.echo is not published to you'
-    )
+    refusal = CommandException({'message': 'acme.echo is not published to you', 'code': 'NODE_NOT_ENTITLED'})
+    for e in (pickle.loads(pickle.dumps(refusal)), copy.copy(refusal)):
+        assert type(e) is CommandException
+        assert e.code == 'NODE_NOT_ENTITLED' and str(e) == 'acme.echo is not published to you'
+
+
+def test_command_exception_is_exported_from_the_package():
+    from rocketride import CommandException
+    from rocketride.core.exceptions import CommandException as Defined
+
+    assert CommandException is Defined
+
+
+async def test_refused_store_reads_keep_the_code():
+    from rocketride.core.exceptions import CommandException
+
+    client = _refusing_client(code='STORE_DENIED', message='denied')
+    for read in (lambda: client.fs_read('h1'), lambda: client.fs_read_many(['a.txt'])):
+        try:
+            await read()
+        except CommandException as e:
+            assert e.code == 'STORE_DENIED' and str(e) == 'denied'
+        else:
+            raise AssertionError('the read did not raise')
+
+
+async def test_a_refused_pipe_tool_call_keeps_the_code():
+    from rocketride.core.exceptions import CommandException
+
+    client = _refusing_client(code='TASK_NOT_REGISTERED', message='the task has ended')
+
+    async def request(message_, timeout=None):
+        if message_['arguments']['subcommand'] == 'open':
+            return {'success': True, 'body': {'pipe_id': 1}}
+        return {'success': False, 'message': 'the task has ended', 'code': 'TASK_NOT_REGISTERED'}
+
+    client.request = request
+    pipe = await (await client.pipe('tk')).open()
+    try:
+        await pipe.tool(tool='search')
+    except CommandException as e:
+        assert isinstance(e, RuntimeError)
+        assert e.code == 'TASK_NOT_REGISTERED' and str(e) == 'the task has ended'
+    else:
+        raise AssertionError('pipe.tool() did not raise')
+
+
+async def test_a_refused_server_info_probe_keeps_the_code(monkeypatch):
+    from rocketride import RocketRideClient
+    from rocketride.core.exceptions import CommandException
+
+    async def request(self, message_, timeout=None):
+        return {'success': False, 'message': 'probe refused', 'code': 'PROBE_DENIED'}
+
+    async def noop(self, *a, **k):
+        return None
+
+    monkeypatch.setattr(RocketRideClient, 'connect', noop)
+    monkeypatch.setattr(RocketRideClient, 'disconnect', noop)
+    monkeypatch.setattr(RocketRideClient, 'request', request)
+    try:
+        await RocketRideClient.get_server_info('http://localhost:1')
+    except CommandException as e:
+        assert e.code == 'PROBE_DENIED' and str(e) == 'probe refused'
+    else:
+        raise AssertionError('get_server_info() did not raise')

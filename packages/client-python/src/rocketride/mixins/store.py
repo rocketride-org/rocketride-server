@@ -29,7 +29,7 @@ open/close internally.
 """
 
 from typing import Dict, Any, List, Optional
-from ..core import DAPClient
+from ..core import CommandException, DAPClient
 
 
 class StoreMixin(DAPClient):
@@ -85,7 +85,7 @@ class StoreMixin(DAPClient):
         )
         response = await self.request(request)
         if self.did_fail(response):
-            raise RuntimeError(response.get('message', 'Failed to read from handle'))
+            raise CommandException({**response, 'message': response.get('message') or 'Failed to read from handle'})
         return response.get('arguments', {}).get('data', b'')
 
     async def fs_write(self, handle: str, data: bytes) -> int:
@@ -270,7 +270,7 @@ class StoreMixin(DAPClient):
         )
         response = await self.request(request)
         if self.did_fail(response):
-            raise RuntimeError(response.get('message', 'fs_read_many failed'))
+            raise CommandException({**response, 'message': response.get('message') or 'fs_read_many failed'})
 
         entries = response.get('body', {}).get('entries', [])
         frame = response.get('arguments', {}).get('data', b'') or b''
@@ -514,8 +514,3 @@ class StoreMixin(DAPClient):
             raise ValueError(f'{name} must not contain path separators')
         if any(c in StoreMixin._INVALID_PATH_CHARS or ord(c) < 0x20 for c in value):
             raise ValueError(f'{name} contains invalid characters: {value}')
-
-    def _check_response(self, response: Dict[str, Any]) -> None:
-        """Raise RuntimeError if the response indicates failure."""
-        if self.did_fail(response):
-            raise RuntimeError(response.get('message', 'Unknown storage error'))

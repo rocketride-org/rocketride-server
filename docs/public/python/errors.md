@@ -22,7 +22,7 @@ What the SDK raises, when, and how to catch it.
 | `Answer.getJson()` on non-JSON content | `ValueError` |
 
 ```python
-from rocketride import RocketRideClient, AuthenticationException
+from rocketride import RocketRideClient, AuthenticationException, CommandException
 from rocketride.core.exceptions import PipeException
 
 try:
@@ -37,6 +37,8 @@ except PipeException as e:
     print(f'Data transfer error: {e}')
 except ConnectionError as e:
     print(f'Transport failure: {e}')
+except CommandException as e:
+    print(f'Server refused the command ({e.code}): {e}')
 except RuntimeError as e:
     print(f'Server rejected the request: {e}')
 ```
