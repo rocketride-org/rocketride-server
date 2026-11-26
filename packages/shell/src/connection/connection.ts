@@ -52,6 +52,7 @@ import type { ConnectionMode, ConnectionStatus } from '../types/connection';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
 import { RocketRideClientProxy } from './RocketRideClientProxy';
+import { getCheckoutScope } from './checkoutScope';
 import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
 import { createOpBus } from '../ops/busOps';
@@ -175,6 +176,32 @@ function isConnectResult(body: unknown): body is ConnectResult {
 	);
 }
 
+type AccountTransition = Readonly<{ changingWorkspace: boolean; disconnecting: boolean }>;
+const idleAccountTransition: AccountTransition = { changingWorkspace: false, disconnecting: false };
+// Federated modules can load independent copies of this file and share one manager.
+const accountTransitionKey = Symbol.for('rocketride.connectionManager.accountTransition');
+
+/** Internal snapshot used to invalidate billing actions before event observers run. */
+export function getAccountTransition(manager: ConnectionManager): AccountTransition {
+	const transition: AccountTransition | undefined = Reflect.get(manager, accountTransitionKey);
+	return transition ?? idleAccountTransition;
+}
+
+function advanceAccountTransition(manager: ConnectionManager, change: Partial<AccountTransition> = {}): void {
+	Reflect.set(manager, accountTransitionKey, { ...getAccountTransition(manager), ...change });
+}
+
+/** Current account permission used by plan changes in the shared billing host. */
+export function canManageOrganizationBilling(account?: ConnectResult | null): boolean {
+	const permissions = account?.organization?.permissions;
+	return Array.isArray(permissions) && permissions.includes('org.admin');
+}
+
+function isSameAccountScope(previous: ConnectResult, next: ConnectResult): boolean {
+	return previous.userId === next.userId && previous.organization?.id === next.organization?.id &&
+		canManageOrganizationBilling(previous) === canManageOrganizationBilling(next);
+}
+
 function isVersionResponse(body: unknown): boolean {
 	// The reachability probe only proves THIS backend is up if the page origin
 	// answers with the server's own /version contract ({ status: 'OK', with a
@@ -261,6 +288,7 @@ export class ConnectionManager implements IConnectionManager {
 	}
 
 	private constructor() {
+		Reflect.set(this, accountTransitionKey, idleAccountTransition);
 		this.installMirrorSubscriptions();
 	}
 
@@ -348,6 +376,8 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Latest buffered payload per replayable event, awaiting a listener. */
 	private pendingEvents = new Map<string, unknown>();
+	private checkoutIntentGeneration = 0;
+	private checkoutWorkspaceChanging = false;
 
 	// =========================================================================
 	// INITIALIZATION
@@ -391,6 +421,7 @@ export class ConnectionManager implements IConnectionManager {
 				// duplicate handling downstream. The guard narrows the untyped
 				// push body to a ConnectResult without a cast.
 				if (message.event === 'apaext_account' && isConnectResult(message.body)) {
+					this.cacheAccountInfo(message.body);
 					this.emit('shell:accountUpdate', message.body);
 					return;
 				}
@@ -444,6 +475,11 @@ export class ConnectionManager implements IConnectionManager {
 			onConnected: async () => {
 				if (!this.hasCurrentLifecycleOwner()) return;
 				if (!this.client?.isAttached() || !this.client.isAuthenticated()) return;
+				const account = this.client.getAccountInfo();
+				if (this.accountInfo && isConnectResult(account) && this.accountInfo !== account) {
+					this.cacheAccountInfo(account);
+					this.emit('shell:accountUpdate', account);
+				}
 				this.publishConnected(this.lifecycleOwner!);
 			},
 
@@ -1192,7 +1228,7 @@ export class ConnectionManager implements IConnectionManager {
 		if (!operation) {
 			if (result.userToken) this.saveToken(result.userToken);
 			this.clearLatchedFailure();
-			this.accountInfo = result;
+			this.cacheAccountInfo(result);
 			this.emit('shell:login', { user: result });
 		}
 
@@ -1332,7 +1368,10 @@ export class ConnectionManager implements IConnectionManager {
 		const key = `${RocketRideClient.normalizeUri(this.serverUri)}\u0000${connectionCredentialKey(credential)}`;
 		if (this.connectionOperation?.key === key) return this.connectionOperation.promise;
 
-		if (this.lifecycleOwner) this.lifecycleOwner.cancellationReason = 'superseded';
+		if (this.lifecycleOwner) {
+			if (this.lifecycleOwner.key !== key) advanceAccountTransition(this, { disconnecting: true });
+			this.lifecycleOwner.cancellationReason = 'superseded';
+		}
 		const operation: ShellConnectionOperation = {
 			key,
 			generation: ++this.connectionGeneration,
@@ -1382,7 +1421,7 @@ export class ConnectionManager implements IConnectionManager {
 			this.assertCurrentOperation(operation);
 			this.updateConnectionStatus({ lastFailure: undefined });
 			this.assertCurrentOperation(operation);
-			this.accountInfo = result;
+			this.cacheAccountInfo(result);
 			// Identity established — this is the only signal that retires an
 			// auth latch (publishConnected deliberately no longer does).
 			this.clearLatchedFailure();
@@ -1435,6 +1474,7 @@ export class ConnectionManager implements IConnectionManager {
 	 * Safe to call when already disconnected.
 	 */
 	public async disconnect(): Promise<void> {
+		advanceAccountTransition(this, { disconnecting: true });
 		this.invalidateLifecycle('detached');
 		const generation = this.connectionGeneration;
 		const manager = this.manager;
@@ -1639,6 +1679,7 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Root-mirrored liveness for socketless realms (null = unmirrored). */
 	private mirrorConnected: boolean | null = null;
+	private mirrorSdkUri: string | undefined;
 
 	/** This realm's brokered client — built on the first mirror delivery,
 	 *  null in a realm that owns a socket (or has not heard from the root). */
@@ -1664,9 +1705,19 @@ export class ConnectionManager implements IConnectionManager {
 		return { ...this.connectionStatus };
 	}
 
-	/** Returns the cached ConnectResult from the most recent successful connect. */
+	/** Returns the latest cached ConnectResult for this connection. */
 	public getAccountInfo(): ConnectResult | undefined {
 		return this.accountInfo ?? this.client?.getAccountInfo() as ConnectResult | undefined;
+	}
+
+	private cacheAccountInfo(result: ConnectResult): void {
+		const previous = this.accountInfo;
+		if (previous && !isSameAccountScope(previous, result)) advanceAccountTransition(this);
+		// Account pushes carry userToken as '' (the server blanks it): keep the
+		// session token already cached for the same user.
+		this.accountInfo = !result.userToken && previous?.userToken && previous.userId === result.userId
+			? { ...result, userToken: previous.userToken }
+			: result;
 	}
 
 	/** Returns the resolved server HTTP URL. */
@@ -1949,14 +2000,48 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param payload - The payload matching the event's type.
 	 */
 	public emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void {
+		if (event === 'shell:workspaceWillChange' || event === 'shell:orgChanged' || event === 'shell:logoutRequest') {
+			this.checkoutIntentGeneration += 1;
+			this.checkoutWorkspaceChanging = true;
+			this.pendingEvents.delete('shell:subscribe');
+		} else if (event === 'shell:workspaceChanged' || event === 'shell:connected') {
+			this.checkoutWorkspaceChanging = false;
+		}
+		if (event === 'shell:subscribe' && this.checkoutWorkspaceChanging) return;
+		const checkoutIntentGeneration = this.checkoutIntentGeneration;
+		// A buffered preselection must not start checkout under a different
+		// account when a subscriber eventually receives the event.
+		const eventPayload = event === 'shell:subscribe'
+			? { ...(payload as ShellConnectionEventMap['shell:subscribe']), checkoutScope: this.isConnected() ? getCheckoutScope(this.getClient()) : null }
+			: payload;
+		if (event === 'shell:workspaceWillChange') advanceAccountTransition(this, { changingWorkspace: true });
+		else if (event === 'shell:workspaceChanged') advanceAccountTransition(this, { changingWorkspace: false });
+		else if (event === 'shell:disconnected' || event === 'shell:logout') advanceAccountTransition(this, { disconnecting: true });
+		else if (event === 'shell:connected') {
+			// A new session ends any transition. Only the cloud Shell emits
+			// shell:workspaceChanged; a mirrored realm (VS Code webviews) learns of
+			// an org switch from apaext_org_changed and then sees only the root
+			// reconnect, so this is where its workspace change finishes too.
+			const transition = getAccountTransition(this);
+			if (transition.disconnecting || transition.changingWorkspace) {
+				advanceAccountTransition(this, { disconnecting: false, changingWorkspace: false });
+			}
+		} else if (event === 'shell:orgChanged') {
+			advanceAccountTransition(this);
+		}
+
 		// Push into debug log
-		this.logDebug(event as string, payload);
+		this.logDebug(event as string, eventPayload);
 
 		// Dispatch to registered handlers via microtask. An unsubscribed handler
 		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
 		if (handlers && handlers.size > 0) {
-			Promise.resolve().then(() => this.dispatch(handlers, event as string, payload));
+			Promise.resolve().then(() => {
+				if (event !== 'shell:subscribe' || this.checkoutIntentGeneration === checkoutIntentGeneration) {
+					this.dispatch(handlers, event as string, eventPayload);
+				}
+			});
 			return;
 		}
 
@@ -1965,7 +2050,7 @@ export class ConnectionManager implements IConnectionManager {
 		// Without this, a click whose listener isn't yet/no-longer mounted is
 		// silently swallowed — the prod "Get Started does nothing" symptom.
 		if (ConnectionManager.REPLAYABLE_EVENTS.has(event as string)) {
-			this.pendingEvents.set(event as string, payload);
+			this.pendingEvents.set(event as string, eventPayload);
 			console.warn(
 				`[ConnectionManager] '${event as string}' emitted with no listener — buffered for replay.`,
 			);
@@ -2273,11 +2358,12 @@ export class ConnectionManager implements IConnectionManager {
 			return {};
 		});
 		this.subscribe('shell:status', (snapshot) => {
-			const mirror = snapshot as { connected: boolean; status: ConnectionStatus; engineHttpUrl?: string } | undefined;
+			const mirror = snapshot as { connected: boolean; status: ConnectionStatus; engineHttpUrl?: string; sdkUri?: string } | undefined;
 			if (!mirror || mirror.connected === undefined || mirror.status === undefined) return;
 			// The root's engine HTTP base — so getHttpUrl() answers in
 			// socketless realms (engine-served icons, MF remote entries).
 			if (mirror.engineHttpUrl !== undefined) this.serverUri = mirror.engineHttpUrl;
+			this.mirrorSdkUri = mirror.sdkUri;
 			const wasConnected = this.isConnected();
 			this.mirrorConnected = mirror.connected;
 			// Normalize the root's status onto this realm's enum so every state
@@ -2289,10 +2375,16 @@ export class ConnectionManager implements IConnectionManager {
 			else if (!mirror.connected && wasConnected) this.emit('shell:disconnected', { reason: 'root disconnected', hasError: false } as never);
 		});
 		this.subscribe('shell:account', (snapshot) => {
+			if (snapshot === null) {
+				this.accountInfo = undefined;
+				this.seedMirrorClient();
+				return;
+			}
 			if (!snapshot) return;
-			this.accountInfo = snapshot as ConnectResult;
+			const account = snapshot as ConnectResult;
+			this.cacheAccountInfo(account);
 			this.seedMirrorClient();
-			this.emit('shell:accountUpdate', this.accountInfo);
+			this.emit('shell:accountUpdate', account);
 		});
 		this.subscribe('shell:services', (snapshot) => {
 			const services = snapshot as { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } | undefined;
@@ -2334,13 +2426,18 @@ export class ConnectionManager implements IConnectionManager {
 			// would be dropped, and this is the only thing that wants it.
 			this.ops().handle(CLIENT_EVENT_OP, (params) => {
 				const { message } = (params ?? {}) as { message?: DAPMessage };
-				if (message) void this.mirrorClient?.receiveEvent(message);
+				if (message?.event === 'apaext_org_changed') {
+					const orgId = message.body?.orgId;
+					this.emit('shell:workspaceWillChange', { orgId: typeof orgId === 'string' ? orgId : '' });
+				} else if (message) {
+					void this.mirrorClient?.receiveEvent(message);
+				}
 			});
 		}
 		this.mirrorClient.applyIdentity({
 			connected: this.mirrorConnected === true,
 			accountInfo: this.accountInfo,
-			...(this.serverUri ? { uri: this.serverUri } : {}),
+			uri: this.mirrorSdkUri || this.serverUri,
 		});
 	}
 

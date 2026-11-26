@@ -15,15 +15,16 @@
  *
  * Reuses the PlanPicker card grid to display available plans for the
  * current app. The user's current plan is highlighted and disabled.
- * On confirmation, calls the host's upgrade callback which swaps the
- * Stripe subscription item server-side with proration.
+ * On confirmation, the host applies the plan change or schedules it for renewal.
  */
 
-import React, { useState, useMemo, type CSSProperties } from 'react';
+import React, { useLayoutEffect, useState, useMemo, useRef, type CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import { Modal } from '../../../components/modal/Modal';
 import { PlanPicker, planAmount } from '../../checkout/PlanPicker';
 import type { CheckoutPlan } from '../../checkout/types';
+import { planChangeCompletion } from './planChange';
+import type { PlanChangeOutcome } from './planChange';
 
 // =============================================================================
 // STYLES
@@ -121,8 +122,14 @@ export interface UpgradeModalProps {
 	 * confirm. Ignored if it equals the current plan. Defaults to no selection.
 	 */
 	preselectedPriceId?: string;
-	/** Called when the user confirms the plan change. */
-	onUpgrade: (newPriceId: string) => Promise<void>;
+	/** False while the host cannot apply a plan change (disconnected, not an admin, account changing). */
+	available?: boolean;
+	/**
+	 * Called when the user confirms the plan change. Resolve with the server's
+	 * outcome to show what it actually did (applied now, or scheduled for
+	 * renewal); resolve with nothing for a neutral confirmation.
+	 */
+	onUpgrade: (newPriceId: string) => Promise<void | PlanChangeOutcome>;
 	/** Called when the modal is dismissed. */
 	onClose: () => void;
 }
@@ -132,12 +139,13 @@ export interface UpgradeModalProps {
 // =============================================================================
 
 /**
- * Whether a plan may appear in the upgrade picker: not a top-up pack, not a
- * hidden promo-base plan, not action-only, and not deactivated. Applied to
+ * A recurring subscription plan the change dialog can offer: monthly or
+ * yearly, and not a top-up pack, hidden promo-base or action-only card. Gates
  * both the picker grid and preselected plans so a hidden plan can never be
  * reached via `preselectedPriceId`.
  */
-const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
+export const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
+	(!p.interval || p.interval === 'month' || p.interval === 'year') &&
 	p.metadata?.kind !== 'topup' &&
 	p.metadata?.kind !== 'promo_base' &&
 	!p.metadata?.action &&
@@ -147,25 +155,37 @@ const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
  * Modal dialog for upgrading or downgrading a subscription plan.
  *
  * Displays the PlanPicker grid with the current plan disabled. The user
- * selects a new plan and clicks Confirm to trigger the server-side
- * Stripe subscription modification with proration.
+ * selects a new plan and confirms; the dialog then reports what the server
+ * did with it.
  */
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	plans,
 	currentPriceId,
 	currentPlanName,
 	preselectedPriceId,
+	available = true,
 	onUpgrade,
 	onClose,
 }) => {
-	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(
-		() => (preselectedPriceId && preselectedPriceId !== currentPriceId
-			? plans.find((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p)) ?? null
-			: null),
+	const [selectedPlanId, setSelectedPlanId] = useState<string | null>(() =>
+		preselectedPriceId && preselectedPriceId !== currentPriceId &&
+		plans.some((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p))
+			? preselectedPriceId
+			: null,
 	);
 	const [upgrading, setUpgrading] = useState(false);
-	const [success, setSuccess] = useState(false);
+	const [completion, setCompletion] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const inFlight = useRef(false);
+	const mounted = useRef(false);
+	const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useLayoutEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			if (closeTimer.current) clearTimeout(closeTimer.current);
+		};
+	}, []);
 
 	// Filter out top-up packs, hidden promo-base plans, and action-only plans
 	const subscriptionPlans = useMemo(
@@ -173,21 +193,20 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		[plans],
 	);
 
-	/** Whether the selected plan differs from the current plan. */
-	const isValidSelection = selectedPlan && selectedPlan.stripePriceId !== currentPriceId;
+	// Resolve the selected card from the latest catalog.
+	const selectedPlan = subscriptionPlans.find((plan) => plan.stripePriceId === selectedPlanId) ?? null;
+	const isValidSelection = selectedPlan !== null && selectedPlan.stripePriceId !== currentPriceId;
 
 	/**
-	 * When opened with a preselected plan (e.g. from the pricing page), show a
-	 * focused confirmation of that plan instead of the full plan picker.
+	 * Compact (focused-confirmation) layout: shown when the caller preselected a
+	 * valid target, so the full picker grid is replaced by a one-line summary.
 	 */
 	const compact = !!preselectedPriceId && isValidSelection;
 
 	/**
-	 * Determine if the selected plan is an upgrade or downgrade. Matches the
-	 * server (change_subscription_plan), which compares RAW price amounts: a
-	 * higher amount is an immediate prorated upgrade, a lower one is scheduled
-	 * for the next renewal. (Comparing normalized monthly cost mislabels
-	 * cross-interval switches, e.g. monthly→annual.)
+	 * Label the change before it is sent, from the plan amounts. The server
+	 * decides the real direction (tier, interval and seats as well as price),
+	 * and the confirmation afterwards reports what it actually did.
 	 */
 	const changeDirection = useMemo(() => {
 		if (!selectedPlan) return null;
@@ -198,44 +217,51 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		return 'change';
 	}, [selectedPlan, currentPriceId, subscriptionPlans]);
 
-	/** Handle plan selection -- skip if it's the current plan. */
+	const canConfirm = available && isValidSelection && !upgrading;
+
 	const handleSelect = (plan: CheckoutPlan) => {
-		if (plan.stripePriceId === currentPriceId) return;
-		setSelectedPlan(plan);
+		if (!available || plan.stripePriceId === currentPriceId || inFlight.current) return;
+		setSelectedPlanId(plan.stripePriceId);
 		setError(null);
 	};
 
-	/** Handle upgrade confirmation. */
 	const handleConfirm = async () => {
-		if (!selectedPlan || upgrading || !isValidSelection) return;
+		if (!canConfirm || !selectedPlan || inFlight.current) return;
+		inFlight.current = true;
 		setUpgrading(true);
 		setError(null);
 		try {
-			await onUpgrade(selectedPlan.stripePriceId);
-			setSuccess(true);
-			// Auto-close after a brief success display
-			setTimeout(() => onClose(), 1500);
-		} catch (e: any) {
-			setError(e?.message ?? 'Plan change failed. Please try again.');
+			const result = await onUpgrade(selectedPlan.stripePriceId);
+			if (!mounted.current) return;
+			setCompletion(planChangeCompletion(result));
+			// Auto-close after a brief confirmation display.
+			closeTimer.current = setTimeout(onClose, 1500);
+		} catch (error: unknown) {
+			if (mounted.current) {
+				setError(error instanceof Error && error.message ? error.message : 'Plan change failed. Please try again.');
+			}
 		} finally {
-			setUpgrading(false);
+			inFlight.current = false;
+			if (mounted.current) setUpgrading(false);
 		}
 	};
 
 	/** Build the confirm button label based on selection state. */
 	const buttonLabel = () => {
 		if (upgrading) return 'Processing...';
-		if (!selectedPlan) return 'Select a plan';
-		if (!isValidSelection) return 'Current plan';
-		const verb = changeDirection === 'downgrade' ? 'Downgrade' : 'Upgrade';
+		if (!available) return 'Plan changes unavailable';
+		if (!selectedPlanId) return 'Select a plan';
+		if (selectedPlanId === currentPriceId) return 'Current plan';
+		if (!selectedPlan) return 'Plan unavailable';
+		const verb = changeDirection === 'upgrade' ? 'Upgrade' : changeDirection === 'downgrade' ? 'Downgrade' : 'Switch';
 		return `${verb} to ${selectedPlan.nickname} (${planAmount(selectedPlan)})`;
 	};
 
-	// Confirm button style: primary, dimmed and non-interactive unless a valid
+	// Confirm button style -- dimmed (and non-interactive) unless a valid
 	// selection exists and no plan change is in flight.
 	const confirmStyle: CSSProperties = {
 		...commonStyles.buttonPrimary,
-		...(isValidSelection && !upgrading ? null : { opacity: 0.5, cursor: 'default' }),
+		...(canConfirm ? null : { opacity: 0.5, cursor: 'default' }),
 	};
 
 	return (
@@ -251,7 +277,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 			width={600}
 			showClose={false}
 			closeOnEscape={!upgrading}
-			footer={success ? undefined : (
+			footer={completion ? undefined : (
 				<>
 					{/* Cancel — the dialog's explicit dismiss control. */}
 					<button
@@ -267,21 +293,17 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 						type="button"
 						style={confirmStyle}
 						onClick={handleConfirm}
-						disabled={!isValidSelection || upgrading}
+						disabled={!canConfirm}
 					>
 						{buttonLabel()}
 					</button>
 				</>
 			)}
 		>
-			{success ? (
-				/* Success confirmation — shown briefly until the auto-close timer
-				   dismisses the dialog (the footer is dropped in this state). */
-				<div style={S.success}>
-					{changeDirection === 'downgrade'
-						? 'Downgrade scheduled! Your current plan stays active until the end of this billing period.'
-						: 'Plan upgraded! Your new features and prorated token credits are available now.'}
-				</div>
+			{completion ? (
+				/* Confirmation of what the server did — shown briefly until the
+				   auto-close timer dismisses the dialog (the footer is dropped). */
+				<div style={S.success} role="status">{completion}</div>
 			) : (
 				<div style={S.body}>
 					{compact && selectedPlan ? (
@@ -309,6 +331,13 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 								selectedPlan={selectedPlan}
 								onSelectPlan={handleSelect}
 								currentPriceId={currentPriceId}
+								keepSelectedPlanVisible
+								intervalDisabled={upgrading || !available}
+								onIntervalChange={(interval) => {
+									if (inFlight.current || selectedPlan?.interval === interval) return;
+									setSelectedPlanId(null);
+									setError(null);
+								}}
 							/>
 						</>
 					)}
@@ -316,17 +345,17 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 					{/* Proration info -- explains what happens on upgrade vs downgrade */}
 					{isValidSelection && changeDirection === 'upgrade' && (
 						<div style={S.prorationNote}>
-							You will be charged the prorated difference for the remainder of your current billing period. Token credits will be adjusted accordingly.
+							An upgrade usually applies now, and Stripe bills any prorated difference on your next invoice (or right away when the billing interval changes). The confirmation shows what was applied.
 						</div>
 					)}
 					{isValidSelection && changeDirection === 'downgrade' && (
 						<div style={S.prorationNote}>
-							Your current plan will remain active until the end of your billing period. The new plan takes effect at your next renewal.
+							A downgrade is usually scheduled for your next renewal, and your current plan stays active until then. The confirmation shows what was applied.
 						</div>
 					)}
 
 					{/* Error banner */}
-					{error && <div style={S.error}>{error}</div>}
+					{error && <div style={S.error} role="alert">{error}</div>}
 				</div>
 			)}
 		</Modal>

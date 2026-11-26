@@ -69,7 +69,12 @@ export async function getStripePublishableKey(client: RocketRideClient | undefin
 	// Step 2: probe the server; cache '' on servers without billing so the
 	// probe is not repeated for them either.
 	try {
-		const info = await RocketRideClient.getServerInfo(uri, 5000);
+		const endpoint = new URL(uri);
+		// getServerInfo takes user input and defaults an unspecified custom
+		// server port. Preserve the actual connected endpoint's implicit port.
+		const port = endpoint.port || (endpoint.protocol === 'wss:' || endpoint.protocol === 'https:' ? '443' : '80');
+		const probeUri = `${endpoint.protocol}//${endpoint.hostname}:${port}`;
+		const info = await RocketRideClient.getServerInfo(probeUri, 5000);
 		const key = info.stripePublishableKey ?? '';
 		keyCache.set(uri, key);
 		return { key, probed: true };
