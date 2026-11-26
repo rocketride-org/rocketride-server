@@ -197,13 +197,12 @@ test('resolve: the status lookup passes its time limit to the client', async () 
 	assert.ok(STATUS_TIMEOUT_MS < 120_000, 'shorter than the bus request timeout');
 });
 
-test('resolve: status hangs, so the lookup times out', async () => {
-	const { connection } = fake({ status: new Promise<string | null>(() => {}) });
-	const started = Date.now();
+test('resolve: status hangs, so the lookup times out', { timeout: 10_000 }, async () => {
+	const { connection, timeouts } = fake({ status: new Promise<string | null>(() => {}) });
 	const { lookupError, ...r } = await new DeveloperIdentity(connection, 20).resolve();
 	assert.deepEqual(r, { developerId: 'local', source: 'default', canRegisterDeveloper: false, lookupFailed: true });
 	assert.match(String(lookupError), /timed out/);
-	assert.ok(Date.now() - started < 1000);
+	assert.deepEqual(timeouts, [20]);
 });
 
 test('scaffold: a late status reply does not rescue a timed-out scaffold', async () => {

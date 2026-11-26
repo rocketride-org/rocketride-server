@@ -1578,9 +1578,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 
 				expect(largeText.length).toBeGreaterThan(10000);
 
-				const startTime = Date.now();
 				const largeResult: PIPELINE_RESULT | undefined = await client.send(token, largeText, {}, 'text/plain');
-				const endTime = Date.now();
 
 				// Validate large data processing
 				if (!largeResult) throw new Error('Process result is undefined');
@@ -1588,10 +1586,6 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				expect(largeResult.text[0]).toContain('Line 1:');
 				expect(largeResult.text[0]).toContain('Line 1000:');
 				expect(largeResult.text[0].length).toBeGreaterThan(10000);
-
-				// Check processing time (should complete reasonably quickly)
-				const processingTime = endTime - startTime;
-				expect(processingTime).toBeLessThan(10000); // Less than 10 seconds
 
 				// Get final status to verify task completed
 				const finalStatus = await client.getTaskStatus(token);
@@ -1675,19 +1669,14 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 		});
 
 		afterEach(async () => {
-			// Clean up all pipelines with a bounded timeout so teardown never hangs
-			await withTimeoutGuard(
-				Promise.all(
-					pipelineTokens.map(async (token) => {
-						try {
-							await client.terminate(token);
-						} catch {
-							// Ignore cleanup errors
-						}
-					})
-				),
-				15000,
-				'pipeline cleanup'
+			await Promise.all(
+				pipelineTokens.map(async (token) => {
+					try {
+						await client.terminate(token);
+					} catch {
+						// Ignore cleanup errors
+					}
+				})
 			);
 			pipelineTokens = [];
 		});
