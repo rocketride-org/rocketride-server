@@ -34,7 +34,9 @@ is covered by the e2e deploy flow on dev machines/CI, not here.
 import io
 import json
 import os
+import shutil
 import re
+import sys
 import time
 import zipfile
 from typing import Any, Dict, List
@@ -62,7 +64,8 @@ from ai.account.store import Store
 
 def test_workspace_yaml_forces_platform_overrides_over_tgz_style():
     """A dev workspace's tgz-style shell override is re-pointed to the
-    server's placed tgzs; every other key survives.
+    server's placed tgzs; allowlisted keys survive, unknown keys are dropped
+    (#1021: pnpm 10 reads any setting from this file).
     """
     source = 'packages:\n  - apps/*\noverrides:\n  shell: file:.rocketride/shell/old.tgz\nsomeKey: kept\n'
     out = _patched_workspace_yaml(source, 'apps/foo-ui', [])
@@ -72,7 +75,7 @@ def test_workspace_yaml_forces_platform_overrides_over_tgz_style():
     assert data['overrides']['shell'] == 'file:.rocketride/shell/shell.tgz'
     assert data['overrides']['rocketride'] == 'file:.rocketride/client/rocketride.tgz'
     assert data['packages'] == ['apps/*']
-    assert data['someKey'] == 'kept'
+    assert 'someKey' not in data
 
 
 def test_workspace_yaml_replaces_workspace_protocol_override():
@@ -194,6 +197,59 @@ def test_drift_names_the_reresolved_package():
     assert drift == ['apps/foo-ui: react 18.2.0 -> 18.3.1']
 
 
+def test_unterminated_patch_hash_run_is_scanned_in_linear_time():
+    """A hostile ``version:`` of repeated ``(patch_hash=`` with no closing
+    paren must not make the pin parser quadratic (it runs on the event loop).
+    """
+    import time
+
+    hostile = '1.0.0' + '(patch_hash=' * 90_000
+    lock = f"""
+lockfileVersion: '9.0'
+importers:
+  apps/foo-ui:
+    dependencies:
+      left-pad:
+        specifier: ^1.3.0
+        version: '{hostile}'
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(patch_hash=def456)(react@18.2.0)
+"""
+    # Time only the regex scan: the YAML parse of a 1 MB scalar is pure Python
+    # and slow under coverage tracing on CI, which says nothing about the scan.
+    start = time.monotonic()
+    app_build._PATCH_HASH_RE.sub('', hostile)
+    assert time.monotonic() - start < 2.0
+    pins = _lockfile_importer_pins(lock)
+    assert pins['apps/foo-ui']['react-dom'] == '18.2.0(react@18.2.0)'
+
+
+def test_patch_hash_is_not_drift():
+    """The build drops the developer's patch config, so a patched direct
+    dependency reinstalls as the bare version. The patch hash is stripped
+    from both sides; a peer suffix is still compared.
+    """
+    lock = """
+lockfileVersion: '9.0'
+importers:
+  apps/foo-ui:
+    dependencies:
+      left-pad:
+        specifier: ^1.3.0
+        version: 1.3.0(patch_hash=abc123)
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(patch_hash=def456)(react@18.2.0)
+"""
+    before = _lockfile_importer_pins(lock)
+    assert before['apps/foo-ui'] == {'left-pad': '1.3.0', 'react-dom': '18.2.0(react@18.2.0)'}
+    after = {'apps/foo-ui': {'left-pad': '1.3.0', 'react-dom': '18.2.0(react@18.2.0)'}}
+    assert _drift_of(before, after) == []
+    after['apps/foo-ui']['react-dom'] = '18.2.0(react@18.3.1)'
+    assert _drift_of(before, after) == ['apps/foo-ui: react-dom 18.2.0(react@18.2.0) -> 18.2.0(react@18.3.1)']
+
+
 def test_lockfile_parser_is_tolerant():
     """Unrecognized shapes yield {} — the lock is a fidelity feature, never
     a gate on its own.
@@ -207,7 +263,10 @@ def test_lockfile_parser_is_tolerant():
 # =============================================================================
 
 
-def _app_source_zip(with_lock: bool = False, lock_text: str = '') -> bytes:
+_SCAFFOLD_SHELL_DEP = {'shell': 'file:../../.rocketride/shell/shell.tgz'}
+
+
+def _app_source_zip(with_lock: bool = False, lock_text: str = '', scaffold_shell: bool = False) -> bytes:
     """A workspace-relative source pack for apps/brandy-ui (the client's shape)."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as archive:
@@ -218,7 +277,7 @@ def _app_source_zip(with_lock: bool = False, lock_text: str = '') -> bytes:
                     'name': 'brandy-ui',
                     'version': '1.0.0',
                     'appManifest': {'id': 'acme.brandy', 'name': 'Brandy', 'icon': 'icon.svg'},
-                    'dependencies': {'react': '^18.2.0'},
+                    'dependencies': {'react': '^18.2.0', **(_SCAFFOLD_SHELL_DEP if scaffold_shell else {})},
                 }
             ),
         )
@@ -297,6 +356,9 @@ def toolchain(monkeypatch, tmp_path):
     ``_resolve_bin``/``_installed_version``/``_resolve_user_tsc`` to work;
     the engine static tree carries placeholder platform tgzs.
     """
+    # These tests exercise the build pipeline, not the sandbox: keep them
+    # independent of an ambient RR_APP_BUILD_SANDBOX=required in the environment.
+    monkeypatch.setenv('RR_APP_BUILD_SANDBOX', 'off')
     env = tmp_path / 'env'
     for pkg, version, bins in (
         ('@rsbuild/core', '2.0.11', {'rsbuild': 'bin/rsbuild.js'}),
@@ -337,12 +399,17 @@ class _FakeExec:
         self.install_hook = None  # optional callable(cwd) run at install
         self.typecheck_exit = 0
         self.typecheck_out = ''
+        self.write_lock = True  # real pnpm writes pnpm-lock.yaml on install
 
     async def __call__(self, argv: List[str], cwd: str, timeout: int, on_line=None) -> 'tuple[int, str]':
         self.calls.append({'argv': list(argv), 'cwd': cwd, 'timeout': timeout})
         if 'install' in argv:
             if self.install_hook:
                 self.install_hook(cwd)
+            lock_path = os.path.join(cwd, 'pnpm-lock.yaml')
+            if self.write_lock and not os.path.isfile(lock_path):
+                with open(lock_path, 'w', encoding='utf-8') as handle:
+                    handle.write("lockfileVersion: '9.0'\n")
             return 0, 'install ok'
         if any('tsc' in str(a) for a in argv):
             return self.typecheck_exit, self.typecheck_out or 'typecheck ok'
@@ -412,7 +479,7 @@ async def test_job_builds_end_to_end(monkeypatch, build_store, toolchain):
     # Install argv contract: non-frozen EXPLICIT, scripts ignored, filtered
     # to the packed importer; devDependencies NOT excluded (no --prod).
     install = next(c for c in fake.calls if 'install' in c['argv'])
-    for flag in ('--no-frozen-lockfile', '--ignore-scripts', '--prefer-offline'):
+    for flag in ('--no-frozen-lockfile', '--ignore-scripts', '--package-import-method=copy', '--prefer-offline'):
         assert flag in install['argv']
     assert '--prod' not in install['argv']
     assert install['argv'][install['argv'].index('--filter') + 1] == './apps/brandy-ui'
@@ -463,6 +530,63 @@ async def test_job_typecheck_failure_is_terminal_with_tsc_errors(monkeypatch, bu
 
 
 @pytest.mark.asyncio
+async def test_saas_build_wraps_typecheck_and_bundle_in_the_sandbox_not_install(monkeypatch, build_store, toolchain):
+    """Under --saas the compilers run through app_build_sandbox.command (the
+    filesystem boundary) while the pnpm install is not wrapped.
+    """
+    monkeypatch.setattr(sys, 'argv', [*sys.argv, '--saas'])
+    monkeypatch.delenv('RR_APP_BUILD_SANDBOX', raising=False)
+    wrapped: List[List[str]] = []
+
+    def stub_command(argv, cwd, job_dir, toolchain_dir):
+        wrapped.append(list(argv))
+        return ['sandbox-stub', *argv]
+
+    monkeypatch.setattr(app_build.app_build_sandbox, 'command', stub_command)
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    assert await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1) is False
+    assert rail.stamps[-1]['status'] == 'ok'
+
+    install = next(c['argv'] for c in fake.calls if 'install' in c['argv'])
+    typecheck = next(c['argv'] for c in fake.calls if any('tsc' in str(a) for a in c['argv']))
+    bundle = next(c['argv'] for c in fake.calls if 'build' in c['argv'])
+    assert install[0] != 'sandbox-stub'
+    assert typecheck[0] == 'sandbox-stub' and bundle[0] == 'sandbox-stub'
+    assert len(wrapped) == 2 and all('install' not in argv for argv in wrapped)
+
+
+@pytest.mark.asyncio
+async def test_saas_build_fails_closed_when_the_sandbox_is_unavailable(monkeypatch, build_store, toolchain):
+    """SandboxUnavailable ends the build in phase 'sandbox' with no compiler run."""
+    monkeypatch.setattr(sys, 'argv', [*sys.argv, '--saas'])
+    monkeypatch.delenv('RR_APP_BUILD_SANDBOX', raising=False)
+
+    def unavailable(argv, cwd, job_dir, toolchain_dir):
+        raise app_build.app_build_sandbox.SandboxUnavailable('bubblewrap is required for hosted app builds')
+
+    monkeypatch.setattr(app_build.app_build_sandbox, 'command', unavailable)
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    worker = AppBuildWorker(server=None)
+    for _ in range(app_build._MAX_ATTEMPTS - 1):
+        assert await worker._run_job('org1', 'acme.brandy', 1) is True
+    assert await worker._run_job('org1', 'acme.brandy', 1) is False
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'sandbox')
+    compilers = [c for c in fake.calls if 'install' not in c['argv']]
+    assert compilers == [], 'a compiler ran without the boundary'
+
+
+@pytest.mark.asyncio
 async def test_job_typecheck_waiver_skips_the_verify_phase(monkeypatch, build_store, toolchain):
     """appManifest.typecheck: false (the PACKAGE tab's waiver) skips the
     verify phase entirely: the build succeeds despite a tsc that WOULD
@@ -488,6 +612,35 @@ async def test_job_typecheck_waiver_skips_the_verify_phase(monkeypatch, build_st
     log_text = (home / 'build.log').read_text(encoding='utf-8')
     assert 'skipped by appManifest.typecheck: false' in log_text
     assert (home / 'dist' / 'remoteEntry.js').is_file()
+
+
+@pytest.mark.asyncio
+async def test_job_builds_a_scaffolded_shell_spec_end_to_end(monkeypatch, build_store, toolchain):
+    """An app scaffolded with shell: file:../../.rocketride/shell/shell.tgz,
+    with a packed lockfile carrying the same specifier, runs through
+    materialize, both lockfile checks, install, typecheck and bundle.
+    """
+    lock = (
+        "lockfileVersion: '9.0'\n"
+        'importers:\n'
+        '  apps/brandy-ui:\n'
+        '    dependencies:\n'
+        '      react: {specifier: ^18.2.0, version: 18.2.0}\n'
+        "      shell: {specifier: 'file:../../.rocketride/shell/shell.tgz', version: 'file:.rocketride/shell/shell.tgz'}\n"
+    )
+    rail = _FakeRail(
+        _app_source_zip(with_lock=True, lock_text=lock, scaffold_shell=True), {'status': 'queued', 'attempt': 0}
+    )
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    final = rail.stamps[-1]
+    assert final['status'] == 'ok', final
+    assert any(any('tsc' in str(a) for a in c['argv']) for c in fake.calls)
+    assert any('build' in c['argv'] for c in fake.calls)
 
 
 @pytest.mark.asyncio
@@ -522,6 +675,63 @@ async def test_job_drift_fails_reasoned(monkeypatch, build_store, toolchain):
     assert 'errors' not in final
     home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
     assert 'react 18.2.0 -> 18.3.1' in (home / 'build.log').read_text(encoding='utf-8')
+
+
+_SCAFFOLD_SHELL_SPEC = 'file:../../.rocketride/shell/shell.tgz'
+_SCAFFOLD_RR_SPEC = 'file:../../.rocketride/client/rocketride.tgz'
+
+_SCAFFOLD_LOCK = f"""
+lockfileVersion: '9.0'
+importers:
+  apps/brandy-ui:
+    dependencies:
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+      rocketride:
+        specifier: {_SCAFFOLD_RR_SPEC}
+        version: file:.rocketride/client/rocketride.tgz
+      shell:
+        specifier: {_SCAFFOLD_SHELL_SPEC}
+        version: file:.rocketride/shell/shell.tgz
+packages:
+  'shell@file:.rocketride/shell/shell.tgz':
+    resolution: {{tarball: file:.rocketride/shell/shell.tgz}}
+  'rocketride@file:.rocketride/client/rocketride.tgz':
+    resolution: {{tarball: file:.rocketride/client/rocketride.tgz}}
+"""
+
+
+@pytest.mark.parametrize('with_lock', [False, True], ids=['no-lockfile', 'packed-lockfile'])
+@pytest.mark.asyncio
+async def test_job_builds_scaffolded_app_with_in_workspace_file_specs(monkeypatch, build_store, toolchain, with_lock):
+    """The scaffold declares its platform packages as
+    ``file:../../.rocketride/...`` from ``apps/<name>``. That spec stays inside
+    the workspace, so a whole build (every materialize gate, including the
+    lockfile path check when a lock records it) must reach ``ok`` rather than
+    stop at materialize as an out-of-tree path.
+    """
+    zip_bytes = _app_source_zip(with_lock=with_lock, lock_text=_SCAFFOLD_LOCK if with_lock else '')
+    src = io.BytesIO(zip_bytes)
+    out = io.BytesIO()
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out, 'w') as zout:
+        for item in zin.namelist():
+            data = zin.read(item)
+            if item == 'apps/brandy-ui/package.json':
+                pkg = json.loads(data)
+                pkg['dependencies'].update({'shell': _SCAFFOLD_SHELL_SPEC, 'rocketride': _SCAFFOLD_RR_SPEC})
+                data = json.dumps(pkg)
+            zout.writestr(item, data)
+
+    rail = _FakeRail(out.getvalue(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    worker = AppBuildWorker(server=None)
+    assert await worker._run_job('org1', 'acme.brandy', 1) is False
+    assert rail.stamps[-1]['status'] == 'ok', rail.stamps[-1]
 
 
 @pytest.mark.asyncio
@@ -654,7 +864,7 @@ def test_rmtree_never_follows_links(tmp_path):
             # Junctions need no privilege (symlinks may) — pnpm's own shape.
             subprocess.run(['cmd', '/c', 'mklink', '/J', link, target], check=True, capture_output=True)
         else:
-            os.symlink(target, link)
+            _symlink_or_skip(target, link)
 
     # Shape 1: a link inside the tree being cleaned.
     job = tmp_path / 'job'
@@ -714,6 +924,7 @@ async def test_toolchain_bootstrap_is_workspace_proof(monkeypatch, tmp_path):
         await app_build._ensure_toolchain_env()
     assert 'no node_modules' in str(exc.value)
     assert '--ignore-workspace' in calls[0]
+    assert '--package-import-method=copy' in calls[0]
 
     # A bootstrap that actually materializes the env succeeds and records
     # its pins; the next call short-circuits without another install.
@@ -858,3 +1069,1310 @@ async def test_exec_streams_lines_live():
     assert code == 0
     assert seen == ['alpha', 'beta']
     assert 'alpha' in out and 'beta' in out
+
+
+# =============================================================================
+# #1021 — NO DEVELOPER-CONTROLLED CODE RUNS DURING THE BUILD
+# =============================================================================
+#
+# Every fixture below is inert text: the tests assert on the hardening logic
+# (argv, resolver choice, tree sanitation, emitted config) and never run a
+# real toolchain or any developer-supplied script.
+
+
+def _hardening_zip(extra: Dict[str, str]) -> bytes:
+    """The standard app pack plus extra inert text entries."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(_app_source_zip(with_lock=False)), 'r') as base:
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            for item in base.infolist():
+                archive.writestr(item, base.read(item))
+            for name, text in extra.items():
+                archive.writestr(name, text)
+    return buffer.getvalue()
+
+
+async def _run_capturing(monkeypatch, zip_bytes: bytes, inspect=None, manifest_extra=None):
+    """Run one job with the fake exec; ``inspect(ws_dir)`` runs at install."""
+    rail = _FakeRail(zip_bytes, {'status': 'queued', 'attempt': 0})
+    if manifest_extra:
+        rail.entry['metadata']['manifest'].update(manifest_extra)
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    fake.install_hook = inspect
+    monkeypatch.setattr(app_build, '_exec', fake)
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    return rail, fake
+
+
+@pytest.mark.asyncio
+async def test_install_ignores_pnpmfile_and_package_manager_switching(monkeypatch, build_store, toolchain):
+    """The install never loads a developer pnpmfile, and never downloads and
+    re-execs another pnpm named by the developer's ``packageManager`` field.
+    """
+    _rail, fake = await _run_capturing(monkeypatch, _app_source_zip())
+    install = next(c for c in fake.calls if 'install' in c['argv'])
+    assert '--ignore-pnpmfile' in install['argv']
+    assert '--config.manage-package-manager-versions=false' in install['argv']
+    assert '--ignore-scripts' in install['argv']
+
+
+@pytest.mark.asyncio
+async def test_typecheck_never_runs_a_tsc_from_the_developer_tree(monkeypatch, build_store, toolchain):
+    """Whatever pnpm installed as ``typescript`` in the developer's tree (an
+    ``npm:``/``file:`` alias, a lockfile tarball) is never the tsc that runs:
+    the typecheck always executes the platform's baked tsc.
+    """
+
+    def plant_user_typescript(ws_dir):
+        # Simulates pnpm materializing a developer-chosen "typescript".
+        pkg = os.path.join(ws_dir, 'apps', 'brandy-ui', 'node_modules', 'typescript')
+        os.makedirs(os.path.join(pkg, 'bin'), exist_ok=True)
+        with open(os.path.join(pkg, 'package.json'), 'w', encoding='utf-8') as handle:
+            json.dump({'name': 'typescript', 'version': '5.9.9', 'bin': {'tsc': 'bin/tsc'}}, handle)
+        with open(os.path.join(pkg, 'bin', 'tsc'), 'w', encoding='utf-8') as handle:
+            handle.write('// inert placeholder')
+
+    _rail, fake = await _run_capturing(monkeypatch, _app_source_zip(), inspect=plant_user_typescript)
+    typecheck = next(c for c in fake.calls if '--noEmit' in c['argv'])
+    tsc = os.path.realpath(typecheck['argv'][1])
+    assert tsc.startswith(os.path.realpath(str(toolchain['env'])) + os.sep)
+    assert os.sep + 'ws' + os.sep not in tsc
+
+
+@pytest.mark.asyncio
+async def test_zip_entries_under_node_modules_are_refused(monkeypatch, build_store, toolchain):
+    """A pack carrying ``node_modules/`` (never produced by the client packer)
+    fails at materialize — a shipped package tree must never reach a resolver.
+    """
+    zip_bytes = _hardening_zip({'node_modules/typescript/bin/tsc': '// inert placeholder'})
+    rail, fake = await _run_capturing(monkeypatch, zip_bytes)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+    home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
+    assert 'node_modules' in (home / 'build.log').read_text(encoding='utf-8')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['Node_Modules/typescript/bin/tsc', 'apps/brandy-ui/NODE_MODULES/x.js'])
+async def test_zip_node_modules_check_is_case_insensitive(monkeypatch, build_store, toolchain, entry):
+    zip_bytes = _hardening_zip({entry: '// inert placeholder'})
+    rail, fake = await _run_capturing(monkeypatch, zip_bytes)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['node_modules./x/a.js', 'node_modules /x/a.js'])
+async def test_zip_node_modules_check_strips_win32_trailing_chars(monkeypatch, build_store, toolchain, entry):
+    rail, fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+async def test_zip_entries_with_a_bang_in_the_path_are_refused(monkeypatch, build_store, toolchain):
+    """No app path may contain '!', the bundler's request separator, so a
+    resolved request cannot be forged by a file or folder name.
+    """
+    zip_bytes = _hardening_zip({'apps/brandy-ui/src/x!y/a.ts': 'export {};\n'})
+    rail, fake = await _run_capturing(monkeypatch, zip_bytes)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+async def test_typecheck_cannot_write_build_info(monkeypatch, build_store, toolchain):
+    """The typecheck turns incremental and composite off and resets
+    tsBuildInfoFile, so a tsconfig tsBuildInfoFile cannot make tsc write a
+    file anywhere, nor fail typescript < 5.6 with TS5069.
+    """
+    _rail, fake = await _run_capturing(monkeypatch, _app_source_zip())
+    argv = next(c for c in fake.calls if '--noEmit' in c['argv'])['argv']
+    assert argv[argv.index('--incremental') + 1] == 'false'
+    assert argv[argv.index('--composite') + 1] == 'false'
+    assert argv[argv.index('--tsBuildInfoFile') + 1] == 'null'
+    assert argv.index('--tsBuildInfoFile') < argv.index('-p')
+
+
+@pytest.mark.asyncio
+async def test_npmrc_and_pnpmfiles_removed_and_workspace_yaml_allowlisted(monkeypatch, build_store, toolchain):
+    """Developer pnpm configuration that can load code or redirect pnpm's
+    directories is removed before install: every .npmrc and pnpmfile in the
+    tree, and every pnpm-workspace.yaml key outside the allowlist.
+    """
+    zip_bytes = _hardening_zip(
+        {
+            '.npmrc': 'modules-dir=../../elsewhere\n',
+            'apps/brandy-ui/.npmrc': 'registry=https://example.invalid/\n',
+            '.pnpmfile.cjs': '// inert placeholder',
+            '.pnpmfile.mjs': '// inert placeholder',
+            'pnpm-workspace.yaml': (
+                'packages:\n  - apps/*\n'
+                'catalog:\n  react: ^18.2.0\n'
+                'pnpmfile: other.cjs\n'
+                'configDependencies:\n  pnpm-plugin-x: 1.0.0+sha512-AAAA\n'
+                'modulesDir: ../../elsewhere\n'
+                'storeDir: /elsewhere\n'
+            ),
+            'package.json': json.dumps({'name': 'ws-root', 'private': True}),
+        }
+    )
+    seen: Dict[str, Any] = {}
+
+    def inspect(ws_dir):
+        import yaml
+
+        seen['files'] = sorted(
+            os.path.relpath(os.path.join(d, f), ws_dir).replace(os.sep, '/')
+            for d, _dirs, files in os.walk(ws_dir)
+            for f in files
+        )
+        seen['yaml'] = yaml.safe_load(open(os.path.join(ws_dir, 'pnpm-workspace.yaml'), encoding='utf-8'))
+
+    rail, _fake = await _run_capturing(monkeypatch, zip_bytes, inspect=inspect)
+    assert rail.stamps[-1]['status'] == 'ok'
+    for gone in ('.npmrc', 'apps/brandy-ui/.npmrc', '.pnpmfile.cjs', '.pnpmfile.mjs'):
+        assert gone not in seen['files']
+    assert set(seen['yaml']) <= set(app_build._WORKSPACE_YAML_KEYS)
+    assert seen['yaml']['packages'] == ['apps/*']
+    assert seen['yaml']['catalog'] == {'react': '^18.2.0'}
+    for dropped in ('pnpmfile', 'configDependencies', 'modulesDir', 'storeDir'):
+        assert dropped not in seen['yaml']
+
+
+def test_workspace_yaml_refuses_packages_outside_the_tree():
+    """A workspace ``packages`` entry may not reach outside the source tree
+    (another job's scratch dir, the toolchain env).
+    """
+    for entry in ('../other', '/opt/rocketride/cache', 'apps/../../x'):
+        with pytest.raises(BuildFailure):
+            _patched_workspace_yaml(f'packages:\n  - "{entry}"\n', 'apps/foo-ui', [])
+
+
+_POSTCSS_NAMES = (
+    '.postcssrc',
+    '.postcssrc.json',
+    '.postcssrc.yaml',
+    '.postcssrc.yml',
+    '.postcssrc.js',
+    '.postcssrc.cjs',
+    '.postcssrc.mjs',
+    '.postcssrc.ts',
+    '.postcssrc.cts',
+    '.postcssrc.mts',
+    'postcss.config.js',
+    'postcss.config.cjs',
+    'postcss.config.mjs',
+    'postcss.config.ts',
+    'postcss.config.cts',
+    'postcss.config.mts',
+)
+
+
+@pytest.mark.asyncio
+async def test_every_postcss_config_and_package_json_key_is_neutralized(monkeypatch, build_store, toolchain):
+    """postcss-load-config searches every name below (JSON/YAML forms load
+    plugins by name too) upward from the app root, plus the package.json
+    ``postcss`` key — all of them are inert before the bundler starts,
+    wherever they sit in the tree.
+    """
+    marker = 'MARKER-plugin-name'
+    extra = {}
+    for directory in ('', 'apps/', 'apps/brandy-ui/', 'apps/brandy-ui/src/'):
+        for name in _POSTCSS_NAMES:
+            extra[f'{directory}{name}'] = f'{{"plugins": {{"{marker}": {{}}}}}}\n'
+    extra['package.json'] = json.dumps({'name': 'ws-root', 'private': True, 'postcss': {'plugins': {marker: {}}}})
+    seen: Dict[str, str] = {}
+
+    def inspect(ws_dir):
+        for d, _dirs, files in os.walk(ws_dir):
+            for f in files:
+                if f in _POSTCSS_NAMES or f == 'package.json':
+                    seen[os.path.relpath(os.path.join(d, f), ws_dir)] = open(
+                        os.path.join(d, f), encoding='utf-8'
+                    ).read()
+
+    zip_bytes = _hardening_zip(extra)
+    rail, _fake = await _run_capturing(monkeypatch, zip_bytes, inspect=inspect)
+    assert rail.stamps[-1]['status'] == 'ok'
+    assert len([k for k in seen if os.path.basename(k) in _POSTCSS_NAMES]) == len(extra) - 1
+    leaked = [path for path, text in seen.items() if marker in text]
+    assert leaked == []
+    assert 'postcss' not in json.loads(seen['package.json'])
+
+
+@pytest.mark.asyncio
+async def test_env_files_keep_only_public_lines(monkeypatch, build_store, toolchain):
+    """The bundler copies the app dir's .env files into its own process env —
+    only PUBLIC_ entries (the ones that reach the bundle) survive.
+    """
+    env_text = 'PUBLIC_API=https://api.example\nNODE_OPTIONS=--inspect\nexport PUBLIC_B=two\nSECRET=x\n# note\n'
+    seen: Dict[str, str] = {}
+
+    def inspect(ws_dir):
+        app = os.path.join(ws_dir, 'apps', 'brandy-ui')
+        for name in ('.env', '.env.local', '.env.production'):
+            seen[name] = open(os.path.join(app, name), encoding='utf-8').read()
+
+    zip_bytes = _hardening_zip(
+        {
+            'apps/brandy-ui/.env': env_text,
+            'apps/brandy-ui/.env.local': 'RSPACK_PROFILE=ALL\n',
+            'apps/brandy-ui/.env.production': 'PUBLIC_X=1\n',
+        }
+    )
+    rail, _fake = await _run_capturing(monkeypatch, zip_bytes, inspect=inspect)
+    assert rail.stamps[-1]['status'] == 'ok'
+    assert seen['.env'].splitlines() == ['PUBLIC_API=https://api.example', 'export PUBLIC_B=two']
+    assert seen['.env.local'].strip() == ''
+    assert seen['.env.production'].splitlines() == ['PUBLIC_X=1']
+
+
+_REAL_FIND_NODE = app_build._find_node
+
+
+def test_find_node_resolves_the_override_through_path(monkeypatch):
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node is not on PATH')
+    monkeypatch.setenv('RR_BUILD_NODE', 'node')
+    assert _REAL_FIND_NODE() == node
+    monkeypatch.setenv('RR_BUILD_NODE', 'definitely-not-a-real-binary-name')
+    assert _REAL_FIND_NODE() is None
+
+
+@pytest.mark.asyncio
+async def test_env_filter_only_touches_dotenv_files(monkeypatch, build_store, toolchain):
+    seen: Dict[str, str] = {}
+
+    def inspect(ws_dir):
+        app = os.path.join(ws_dir, 'apps', 'brandy-ui')
+        for name in ('.env.local', '.environment.md', '.envrc'):
+            seen[name] = open(os.path.join(app, name), encoding='utf-8').read()
+
+    zip_bytes = _hardening_zip(
+        {
+            'apps/brandy-ui/.env.local': 'SECRET=x\n',
+            'apps/brandy-ui/.environment.md': 'SECRET=docs\n',
+            'apps/brandy-ui/.envrc': 'SECRET=direnv\n',
+        }
+    )
+    rail, _fake = await _run_capturing(monkeypatch, zip_bytes, inspect=inspect)
+    assert rail.stamps[-1]['status'] == 'ok'
+    assert seen['.env.local'].strip() == ''
+    assert seen['.environment.md'] == 'SECRET=docs\n'
+    assert seen['.envrc'] == 'SECRET=direnv\n'
+
+
+class _HarvestTamperExec(_FakeExec):
+    """A bundle step that lets code in the sandbox tamper with the job's .out."""
+
+    def __init__(self, tamper):
+        super().__init__()
+        self.tamper = tamper
+
+    async def __call__(self, argv, cwd, timeout, on_line=None):
+        result = await super().__call__(argv, cwd, timeout, on_line)
+        if 'build' in argv:
+            config = argv[argv.index('--config') + 1]
+            self.tamper(os.path.join(os.path.dirname(os.path.dirname(config)), '.out'))
+        return result
+
+
+async def _run_tampered(monkeypatch, tamper):
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    monkeypatch.setattr(app_build, '_exec', _HarvestTamperExec(tamper))
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    return rail
+
+
+@pytest.mark.asyncio
+async def test_harvest_refuses_an_out_dir_swapped_for_a_symlink(monkeypatch, build_store, toolchain, tmp_path):
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'remoteEntry.js').write_text('// host file')
+
+    def tamper(out_dir):
+        shutil.rmtree(out_dir)
+        _symlink_or_skip(str(outside), out_dir)
+
+    rail = await _run_tampered(monkeypatch, tamper)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'harvest'), final
+    assert not (
+        build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12' / 'dist'
+    ).exists()
+    assert sorted(p.name for p in outside.iterdir()) == ['remoteEntry.js']
+
+
+@pytest.mark.asyncio
+async def test_harvest_does_not_copy_a_manifest_asset_through_a_dangling_link(
+    monkeypatch, build_store, toolchain, tmp_path
+):
+    target = tmp_path / 'outside' / 'written-through-the-link.svg'
+    target.parent.mkdir()
+
+    def tamper(out_dir):
+        _symlink_or_skip(str(target), os.path.join(out_dir, 'icon.svg'))
+
+    rail = await _run_tampered(monkeypatch, tamper)
+    assert not target.exists()
+    assert rail.stamps[-1]['status'] == 'failed'
+
+
+_DIST = ('orgs', 'org1', 'files', '.deployments', 'acme.brandy', 'v000001-abcdef12', 'dist')
+
+
+@pytest.mark.asyncio
+async def test_harvest_refuses_an_app_dir_swapped_for_a_symlink(monkeypatch, build_store, toolchain, tmp_path):
+    """The bundle step can write the job dir: an app dir swapped for a link to a
+    host directory must not have its icon copied (the copy runs outside the sandbox).
+    """
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'icon.svg').write_text('<svg>host file</svg>')
+
+    def tamper(out_dir):
+        app_dir = os.path.join(os.path.dirname(out_dir), 'ws', 'apps', 'brandy-ui')
+        shutil.rmtree(app_dir)
+        _symlink_or_skip(str(outside), app_dir)
+
+    rail = await _run_tampered(monkeypatch, tamper)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'harvest'), final
+    assert not (build_store.joinpath(*_DIST) / 'icon.svg').exists()
+    assert not (build_store.joinpath(*_DIST)).exists()
+
+
+@pytest.mark.asyncio
+async def test_harvest_copies_the_manifest_icon_for_a_normal_app(monkeypatch, build_store, toolchain):
+    rail = await _run_tampered(monkeypatch, lambda out_dir: None)
+    assert rail.stamps[-1]['status'] == 'ok', rail.stamps[-1]
+    assert (build_store.joinpath(*_DIST) / 'icon.svg').read_text() == '<svg/>'
+
+
+@pytest.mark.asyncio
+async def test_harvest_copies_the_manifest_icon_for_an_app_at_the_workspace_root(monkeypatch, build_store, toolchain):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr(
+            'package.json',
+            json.dumps(
+                {'name': 'brandy-ui', 'version': '1.0.0', 'appManifest': {'id': 'acme.brandy', 'icon': 'icon.svg'}}
+            ),
+        )
+        archive.writestr('tsconfig.json', json.dumps({'compilerOptions': {'strict': True}}))
+        archive.writestr('src/index.ts', "import('./AppDescriptor');")
+        archive.writestr('src/AppDescriptor.ts', 'export default {};')
+        archive.writestr('icon.svg', '<svg/>')
+    rail = _FakeRail(buffer.getvalue(), {'status': 'queued', 'attempt': 0})
+    rail.entry['metadata']['appRoot'] = ''
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    monkeypatch.setattr(app_build, '_exec', _FakeExec())
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    assert rail.stamps[-1]['status'] == 'ok', rail.stamps[-1]
+    assert (build_store.joinpath(*_DIST) / 'icon.svg').read_text() == '<svg/>'
+
+
+def _guard_cases(job, env):
+    """(request, allowed) pairs shared by the Python helper and the JS twin.
+
+    Strings only: nothing is resolved, loaded or built.
+    """
+    loader = os.path.join(env, 'node_modules', 'css-loader', 'dist', 'cjs.js')
+    app_css = os.path.join(job, 'ws', 'apps', 'x', 'src', 'b.css')
+    app_ts = os.path.join(job, 'ws', 'apps', 'x', 'src', 'index.ts')
+    tree_loader = os.path.join(job, 'ws', 'apps', 'x', 'x.cjs')
+    app_dep_loader = os.path.join(job, 'ws', 'node_modules', 'some-loader', 'index.js')
+    outside = os.path.join(os.path.dirname(job), 'elsewhere', 'file.txt')
+    return [
+        (app_ts, True),  # a plain module in the job tree
+        (f'{loader}??ruleSet[1].rules[0]!{app_css}', True),  # platform loader chain
+        (f'-!{loader}!{app_css}?module', True),  # css-loader @import shape
+        (f'{app_css}.webpack[javascript/auto]!=!{loader}!{app_css}', True),  # matchResource shape
+        ('builtin:swc-loader??x!' + app_ts, True),  # builtin loader
+        ('data:text/javascript,export default 1', True),
+        ('builtin:swc-loader??rule1!data:text/javascript,if(!a){b()}', True),
+        (f'{os.path.join(job, "evil.cjs")}!data:text/javascript,if(!a){{b()}}', False),
+        ('data:text/javascript,if(!a){b()}', True),  # an inline runtime module whose body has '!'
+        (os.path.join(job, 'node_modules', 'x-loader', 'i.js') + '!' + app_ts, True),  # toolchain copy fallback
+        (f'!!{tree_loader}!{app_ts}', False),  # a loader file from the developer tree
+        (f'{app_dep_loader}!{app_ts}', False),  # a loader the app installed itself
+        (outside, False),  # a module outside the job and toolchain
+        (f'{loader}!{outside}', False),
+        ('relative/loader!' + app_ts, False),  # unresolved segment: fail closed
+        ('', False),
+        (f'{loader}!!{app_ts}', False),  # empty segment: fail closed
+        (f'{loader}?{{"x":1}}!{app_css}', False),  # inline loader options from an import
+        (f'{loader}?x=1!{app_css}', False),
+        (f'builtin:swc-loader?{{"x":1}}!{app_ts}', False),  # builtin with inline options
+        (f'{os.path.join(job, "ws", "evil.cjs")}!{os.path.join(job, "ws", "x")}!=!data:/a.js', False),  # forged path
+    ]
+
+
+def _symlink_or_skip(target, link) -> None:
+    """``os.symlink``; on Windows only, skip when the privilege is missing (any other failure is a real error)."""
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError) as exc:
+        if os.name != 'nt':
+            raise
+        pytest.skip(f'cannot create a symlink on this host: {exc}')
+
+
+def _guard_roots(tmp_path):
+    job = tmp_path / 'job'
+    env = tmp_path / 'env'
+    (job / 'ws' / 'apps' / 'x' / 'src').mkdir(parents=True)
+    (env / 'node_modules').mkdir(parents=True)
+    return os.path.realpath(job), os.path.realpath(env)
+
+
+def test_resolved_request_guard_allows_only_toolchain_loaders_and_in_tree_modules(tmp_path):
+    """The resolved-module guard: loaders must live in the toolchain env (or
+    be builtins) and modules in the job tree or the toolchain env.
+    """
+    job, env = _guard_roots(tmp_path)
+    module_roots = (job, env)
+    loader_roots = (env, os.path.join(job, 'node_modules'))
+    for request, allowed in _guard_cases(job, env):
+        assert app_build._resolved_request_allowed(request, module_roots, loader_roots) is allowed, request
+
+
+def test_resolved_request_guard_follows_symlinks_out_of_the_tree(tmp_path):
+    """A path inside the tree that is a symlink to a file elsewhere is judged
+    by where it really points.
+    """
+    job, env = _guard_roots(tmp_path)
+    target = tmp_path / 'secret.txt'
+    target.write_text('x', encoding='utf-8')
+    link = os.path.join(job, 'ws', 'apps', 'x', 'src', 'link.txt')
+    _symlink_or_skip(str(target), link)
+    assert app_build._resolved_request_allowed(link, (job, env), (env,)) is False
+
+
+def test_emitted_config_carries_the_resolved_module_guard(tmp_path):
+    """The canonical rsbuild config installs the resolved-module guard with
+    the job and toolchain roots, and its JS twin decides the same cases as
+    the Python helper. The guard function is extracted from the emitted text
+    and called on plain strings under node; no build runs.
+    """
+    import shutil
+    import subprocess
+
+    job, env = _guard_roots(tmp_path)
+    app = os.path.join(job, 'ws', 'apps', 'x')
+    config_path = app_build._emit_config(os.path.join(job, '.build'), app, os.path.join(job, '.out'), 'm', env)
+    text = open(config_path, encoding='utf-8').read()
+    start, end = '// <rr-resolved-module-guard>', '// </rr-resolved-module-guard>'
+    assert start in text and end in text
+    assert 'new RocketRideResolvedModuleGuard()' in text
+    assert 'afterResolve' in text and 'contextModuleFactory' in text
+    assert json.dumps([job, env]) in text
+    assert json.dumps(sorted({env, os.path.join(job, 'node_modules')})) in text
+    guard = text[text.index(start) : text.index(end)]
+
+    node = shutil.which('node')
+    if not node:
+        if os.environ.get('CI'):
+            pytest.fail('node is required in CI to evaluate the emitted guard')
+        pytest.skip('node not available to evaluate the emitted guard')
+    cases = _guard_cases(job, env)
+    # A path inside the job tree that links to a file outside it: the JS guard resolves it like the Python one.
+    outside = tmp_path / 'outside-secret.txt'
+    outside.write_text('x', encoding='utf-8')
+    link = os.path.join(job, 'ws', 'apps', 'x', 'src', 'escape.txt')
+    _symlink_or_skip(str(outside), link)
+    cases = cases + [(link, False)]
+    probe = tmp_path / 'probe.mjs'
+    probe.write_text(
+        "import path from 'node:path';\nimport fs from 'node:fs';\n"
+        + guard
+        + '\nconst out = [];\n'
+        + 'for (const request of '
+        + json.dumps([request for request, _ in cases])
+        + ') { out.push(rrRequestAllowed(request)); }\n'
+        + 'console.log(JSON.stringify(out));\n',
+        encoding='utf-8',
+    )
+    result = subprocess.run([node, str(probe)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [allowed for _, allowed in cases]
+    # The whole emitted config must still parse (syntax only, nothing runs).
+    check = subprocess.run([node, '--check', config_path], capture_output=True, text=True, timeout=60)
+    assert check.returncode == 0, check.stderr
+
+
+# =============================================================================
+# MANIFEST / WORKSPACE / ENV SANITIZING (#1021, round 2) — inert fixtures
+# =============================================================================
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding='utf-8')
+
+
+def test_package_json_pnpm_and_browserslist_keys_are_removed(tmp_path):
+    """The `pnpm` and `browserslist` keys go from every package.json."""
+    ws = tmp_path / 'ws'
+    manifest = {'name': 'x', 'pnpm': {'patchedDependencies': {'a': 'p.patch'}}, 'browserslist': ['> 1%'], 'a': 1}
+    _write(ws / 'package.json', json.dumps(manifest))
+    _write(ws / 'apps' / 'x' / 'package.json', json.dumps(manifest))
+    app_build._neutralize_tool_configs(str(ws), str(ws / 'apps' / 'x'))
+    for rel in ('package.json', 'apps/x/package.json'):
+        data = json.loads((ws / rel).read_text(encoding='utf-8'))
+        assert 'pnpm' not in data and 'browserslist' not in data
+        assert data['a'] == 1
+
+
+def test_package_json_package_manager_pins_are_removed(tmp_path):
+    """`packageManager` / `devEngines` (honored by a Corepack pnpm shim) are
+    stripped; a manifest without any neutralized key is not rewritten.
+    """
+    ws = tmp_path / 'ws'
+    pinned = {'name': 'x', 'packageManager': 'pnpm@1.0.0', 'devEngines': {'packageManager': {'name': 'pnpm'}}, 'a': 1}
+    _write(ws / 'package.json', json.dumps(pinned))
+    plain_text = '{"name":"y","a":2}'
+    _write(ws / 'apps' / 'y' / 'package.json', plain_text)
+    out = app_build._neutralize_tool_configs(str(ws), str(ws))
+    data = json.loads((ws / 'package.json').read_text(encoding='utf-8'))
+    assert 'packageManager' not in data and 'devEngines' not in data and data['a'] == 1
+    assert {'package.json:packageManager', 'package.json:devEngines'} <= set(out)
+    assert (ws / 'apps' / 'y' / 'package.json').read_text(encoding='utf-8') == plain_text
+
+
+@pytest.mark.parametrize('spec', ['link:../x', 'link:./local', 'file:/etc', 'file:../x', 'file:a/../../x', 'FILE:///x'])
+@pytest.mark.parametrize(
+    'table', ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides']
+)
+def test_package_json_refuses_escaping_dependency_specs(tmp_path, table, spec):
+    ws = tmp_path / 'ws'
+    _write(ws / 'package.json', json.dumps({'name': 'x', table: {'dep': spec}}))
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_package_json_allows_in_tree_file_specs(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / 'package.json', json.dumps({'dependencies': {'a': 'file:.rocketride/shell/shell.tgz', 'b': '^1.0.0'}}))
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+@pytest.mark.parametrize(
+    'rel, spec',
+    [
+        ('apps/x/package.json', 'file:../../.rocketride/shell/shell.tgz'),
+        ('apps/x/package.json', 'file:../shared/local.tgz'),
+        ('package.json', 'file:.rocketride/shell/shell.tgz'),
+    ],
+)
+def test_package_json_allows_in_workspace_specs_from_the_declaring_importer(tmp_path, rel, spec):
+    ws = tmp_path / 'ws'
+    _write(ws / rel, json.dumps({'dependencies': {'shell': spec}}))
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+@pytest.mark.parametrize(
+    'rel, spec',
+    [
+        ('apps/x/package.json', 'file:../../../x'),
+        ('apps/x/package.json', 'file:../../../.rocketride/shell/shell.tgz'),
+        ('apps/x/package.json', 'file:/etc/x.tgz'),
+        ('apps/x/package.json', 'link:../../.rocketride/shell'),
+    ],
+)
+def test_package_json_refuses_specs_escaping_the_workspace_root(tmp_path, rel, spec):
+    ws = tmp_path / 'ws'
+    _write(ws / rel, json.dumps({'dependencies': {'shell': spec}}))
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_package_manifest_is_parsed_once_however_many_configs_it_owns(tmp_path, monkeypatch):
+    ws = tmp_path / 'ws'
+    _write(ws / 'package.json', json.dumps({'type': 'module'}))
+    configs = ['postcss.config.js', 'postcss.config.cjs', 'postcss.config.mjs', '.postcssrc.json', '.postcssrc.yml']
+    for name in configs:
+        _write(ws / name, 'module.exports = {}')
+    loads = []
+    real_load = app_build.json.load
+
+    def counting_load(handle, *args, **kwargs):
+        loads.append(getattr(handle, 'name', None))
+        return real_load(handle, *args, **kwargs)
+
+    monkeypatch.setattr(app_build.json, 'load', counting_load)
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    # one parse for the package.json walk itself, one shared by every config
+    assert len(loads) <= 2, loads
+    assert (ws / 'postcss.config.js').read_text().startswith('export default')
+
+
+def test_workspace_yaml_deeply_nested_catalog_is_a_build_failure_not_a_crash():
+    source = 'packages: ["apps/*"]\ncatalog:\n  a: ' + '{a: ' * 400 + 'x' + '}' * 400 + '\n'
+    with pytest.raises(BuildFailure, match='nested'):
+        _patched_workspace_yaml(source, 'apps/x', [])
+
+
+def _cyclic_alias_gadget(cycle_len: int, links: int) -> str:
+    """Stacked alias cycles: shallow by the measured height, deep for the dumper."""
+    out = ['g0: &g0 {v: "1"}']
+    for k in range(1, links + 1):
+        node = f'&c{k}_L {{n: *c{k}_1, t: *g{k - 1}}}'
+        for i in range(cycle_len - 1, 0, -1):
+            node = (f'&c{k}_1 ' if i == 1 else '') + '{n: ' + node + '}'
+        out.append(f'g{k}: &g{k} {{a: {node}, b: *c{k}_L}}')
+    out.append(f'overrides: {{x: *g{links}}}')
+    return '\n'.join(out) + '\n'
+
+
+def test_workspace_yaml_stacked_alias_cycles_are_a_build_failure_not_a_crash():
+    # Passes the depth cap but is too deep for the recursive walks and dump.
+    with pytest.raises(BuildFailure, match='nested'):
+        _patched_workspace_yaml(_cyclic_alias_gadget(30, 15), 'apps/x', [])
+
+
+def test_workspace_yaml_ordinary_aliases_and_catalogs_still_load():
+    source = 'packages:\n  - "apps/*"\ncatalog: &base\n  react: ^18.2.0\ncatalogs:\n  next: *base\n'
+    out = _patched_workspace_yaml(source, 'apps/x', [])
+    assert 'react' in out and 'overrides' in out
+
+
+def test_workspace_yaml_refuses_escaping_override_specs():
+    for spec in ('link:../x', 'file:/abs', 'file:../x'):
+        with pytest.raises(BuildFailure):
+            _patched_workspace_yaml(f'packages:\n  - "apps/*"\noverrides:\n  dep: "{spec}"\n', 'apps/x', [])
+
+
+def test_undecodable_or_invalid_package_json_is_a_build_failure(tmp_path):
+    ws = tmp_path / 'ws'
+    ws.mkdir()
+    (ws / 'package.json').write_bytes(b'\xff\xfe{"name": 1}')
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+    (ws / 'package.json').write_text('{not json', encoding='utf-8')
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_workspace_yaml_drops_only_built_dependencies():
+    dropped: List[str] = []
+    out = _patched_workspace_yaml(
+        'packages:\n  - "apps/*"\nonlyBuiltDependencies:\n  - esbuild\n', 'apps/x', [], dropped
+    )
+    assert 'onlyBuiltDependencies' not in out
+    assert 'onlyBuiltDependencies' in dropped
+    assert 'onlyBuiltDependencies' not in app_build._WORKSPACE_YAML_KEYS
+
+
+def test_workspace_yaml_packages_must_be_a_list_of_safe_strings():
+    for text in ('packages: "apps/*"\n', 'packages:\n  - 3\n', 'packages:\n  - {a: b}\n'):
+        with pytest.raises(BuildFailure):
+            _patched_workspace_yaml(text, 'apps/x', [])
+    for entry in ('apps/{a,../b}', '{../x,y}', '../x'):
+        with pytest.raises(BuildFailure):
+            _patched_workspace_yaml(f'packages:\n  - "{entry}"\n', 'apps/x', [])
+    _patched_workspace_yaml('packages:\n  - "apps/*"\n  - "!apps/old"\n', 'apps/x', [])
+
+
+def test_browserslist_and_swcrc_files_are_removed_anywhere(tmp_path):
+    ws = tmp_path / 'ws'
+    names = ('.browserslistrc', 'browserslist', '.swcrc')
+    for directory in ('', 'apps', 'apps/x/src'):
+        for name in names:
+            _write(ws / directory / name, 'x\n')
+    _write(ws / 'keep.txt', 'k')
+    removed = app_build._remove_pnpm_configs(str(ws))
+    assert len(removed) == 9
+    left = [f for _d, _s, files in os.walk(ws) for f in files]
+    assert left == ['keep.txt']
+
+
+def test_emitted_config_pins_the_platform_browserslist(tmp_path):
+    app = tmp_path / 'job' / 'ws' / 'apps' / 'x'
+    app.mkdir(parents=True)
+    config_path = app_build._emit_config(str(tmp_path / 'job' / '.build'), str(app), str(tmp_path / 'out'), 'm')
+    text = open(config_path, encoding='utf-8').read()
+    assert 'overrideBrowserslist: ["chrome >= 107", "edge >= 107", "firefox >= 104", "safari >= 16"]' in text
+
+
+def test_every_babel_config_name_is_made_inert(tmp_path):
+    ws = tmp_path / 'ws'
+    names = [f'babel.config.{e}' for e in ('js', 'cjs', 'mjs', 'json', 'ts', 'cts', 'mts')]
+    names += ['.babelrc'] + [f'.babelrc.{e}' for e in ('js', 'cjs', 'mjs', 'json')]
+    for name in names:
+        _write(ws / 'apps' / 'x' / name, 'MARKER-plugin\n')
+    app_build._neutralize_tool_configs(str(ws), str(ws / 'apps' / 'x'))
+    for name in names:
+        assert 'MARKER' not in (ws / 'apps' / 'x' / name).read_text(encoding='utf-8'), name
+
+
+def test_env_files_drop_public_lines_with_command_substitution(tmp_path):
+    app = tmp_path / 'app'
+    _write(app / '.env', 'PUBLIC_A=ok\nPUBLIC_B=$(id)\nPUBLIC_C=`id`\nexport PUBLIC_D=x$(y)\nPUBLIC_E=$VAR\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=ok', 'PUBLIC_E=$VAR']
+
+
+def test_config_and_env_name_checks_are_case_insensitive(tmp_path):
+    """Case-insensitive filesystems resolve 'Postcss.config.js', '.NPMRC',
+    'Package.json' and '.ENV.local' to the real tool files; every name check
+    folds case, and a lookalike directory name is left alone.
+    """
+    ws = tmp_path / 'ws'
+    _write(ws / 'Postcss.config.js', 'MARKER-plugin\n')
+    _write(ws / '.NPMRC', 'x\n')
+    _write(ws / 'node_modules_extra' / 'keep.txt', 'k')
+    _write(ws / '.ENV.local', 'PUBLIC_A=ok\nSECRET=x\n')
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert 'MARKER' not in (ws / 'Postcss.config.js').read_text(encoding='utf-8')
+    assert app_build._remove_pnpm_configs(str(ws)) == ['.NPMRC']
+    app_build._filter_env_files(str(ws))
+    assert (ws / '.ENV.local').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=ok']
+    assert (ws / 'node_modules_extra' / 'keep.txt').is_file()
+
+
+def test_package_json_name_is_matched_case_insensitively(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / 'Package.json', json.dumps({'name': 'x', 'dependencies': {'dep': 'link:../x'}}))
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_env_filter_accepts_the_colon_assignment_form(tmp_path):
+    """Rsbuild reads `KEY: value` too: PUBLIC_ colon lines are kept (with the
+    same value checks), every other colon line is dropped.
+    """
+    app = tmp_path / 'app'
+    _write(app / '.env', 'PUBLIC_API: https://x\nNODE_OPTIONS: --x\nPUBLIC_BAD: $(id)\nPUBLIC_TICK: `id`\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_API: https://x']
+
+
+def test_corepack_env_file_is_removed_from_the_tree(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / '.corepack.env', 'COREPACK_HOME=/evil\n')
+    _write(ws / 'apps' / 'x' / '.corepack.env', 'COREPACK_NPM_REGISTRY=http://evil\n')
+    assert app_build._remove_pnpm_configs(str(ws)) == ['.corepack.env', 'apps/x/.corepack.env']
+
+
+def _hermetic_corepack_env(monkeypatch):
+    for key in ('COREPACK_HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA'):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _default_corepack_home():
+    sub = 'AppData/Local' if os.name == 'nt' else '.cache'
+    return os.path.join(os.path.expanduser('~'), sub, 'node', 'corepack')
+
+
+def test_build_env_pins_corepack_to_the_workers_values(monkeypatch, tmp_path):
+    """The Corepack walk can read an app's .corepack.env; the build env pins
+    the keys it could set, using the WORKER's home and never the job's.
+    """
+    _hermetic_corepack_env(monkeypatch)
+    env = app_build._build_env()
+    assert env['COREPACK_ENV_FILE'] == '0'
+    assert env['COREPACK_HOME'] == _default_corepack_home()
+    assert 'COREPACK_ENABLE_NETWORK' not in env and 'COREPACK_DEFAULT_TO_LATEST' not in env
+    explicit = str(tmp_path / 'corepack')
+    monkeypatch.setenv('COREPACK_HOME', explicit)
+    assert app_build._build_env()['COREPACK_HOME'] == explicit
+
+
+def test_corepack_home_follows_corepacks_own_resolution_order(monkeypatch, tmp_path):
+    """COREPACK_HOME, else XDG_CACHE_HOME, else (Windows) LOCALAPPDATA, else
+    the worker home's cache dir. Read from the worker's env only.
+    """
+    _hermetic_corepack_env(monkeypatch)
+    assert app_build._corepack_home() == _default_corepack_home()
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'xdg'))
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'xdg'), 'node', 'corepack')
+    monkeypatch.setenv('COREPACK_HOME', str(tmp_path / 'explicit'))
+    assert app_build._corepack_home() == str(tmp_path / 'explicit')
+
+
+def test_corepack_home_uses_localappdata_on_windows(monkeypatch, tmp_path):
+    _hermetic_corepack_env(monkeypatch)
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'local'))
+    monkeypatch.setattr(app_build.os, 'name', 'nt')
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'local'), 'node', 'corepack')
+
+
+def test_corepack_home_ignores_relative_values(monkeypatch, tmp_path):
+    """The job install's cwd is the uploaded tree, so a relative cache dir
+    would land inside it: only absolute values are accepted.
+    """
+    _hermetic_corepack_env(monkeypatch)
+    monkeypatch.setenv('COREPACK_HOME', 'rel/corepack')
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'xdg'))
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'xdg'), 'node', 'corepack')
+    monkeypatch.setenv('XDG_CACHE_HOME', 'rel/xdg')
+    assert app_build._corepack_home() == _default_corepack_home()
+    monkeypatch.setenv('COREPACK_HOME', '')
+    assert os.path.isabs(app_build._corepack_home())
+    monkeypatch.setenv('LOCALAPPDATA', 'rel/local')
+    monkeypatch.setattr(app_build.os, 'name', 'nt')
+    assert os.path.isabs(app_build._corepack_home())
+
+
+def test_job_install_env_also_pins_corepack_network_and_latest():
+    token = app_build._JOB_INSTALL.set(True)
+    try:
+        env = app_build._build_env()
+    finally:
+        app_build._JOB_INSTALL.reset(token)
+    assert env['COREPACK_ENABLE_NETWORK'] == '0' and env['COREPACK_DEFAULT_TO_LATEST'] == '0'
+    assert 'COREPACK_ENABLE_NETWORK' not in app_build._build_env()
+
+
+def test_win32_trailing_dot_config_names_are_removed(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / '.npmrc.', 'x\n')
+    _write(ws / 'node_modules_extra' / 'keep.txt', 'k')
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    # Win32 strips the trailing dot when the file is created, so the walk may
+    # report either spelling; the file must be gone in both.
+    removed = app_build._remove_pnpm_configs(str(ws))
+    assert len(removed) == 1 and removed[0] in ('.npmrc.', '.npmrc')
+    assert not any(name.startswith('.npmrc') for name in os.listdir(ws))
+    assert (ws / 'node_modules_extra' / 'keep.txt').is_file()
+
+
+def test_fold_name_matches_ntfs_uppercase_comparison():
+    """NTFS compares names by uppercasing: a dotless i uppercases to I."""
+    assert app_build._fold_name('postcss.conf' + chr(0x131) + 'g.js') == 'postcss.config.js'
+    assert app_build._fold_name('po' + chr(0x17F) + 'tcss.config.js') == 'postcss.config.js'
+    assert app_build._fold_name('.npmrc. ') == '.npmrc'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'entry', ['node_modules:$I30:$INDEX_ALLOCATION/x.js', 'apps/a:b/x.js', 'C:/x.js'], ids=['ads', 'segment', 'drive']
+)
+async def test_zip_entry_with_a_colon_in_any_segment_is_refused(monkeypatch, build_store, toolchain, entry):
+    rail, fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['/x.js'])
+async def test_zip_entry_leading_slash_still_refused(monkeypatch, build_store, toolchain, entry):
+    rail, _fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    assert rail.stamps[-1]['status'] == 'failed'
+
+
+def test_env_filter_drops_lines_with_js_only_line_separators(tmp_path):
+    """Rsbuild's dotenv regex treats U+2028/U+2029 (and Python NEL) as line
+    breaks, so one kept line could smuggle a second, non-PUBLIC_ assignment.
+    """
+    ls, ps, nel = chr(0x2028), chr(0x2029), chr(0x85)
+    app = tmp_path / 'app'
+    text = (
+        f"PUBLIC_A='x'{ls}NODE_OPTIONS=--require ./evil.js\n"
+        f"PUBLIC_B: 'x'{ps}RSPACK_X=1\n"
+        f'PUBLIC_C=y{nel}SECRET=1\n'
+        'PUBLIC_SAFE=ok\n'
+    )
+    _write(app / '.env', text)
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_SAFE=ok']
+    _write(app / '.env', 'PUBLIC_A=1\nPUBLIC_B: 2\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=1', 'PUBLIC_B: 2']
+
+
+def test_env_filter_only_touches_dotenv_names(tmp_path):
+    """`.env` and `.env.*` are filtered; `.environment.json` is not an env file."""
+    app = tmp_path / 'app'
+    _write(app / '.environment.json', '{"SECRET": "x"}\n')
+    _write(app / '.env.production', 'PUBLIC_A=1\nSECRET=x\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.environment.json').read_text(encoding='utf-8') == '{"SECRET": "x"}\n'
+    assert (app / '.env.production').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=1']
+
+
+def test_neutralize_reports_what_it_ignored_and_tolerates_a_bom(tmp_path):
+    """Neutralized configs and stripped package.json keys are returned for the
+    build log, and a manifest with a UTF-8 BOM (which pnpm accepts) is read.
+    """
+    ws = tmp_path / 'ws'
+    app = ws / 'apps' / 'x'
+    app.mkdir(parents=True)
+    (app / '.postcssrc.json').write_text('{"plugins": {}}', encoding='utf-8')
+    (app / 'package.json').write_bytes(b'\xef\xbb\xbf' + json.dumps({'name': 'x', 'postcss': {}}).encode())
+    out = app_build._neutralize_tool_configs(str(ws), str(app))
+    assert 'apps/x/.postcssrc.json' in out
+    assert 'apps/x/package.json:postcss' in out
+    assert 'postcss' not in json.loads((app / 'package.json').read_text(encoding='utf-8'))
+
+
+@pytest.mark.parametrize(
+    'spec,unsafe',
+    [
+        ('../../elsewhere', True),
+        ('/var/elsewhere', True),
+        ('~/elsewhere', True),
+        ('C:/elsewhere', True),
+        ('../x.tgz', True),
+        ('workspace:../../x', True),
+        ('git+file:/x', True),
+        ('link:../x', True),
+        ('file:./pkgs/a', False),
+        ('./pkgs/a', False),
+        ('pkgs/a.tgz', False),
+        ('workspace:*', False),
+        ('^1.2.3', False),
+        ('npm:react@18', False),
+        ('~4.17.21', False),
+        ('~', True),
+        ('workspace:~', False),
+        ('workspace:~1.0.0', False),
+        ('workspace:^', False),
+    ],
+)
+def test_unsafe_spec_covers_bare_and_prefixed_local_paths(spec, unsafe):
+    """Every way pnpm reads a dependency spec as a local path is checked."""
+    assert app_build._unsafe_spec(spec) is unsafe
+
+
+@pytest.mark.parametrize(
+    'spec,base,unsafe',
+    [
+        ('file:../../.rocketride/shell/shell.tgz', 'apps/x', False),
+        ('file:../../../x', 'apps/x', True),
+        ('file:../x', '.', True),
+        ('../../.rocketride/shell/shell.tgz', 'apps/x', False),
+        ('../../../x.tgz', 'apps/x', True),
+        ('file:/etc/x', 'apps/x', True),
+        # a bare spec with a separator is a path unless it is a registry/git/URL form
+        ('pkgs/../../x', '.', True),
+        ('pkgs\\..\\..\\x', '.', True),
+        ('foo/../../x', 'apps/x', False),
+        ('foo/../../../../x', 'apps/x', True),
+        ('user/repo', '.', False),
+        ('github:user/repo', '.', False),
+        ('npm:@scope/name@^1.0.0', '.', False),
+        ('git+https://example.com/a/b.git', '.', False),
+        ('https://example.com/a/../b.tgz', '.', False),
+        ('git@github.com:user/repo.git', '.', False),
+        # a prefix or a '://' that is not at the start does not exempt a path
+        ('git+x/../../../../y', 'apps/x', True),
+        ('git@x/../../../../y', 'apps/x', True),
+        ('http:x/../../../../y', 'apps/x', True),
+        ('github:x/../../../../y', 'apps/x', True),
+        ('npm:x/../../../../y', 'apps/x', True),
+        ('p/../../../../x/a://..', 'apps/x', True),
+        # only http(s) and the git protocols are remote; any other scheme is a path
+        ('foo://../../../x', '.', True),
+        ('svn://../../../../x', 'apps/x', True),
+        ('foo://a/b', '.', False),
+        ('ssh://git@example.com/a/b.git', '.', False),
+        ('git://example.com/a/b.git', '.', False),
+        ('git+ssh://git@example.com/a/b.git', '.', False),
+    ],
+)
+def test_unsafe_spec_resolves_against_the_declaring_package(spec, base, unsafe):
+    assert app_build._unsafe_spec(spec, base) is unsafe
+
+
+def test_scaffolded_shell_spec_builds(tmp_path):
+    """The scaffold writes file:../../.rocketride/shell/shell.tgz into an app
+    package.json; it resolves inside the workspace and must not be refused.
+    """
+    ws = tmp_path / 'ws'
+    spec = 'file:../../.rocketride/shell/shell.tgz'
+    _write(ws / 'apps' / 'x' / 'package.json', json.dumps({'name': 'x', 'dependencies': {'shell': spec}}))
+    app_build._neutralize_tool_configs(str(ws), str(ws / 'apps' / 'x'))
+    # one level too deep a climb leaves the workspace and is refused
+    _write(
+        ws / 'apps' / 'y' / 'package.json', json.dumps({'name': 'y', 'dependencies': {'shell': 'file:../../../x.tgz'}})
+    )
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws / 'apps' / 'y'))
+
+
+def test_workspace_yaml_alias_heavy_catalog_is_walked_quickly():
+    import time
+
+    lines = ['packages:', '  - "apps/*"', 'x-anchors:']
+    lines.append('  l0: &l0 {a: "^1.0.0", b: "^1.0.0"}')
+    for i in range(1, 25):
+        lines.append(f'  l{i}: &l{i} {{a: *l{i - 1}, b: *l{i - 1}}}')
+    lines += ['catalog:', '  top: *l24']
+    started = time.monotonic()
+    _patched_workspace_yaml('\n'.join(lines) + '\n', 'apps/x', [])
+    assert time.monotonic() - started < 2.0
+
+
+@pytest.mark.parametrize('table', ['catalog', 'overrides'])
+def test_workspace_yaml_alias_inside_a_list_is_refused_quickly(table):
+    import time
+
+    lines = ['packages:', '  - "apps/*"', 'x-anchors:']
+    lines.append('  l0: &l0 {a: "^1.0.0", b: "^1.0.0"}')
+    for i in range(1, 25):
+        lines.append(f'  l{i}: &l{i} {{a: *l{i - 1}, b: *l{i - 1}}}')
+    lines += [f'{table}:', '  top: [*l24]']
+    started = time.monotonic()
+    with pytest.raises(BuildFailure):
+        _patched_workspace_yaml('\n'.join(lines) + '\n', 'apps/x', [])
+    assert time.monotonic() - started < 2.0
+
+
+def test_workspace_yaml_self_referential_catalog_alias_is_not_a_crash():
+    text = 'packages:\n  - "apps/*"\ncatalog: &c\n  self: *c\n  dep: "^1.0.0"\n'
+    _patched_workspace_yaml(text, 'apps/x', [])
+
+
+def test_workspace_yaml_alias_still_checks_the_shared_spec():
+    text = 'packages:\n  - "apps/*"\ncatalog:\n  ok: &s "file:../x"\ncatalogs:\n  n:\n    dep: *s\n'
+    with pytest.raises(BuildFailure):
+        _patched_workspace_yaml(text, 'apps/x', [])
+
+
+def test_inert_postcss_config_follows_the_package_module_type(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / 'apps' / 'esm' / 'package.json', json.dumps({'name': 'e', 'type': 'module'}))
+    _write(ws / 'apps' / 'esm' / '.postcssrc.js', 'MARKER\n')
+    _write(ws / 'apps' / 'cjs' / 'package.json', json.dumps({'name': 'c'}))
+    _write(ws / 'apps' / 'cjs' / '.postcssrc.js', 'MARKER\n')
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert (ws / 'apps' / 'esm' / '.postcssrc.js').read_text(encoding='utf-8') == 'export default {};\n'
+    assert (ws / 'apps' / 'cjs' / '.postcssrc.js').read_text(encoding='utf-8') == 'module.exports = {};\n'
+
+
+def test_under_refuses_a_symlink_out_of_the_root(tmp_path):
+    """Harvest containment: a file inside a root that links elsewhere is out."""
+    root = tmp_path / 'out'
+    root.mkdir()
+    outside = tmp_path / 'outside.txt'
+    outside.write_text('x', encoding='utf-8')
+    (root / 'a.txt').write_text('a', encoding='utf-8')
+    _symlink_or_skip(str(outside), str(root / 'b.txt'))
+    roots = (os.path.realpath(str(root)),)
+    assert app_build._under(str(root / 'a.txt'), roots) is True
+    assert app_build._under(str(root / 'b.txt'), roots) is False
+
+
+def test_resolutions_table_is_checked_like_overrides(tmp_path):
+    """A root package.json ``resolutions`` table (honoured by pnpm like
+    ``overrides``) is checked, so an out-of-tree path there is refused.
+    """
+    ws = tmp_path / 'ws'
+    app = ws / 'apps' / 'x'
+    app.mkdir(parents=True)
+    (ws / 'package.json').write_text(
+        json.dumps({'name': 'r', 'resolutions': {'x': 'file:/elsewhere'}}), encoding='utf-8'
+    )
+    with pytest.raises(app_build.BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(app))
+
+
+@pytest.mark.parametrize(
+    'lock,refused',
+    [
+        ('packages:\n  x@1.0.0:\n    resolution: {directory: /elsewhere, type: directory}\n', True),
+        ('packages:\n  x@1.0.0:\n    resolution: {tarball: file:../../x.tgz}\n', True),
+        (
+            'importers:\n  .:\n    dependencies:\n      x:\n        specifier: link:../..\n        version: link:../..\n',
+            True,
+        ),
+        (
+            'importers:\n  .:\n    dependencies:\n      x:\n        specifier: file:./pkgs/x\n        version: file:pkgs/x\n',
+            False,
+        ),
+        (
+            # a monorepo app linking a sibling workspace package (relative to the importer)
+            "importers:\n  apps/x:\n    dependencies:\n      '@acme/ui':\n        specifier: workspace:*\n        version: link:../../packages/ui\n",
+            False,
+        ),
+        ('importers:\n  apps/x:\n    dependencies:\n      y:\n        version: link:../../../elsewhere\n', True),
+        ('packages:\n  x@1.0.0:\n    resolution: {directory: packages/x, type: directory}\n', False),
+        # a flow-style importer after a block one must not inherit its directory
+        (
+            'importers:\n  apps/a/b:\n    dependencies: {}\n'
+            "  .: {dependencies: {y: {specifier: 'workspace:*', version: 'link:../../../evil'}}}\n",
+            True,
+        ),
+        # a comment on the key line resets to the root
+        (
+            'importers:\n  apps/a/b:\n    dependencies: {}\n  .: # root\n    dependencies:\n      y:\n        version: link:../../../evil\n',
+            True,
+        ),
+        # version: file: under importers is root-relative
+        ('importers:\n  apps/a/b:\n    dependencies:\n      y:\n        version: file:../x\n', True),
+        ('packages:\n  react@18.2.0:\n    resolution: {integrity: sha512-AAAA}\n', False),
+    ],
+)
+def test_lockfile_path_resolutions_outside_the_tree_are_refused(lock, refused):
+    """The install keeps lockfile resolutions, so path entries there are checked."""
+    if refused:
+        with pytest.raises(app_build.BuildFailure):
+            app_build._refuse_lockfile_paths(lock)
+    else:
+        app_build._refuse_lockfile_paths(lock)
+
+
+@pytest.mark.parametrize(
+    'lock',
+    [
+        # an escaped importer key decodes to the root importer
+        'importers:\n  "\\x2e":\n    dependencies:\n      y:\n        specifier: workspace:*\n        version: link:../evil\n',
+        # a flow mapping split over lines
+        "importers: {\n  a/b/c:\n   x, .: {dependencies: {y: {version: 'link:../../../evil'}}}}\n",
+        # an unparsable lockfile
+        'importers:\n  .: [\n',
+        # an importer directory outside the tree
+        'importers:\n  ../..:\n    dependencies:\n      y:\n        version: link:x\n',
+    ],
+)
+def test_lockfile_check_reads_yaml_as_pnpm_does(lock):
+    """The lockfile is decoded as YAML, so escapes, flow style and parse
+    errors cannot steer the path check.
+    """
+    with pytest.raises(app_build.BuildFailure):
+        app_build._refuse_lockfile_paths(lock)
+
+
+def test_lockfile_aliases_are_refused_before_any_expansion(monkeypatch):
+    """Lockfile aliases (which pnpm never writes) are refused from the parser's
+    events, before the document is loaded, so nested aliases cannot make the
+    check expand. Asserted on the control flow, not on elapsed time: a paused
+    or slow runner cannot change what happens.
+    """
+    import yaml
+
+    def never_loaded(*args, **kwargs):
+        raise AssertionError('the lockfile was loaded (and its aliases expanded) before the alias refusal')
+
+    monkeypatch.setattr(yaml, 'safe_load_all', never_loaded)
+    monkeypatch.setattr(yaml, 'safe_load', never_loaded)
+    lines = ['a0: &a0 [x, x, x, x, x, x, x, x, x, x]']
+    for i in range(1, 8):
+        lines.append(f'a{i}: &a{i} [' + ', '.join([f'*a{i - 1}'] * 10) + ']')
+    with pytest.raises(app_build.BuildFailure, match='YAML aliases'):
+        app_build._refuse_lockfile_paths('\n'.join(lines) + '\n')
+
+
+def test_lockfile_with_two_documents_is_read():
+    """A two-document lockfile (pnpm 10 can write one) is fully checked."""
+    ok = '---\nlockfileVersion: 9.0\n---\nlockfileVersion: 9.0\nimporters:\n  .:\n    dependencies: {}\n'
+    app_build._refuse_lockfile_paths(ok)
+    bad = '---\nlockfileVersion: 9.0\n---\npackages:\n  x@1.0.0:\n    resolution: {directory: ../../x}\n'
+    with pytest.raises(app_build.BuildFailure):
+        app_build._refuse_lockfile_paths(bad)
+
+
+@pytest.mark.parametrize(
+    'resolution,refused',
+    [
+        ('{repo: /tmp/elsewhere, commit: abc}', True),
+        ('{repo: ../../elsewhere, commit: abc}', True),
+        ('{tarball: /elsewhere/x.tgz}', True),
+        ("{tarball: 'https://registry.npmjs.org/x/-/x-1.0.0.tgz'}", False),
+        ("{repo: 'https://github.com/a/b.git', commit: abc}", False),
+        ('{tarball: codeload.github.com/a/b/tar.gz/abc}', False),
+    ],
+)
+def test_lockfile_local_repo_and_tarball_paths_are_checked(resolution, refused):
+    lock = f'packages:\n  x@1.0.0:\n    resolution: {resolution}\n'
+    if refused:
+        with pytest.raises(app_build.BuildFailure):
+            app_build._refuse_lockfile_paths(lock)
+    else:
+        app_build._refuse_lockfile_paths(lock)
+
+
+def test_patched_dependency_paths_are_checked():
+    lock = 'patchedDependencies:\n  x@1.0.0:\n    hash: abc\n    path: ../../x.patch\n'
+    with pytest.raises(app_build.BuildFailure):
+        app_build._refuse_lockfile_paths(lock)
+    app_build._refuse_lockfile_paths('patchedDependencies:\n  x@1.0.0:\n    hash: abc\n    path: patches/x.patch\n')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['missing', 'escaping'])
+async def test_install_lockfile_is_checked_before_typecheck_and_bundle(monkeypatch, build_store, toolchain, mode):
+    """The lockfile the install wrote is checked for out-of-tree paths, and a
+    missing one fails closed — before the typecheck or bundle run.
+    """
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    if mode == 'missing':
+        fake.write_lock = False
+    else:
+
+        def escaping_install(cwd):
+            with open(os.path.join(cwd, 'pnpm-lock.yaml'), 'w', encoding='utf-8') as handle:
+                handle.write(
+                    "lockfileVersion: '9.0'\npackages:\n  evil@1.0.0:\n    resolution: {directory: ../../outside, type: directory}\n"
+                )
+
+        fake.install_hook = escaping_install
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    worker = AppBuildWorker(server=None)
+    await worker._run_job('org1', 'acme.brandy', 1)
+
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'install')
+    assert not any(any('tsc' in str(a) for a in c['argv']) or 'build' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+async def test_packed_lockfile_with_an_escaping_path_fails_in_materialize(monkeypatch, build_store, toolchain):
+    """The same check on the PACKED lockfile (before install) reports materialize."""
+    lock = (
+        "lockfileVersion: '9.0'\n"
+        'packages:\n  evil@1.0.0:\n    resolution: {directory: ../../outside, type: directory}\n'
+    )
+    rail = _FakeRail(_app_source_zip(with_lock=True, lock_text=lock), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.parametrize('depth', [400, 3000])
+def test_workspace_yaml_deep_nesting_is_a_build_failure_not_a_crash(depth):
+    """Plain deep nesting (no aliases) must not escape as a RecursionError."""
+    text = 'overrides:\n  ' + '{a: ' * depth + 'x' + '}' * depth + '\n'
+    with pytest.raises(BuildFailure, match='nested') as info:
+        _patched_workspace_yaml(text, 'apps/x', [])
+    assert info.value.phase == 'materialize'
+
+
+@pytest.mark.parametrize('depth', [5000, 100000])
+@pytest.mark.parametrize('shape', ['array', 'object'])
+def test_deeply_nested_package_json_is_a_build_failure_not_a_crash(tmp_path, depth, shape):
+    """json.load / the spec walk / the rewrite must not leak a RecursionError."""
+    if shape == 'array':
+        # Parses, then recurses in the rewrite that strips the postcss key.
+        text = '{"postcss": 1, "keep": ' + '[' * depth + ']' * depth + '}'
+    else:
+        text = '{"dependencies": ' + '{"a":' * depth + '1' + '}' * depth + '}'
+    ws = tmp_path / 'ws'
+    ws.mkdir()
+    (ws / 'package.json').write_text(text, encoding='utf-8')
+    with pytest.raises(BuildFailure, match='nested') as info:
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert info.value.phase == 'materialize'

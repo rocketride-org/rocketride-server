@@ -324,6 +324,10 @@ jobs:
             echo "RR_REQUIRE_DB_TESTS=1"
           } >> "$GITHUB_ENV"
 
+      - name: Install app compiler filesystem boundary / Linux
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
+
       # CPython 3.12 `_wmi` timeout race (python/cpython#130727, fixed in 3.13
       # by python/cpython#134313): after a WMI query times out, its helper
       # thread can close an unrelated handle of the process. Under CI load a
@@ -368,6 +372,8 @@ jobs:
         # (.env.template, the engine's built-in dev key).
         env:
           ROCKETRIDE_APIKEY: MYAPIKEY
+          # Require real tsc/rsbuild CSS and hostile-input checks on Linux.
+          RR_TEST_APP_COMPILERS: ${{ matrix.platform == 'ubuntu' && '1' || '0' }}
           # Force uv to copy rather than hardlink when (re)installing node deps at
           # test time. On Windows a hardlink over an already-loaded native .pyd
           # (e.g. cryptography's _rust.pyd) fails with a file lock; copy is atomic.

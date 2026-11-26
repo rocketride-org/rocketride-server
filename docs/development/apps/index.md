@@ -255,3 +255,31 @@ export default defineConfig(() => ({
   },
 }));
 ```
+
+## Server compiler isolation
+
+Hosted source builds (`--saas`, `--hosted` or `--shared-host`) require
+`RR_APP_BUILD_SANDBOX=required`; setting it to `off` fails the build. Local
+engines can opt in with the same setting. Only type checking and bundling run
+inside this boundary; dependency installation still needs registry access and
+continues to disable lifecycle scripts and pnpm hooks.
+
+Linux uses bubblewrap, installed in the engine image. The pod must permit
+unprivileged user namespaces. No privileged container or host mount is needed.
+The compiler sees its writable job, the read-only platform toolchain, Node and
+system runtime libraries. Other jobs, the engine, store paths and service
+account tokens are absent; the compiler has a separate network namespace. A
+missing provider or a denied namespace fails the build rather than running the
+compiler without isolation.
+
+On macOS, local opt-in uses `sandbox-exec` and a standalone platform Node binary
+(`RR_BUILD_NODE` can choose it). Node distributions that load additional
+libraries outside the platform toolchain/system library roots are refused by
+the policy; use a standalone Node distribution for this local check. Writes
+remain inside the job and network access is denied. Run the real boundary probe
+with `RR_TEST_APP_COMPILERS=1 pytest packages/ai/tests/ai/account/test_app_build_sandbox.py -m integration`.
+The same opt-in runs `test_app_build_live.py`: real tsc, CSS imports/modules,
+dynamic import contexts and refusal of an inline loader before it executes.
+Linux CI requires both live suites.
+The bundler's module/loader guard remains necessary in addition to this process
+boundary: filesystem isolation does not authorize developer-supplied loaders.

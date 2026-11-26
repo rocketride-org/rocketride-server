@@ -44,11 +44,11 @@ toolchain never touches it. Each job:
                OUTSIDE the app dir so user devDep toolchains can never
                capture its imports
   INSTALL      pnpm install --no-frozen-lockfile --ignore-scripts
-               --prefer-offline, filtered to the packed importers —
-               devDependencies INCLUDED (the user's typescript + @types
-               feed the typecheck gate); post-install lockfile drift diff
-  TYPECHECK    the USER's typescript (their editor triple: their tsc, their
-               tsconfig, their @types; baked fallback when undeclared)
+               --ignore-pnpmfile --prefer-offline (package-manager version
+               switching off), filtered to the packed importers —
+               devDependencies INCLUDED (the user's @types feed the
+               typecheck gate); post-install lockfile drift diff
+  TYPECHECK    the PLATFORM's baked tsc over the user's tsconfig and @types
   BUNDLE       the PLATFORM's rsbuild + Module Federation (the artifact
                format is a runtime contract with the shell — never the
                user's bundler)
@@ -58,17 +58,28 @@ toolchain never touches it. Each job:
                failed build stays 'private' on the rail), deploy event,
                account refresh for the deployer
 
-v1 executes NO user-authored code: lifecycle scripts are ignored, script
-strings are never run, the rsbuild config is the platform's, and auto-loaded
-config files (postcss/babel) are neutralized. The user's typescript is the
-ONE registry package deliberately executed — locked, integrity-verified by
-pnpm, and alias-guarded at preflight.
+The build executes NO developer-controlled code (#1021): lifecycle scripts
+and pnpmfiles are ignored, .npmrc files are removed and pnpm-workspace.yaml
+is reduced to an allowlist, a shipped node_modules is refused, the rsbuild
+config and the tsc are the platform's, every auto-loaded postcss/babel
+config is neutralized, .env files keep only PUBLIC_ entries, and the
+bundler refuses any loader outside the platform toolchain and any module
+outside the job directory or the toolchain. What the type checker can still
+READ while it compiles is bounded by app_build_sandbox: hosted engines
+require a job-only filesystem and a read-only toolchain, without network
+access, and fail closed when that boundary is unavailable. The typecheck
+runs with incremental and
+composite off and tsBuildInfoFile reset, so tsconfig cannot make it write
+build-info files (and a configured tsBuildInfoFile is not a TS5069 error on
+typescript < 5.6).
 """
 
 import asyncio
+import contextvars
 import glob
 import json
 import os
+import posixpath
 import re
 import shutil
 import stat
@@ -81,6 +92,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from rocketlib import debug, error
 
 from ai.account.deployment_backend import artifact_content_dir
+from ai.account import app_build_sandbox
 
 # =============================================================================
 # CONFIGURATION — env knobs, phase timeouts, toolchain pins
@@ -152,16 +164,111 @@ _ROCKETRIDE_REL = '.rocketride/client/rocketride.tgz'
 # Auto-loaded config files rsbuild would execute from the project tree —
 # neutralized at materialize (user JS must never run). Content by extension.
 _NEUTRALIZED_CONFIGS = (
+    # Every name postcss-load-config (rsbuild 2) searches — the JSON/YAML
+    # forms load plugins BY NAME, so they are code too.
+    '.postcssrc',
+    '.postcssrc.json',
+    '.postcssrc.yaml',
+    '.postcssrc.yml',
+    '.postcssrc.js',
+    '.postcssrc.cjs',
+    '.postcssrc.mjs',
+    '.postcssrc.ts',
+    '.postcssrc.cts',
+    '.postcssrc.mts',
     'postcss.config.js',
     'postcss.config.cjs',
     'postcss.config.mjs',
     'postcss.config.ts',
+    'postcss.config.cts',
+    'postcss.config.mts',
     'babel.config.js',
     'babel.config.cjs',
+    'babel.config.mjs',
+    'babel.config.json',
+    'babel.config.ts',
+    'babel.config.cts',
+    'babel.config.mts',
     '.babelrc',
     '.babelrc.js',
     '.babelrc.cjs',
+    '.babelrc.mjs',
+    '.babelrc.json',
 )
+
+# package.json keys REMOVED from every manifest: the loaders read postcss/
+# babel as config (plugins by name); `pnpm` carries pnpm settings (hooks,
+# patches, overrides, ...) that are developer configuration; `browserslist`
+# steers the transpiler's target resolution (the platform sets its own).
+# `packageManager` and `devEngines` pin a package manager: a Corepack shim
+# (which _find_pnpm may resolve from PATH) honors the pin and would fetch and
+# run whatever version the app names instead of the platform's pnpm.
+_NEUTRALIZED_PACKAGE_KEYS = ('postcss', 'babel', 'pnpm', 'browserslist', 'packageManager', 'devEngines')
+
+# Dependency tables whose specs are checked for link:/file: escapes.
+_DEPENDENCY_TABLES = (
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+    'peerDependencies',
+    'overrides',
+    'resolutions',
+)
+
+# The browser targets of the generated rsbuild config; any developer
+# browserslist (file or package.json key) is removed.
+_BROWSERSLIST_DEFAULT = ('chrome >= 107', 'edge >= 107', 'firefox >= 104', 'safari >= 16')
+
+# Developer configuration files REMOVED from the tree before install: .npmrc
+# can redirect pnpm's modules/store dirs (into the shared toolchain env) and
+# name a pnpmfile; pnpmfiles are code. --ignore-pnpmfile is the second lock.
+# .swcrc configures the SWC transpiler (plugins load by path) and the
+# browserslist files steer target resolution.
+# .corepack.env is read by Corepack's upward walk and can set COREPACK_HOME,
+# COREPACK_NPM_REGISTRY or COREPACK_INTEGRITY_KEYS.
+_REMOVED_CONFIG_FILES = (
+    '.npmrc',
+    '.pnpmfile.cjs',
+    '.pnpmfile.mjs',
+    '.swcrc',
+    '.browserslistrc',
+    'browserslist',
+    '.corepack.env',
+)
+
+# The pnpm-workspace.yaml keys that survive into the scratch workspace —
+# workspace layout and resolution only. Everything else (pnpm 10 accepts
+# any setting here: pnpmfile, configDependencies, modulesDir, storeDir,
+# nodeOptions, ...) is dropped.
+_WORKSPACE_YAML_KEYS = (
+    'packages',
+    'catalog',
+    'catalogs',
+    'overrides',
+    'peerDependencyRules',
+    'allowedDeprecatedVersions',
+    'autoInstallPeers',
+    'strictPeerDependencies',
+    'dedupePeerDependents',
+    'resolutionMode',
+    'linkWorkspacePackages',
+    'preferWorkspacePackages',
+    'injectWorkspacePackages',
+    'ignoredOptionalDependencies',
+    'supportedArchitectures',
+    'neverBuiltDependencies',
+    'ignoredBuiltDependencies',
+)
+
+# rsbuild copies the app dir's .env files into its OWN process env; only
+# PUBLIC_ entries are meant for the bundle, so only those survive.
+# Rsbuild's dotenv parser also accepts the colon form (`PUBLIC_X: value`).
+# Characters a JS /gm regex (Rsbuild's dotenv parser) treats as line breaks but
+# text-mode reading does not split on (U+2028, U+2029), plus NEL, which Python
+# splits on and JS does not. A kept line containing one could carry a second,
+# non-PUBLIC_ assignment, so such lines are dropped.
+_JS_LINE_BREAKS = (chr(0x2028), chr(0x2029), chr(0x85))
+_ENV_PUBLIC_LINE = re.compile(r'^\s*(?:export\s+)?PUBLIC_[A-Za-z0-9_]*(?:\s*=|:\s)(.*)$')
 
 
 def _scratch_root() -> str:
@@ -260,6 +367,32 @@ class BuildInfraFailure(Exception):
 # =============================================================================
 
 
+# True only around the job's `pnpm install` (see _build_env).
+_JOB_INSTALL: 'contextvars.ContextVar[bool]' = contextvars.ContextVar('rr_build_job_install', default=False)
+
+
+def _corepack_home() -> str:
+    """Corepack's cache dir as the WORKER's own environment resolves it.
+
+    Corepack's order: COREPACK_HOME, XDG_CACHE_HOME, (Windows) LOCALAPPDATA,
+    then the home directory's cache dir. A relative value is ignored (the
+    job install runs inside the uploaded tree, which would then hold the
+    cache), so every result is absolute.
+    """
+    explicit = os.environ.get('COREPACK_HOME')
+    if explicit and os.path.isabs(explicit):
+        return explicit
+    xdg = os.environ.get('XDG_CACHE_HOME')
+    if xdg and os.path.isabs(xdg):
+        return os.path.join(xdg, 'node', 'corepack')
+    local = os.environ.get('LOCALAPPDATA')
+    if os.name == 'nt' and local and os.path.isabs(local):
+        return os.path.join(local, 'node', 'corepack')
+    return os.path.join(
+        os.path.abspath(os.path.expanduser('~')), 'AppData/Local' if os.name == 'nt' else '.cache', 'node', 'corepack'
+    )
+
+
 def _build_env() -> Dict[str, str]:
     """The scrubbed environment build subprocesses run in.
 
@@ -288,6 +421,18 @@ def _build_env() -> Dict[str, str]:
     )
     env = {key: os.environ[key] for key in keep if key in os.environ}
     env['NO_COLOR'] = '1'
+    # A pnpm that is a Corepack shim walks up from cwd and loads the app's
+    # .corepack.env. The file is removed from the tree and ignored here, and
+    # COREPACK_HOME is the WORKER's (never derived from the job's dir/HOME).
+    env['COREPACK_ENV_FILE'] = '0'
+    env['COREPACK_HOME'] = _corepack_home()
+    if _JOB_INSTALL.get():
+        # Job install only: the toolchain bootstrap may legitimately need the
+        # network to fetch pnpm through a shim the first time, so these pins
+        # are not applied to it. The job install runs the already-cached pnpm
+        # and must not fetch a "latest" or app-chosen package manager.
+        env['COREPACK_ENABLE_NETWORK'] = '0'
+        env['COREPACK_DEFAULT_TO_LATEST'] = '0'
     return env
 
 
@@ -323,7 +468,9 @@ def _kill_tree(proc: Any) -> None:
             pass  # already gone
 
 
-async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) -> Tuple[int, str]:
+async def _exec(
+    argv: List[str], cwd: str, timeout: int, on_line: Any = None, pass_fds: Tuple[int, ...] = ()
+) -> Tuple[int, str]:
     """Run one toolchain command; ``(exit_code, combined_output)``.
 
     THE seam every external tool runs through (tests patch it). Windows
@@ -334,6 +481,7 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
     ARRIVES — the live build feed. Output is read incrementally either way;
     the returned transcript keeps the same head+tail truncation as before.
     The timeout is the OVERALL phase deadline, enforced across every read.
+    ``pass_fds`` (POSIX) are extra descriptors the child inherits.
 
     Raises:
         BuildInfraFailure: The command could not be SPAWNED (missing binary,
@@ -347,10 +495,12 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
             *argv,
             cwd=cwd,
             env=_build_env(),
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             limit=_SUBPROCESS_BUFFER,
             start_new_session=(os.name != 'nt'),
+            **({'pass_fds': pass_fds} if pass_fds else {}),
         )
     except Exception as exc:
         raise BuildInfraFailure('spawn', f'could not start {argv[0]!r}: {exc}')
@@ -387,6 +537,99 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
     return int(proc.returncode or 0), _truncated(''.join(chunks))
 
 
+def _tsc_args(tsconfig: str) -> List[str]:
+    """The platform typecheck's tsc flags: the one place the argv is built.
+
+    ``--tsBuildInfoFile null`` resets a tsconfig value: typescript < 5.6
+    reports TS5069 for tsBuildInfoFile without incremental.
+    """
+    return ['--noEmit', '--incremental', 'false', '--composite', 'false', '--tsBuildInfoFile', 'null', '-p', tsconfig]
+
+
+async def _exec_compiler(
+    argv: List[str], cwd: str, timeout: int, job_dir: str, env_dir: str, on_line: Any = None
+) -> Tuple[int, str]:
+    """Compile inside the filesystem boundary, failing closed when required."""
+    try:
+        isolated = app_build_sandbox.command(argv, cwd, job_dir, env_dir)
+    except app_build_sandbox.SandboxUnavailable as exc:
+        raise BuildInfraFailure('sandbox', str(exc)) from exc
+    provider = os.path.basename(isolated[0])
+    status_read = status_write = None
+    if provider == 'bwrap' and os.name != 'nt':
+        # bwrap writes its child pid here only once the sandbox is set up, so "exited non-zero
+        # and wrote no pid" is a startup failure, while anything else is the compiler's own
+        # result. The compiler's output is app-controlled and never decides this.
+        status_read, status_write = os.pipe()
+        os.set_blocking(status_read, False)
+        isolated = [isolated[0], '--info-fd', str(status_write), *isolated[1:]]
+
+    # Live output is held while it could still be the provider's own startup text (which can
+    # carry host paths): until bwrap reports its child, or for sandbox-exec (no status channel)
+    # while every line so far is a `sandbox-exec:` line. The hold is bounded.
+    held: List[str] = []
+    state = {'live': on_line is None or (status_read is None and provider != 'sandbox-exec')}
+
+    def reported() -> bool:
+        if status_read is None:
+            return False
+        try:
+            # The parent still holds the write end, so the pipe never reports EOF; the read is
+            # non-blocking and bounded by the few bytes bwrap wrote, so it cannot hang.
+            return bool(os.read(status_read, 4096))
+        except BlockingIOError:
+            return False
+
+    async def release() -> None:
+        state['live'] = True
+        pending, held[:] = list(held), []
+        for line in pending:
+            await on_line(line)
+
+    started = False
+
+    async def gate(line: str) -> None:
+        nonlocal started
+        if state['live']:
+            await on_line(line)
+            return
+        if status_read is not None:
+            started = started or reported()
+            if started:
+                held.append(line)
+                await release()
+                return
+        elif not line.startswith('sandbox-exec: '):
+            held.append(line)
+            await release()
+            return
+        if len(held) < 200:
+            held.append(line)
+
+    try:
+        feed = on_line if state['live'] else gate
+        if status_write is None:
+            code, out = await _exec(isolated, cwd, timeout, on_line=feed)
+        else:
+            code, out = await _exec(isolated, cwd, timeout, on_line=feed, pass_fds=(status_write,))
+        decided = (started or reported()) if status_read is not None else None
+    finally:
+        for fd in (status_read, status_write):
+            if fd is not None:
+                os.close(fd)
+    # The sandbox itself failed to start (e.g. a kernel that denies user namespaces):
+    # an infrastructure failure to retry or alert on, not a compile error for the developer.
+    failure = app_build_sandbox.startup_failure(isolated, code, out, decided)
+    if failure is not None:
+        # The provider's text can carry host paths: held lines are dropped from the developer
+        # feed, and the text goes to the operator log only.
+        error(f'[app_build] sandbox could not start (exit {code}): {failure}')
+        raise BuildInfraFailure('sandbox', 'app build sandbox could not start')
+    if not state['live'] and held:
+        await release()  # not a startup failure after all: nothing was provider-only
+    return code, out
+
+
 # =============================================================================
 # TOOLCHAIN — node/pnpm discovery + the baked (or bootstrapped) env
 # =============================================================================
@@ -394,7 +637,7 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
 
 def _find_node() -> Optional[str]:
     """The node binary (RR_BUILD_NODE override, else PATH)."""
-    return os.environ.get('RR_BUILD_NODE') or shutil.which('node')
+    return shutil.which(os.environ.get('RR_BUILD_NODE') or 'node')
 
 
 def _find_pnpm() -> Optional[str]:
@@ -475,7 +718,7 @@ async def _ensure_toolchain_env_locked(on_line: Any = None) -> str:
     # finds the REPO's workspace, "successfully" installs THAT, and leaves
     # this env with no node_modules at all (exit 0, nothing here).
     code, out = await _exec(
-        [pnpm, 'install', '--ignore-workspace', '--ignore-scripts', '--prefer-offline'],
+        [pnpm, 'install', '--ignore-workspace', '--ignore-scripts', '--package-import-method=copy', '--prefer-offline'],
         env_dir,
         _PHASE_TIMEOUTS['install'],
         on_line=on_line,
@@ -529,25 +772,12 @@ def _installed_version(base_dir: str, package: str) -> str:
         return ''
 
 
-def _resolve_user_tsc(app_dir: str, stop_dir: str) -> Optional[str]:
-    """The USER's tsc script, by upward node resolution from the app dir.
-
-    Walks ``node_modules/typescript`` from the app dir up to (and including)
-    ``stop_dir`` — the jobdir whose node_modules is the baked toolchain
-    layer, making the platform tsc the natural last rung of the SAME walk.
+def _resolve_platform_tsc(env_dir: str) -> Optional[str]:
+    """The PLATFORM's tsc script from the baked toolchain env — never the
+    developer's: whatever pnpm installed as ``typescript`` in the developer
+    tree (an ``npm:``/``file:`` alias, a lockfile tarball) is developer code.
     """
-    current = os.path.abspath(app_dir)
-    stop = os.path.abspath(stop_dir)
-    while True:
-        candidate = _resolve_bin(current, 'typescript', ('tsc',))
-        if candidate and os.path.isfile(candidate):
-            return candidate
-        if current == stop:
-            return None
-        parent = os.path.dirname(current)
-        if parent == current:
-            return None
-        current = parent
+    return _resolve_bin(env_dir, 'typescript', ('tsc',))
 
 
 # =============================================================================
@@ -555,31 +785,62 @@ def _resolve_user_tsc(app_dir: str, stop_dir: str) -> Optional[str]:
 # =============================================================================
 
 
-def _patched_workspace_yaml(source_text: Optional[str], app_root: str, include_roots: List[str]) -> str:
+def _patched_workspace_yaml(
+    source_text: Optional[str], app_root: str, include_roots: List[str], dropped: Optional[List[str]] = None
+) -> str:
     """The scratch workspace yaml: the user's, with platform overrides FORCED.
 
     The ONE deliberate edit of transported workspace truth — the platform's
     packages are the platform's to pin, unconditionally: `overrides.shell`
     and `overrides.rocketride` point at the server's placed tgzs whatever
     the user's yaml said (a dev tgz override, the in-repo `workspace:*`, or
-    nothing). Every other line survives verbatim. A pack with NO workspace
+    nothing). Only _WORKSPACE_YAML_KEYS survive (dropped names are appended
+    to ``dropped``), and ``packages`` may not reach outside the tree. A pack with NO workspace
     yaml gets the minimal fallback: the packed importers + the same two
     overrides (synthesis only where the user had no workspace truth).
 
     Raises:
-        BuildFailure: The yaml is unparseable, or it aliases the
-            ``typescript`` package name (the alias guard — the typecheck
-            gate executes the real typescript at the user's version, never
-            an arbitrary package wearing the name).
+        BuildFailure: The yaml is unparseable, ``packages`` is not a list of
+            safe strings, a dependency spec escapes the tree, or it aliases
+            the ``typescript`` package name (the alias guard — the typecheck
+            gate always runs the platform's baked typescript, never an
+            arbitrary package wearing the name).
     """
     import yaml
 
     if source_text is not None:
         try:
             data = yaml.safe_load(source_text)
+        except RecursionError:
+            raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
         except Exception as exc:
             raise BuildFailure('materialize', f'pnpm-workspace.yaml is not valid YAML: {exc}')
+        _refuse_deep_yaml(data, 'pnpm-workspace.yaml')
         data = data if isinstance(data, dict) else {}
+        for key in [k for k in data if k not in _WORKSPACE_YAML_KEYS]:
+            data.pop(key)
+            if dropped is not None:
+                dropped.append(str(key))
+        if 'packages' in data:
+            packages = data['packages']
+            if not isinstance(packages, list) or not all(isinstance(entry, str) for entry in packages):
+                raise BuildFailure('materialize', 'pnpm-workspace.yaml packages must be a list of strings')
+            for entry in packages:
+                glob_path = entry.lstrip('!').replace('\\', '/')
+                if glob_path.startswith('/') or ':' in glob_path or '{' in glob_path or '..' in glob_path.split('/'):
+                    raise BuildFailure(
+                        'materialize',
+                        f'pnpm-workspace.yaml packages entry {entry!r} reaches outside the source tree',
+                    )
+        seen: set = set()
+        try:
+            for table in ('overrides', 'catalog'):
+                _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}', '.', seen)
+            catalogs = data.get('catalogs')
+            for named in catalogs.values() if isinstance(catalogs, dict) else ():
+                _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs', '.', seen)
+        except RecursionError:
+            raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
     else:
         packages = [app_root or '.'] + [inc for inc in include_roots if inc]
         data = {'packages': packages}
@@ -595,13 +856,149 @@ def _patched_workspace_yaml(source_text: Optional[str], app_root: str, include_r
             raise BuildFailure(
                 'materialize',
                 f'pnpm-workspace.yaml override {selector!r} targets the "typescript" package — the '
-                'typecheck gate runs the real typescript at your locked version; aliasing the name '
+                'typecheck gate always runs the platform typescript; aliasing the name '
                 'is not supported',
             )
     overrides['shell'] = f'file:{_SHELL_REL}'
     overrides['rocketride'] = f'file:{_ROCKETRIDE_REL}'
     data['overrides'] = overrides
-    return yaml.safe_dump(data, sort_keys=False)
+    try:
+        return yaml.safe_dump(data, sort_keys=False)
+    except RecursionError:
+        # Aliased cycles can be shallow by _refuse_deep_yaml's measure and
+        # still too deep for the dumper (it recurses in a different order).
+        raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
+
+
+_YAML_MAX_DEPTH = 64
+
+
+def _refuse_deep_yaml(data: Any, where: str) -> None:
+    """Raise BuildFailure when a parsed YAML tree is nested too deeply.
+
+    ``yaml.safe_load`` accepts nesting far deeper than the recursive code that
+    follows (``yaml.safe_dump`` of the patched workspace) can walk, and that
+    would surface as a RecursionError, retried as an infrastructure fault.
+    This is the fast first check, not a guarantee: aliased cycles can pass it
+    and still outrun the recursive walks, so those also turn RecursionError
+    into a BuildFailure.
+    Only depth is capped. Aliases are fine: a node reachable under several keys
+    is measured once (by identity), and a self-referential anchor is a back edge
+    that adds no depth, so neither is refused. The walk is iterative.
+    """
+    heights: dict = {}
+    on_path: set = set()
+    stack: List[Tuple[Any, bool]] = [(data, False)]
+    while stack:
+        node, leaving = stack.pop()
+        if leaving:
+            on_path.discard(id(node))
+            children = list(node.keys()) + list(node.values()) if isinstance(node, dict) else list(node)
+            heights[id(node)] = 1 + max(
+                (heights.get(id(c), 0) for c in children if isinstance(c, (dict, list))), default=0
+            )
+            if heights[id(node)] > _YAML_MAX_DEPTH:
+                raise BuildFailure('materialize', f'{where} is nested too deeply')
+            continue
+        if not isinstance(node, (dict, list)) or id(node) in heights or id(node) in on_path:
+            continue
+        on_path.add(id(node))
+        stack.append((node, True))
+        children = list(node.keys()) + list(node.values()) if isinstance(node, dict) else list(node)
+        stack.extend((c, False) for c in children if isinstance(c, (dict, list)))
+
+
+# Only the schemes pnpm resolves away from the local disk are exempt from the
+# path check: http(s) goes to the tarball resolver and the git protocols to the
+# git resolver. Any other scheme (including one pnpm does not know) that holds a
+# '/' falls through to the local resolver, which joins it onto the project
+# directory, so it is decided by its shape like any other spec. A prefix such as
+# 'git+' or 'github:' alone proves nothing either.
+_REMOTE_URL_SCHEME = re.compile(r'^(?:https?|git|git\+http|git\+https|git\+ssh|git\+rsync|git\+ftp|ssh)://')
+
+
+def _unsafe_spec(spec: Any, base: str = '.') -> bool:
+    """True when a dependency spec reaches outside the source tree.
+
+    ``base`` is the workspace-relative directory of the declaring importer
+    (``''`` for the workspace root and for workspace-yaml tables). A relative
+    path is resolved from ``base`` the way pnpm does, so ``file:../../.rocketride/
+    shell/shell.tgz`` declared in ``apps/x`` stays inside the workspace and is
+    accepted, while a path that climbs above the workspace root is refused.
+
+    ``link:`` (any target) is refused. A local path spec — ``file:``,
+    ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
+    that starts with ``.``, ``/``, ``~`` or a drive letter, ends in
+    ``.tgz``/``.tar``/``.tar.gz``, or holds a path separator without starting
+    with an http(s) or git URL scheme, as a local path) — is refused when it is
+    absolute, home-relative, or, resolved against ``base`` (the declaring
+    package's directory relative to the workspace root), lands above the
+    workspace root. A ``..`` that stays inside the tree is allowed, so a
+    package under ``apps/x`` can name ``file:../../.rocketride/shell/shell.tgz``.
+    A ``workspace:`` path is also resolved against the root, since which of
+    the two pnpm uses is not worth guessing.
+    """
+    text = str(spec).strip().lower()
+    if text.startswith(('link:', 'git+file:')):
+        return True
+    bases = [base]
+    for prefix in ('file:', 'workspace:'):
+        if text.startswith(prefix):
+            target = text[len(prefix) :].strip()
+            # workspace:^ / workspace:~ / workspace:* / workspace:1.2.3 are
+            # version ranges; only a path-shaped target is a local path.
+            if prefix == 'workspace:':
+                if not (target.startswith(('.', '/')) or re.match(r'^[a-z]:', target) is not None):
+                    return False
+                bases = [base, '.']
+            break
+    else:
+        if _REMOTE_URL_SCHEME.match(text):
+            return False
+        # '~' alone or '~/...' is a home path; '~1.2.3' is a version range.
+        bare = (
+            text.startswith(('.', '/'))
+            or text in ('~',)
+            or text.startswith('~/')
+            or re.match(r'^[a-z]:', text) is not None
+            or '/' in text
+            or '\\' in text
+        )
+        if not (bare or text.endswith(('.tgz', '.tar', '.tar.gz'))):
+            return False
+        target = text
+    return any(_lock_path_escapes(target, b) for b in bases)
+
+
+def _refuse_unsafe_specs(table: Any, where: str, base: str = '.', _seen: Optional[set] = None) -> None:
+    """Raise BuildFailure when a dependency table holds an unsafe spec.
+
+    Nested tables (npm-style nested overrides) are walked. A table object
+    already walked is skipped: YAML aliases hand the same mapping out under
+    several keys (or, for a self-referential anchor, back to itself), so an
+    unmarked walk is exponential or unbounded.
+    """
+    if not isinstance(table, dict):
+        return
+    seen = _seen if _seen is not None else set()
+    if id(table) in seen:
+        return
+    seen.add(id(table))
+    for name, spec in table.items():
+        if isinstance(spec, dict):
+            _refuse_unsafe_specs(spec, where, base, seen)
+        elif not (spec is None or isinstance(spec, (str, int, float, bool))):
+            # pnpm specs are strings. A list (or any other container) is never
+            # stringified: str() would expand every shared alias in it.
+            raise BuildFailure(
+                'materialize',
+                f'{where}: dependency {str(name)!r} must be a version string or a nested table',
+            )
+        elif _unsafe_spec(spec, base):
+            raise BuildFailure(
+                'materialize',
+                f'{where}: dependency {str(name)!r} uses {str(spec)!r}; link:, git+file: and out-of-tree path specs are not supported',
+            )
 
 
 def _override_target(selector: str) -> str:
@@ -654,32 +1051,321 @@ def _place_platform_tgzs(ws_dir: str) -> None:
         shutil.copyfile(src, dest)
 
 
-def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> None:
-    """Overwrite auto-loaded postcss/babel configs with inert content.
+def _package_is_module(path: str, ws_dir: str, cache: Optional[Dict[str, bool]] = None) -> bool:
+    """True when the nearest package.json at or above ``path`` (within
+    ``ws_dir``) sets ``"type": "module"`` — Node then loads a ``.js`` file as
+    ESM, where ``module.exports`` is a ReferenceError.
 
-    rsbuild executes these from the project tree when present — user JS that
-    the config-emission strategy otherwise keeps off the server. Only
-    EXISTING files are overwritten (creating absent ones is pointless).
+    ``cache`` memoizes the answer per package.json path, so a manifest that
+    owns many configs is parsed once, not once per config.
     """
-    inert = {
-        '.js': 'module.exports = {};\n',
-        '.cjs': 'module.exports = {};\n',
-        '.mjs': 'export default {};\n',
-        '.ts': 'export default {};\n',
-        '': '{}\n',  # .babelrc (JSON)
-    }
-    for root in {ws_dir, app_dir}:
-        for name in _NEUTRALIZED_CONFIGS:
-            path = os.path.join(root, name)
-            if not os.path.isfile(path):
-                continue
-            ext = os.path.splitext(name)[1] if not name.startswith('.babelrc') or '.' in name[1:] else ''
-            content = inert.get(ext if name != '.babelrc' else '', 'module.exports = {};\n')
-            with open(path, 'w', encoding='utf-8') as handle:
-                handle.write(content)
+    here = os.path.dirname(path)
+    root = os.path.abspath(ws_dir)
+    while True:
+        candidate = os.path.join(here, 'package.json')
+        if os.path.isfile(candidate):
+            if cache is not None and candidate in cache:
+                return cache[candidate]
+            try:
+                with open(candidate, 'r', encoding='utf-8-sig') as handle:
+                    manifest = json.load(handle)
+                result = isinstance(manifest, dict) and manifest.get('type') == 'module'
+            except (OSError, UnicodeDecodeError, ValueError, RecursionError):
+                result = False
+            if cache is not None:
+                cache[candidate] = result
+            return result
+        if os.path.abspath(here) == root or os.path.dirname(here) == here:
+            return False
+        here = os.path.dirname(here)
 
 
-def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> str:
+def _inert_config(name: str, module_package: bool = False) -> str:
+    """Inert content for one neutralized config name (by its loader).
+
+    A ``.js`` file follows its package's ``type``: ESM syntax under
+    ``"type": "module"``, CommonJS otherwise.
+    """
+    ext = os.path.splitext(name)[1] if name not in ('.postcssrc', '.babelrc') else ''
+    if ext == '.js' and module_package:
+        return 'export default {};\n'
+    if ext in ('.js', '.cjs', '.cts'):
+        return 'module.exports = {};\n'
+    if ext in ('.mjs', '.ts', '.mts'):
+        return 'export default {};\n'
+    return '{}\n'  # JSON / YAML / extensionless rc
+
+
+def _fold_name(name: str) -> str:
+    """A filename as a case-insensitive Windows/macOS filesystem resolves it.
+
+    Uppercased then casefolded (NTFS compares by uppercasing: a dotless
+    ``\u0131`` is ``I``; ``po\u017ftcss`` is ``postcss``), with the trailing dots
+    and spaces Win32 strips (``.npmrc.`` is ``.npmrc``) removed.
+    """
+    return name.rstrip(' .').upper().casefold()
+
+
+def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
+    """Make every auto-loaded postcss/babel config in the tree inert.
+
+    postcss-load-config searches upward from the app root, and its JSON/YAML
+    forms and the package.json ``postcss`` key load plugins by name — all
+    developer code. The WHOLE source tree is walked (``app_dir`` lies inside
+    ``ws_dir``): existing config files get inert content and the config keys
+    (postcss, babel, pnpm, browserslist, packageManager, devEngines) are stripped from every package.json,
+    whose dependency specs must not use ``link:`` or out-of-tree ``file:``.
+    Absent files are not created.
+
+    Returns:
+        The neutralized items, workspace-relative (config files, and
+        ``<package.json>:<key>`` for stripped keys), for the build log.
+
+    Raises:
+        BuildFailure: A package.json is not UTF-8 JSON, or a dependency spec
+            escapes the source tree.
+    """
+    names = set(_NEUTRALIZED_CONFIGS)
+    neutralized: List[str] = []
+    module_cache: Dict[str, bool] = {}
+    for dirpath, _dirs, files in os.walk(ws_dir):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            # Case-insensitive: on a case-insensitive filesystem 'Postcss.config.js'
+            # is the file the loader finds. `path` keeps the real spelling.
+            name = _fold_name(name)
+            if name in names:
+                with open(path, 'w', encoding='utf-8') as handle:
+                    handle.write(_inert_config(name, _package_is_module(path, ws_dir, module_cache)))
+                neutralized.append(os.path.relpath(path, ws_dir).replace(os.sep, '/'))
+            elif name == 'package.json':
+                rel = os.path.relpath(path, ws_dir).replace(os.sep, '/')
+                try:
+                    with open(path, 'r', encoding='utf-8-sig') as handle:
+                        manifest = json.load(handle)
+                except RecursionError:
+                    raise BuildFailure('materialize', f'{rel} is nested too deeply')
+                except (UnicodeDecodeError, ValueError) as exc:
+                    # Another reader (pnpm) may parse what this one skips.
+                    raise BuildFailure('materialize', f'{rel} is not valid UTF-8 JSON: {exc}')
+                if not isinstance(manifest, dict):
+                    continue
+                package_dir = posixpath.dirname(rel) or '.'
+                try:
+                    for table in _DEPENDENCY_TABLES:
+                        _refuse_unsafe_specs(manifest.get(table), rel, package_dir)
+                    if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
+                        for key in _NEUTRALIZED_PACKAGE_KEYS:
+                            if manifest.pop(key, None) is not None:
+                                neutralized.append(f'{rel}:{key}')
+                        with open(path, 'w', encoding='utf-8') as handle:
+                            json.dump(manifest, handle, indent=2)
+                except RecursionError:
+                    raise BuildFailure('materialize', f'{rel} is nested too deeply')
+    return neutralized
+
+
+def _remove_pnpm_configs(ws_dir: str) -> List[str]:
+    """Delete every developer .npmrc / pnpmfile / .swcrc / browserslist file in the tree.
+
+    Returns the removed workspace-relative paths (for the build log).
+    """
+    removed: List[str] = []
+    for dirpath, _dirs, files in os.walk(ws_dir):
+        for name in files:
+            if _fold_name(name) in _REMOVED_CONFIG_FILES:
+                path = os.path.join(dirpath, name)
+                os.remove(path)
+                removed.append(os.path.relpath(path, ws_dir).replace(os.sep, '/'))
+    return sorted(removed)
+
+
+def _filter_env_files(app_dir: str) -> None:
+    """Reduce the app dir's .env files to their PUBLIC_ lines.
+
+    rsbuild loads ``.env*`` from the app root into its own process env (non
+    PUBLIC_ keys such as NODE_OPTIONS or RSPACK_* would steer the build
+    process itself); only PUBLIC_ entries are meant for the bundle, and a
+    value containing command substitution (``$(`` or a backtick) is dropped.
+    Multi-line values are not supported in server builds. A line holding U+2028,
+    U+2029 or NEL is dropped: the dotenv parser would see it as several lines.
+    """
+    try:
+        names = os.listdir(app_dir)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(app_dir, name)
+        lowered = _fold_name(name)
+        if not (lowered == '.env' or lowered.startswith('.env.')) or not os.path.isfile(path):
+            continue
+        with open(path, 'r', encoding='utf-8', errors='replace') as handle:
+            kept = []
+            for line in handle:
+                match = _ENV_PUBLIC_LINE.match(line.rstrip('\r\n'))
+                if any(sep in line for sep in _JS_LINE_BREAKS):
+                    continue
+                if match and '$(' not in match.group(1) and '`' not in match.group(1):
+                    kept.append(line.rstrip('\r\n'))
+        with open(path, 'w', encoding='utf-8') as handle:
+            handle.write('\n'.join(kept) + '\n' if kept else '')
+
+
+# The resolved-module guard emitted into the canonical rsbuild config. After
+# the bundler resolves a module, every loader in its chain must be a builtin
+# or live in the platform toolchain env, and the module itself must live in
+# the job directory or the toolchain env. A loader file from the developer
+# tree (named inline in an import string, or installed by the app) is never
+# run, and a file elsewhere on the pod is never pulled into the bundle.
+# `_resolved_request_allowed` is the Python twin of `rrRequestAllowed`; the
+# two are kept in lockstep and tested on the same strings.
+_BUILTIN_PREFIXES = ('builtin:', 'data:', 'node:')
+
+
+def _strip_query(segment: str) -> str:
+    """Drop a ``?query`` / ``#fragment`` suffix from one request segment."""
+    for mark in ('?', '#'):
+        index = segment.find(mark)
+        if index != -1:
+            segment = segment[:index]
+    return segment
+
+
+def _under(path: str, roots: Tuple[str, ...]) -> bool:
+    """True when ``path`` (an absolute filesystem path) is inside a root."""
+    if not os.path.isabs(path):
+        return False
+    real = os.path.realpath(path)
+    return any(real == root or real.startswith(root + os.sep) for root in roots)
+
+
+def _loader_options_allowed(loader: str) -> bool:
+    """A loader may carry no inline options, only a ``??ident`` reference.
+
+    The bundler writes options from the platform config as ``??<ident>``
+    (a reference to a rule). Inline ``?{...}`` / ``?key=value`` options in a
+    request come from an import string, and some loaders load files named
+    in their options, so they are refused.
+    """
+    index = loader.find('?')
+    if index == -1:
+        return True
+    return loader[index:].startswith('??') and '#' not in loader[index:]
+
+
+def _resolved_request_allowed(request: str, module_roots: Tuple[str, ...], loader_roots: Tuple[str, ...]) -> bool:
+    """Decide whether a RESOLVED bundler request may be built.
+
+    ``request`` is the bundler's resolved request: optional matchResource
+    prefix (``<x>!=!``), optional ``-!`` / ``!!`` / ``!`` prefix, then
+    ``loader!loader!...!resource``, each segment absolute after resolution.
+    Every loader must be a builtin or sit under ``loader_roots``; the
+    resource must be a builtin/data/node: URI or sit under ``module_roots``.
+    Anything unparseable is refused (fail closed). Roots must be realpaths.
+    """
+    if not isinstance(request, str) or not request:
+        return False
+    rest = request
+    # matchResource prefix, as the bundler parses it: ^([^!]+)!=! — the
+    # prefix itself never contains '!'.
+    match = re.match(r'^[^!]+!=!', rest)
+    if match:
+        rest = rest[match.end() :]
+    for prefix in ('-!', '!!', '!'):
+        if rest.startswith(prefix):
+            rest = rest[len(prefix) :]
+            break
+    if rest.startswith('data:'):
+        return True  # an inline data: module (its body may contain '!')
+    # A data URI body can contain literal '!'. Split only its loader prefix,
+    # otherwise platform-generated Module Federation data modules are rejected.
+    data_at = rest.find('!data:')
+    if data_at != -1:
+        loaders, resource = rest[:data_at].split('!'), rest[data_at + 1 :]
+    else:
+        *loaders, resource = rest.split('!')
+    if not resource or any(not loader for loader in loaders):
+        return False
+    for loader in loaders:
+        if not _loader_options_allowed(loader):
+            return False
+        if loader.startswith('builtin:'):
+            continue
+        if not _under(_strip_query(loader), loader_roots):
+            return False
+    if resource.startswith(_BUILTIN_PREFIXES):
+        return True
+    return _under(_strip_query(resource), module_roots)
+
+
+_RESOLVED_GUARD_JS = """// <rr-resolved-module-guard>
+const RR_MODULE_ROOTS = __MODULE_ROOTS__;
+const RR_LOADER_ROOTS = __LOADER_ROOTS__;
+const RR_BUILTIN_PREFIXES = ['builtin:', 'data:', 'node:'];
+function rrStripQuery(segment) {
+  for (const mark of ['?', '#']) {
+    const index = segment.indexOf(mark);
+    if (index !== -1) segment = segment.slice(0, index);
+  }
+  return segment;
+}
+function rrUnder(file, roots) {
+  if (!path.isAbsolute(file)) return false;
+  let real;
+  try { real = fs.realpathSync(file); } catch (e) { real = path.resolve(file); }
+  return roots.some((root) => real === root || real.startsWith(root + path.sep));
+}
+function rrRequestAllowed(request) {
+  if (typeof request !== 'string' || !request) return false;
+  let rest = request;
+  const mr = /^[^!]+!=!/.exec(rest);
+  if (mr) rest = rest.slice(mr[0].length);
+  for (const prefix of ['-!', '!!', '!']) {
+    if (rest.startsWith(prefix)) { rest = rest.slice(prefix.length); break; }
+  }
+  if (rest.startsWith('data:')) return true;
+  const dataAt = rest.indexOf('!data:');
+  const segments = (dataAt === -1 ? rest : rest.slice(0, dataAt)).split('!');
+  const resource = dataAt === -1 ? segments.pop() : rest.slice(dataAt + 1);
+  if (!resource || segments.some((segment) => !segment)) return false;
+  for (const loader of segments) {
+    const q = loader.indexOf('?');
+    if (q !== -1 && !(loader.startsWith('??', q) && loader.indexOf('#', q) === -1)) return false;
+    if (loader.startsWith('builtin:')) continue;
+    if (!rrUnder(rrStripQuery(loader), RR_LOADER_ROOTS)) return false;
+  }
+  if (RR_BUILTIN_PREFIXES.some((prefix) => resource.startsWith(prefix))) return true;
+  return rrUnder(rrStripQuery(resource), RR_MODULE_ROOTS);
+}
+function rrCheck(request) {
+  if (!rrRequestAllowed(request)) {
+    throw new Error('module or loader outside the app build tree is not allowed in server app builds');
+  }
+}
+class RocketRideResolvedModuleGuard {
+  apply(compiler) {
+    compiler.hooks.normalModuleFactory.tap('rr-resolved-module-guard', (factory) => {
+      factory.hooks.afterResolve.tap('rr-resolved-module-guard', (data) => {
+        const created = (data && data.createData) || {};
+        // No request means the loader chain cannot be checked: refuse.
+        rrCheck(typeof created.request === 'string' ? created.request : '');
+      });
+    });
+    compiler.hooks.contextModuleFactory.tap('rr-resolved-module-guard', (factory) => {
+      factory.hooks.afterResolve.tap('rr-resolved-module-guard', (data) => {
+        const resource = String((data && (data.resource || data.context)) || '');
+        rrCheck(resource);
+        return data;
+      });
+    });
+  }
+}
+// </rr-resolved-module-guard>"""
+
+
+def _emit_config(
+    build_dir: str, app_dir: str, out_dir: str, module_id: str, toolchain_dir: Optional[str] = None
+) -> str:
     """Write the server-canonical rsbuild config; returns its path.
 
     Kept in LOCKSTEP with the app scaffold's rsbuild template
@@ -689,17 +1375,30 @@ def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> 
     resolution for include-root imports, and NO dev-server block. It lives
     OUTSIDE the app dir (`<jobdir>/.build/`), so its imports resolve to the
     baked toolchain layer and can never be captured by installed user
-    devDep toolchains.
+    devDep toolchains. It also installs the resolved-module guard: modules
+    must resolve inside the job directory (the parent of ``build_dir``) or
+    the toolchain env, and loaders only inside the toolchain env.
     """
     os.makedirs(build_dir, exist_ok=True)
     config_path = os.path.join(build_dir, 'rsbuild.config.mjs')
     tsconfig = os.path.join(app_dir, 'tsconfig.json')
+    job_root = os.path.realpath(os.path.dirname(os.path.abspath(build_dir)))
+    # The job's node_modules IS the toolchain (a link, or a copy where links
+    # are unavailable), so loaders resolved through it are platform loaders.
+    loader_roots = sorted({os.path.realpath(toolchain_dir or _env_dir()), os.path.join(job_root, 'node_modules')})
+    module_roots = [job_root, os.path.realpath(toolchain_dir or _env_dir())]
     lines = [
         '// Server-canonical app build config — generated per build by app_build.py.',
         '// Keep the MF shape in lockstep with apps/shared/src/modules/appdev/templates.ts.',
         "import { defineConfig } from '@rsbuild/core';",
         "import { pluginReact } from '@rsbuild/plugin-react';",
         "import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';",
+        "import path from 'node:path';",
+        "import fs from 'node:fs';",
+        '',
+        _RESOLVED_GUARD_JS.replace('__MODULE_ROOTS__', json.dumps(module_roots)).replace(
+            '__LOADER_ROOTS__', json.dumps(loader_roots)
+        ),
         '',
         'export default defineConfig({',
         f'  root: {json.dumps(app_dir)},',
@@ -720,7 +1419,12 @@ def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> 
         '      },',
         '    }),',
         '  ],',
-        "  tools: { rspack: { module: { rules: [{ test: /\\.pipe$/, type: 'json' }] } } },",
+        '  tools: {',
+        '    rspack: {',
+        "      module: { rules: [{ test: /\\.pipe$/, type: 'json' }] },",
+        '      plugins: [new RocketRideResolvedModuleGuard()],',
+        '    },',
+        '  },',
         '  source: {',
         "    entry: { index: './src/index.ts' },",
     ]
@@ -729,6 +1433,7 @@ def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> 
     lines += [
         '  },',
         '  output: {',
+        f'    overrideBrowserslist: {json.dumps(list(_BROWSERSLIST_DEFAULT))},',
         "    assetPrefix: 'auto',",
         '    cleanDistPath: true,',
         f'    distPath: {{ root: {json.dumps(out_dir)} }},',
@@ -800,6 +1505,152 @@ def _safe_asset_rel(rel: str) -> Optional[str]:
 # =============================================================================
 
 
+_LOCK_PATH_PREFIXES = ('link:', 'file:', 'git+file:')
+
+
+def _lock_path_escapes(target: str, base: str) -> bool:
+    """True when a lockfile path value leaves the workspace root."""
+    target = target.strip().replace('\\', '/')
+    if target.startswith(('/', '~')) or re.match(r'^[a-zA-Z]:', target) is not None:
+        return True
+    resolved = posixpath.normpath(posixpath.join(base, target))
+    return resolved == '..' or resolved.startswith('../')
+
+
+def _lock_strings(node: Any):
+    """Yield every string key and value in a decoded YAML tree."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if isinstance(key, str):
+                yield key
+            yield from _lock_strings(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _lock_strings(item)
+    elif isinstance(node, str):
+        yield node
+
+
+def _check_lock_value(value: str, base: str) -> None:
+    lowered = value.strip().lower()
+    for prefix in _LOCK_PATH_PREFIXES:
+        if lowered.startswith(prefix):
+            if _lock_path_escapes(value.strip()[len(prefix) :], base):
+                raise BuildFailure(
+                    'materialize', f'pnpm-lock.yaml resolves a package outside the source tree: {value!r}'
+                )
+            return
+
+
+def _refuse_lockfile_paths(lock_text: str) -> None:
+    """Raise BuildFailure when the lockfile resolves a package to a local path
+    outside the source tree, or cannot be parsed.
+
+    The lockfile is decoded with the YAML parser (so quoting, escapes and
+    flow style read exactly as pnpm reads them) and walked:
+
+    - under ``importers.<dir>``, a ``specifier`` or a ``link:`` version is
+      relative to that importer's directory (a workspace sibling is
+      ``link:../../packages/x`` from ``apps/x``); any other path value
+      (``version: file:``) is relative to the workspace root;
+    - everywhere else (``packages``, ``snapshots``, ...), ``directory:``
+      resolutions and every ``link:``/``file:`` value are relative to the
+      workspace root.
+
+    A path that is absolute, home-relative or lands above the workspace root
+    is refused. The install keeps lockfile resolutions, so the manifest
+    check alone does not cover them.
+    """
+    import yaml
+
+    try:
+        # pnpm never writes YAML aliases; refusing them up front keeps the
+        # walk linear (a few aliased anchors would otherwise expand
+        # exponentially).
+        for event in yaml.parse(lock_text, Loader=yaml.SafeLoader):
+            if isinstance(event, yaml.AliasEvent):
+                raise BuildFailure('materialize', 'pnpm-lock.yaml uses YAML aliases, which pnpm never writes')
+        documents = [doc for doc in yaml.safe_load_all(lock_text) if doc is not None]
+    except BuildFailure:
+        raise
+    except Exception as exc:
+        raise BuildFailure('materialize', f'pnpm-lock.yaml could not be parsed: {exc}')
+    for data in documents:
+        if not isinstance(data, dict):
+            raise BuildFailure('materialize', 'pnpm-lock.yaml is not a mapping')
+        try:
+            _refuse_lockfile_document_paths(data)
+        except RecursionError:
+            raise BuildFailure('materialize', 'pnpm-lock.yaml is nested too deeply')
+
+
+def _refuse_lockfile_document_paths(data: Dict[str, Any]) -> None:
+    """Check one decoded lockfile document (see _refuse_lockfile_paths)."""
+    for section, body in data.items():
+        if section == 'importers' and isinstance(body, dict):
+            for importer, tables in body.items():
+                importer_dir = str(importer).strip() or '.'
+                if _lock_path_escapes(importer_dir, '.') and importer_dir != '.':
+                    raise BuildFailure(
+                        'materialize', f'pnpm-lock.yaml importer outside the source tree: {importer_dir!r}'
+                    )
+                for table in tables.values() if isinstance(tables, dict) else []:
+                    if not isinstance(table, dict):
+                        for value in _lock_strings(table):
+                            _check_lock_value(value, '.')
+                        continue
+                    for dep in table.values():
+                        if isinstance(dep, dict):
+                            for key, value in dep.items():
+                                if not isinstance(value, str):
+                                    for nested in _lock_strings(value):
+                                        _check_lock_value(nested, '.')
+                                    continue
+                                relative = key == 'specifier' or value.strip().lower().startswith('link:')
+                                _check_lock_value(value, importer_dir if relative else '.')
+                        else:
+                            for value in _lock_strings(dep):
+                                _check_lock_value(value, '.')
+            continue
+        for node_value in _walk_lock_resolutions(body):
+            if _lock_path_escapes(node_value, '.'):
+                raise BuildFailure(
+                    'materialize', f'pnpm-lock.yaml resolves a package outside the source tree: {node_value!r}'
+                )
+        for value in _lock_strings(body):
+            _check_lock_value(value, '.')
+
+
+_LOCK_LOCAL_PATH_KEYS = ('directory', 'repo', 'tarball', 'path')
+
+
+def _walk_lock_resolutions(node: Any):
+    """Yield every local-path value in the tree: a ``directory`` resolution,
+    and a ``repo`` / ``tarball`` / ``path`` (patched dependency) value that is
+    a filesystem path rather than a URL.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in _LOCK_LOCAL_PATH_KEYS and isinstance(value, str):
+                text = value.strip()
+                if key == 'directory' or not (
+                    '://' in text or text.startswith(('git@', 'github:', 'gitlab:', 'bitbucket:'))
+                ):
+                    yield text
+            else:
+                yield from _walk_lock_resolutions(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk_lock_resolutions(item)
+
+
+# A patched dependency's resolved version carries `(patch_hash=H)`. The
+# materialize step drops the developer's patch config (the `pnpm` package key
+# and `patchedDependencies`), so the reinstall resolves the same version
+# without that segment. It is not drift; peer suffixes stay compared.
+_PATCH_HASH_RE = re.compile(r'\(patch_hash=[^()]*\)')
+
+
 def _lockfile_importer_pins(lock_text: str) -> Dict[str, Dict[str, str]]:
     """Importer path -> {dependency: resolved version} from a pnpm lockfile.
 
@@ -828,7 +1679,7 @@ def _lockfile_importer_pins(lock_text: str) -> Dict[str, Dict[str, str]]:
             for name, spec in deps.items():
                 version = spec.get('version') if isinstance(spec, dict) else spec
                 if version:
-                    pins[str(name)] = str(version)
+                    pins[str(name)] = _PATCH_HASH_RE.sub('', str(version))
         out[str(importer)] = pins
     return out
 
@@ -1262,8 +2113,23 @@ class AppBuildWorker:
         archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
         for item in archive.infolist():
             name = item.filename.replace('\\', '/')
-            if name.startswith('/') or '..' in name.split('/') or (len(name) > 1 and name[1] == ':'):
+            # ':' in any segment: a drive letter, or an NTFS alternate data stream.
+            if name.startswith('/') or '..' in name.split('/') or ':' in name:
                 raise BuildFailure('materialize', f'zip entry has an unsafe path: {item.filename!r}')
+            # A shipped package tree would be resolved (and its code run)
+            # in place of what pnpm installs — the client never packs one.
+            if 'node_modules' in [_fold_name(part) for part in name.split('/')]:
+                raise BuildFailure(
+                    'materialize', f'zip entry {item.filename!r} is inside node_modules — packs must not ship packages'
+                )
+            # '!' is the bundler's request separator. No path in the tree may
+            # carry one, so a resolved request string cannot be forged by a
+            # file or folder name. (pnpm-made paths are not covered by this ban; a '!'
+            # there makes the guard read a loader segment it then refuses.)
+            if '!' in name:
+                raise BuildFailure(
+                    'materialize', f"zip entry {item.filename!r} contains '!' — not allowed in app paths"
+                )
             if item.is_dir():
                 continue
             dest = os.path.join(ws_dir, *name.split('/'))
@@ -1282,7 +2148,14 @@ class AppBuildWorker:
         if os.path.isfile(ws_yaml_path):
             with open(ws_yaml_path, 'r', encoding='utf-8') as handle:
                 source_yaml = handle.read()
-        patched = _patched_workspace_yaml(source_yaml, app_root, include_roots)
+        removed = _remove_pnpm_configs(ws_dir)
+        dropped: List[str] = []
+        patched = _patched_workspace_yaml(source_yaml, app_root, include_roots, dropped)
+        if removed or dropped:
+            log_parts.append(
+                '== materialize ==\nignored by the server build: '
+                + ', '.join(removed + [f'pnpm-workspace.yaml:{key}' for key in dropped])
+            )
         with open(ws_yaml_path, 'w', encoding='utf-8') as handle:
             handle.write(patched)
         # pnpm requires a workspace-root package.json; packs without one get
@@ -1293,10 +2166,15 @@ class AppBuildWorker:
                 json.dump({'name': 'rocketride-app-build-ws', 'private': True}, handle, indent=1)
 
         _place_platform_tgzs(ws_dir)
-        _neutralize_tool_configs(ws_dir, app_dir)
+        neutralized = _neutralize_tool_configs(ws_dir, app_dir)
+        if neutralized:
+            log_parts.append(
+                '== materialize ==\nneutralized by the server build (not applied): ' + ', '.join(neutralized)
+            )
+        _filter_env_files(app_dir)
         _link_toolchain(job_dir, env_dir)
         out_dir = os.path.join(job_dir, '.out')
-        config_path = _emit_config(os.path.join(job_dir, '.build'), app_dir, out_dir, module_id)
+        config_path = _emit_config(os.path.join(job_dir, '.build'), app_dir, out_dir, module_id, env_dir)
 
         # The packed lockfile (when present): pre-install pins for the skew
         # check + drift diff. Absent = the developer didn't pin; fresh
@@ -1305,7 +2183,9 @@ class AppBuildWorker:
         pins_before: Dict[str, Dict[str, str]] = {}
         if os.path.isfile(lock_path):
             with open(lock_path, 'r', encoding='utf-8') as handle:
-                pins_before = _lockfile_importer_pins(handle.read())
+                lock_text = handle.read()
+            _refuse_lockfile_paths(lock_text)
+            pins_before = _lockfile_importer_pins(lock_text)
             app_pins = pins_before.get(app_root or '.', {})
             react_pin = str(app_pins.get('react') or '')
             if react_pin and not react_pin.split('(', 1)[0].startswith('18.'):
@@ -1318,21 +2198,47 @@ class AppBuildWorker:
         # ── INSTALL ──────────────────────────────────────────────────────
         build['phase'] = 'install'
         await self._stamp(org_id, app_id, version, build)
-        argv = [pnpm, 'install', '--no-frozen-lockfile', '--ignore-scripts', '--prefer-offline']
+        argv = [
+            pnpm,
+            'install',
+            '--no-frozen-lockfile',
+            '--ignore-scripts',
+            '--ignore-pnpmfile',
+            # A job must never share an inode with the pnpm store/toolchain.
+            # A writable alias would bypass a read-only sandbox bind.
+            '--package-import-method=copy',
+            '--config.manage-package-manager-versions=false',
+            '--prefer-offline',
+        ]
         if app_root:
             argv += ['--filter', f'./{app_root}']
             for inc in include_roots:
                 if os.path.isfile(os.path.join(ws_dir, *inc.split('/'), 'package.json')):
                     argv += ['--filter', f'./{inc}']
         await feed.set_phase('install')
-        code, out = await _exec(argv, ws_dir, _PHASE_TIMEOUTS['install'], on_line=feed.line)
+        token = _JOB_INSTALL.set(True)
+        try:
+            code, out = await _exec(argv, ws_dir, _PHASE_TIMEOUTS['install'], on_line=feed.line)
+        finally:
+            _JOB_INSTALL.reset(token)
         await feed.flush()
         log_parts.append(f'== install ==\n$ {" ".join(argv)}\n{out}')
         if code != 0:
             raise BuildFailure('install', f'pnpm install failed (exit {code})', _tail_errors('install', out))
-        if pins_before and os.path.isfile(lock_path):
-            with open(lock_path, 'r', encoding='utf-8') as handle:
-                drift = _drift_of(pins_before, _lockfile_importer_pins(handle.read()))
+        # The install wrote the lockfile the typecheck and bundle will use;
+        # it must resolve nothing outside the tree (the packed one was checked
+        # above, but the install re-resolves). Missing = fail closed.
+        if not os.path.isfile(lock_path):
+            raise BuildFailure('install', 'pnpm install did not write pnpm-lock.yaml')
+        with open(lock_path, 'r', encoding='utf-8') as handle:
+            installed_lock = handle.read()
+        try:
+            _refuse_lockfile_paths(installed_lock)
+        except BuildFailure as exc:
+            # The install wrote this lockfile, so the failure belongs to the install phase.
+            raise BuildFailure('install', str(exc)) from exc
+        if pins_before:
+            drift = _drift_of(pins_before, _lockfile_importer_pins(installed_lock))
             if drift:
                 raise BuildFailure(
                     'install',
@@ -1340,7 +2246,7 @@ class AppBuildWorker:
                     [{'phase': 'install', 'message': line[:_MAX_ERROR_CHARS]} for line in drift[:_MAX_ERRORS]],
                 )
 
-        # ── TYPECHECK — the user's editor triple ─────────────────────────
+        # ── TYPECHECK — the platform tsc over the user's tsconfig ────────
         build['phase'] = 'typecheck'
         await self._stamp(org_id, app_id, version, build)
         tsconfig = os.path.join(app_dir, 'tsconfig.json')
@@ -1352,17 +2258,21 @@ class AppBuildWorker:
             # recorded in the log, never silent.
             log_parts.append('== typecheck ==\nskipped by appManifest.typecheck: false')
         elif os.path.isfile(tsconfig):
-            tsc = _resolve_user_tsc(app_dir, job_dir)
+            tsc = _resolve_platform_tsc(env_dir)
             if not tsc:
-                raise BuildInfraFailure(
-                    'typecheck', 'no typescript available (user install and baked env both missing it)'
-                )
+                raise BuildInfraFailure('typecheck', 'baked typescript missing from the toolchain env')
             await feed.set_phase('typecheck')
-            code, out = await _exec(
-                [node, tsc, '--noEmit', '-p', tsconfig], app_dir, _PHASE_TIMEOUTS['typecheck'], on_line=feed.line
+            tsc_args = _tsc_args(tsconfig)
+            code, out = await _exec_compiler(
+                [node, tsc, *tsc_args],
+                app_dir,
+                _PHASE_TIMEOUTS['typecheck'],
+                job_dir,
+                env_dir,
+                on_line=feed.line,
             )
             await feed.flush()
-            log_parts.append(f'== typecheck ==\n$ node {tsc} --noEmit -p {tsconfig}\n{out}')
+            log_parts.append(f'== typecheck ==\n$ node {tsc} {" ".join(tsc_args)}\n{out}')
             if code != 0:
                 raise BuildFailure('typecheck', f'tsc --noEmit failed (exit {code})', _tsc_errors(out))
 
@@ -1373,8 +2283,13 @@ class AppBuildWorker:
         if not rsbuild:
             raise BuildInfraFailure('bundle', 'baked rsbuild missing from the toolchain env')
         await feed.set_phase('bundle')
-        code, out = await _exec(
-            [node, rsbuild, 'build', '--config', config_path], app_dir, _PHASE_TIMEOUTS['bundle'], on_line=feed.line
+        code, out = await _exec_compiler(
+            [node, rsbuild, 'build', '--config', config_path],
+            app_dir,
+            _PHASE_TIMEOUTS['bundle'],
+            job_dir,
+            env_dir,
+            on_line=feed.line,
         )
         await feed.flush()
         log_parts.append(f'== bundle ==\n$ node {rsbuild} build --config {config_path}\n{out}')
@@ -1387,6 +2302,18 @@ class AppBuildWorker:
         build['phase'] = 'harvest'
         await self._stamp(org_id, app_id, version, build)
         await feed.set_phase('harvest')
+        # The bundle step runs code that can write the job dir (it is bound
+        # read-write), so .out may have been swapped for a link. Containment is
+        # judged against the job's own .out, before anything is copied or read.
+        out_root = os.path.join(os.path.realpath(job_dir), '.out')
+        if os.path.islink(out_dir) or os.path.realpath(out_dir) != out_root:
+            raise BuildFailure('harvest', 'the build output directory is not the job output directory')
+        # The same code can also swap the app dir (or ws) for a link to a host
+        # directory, and the asset copy below runs on the host, outside the
+        # sandbox: refuse unless the app tree is still the job's own ws tree.
+        job_ws = os.path.join(os.path.realpath(job_dir), 'ws')
+        if os.path.realpath(ws_dir) != job_ws or not _under(app_dir, (job_ws,)):
+            raise BuildFailure('harvest', 'the app directory is not inside the job workspace')
         # Manifest-referenced assets: rsbuild only emits what code imports,
         # and the entry token is scoped to dist/ — copy icon/readme in.
         for key in ('icon', 'readme'):
@@ -1394,8 +2321,16 @@ class AppBuildWorker:
             if not rel:
                 continue
             src = os.path.join(app_dir, *rel.split('/'))
+            # The asset must really live in the app tree: a symlink (for
+            # example a pnpm link under node_modules) is not followed out.
+            if not _under(src, (os.path.realpath(app_dir),)):
+                raise BuildFailure('harvest', f'manifest {key} {rel!r} resolves outside the app')
             if os.path.isfile(src) and not os.path.isfile(os.path.join(out_dir, *rel.split('/'))):
                 dest = os.path.join(out_dir, *rel.split('/'))
+                if not _under(dest, (out_root,)):
+                    raise BuildFailure(
+                        'harvest', f'manifest {key} {rel!r} would be written outside the output directory'
+                    )
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.copyfile(src, dest)
         # Bound the harvest BEFORE reading anything: reject a pathological
@@ -1406,6 +2341,8 @@ class AppBuildWorker:
         for dirpath, _dirs, files in os.walk(out_dir):
             for filename in files:
                 total_files += 1
+                if not _under(os.path.join(dirpath, filename), (out_root,)):
+                    raise BuildFailure('harvest', 'a build output file links outside the output directory')
                 try:
                     size = os.path.getsize(os.path.join(dirpath, filename))
                 except OSError:
