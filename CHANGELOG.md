@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **shell**: billing links (Stripe portal and checkout) open on the cloud shell: `host.openExternal` is registered there (#3460, stage #3466)
+- **shell**: Profile shows a "Verify email" link next to an unverified email that opens Zitadel's verify page, so an email and password user can verify and their pending invites activate at the next sign-in (#3529, stage #3528)
 - **server**: factory lookups (monitors, endpoints, filters, tasks) called each object's constructor through a function pointer of another type (a derived interface's constructor called as the root interface's), which UBSan reports as `function-type-mismatch` in every engine process. Every interface that shares a factory registry now names its root (`FactoryRoot`), and stored constructors and lookups both use the root's type (#3369)
 - **server**: `engtest` and `nodetest` handed Catch2 the program path in a string that was already freed, an ASan `heap-use-after-free` at start (#3369)
 - **server**: the indexer's word DB memory pool freed memory from `new[]` with `delete`, an ASan `alloc-dealloc-mismatch` when the word DB closes (#3369)
