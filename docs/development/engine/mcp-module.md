@@ -25,6 +25,19 @@ accepts, including optional modes: `validate_pipeline` is a destructive,
 open-world write because of its single-component form, even though the whole
 pipeline form is static.
 
+Every tool also needs a row in `RESULT_SCHEMAS` in `tools/_results.py`, its
+`outputSchema`: `result_schema(success(...))`, a union of the success object
+and `ERROR_RESULT`. A client that validates results fails the call when a
+result does not match, so type a value by who produces it. Type exactly what
+the handler computes or checks. Leave values the caller sent untyped. Type
+engine values per the code that produces them, with `null` allowed where the
+handler reads them with `.get`. Require only the keys the handler always sets,
+and never close an object. `conftest.py` checks every handler result in every
+MCP test against its row; add a row to the table in `test_output_schemas.py`
+for a result shape no other test produces, such as an engine null. To loosen a
+row that rejects a real result, replace its success branch with `success({})`
+and keep the row.
+
 `always_load=True` (`_meta["anthropic/alwaysLoad"]`) is reserved for the core
 workflow tools. Name any other tool in `SERVER_INSTRUCTIONS` in `handlers.py`, so
 a host using tool search knows to look for it.

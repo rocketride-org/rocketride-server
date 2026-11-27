@@ -90,6 +90,6 @@ def normalize_error(exc: Exception, *, hint: Optional[str] = None) -> dict:
     return {
         'ok': False,
         'error_type': error_type,
-        'message': _extract_dap_failure(exc) or str(exc),
+        'message': str(_extract_dap_failure(exc) or str(exc)),
         'hint': hint,
     }

@@ -241,6 +241,19 @@ def test_tool_registry_without_hints_emits_no_annotations_or_meta():
 
     assert tool.annotations is None
     assert tool.meta is None
+    assert tool.output_schema is None
+
+
+def test_tool_registry_emits_output_schemas_by_name():
+    registry = ToolRegistry()
+
+    @registry.register('plain', 'desc', {'type': 'object', 'properties': {}})
+    async def _handler(client, tasks, args):
+        return {}
+
+    registry.set_output_schemas({'plain': {'type': 'object', 'title': 'P'}, 'unregistered': {'type': 'object'}})
+
+    assert registry.tools()[0].model_dump(by_alias=True)['outputSchema'] == {'type': 'object', 'title': 'P'}
 
 
 def test_tool_hints_reject_read_only_and_destructive_together():

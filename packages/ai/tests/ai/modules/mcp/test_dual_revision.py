@@ -216,11 +216,12 @@ async def test_modern_client_can_list_tools_through_the_real_mount(monkeypatch, 
 
 
 def _assert_listing_carries_explicit_annotations(tools):
-    """Every tool states all three booleans on the wire; `_meta` appears only where a tool asks for it."""
+    """Every tool states all three booleans and an outputSchema on the wire; `_meta` only where a tool asks."""
     for tool in tools:
         annotations = tool['annotations']
         assert set(annotations) == {'readOnlyHint', 'destructiveHint', 'openWorldHint'}, tool['name']
         assert all(isinstance(value, bool) for value in annotations.values()), tool['name']
+        assert tool['outputSchema']['type'] == 'object' and tool['outputSchema']['oneOf'], tool['name']
     by_name = {tool['name']: tool for tool in tools}
     assert by_name['list_components']['_meta']['anthropic/alwaysLoad'] is True
     assert '_meta' not in by_name['store_read']

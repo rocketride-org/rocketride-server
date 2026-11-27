@@ -38,6 +38,14 @@ is not offered (see its entry). This page is the full reference; the
   open-world: the four execution tools, because a pipeline's nodes run whatever
   the pipeline defines, and `validate_pipeline`, because its single-component
   form runs the provider's configuration probe.
+- **Every tool declares an `outputSchema`.** It is a `oneOf` of the tool's
+  success object (`ok: true` and the keys under **Returns**) and the error
+  envelope above, so a client that validates results accepts both. Values the
+  server computes are typed. Values you sent, such as paths, ids and pipeline
+  JSON, come back untyped. Records the engine owns (deployments, artifacts,
+  store entries, running tasks, log events and trace summaries) have typed
+  optional fields and no required keys, and can carry keys the schema does not
+  list.
 
 ## Discover components
 
@@ -133,6 +141,8 @@ configured database. Validate whole pipelines unless you want that probe.
 - **Returns:** `{ok, errors: [], warnings: []}` — `ok` is true only when there
   are no errors. A rejection (`ok: false`) sets the MCP `isError` flag but is
   not the shared error envelope.
+- **Output schema:** the success branch allows `ok: false` with `errors` and
+  `warnings`, so a rejection matches that branch, not the error envelope.
 
 ### describe_pipeline
 

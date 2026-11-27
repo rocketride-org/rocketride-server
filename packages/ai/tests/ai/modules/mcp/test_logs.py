@@ -20,6 +20,7 @@ def test_register_adds_four_log_tools():
     assert set(_registry().names()) == {'log_chapters', 'log_read', 'log_traces', 'log_trace'}
 
 
+@pytest.mark.no_result_schema  # checks identity, and the schema check wraps each handler
 def test_register_binds_each_name_to_its_handler():
     """The behavior tests below call the private handlers directly, so this
     pins the name-to-handler wiring a mis-wired register() would break.
