@@ -112,7 +112,7 @@ requires a paid licence for org-owned repos. Mirrors the local pre-commit hook.
 `_build.yaml` runs a three-platform matrix (Ubuntu 22.04, Windows Server 2022,
 macOS ARM64), each doing `./builder build`, then `./builder server:compile-tests` when
 it compiled the engine (so the C++ test programs do not compile while the suites run),
-then `./builder test --verbose`, with 90-minute timeouts. The test step boots a local engine on `:5565` and
+then `./builder test --verbose` (plus `--sequential` when the repo variable `CI_TEST_SEQUENTIAL` is `true`), with 90-minute timeouts. The test step boots a local engine on `:5565` and
 connects a test client, so both sides need a matching `ROCKETRIDE_APIKEY` — CI
 uses the literal `MYAPIKEY`, the same placeholder as `.env.template`. Ubuntu also
 starts moto (S3), Azurite, and Postgres (pgvector on `:55432`, Apache AGE 1.5.0 on
