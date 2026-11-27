@@ -55,6 +55,8 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
 | `ROCKETRIDE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of widget CSP and upload/dropper links. When unset: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise, when `MCP_RESOURCE_IDENTIFIER` is set, its origin with `https`→`wss` / `http`→`ws`; on a non-loopback bind with neither set (for example the Docker image), `ws://127.0.0.1:<port>`, so tool calls stay on this engine (`ws://[::1]:<port>` for a `::` bind, `ws://<bind address>:<port>` for a bind to one specific IP address, and `ws://127.0.0.1:<port>` for a bind host that is a name, which logs a warning). In those cases upload links, the file-drop page and widget addresses use that address too, so set `MCP_RESOURCE_IDENTIFIER` (or `ROCKETRIDE_URI`) to the engine's public address for clients on other machines. The engine logs the resolved value at startup. |
 | `MCP_UI_DOMAIN` | _(unset)_ | ChatGPT's widget domain: an origin such as `https://widgets.example.com`, unique to your app, which ChatGPT requires when you submit an app with widgets. It is sent on every widget resource as `_meta["openai/widgetDomain"]`, ChatGPT's own key, and never as `_meta.ui.domain`: each host has its own domain format, and Claude shows an error instead of the widget when `ui.domain` is not its own hash of the connector URL. Other hosts get no domain and use their default sandbox origin. Unset: no domain is sent. A value that is not an `https` origin (or `http` on a loopback host) is ignored with a warning. Give an internationalized host name in its ASCII (`xn--`) form. |
 | `MCP_OPENAI_APPS_CHALLENGE_TOKEN` | _(unset)_ | Served as the plain-text body of `GET /.well-known/openai-apps-challenge` for OpenAI's plugin domain verification. Unset: the route answers 404. |
+| `MCP_RATE_LIMIT_REQUESTS_PER_MINUTE` | `600`, or `0` on a loopback bind | Requests to `/mcp` one signed-in account may send per minute. A request over the limit gets 429 with `Retry-After` in seconds. All of an account's API keys and OAuth tokens share one count, kept per engine process. `0` turns the limit off. A value that is not a whole number of 0 or more is ignored with a warning that names the variable, and the default applies. |
+| `MCP_RATE_LIMIT_CALLS_PER_MINUTE` | `120`, or `0` on a loopback bind | Tool calls one signed-in account may make per minute, counted the same way. A call over the limit does not run and returns `error_type: "RateLimited"` with the seconds to wait in `retry_after`. `0` turns the limit off. |
 
 Three related guards to know about:
 
@@ -78,7 +80,9 @@ Three related guards to know about:
 `MCP_DEV_NO_AUTH=1` (or the engine config key `mcp_dev_no_auth`) disables
 authentication on `/mcp` — honored only when the engine binds a loopback host
 (`localhost`, `127.0.0.1`, `::1`); on any other bind the bypass is ignored
-and auth stays on.
+and auth stays on. With the bypass on, `/mcp` does not look up the account, so
+a rate limit set there counts each API key or token on its own, and a request
+with no credential is not counted.
 
 ### OAuth discovery document
 
@@ -109,8 +113,11 @@ always registered and answers 404 while the variable is unset.
   [reference entry](/connect/mcp/http/tools#send_files).
 - **Credential names, never values** — integration-readiness tools report
   which environment variables are configured; the values never transit MCP.
-- **No rate limiting** is applied at the MCP layer; put the endpoint behind
-  your own gateway if you need throttling.
+- **Rate limits per account.** `/mcp` counts requests and tool calls per
+  signed-in account (`MCP_RATE_LIMIT_*`, above). Each engine process keeps its
+  own counts, so with several replicas each one has its own budget. Requests
+  that fail sign-in are refused before they are counted. To limit those, or to
+  limit by client address, put the endpoint behind your own gateway.
 - **Stateless transport** — no sessions and no sticky-session requirement, so
   the endpoint load-balances freely.
 

@@ -295,6 +295,26 @@ async def test_caller_auth_contextvar_survives_into_sdk_dispatch_for_verified_jw
 
 
 @pytest.mark.asyncio
+async def test_request_over_the_account_limit_gets_429_and_builds_no_engine_client(monkeypatch):
+    """The request limit answers 429 with Retry-After before any engine client is built."""
+    from ai.modules.mcp import ratelimit
+
+    monkeypatch.setenv(ratelimit.ENV_REQUESTS_PER_MINUTE, '1')
+    built = []
+    async with _e2e_mcp_app(monkeypatch, _recording_factory(built)) as app:
+        first = await app.post('/mcp', json=_E2E_TOOLS_CALL, headers=_E2E_HEADERS)
+        second = await app.post('/mcp', json=_E2E_TOOLS_CALL, headers=_E2E_HEADERS)
+
+    assert first.status_code == 200
+    assert len(built) == 1
+    assert second.status_code == 429
+    assert 1 <= int(second.headers['retry-after']) <= 60
+    assert second.json()['retry_after'] == int(second.headers['retry-after'])
+    assert second.json()['error'].startswith('This account reached its limit of 1 request a minute to RocketRide, so')
+    assert identity.CALLER_KEY.get() is None
+
+
+@pytest.mark.asyncio
 async def test_rejected_request_builds_no_engine_client_and_leaves_caller_auth_unset(monkeypatch):
     """An auth-REJECTED request must never reach `engine_factory()` at all.
 

@@ -25,10 +25,12 @@ from .cache_policy import (
     UI_READ_TTL_MS,
 )
 from .engine import EngineClient
-from .errors import HardError, normalize_error
+from .errors import HardError, normalize_error, rate_limited
+from .ratelimit import SlidingWindow
 from .registry import TaskRegistry
 from .tooling import ToolRegistry
 from . import apps as apps_mod
+from . import identity
 from . import resources as resources_mod
 from . import tools as tools_pkg
 
@@ -98,6 +100,7 @@ def build_mcp_server(
     engine_origin: Optional[str] = None,
     local_engine: bool = False,
     ui_domain: Optional[str] = None,
+    call_limiter: Optional[SlidingWindow] = None,
 ) -> Server:
     """Build and return a low-level MCP Server wired with tools and resources.
 
@@ -141,6 +144,10 @@ def build_mcp_server(
             resolved once by ``__init__.initModule`` and sent on every widget
             resource as ``openai/widgetDomain`` (see ``apps.ui_meta``). None
             sends no domain, and every host uses its default.
+        call_limiter: The per-account tool-call window built once by
+            ``__init__.initModule``. A call over the limit returns the
+            ``RateLimited`` result and never reaches its handler. None (or a
+            limit of 0) means no limit.
 
     Returns:
         A configured mcp.server.lowlevel.Server ready to run.
@@ -159,8 +166,14 @@ def build_mcp_server(
 
     async def _on_call_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
         name, arguments = params.name, dict(params.arguments or {})
+        key = identity.CALLER_KEY.get()
+        wait = None
+        if call_limiter is not None and key is not None:
+            wait = call_limiter.check(key)
         handler = registry.handler(name)
-        if handler is None:
+        if wait is not None:
+            result = rate_limited(wait, call_limiter.limit)
+        elif handler is None:
             result = {
                 'ok': False,
                 'error_type': 'UnknownTool',

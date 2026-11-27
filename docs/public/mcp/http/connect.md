@@ -103,7 +103,18 @@ that caller's own file store, deployments, environment variables, and run logs.
 - **Not served:** the legacy HTTP+SSE transport (no separate `/sse` endpoint)
   and WebSocket upgrades on `/mcp` (refused with close code 1008). There is no
   event replay (`Last-Event-ID`) — the server keeps no session state to replay.
-- **No rate limiting** is applied at the MCP layer.
+- **Rate limits per account.** Each signed-in account may send 600 requests a
+  minute to `/mcp`, and at most 120 of them may be tool calls. All of an
+  account's API keys and OAuth tokens share one count. A request over the limit
+  gets HTTP 429 with a `Retry-After` header in seconds and a JSON body such as
+  `{"error": "This account reached its limit of 600 requests a minute to RocketRide, so this request did not go through. Try again in 23 seconds.", "retry_after": 23}`.
+  A tool call over the limit does not run: it returns `error_type: "RateLimited"`
+  with `isError` set, the seconds to wait in `retry_after`, and a message and
+  hint that say the same in words.
+  Counts are kept per engine process. A request that fails sign-in gets 401 and
+  is not counted. A self-hosted engine sets both numbers with
+  [two settings](/connect/mcp/http/self-hosting#configuration), and on a
+  loopback bind both limits are off unless set.
 
 ## FAQ
 
