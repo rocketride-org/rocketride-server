@@ -110,7 +110,7 @@ For OpenSearch vector ingest, an application document ID is built from `objectId
 
 The OpenSearch vector path does not silently coerce a bad question vector into a compatible query. It skips missing, non-numeric, or wrong-dimensional vectors, then applies the score threshold to the ten returned k-NN hits. That behavior protects the index from invalid input but can look like an empty retrieval result; confirm the embedding before reducing the score.
 
-Elasticsearch can reconstruct a stored object by fetching chunk ranges in chunk-ID order. That render path is Elasticsearch-only; the OpenSearch service does not implement the equivalent object rendering path in this node.
+Elasticsearch can reconstruct a stored object by fetching chunk ranges in chunk-ID order. It reads the chunks in pages of up to 10,000 hits. On an index whose `index.max_result_window` is lower, the first page is rejected and rendering continues in pages of that limit. That render path is Elasticsearch-only; the OpenSearch service does not implement the equivalent object rendering path in this node.
 
 ### Mode-switching checklist
 

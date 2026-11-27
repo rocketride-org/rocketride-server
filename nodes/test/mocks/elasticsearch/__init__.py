@@ -8,6 +8,10 @@ Mock elasticsearch for index_search node tests.
 When ROCKETRIDE_MOCK is set, this module shadows the real elasticsearch package
 so the Elasticsearch store uses in-memory storage. Supports indices.exists/create/
 delete, index(), search(), bulk(), scan(), cluster.health(), and close().
+
+search() applies the term and range clauses under bool.must, a sort on fields,
+from/size, and the server's index.max_result_window limit. Other query clauses
+match every document.
 """
 
 from typing import Any, Dict, List, Optional
@@ -16,6 +20,79 @@ from . import _store_data
 
 _store = _store_data._store
 _indices = _store_data._indices
+
+# index.max_result_window on an index with default settings
+MAX_RESULT_WINDOW = 10000
+
+
+class ApiError(Exception):
+    """Mirrors elasticsearch.ApiError: the server answered with an error."""
+
+
+class BadRequestError(ApiError):
+    """Mirrors elasticsearch.BadRequestError (HTTP 400), whose text carries the root cause's reason."""
+
+    def __init__(self, error_type: str, reason: str) -> None:
+        super().__init__(f'BadRequestError(400, {error_type!r}, {reason!r})')
+
+
+def _field(source: Dict[str, Any], path: str) -> Any:
+    """The value at a dotted path such as 'meta.chunkId', or None."""
+    value: Any = source
+    for part in path.split('.'):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
+def _sort_key(value: Any) -> tuple:
+    """Sort missing values last, as Elasticsearch does for an ascending sort."""
+    return (value is None, value)
+
+
+def _matches(source: Dict[str, Any], clause: Dict[str, Any]) -> bool:
+    """
+    Whether a document matches one bool.must clause.
+
+    Only term and range are applied. Any other clause (match, knn, ...) matches
+    every document, as this mock did before it applied filters at all.
+    """
+    if 'term' in clause:
+        kind = 'term'
+    elif 'range' in clause:
+        kind = 'range'
+    else:
+        return True
+
+    condition = clause[kind]
+    if not isinstance(condition, dict) or len(condition) != 1:
+        return True
+    path = next(iter(condition))
+    expected = condition[path]
+    actual = _field(source, path)
+
+    if kind == 'term':
+        if isinstance(expected, dict):
+            expected = expected.get('value')
+        return actual == expected
+
+    if actual is None:
+        return False
+    for op, bound in expected.items():
+        if op == 'gte':
+            if actual < bound:
+                return False
+        elif op == 'gt':
+            if actual <= bound:
+                return False
+        elif op == 'lte':
+            if actual > bound:
+                return False
+        elif op == 'lt':
+            if actual >= bound:
+                return False
+    return True
 
 
 class IndicesMock:
@@ -44,6 +121,9 @@ class Elasticsearch:
         self.indices = IndicesMock()
         self.cluster = ClusterMock()
 
+        # An index can set index.max_result_window below the default; a test sets this to model one
+        self.maxResultWindow = MAX_RESULT_WINDOW
+
     def index(
         self, index: str, id: Optional[str] = None, body: Optional[Dict] = None, refresh: bool = False, **kwargs: Any
     ) -> Dict[str, Any]:
@@ -57,10 +137,28 @@ class Elasticsearch:
         return {'count': len(_store.get(index, []))}
 
     def search(self, index: str, body: Optional[Dict] = None, **kwargs: Any) -> Dict[str, Any]:
+        # Like the server, reject a page past index.max_result_window
+        body = body or {}
+        window = int(body.get('from', 0) or 0) + int(body.get('size', 10) or 0)
+        if window > self.maxResultWindow:
+            raise BadRequestError(
+                'search_phase_execution_exception',
+                f'Result window is too large, from + size must be less than or equal to: '
+                f'[{self.maxResultWindow}] but was [{window}]. This limit can be set by changing the '
+                f'[index.max_result_window] index level setting.',
+            )
+
+        # bool.must is a list of clauses or, as Elasticsearch also accepts, a single clause
+        must = body.get('query', {}).get('bool', {}).get('must', [])
+        if isinstance(must, dict):
+            must = [must]
+
         docs = _store.get(index, [])
         hits = []
         for i, d in enumerate(docs):
             src = d.get('_source', {})
+            if not all(_matches(src, clause) for clause in must):
+                continue
             hits.append(
                 {
                     '_index': index,
@@ -69,7 +167,23 @@ class Elasticsearch:
                     '_source': src,
                 }
             )
-        return {'hits': {'total': {'value': len(hits)}, 'hits': hits}}
+        total = len(hits)
+
+        # Sort on fields (stable, so equal values keep storage order); '_score' and the like are left alone
+        for sort in reversed(body.get('sort', [])):
+            if not isinstance(sort, dict):
+                continue
+            for path, order in sort.items():
+                if isinstance(order, dict):
+                    order = order.get('order')
+                descending = order == 'desc'
+                hits.sort(key=lambda hit, path=path: _sort_key(_field(hit['_source'], path)), reverse=descending)
+
+        # A request that names a size gets that page only
+        if 'size' in body:
+            start = int(body.get('from', 0) or 0)
+            hits = hits[start : start + int(body['size'] or 0)]
+        return {'hits': {'total': {'value': total}, 'hits': hits}}
 
     def delete_by_query(
         self, index: str, body: Optional[Dict] = None, wait_for_completion: bool = True, **kwargs: Any

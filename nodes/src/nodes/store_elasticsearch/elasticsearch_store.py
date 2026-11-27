@@ -49,6 +49,12 @@ from .constants import (
 )
 
 
+# A search rejected for asking for too many hits names the index's limit.
+# This matches Elasticsearch's error text: if Elasticsearch rewords it, render on an
+# index with a lower index.max_result_window raises on the first page instead of retrying.
+_MAX_RESULT_WINDOW = re.compile(r'Result window is too large, from \+ size must be less than or equal to: \[(\d+)\]')
+
+
 def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
     """Highlight configuration for text search (Elasticsearch/OpenSearch DSL)."""
     return {
@@ -79,6 +85,10 @@ class Store(DocumentStoreBase):
     port: int = 0
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
+    # The most hits render asks for in one search. Elasticsearch rejects a search
+    # whose from + size exceeds index.max_result_window (10000 by default).
+    # An index configured lower lowers this to its limit on the first rejection.
+    renderPageSize: int = 10000
     payload_limit: int = 32 * 1024 * 1024
     similarity: str = 'cosine'
     threshold_search: float = 0.0
@@ -665,85 +675,127 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return
 
-        # Since chunks are returned in any order, and a single objectId
-        # may contain tens of thousands of chunks, we grab them one
-        # group at a time (renderChunkSize), put them into an array,
-        # join them and call the callback
-        offset = 0
+        # A document may hold tens of thousands of chunks, and Elasticsearch
+        # rejects a search whose from + size exceeds index.max_result_window
+        # (10000 by default). So page through the document in chunkId order
+        # with a cursor, at most renderPageSize hits a page. ChunkIds need
+        # not be contiguous, and a chunk number can be stored more than once
+        # (an upsert without chunk 0 that repeats one), so neither a gap nor a
+        # page's chunkId span says where the document ends; only a short page
+        # does.
+        #
+        # Render keeps one copy of each chunk number, so after a full page the
+        # next one starts at that page's last chunkId (whose copies may not all
+        # have fit), or past it when the page held copies of that one chunkId
+        # only. The cursor moves forward on every full page, and re-reading a
+        # copy only replaces it in place. The callback gets the joined text one
+        # renderChunkSize group of chunkIds at a time.
+        groupSize = self.renderChunkSize
+        groupStart = 0
+        pieces: Dict[int, str] = {}
+
+        cursor = 0
         while True:
-            # Build query for getting a set of chunks
-            search_body = {
-                'query': {
-                    'bool': {
-                        'must': [
-                            {'term': {'meta.objectId': objectId}},
-                            {'range': {'meta.chunkId': {'gte': offset, 'lt': offset + self.renderChunkSize}}},
-                        ]
-                    }
-                },
-                'size': self.renderChunkSize,
-                'sort': [{'meta.chunkId': {'order': 'asc'}}],
-                '_source': [CONTENT_FIELD, 'meta.chunkId'],
-            }
+            hits = self._searchRenderPage(objectId, cursor)
 
-            # Perform the query (Elasticsearch 8.x uses body parameter)
-            response = self.client.search(index=self.index, body=search_body)
-            hits = response.get('hits', {}).get('hits', [])
-
-            # Create a renderChunkSize array with empty
-            # entries. This will allow us to join even when
-            # a chunk doesn't come back
-            text: List[str] = [''] * self.renderChunkSize
-            lastIndex = -1
-
-            # Now, add the documents to the results
+            lastChunk = cursor
             for hit in hits:
-                # Get the source
-                source = hit.get('_source', {})
-                if source is None:
+                source = hit.get('_source') or {}
+                chunk = (source.get('meta') or {}).get('chunkId')
+
+                # meta.chunkId is mapped as an integer and the range query only
+                # matches hits that have one, so this skips only a malformed hit
+                # that has no place in the document's order
+                if not isinstance(chunk, int) or chunk < cursor:
                     continue
+                lastChunk = max(lastChunk, chunk)
 
-                # Get the info
-                content = source.get(CONTENT_FIELD, '')
-                meta = source.get('meta', {})
-                chunk = meta.get('chunkId', 0)
+                # Hits arrive in chunkId order, so a chunk past the current group completes it
+                if chunk >= groupStart + groupSize:
+                    self._emitRenderGroup(pieces, callback)
+                    pieces = {}
+                    groupStart = chunk - chunk % groupSize
 
-                # Should never happen since we gave it an offset
-                if chunk < offset:
-                    continue
+                # Of several copies of one chunk number, the last one read is kept
+                pieces[chunk] = source.get(CONTENT_FIELD) or ''
 
-                # Should never happen since we gave it a range
-                if chunk >= offset + self.renderChunkSize:
-                    continue
-
-                # Get the index into the array
-                index = chunk - offset
-
-                # Add it to our array
-                text[index] = content
-
-                # Determine the highest index we use
-                if index > lastIndex:
-                    lastIndex = index
-
-            # Compute the number of items we are going to process
-            numberOfItems = lastIndex + 1
-
-            # If we got no items back, we are done
-            if numberOfItems < 1:
+            # Compared after the search, which may have lowered the page size to the index's limit
+            if len(hits) < self.renderPageSize:
                 break
+            cursor = self._nextRenderCursor(cursor, lastChunk)
 
-            # Join it together
-            fullText = ''.join(text[0:numberOfItems])
+        self._emitRenderGroup(pieces, callback)
 
-            # Call the output function
-            callback(fullText)
+    def _searchRenderPage(self, objectId: str, cursor: int) -> List[Dict[str, Any]]:
+        """
+        Return up to renderPageSize hits of one document from chunkId cursor on, in chunkId order.
 
-            # If we got less than we asked for, must be done
-            if numberOfItems < self.renderChunkSize:
-                break
+        An index whose index.max_result_window is below renderPageSize rejects
+        the search and names its limit. renderPageSize then drops to that limit,
+        for this page and every later render, and the page is searched again.
+        """
+        while True:
+            try:
+                return self._searchRenderPageOnce(objectId, cursor, self.renderPageSize)
+            except Exception as error:
+                # Matched on the message, not the class: the error is whatever the
+                # client raises, and anything else is raised unchanged
+                match = _MAX_RESULT_WINDOW.search(str(error))
+                if match is None:
+                    raise
+                limit = int(match.group(1))
 
-            offset += self.renderChunkSize
+                # Only a lower, usable limit is retried, so the retries end
+                if not 0 < limit < self.renderPageSize:
+                    raise
+                self.renderPageSize = limit
+
+    def _searchRenderPageOnce(self, objectId: str, cursor: int, pageSize: int) -> List[Dict[str, Any]]:
+        """
+        Search once for up to pageSize hits of one document from chunkId cursor on, in chunkId order.
+        """
+        search_body = {
+            'query': {
+                'bool': {
+                    'must': [
+                        {'term': {'meta.objectId': objectId}},
+                        {'range': {'meta.chunkId': {'gte': cursor}}},
+                    ]
+                }
+            },
+            'size': pageSize,
+            'sort': [{'meta.chunkId': {'order': 'asc'}}],
+            '_source': [CONTENT_FIELD, 'meta.chunkId'],
+        }
+
+        # Perform the query (Elasticsearch 8.x uses body parameter)
+        response = self.client.search(index=self.index, body=search_body)
+        return response.get('hits', {}).get('hits', [])
+
+    @staticmethod
+    def _nextRenderCursor(cursor: int, lastChunk: int) -> int:
+        """
+        Return where the page after a full page starts.
+
+        Every full page moves the cursor forward, so render always ends.
+        """
+        if lastChunk > cursor:
+            # Start at the page's last chunkId: its copies may not all have fit
+            return lastChunk
+
+        # A full page of copies of one chunkId: step past it
+        return cursor + 1
+
+    @staticmethod
+    def _emitRenderGroup(pieces: Dict[int, str], callback: Callable[[str], None]) -> None:
+        """
+        Send one render group's text to the callback, joined in chunkId order.
+
+        A missing chunk adds no text, and the join walks only the chunks present,
+        not the gaps between them.
+        """
+        if pieces:
+            callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
 
     # -------------------------------------------------------------------------
     # Text/Index mode (BM25, no embeddings)
