@@ -56,6 +56,10 @@ codex plugin marketplace add rocketride-org/rocketride-server
 codex plugin add rocketride@rocketride
 ```
 
+## ChatGPT
+
+ChatGPT does not use these skills. The RocketRide app for ChatGPT is packaged separately in `docs/chatgpt/` and connects to the same hosted MCP server.
+
 ## Install in other coding agents
 
 Any agent that reads the open `SKILL.md` format (Cursor, GitHub Copilot, Codex,

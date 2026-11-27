@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **nodes**: add experimental `tool_redis` with seven namespaced Redis/Valkey utilities, read-only defaults, bounded results and hosted TLS/public-host guards (#3049).
+- **docs**: `docs/chatgpt/` packages the RocketRide app for OpenAI's plugin directory: `plugin.json` with the listing text, five positive and three negative review test cases and the release notes, `mcp.json` with the hosted server's URL, and a square icon drawn from the RocketRide mark. `tests/test_chatgpt_package.py`, run by `docs:test`, checks it against the directory's limits. The README says how to build the ZIP and what goes into the portal instead of the package
 - **builder**: `--cmake-config=Sanitize` (Linux only) builds the engine, its C++ test programs and the C++ nodes with ASan and UBSan in one build (#3338)
 - **ci**: an opt-in sanitizer job: a pull request that changes C++ code and has the `ci:sanitize` label, or a manual run, builds with `--cmake-config=Sanitize`, runs `server:test` and `nodes:test`, and shows the sanitizer reports grouped in the job summary. It is not part of `CI OK` (#3338)
 - **shell**: `site.organization` (Organization and WebSite JSON-LD), `site.notFound` (the site's own 404 page), IndexNow submission of changed pages when `RR_INDEXNOW_KEY` and an `https` `RR_APP_URL` are set, eleven more named crawlers, and a warning when an engine serves published pages without `RR_APP_URL` (#3140)

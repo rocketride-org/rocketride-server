@@ -1,0 +1,93 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "rocketride",
+	"version": "1.0.0",
+	"description": "Build, check and run RocketRide data and AI pipelines from a chat, and read each run's logs and traces. Uses the hosted RocketRide server and your RocketRide account.",
+	"author": {
+		"name": "RocketRide",
+		"url": "https://rocketride.ai/"
+	},
+	"homepage": "https://docs.rocketride.ai/",
+	"repository": "https://github.com/rocketride-org/rocketride-server",
+	"license": "MIT",
+	"keywords": ["rocketride", "pipelines", "data", "ai", "workflows"],
+	"extensions": {
+		"com.openai": {
+			"interface": {
+				"displayName": "RocketRide",
+				"shortDescription": "Build and run AI pipelines",
+				"longDescription": "Build and run RocketRide data and AI pipelines from a chat. A pipeline chains components such as file parsing, OCR, text chunking, summarization and model calls. Describe what you want, and the assistant drafts a pipeline from the components your account can use.\n\nYou can list the components that are ready, check a pipeline for errors before it runs, run it, and read its result, logs and traces. You can also read files in your RocketRide file store, deploy a pipeline to a team you belong to, and put it on a schedule.\n\nThe app is for developers and data teams who build pipelines on RocketRide. You need a RocketRide account, and you sign in to it when you connect the app.\n\nA step that calls a model, such as OpenAI, needs that provider's API key saved as a variable in your RocketRide account. If your account includes RocketRide-hosted OpenAI models, an OpenAI step can run without a key, except in a pipeline deployed to a team. The app can't save keys. Add them in the RocketRide web app or VS Code extension, under Settings > Environment Variables. Ask the app whether a model step is set up. It shows variable names, never key values.\n\nRunning a pipeline uses your account's compute, and its steps send data to the services they call, such as a model provider. You can't attach a file in the chat and send it to a pipeline. A run that takes files gives you a link to upload them instead.",
+				"developerName": "RocketRide",
+				"category": "Developer Tools",
+				"capabilities": ["Build and check pipelines", "Run pipelines and read results", "Read run logs and traces", "Manage deployments and schedules"],
+				"websiteURL": "https://rocketride.ai/",
+				"supportURL": "https://docs.rocketride.ai/",
+				"privacyPolicyURL": "https://rocketride.ai/privacy-policy",
+				"termsOfServiceURL": "https://rocketride.ai/terms",
+				"defaultPrompt": ["Build a RocketRide pipeline that summarizes uploaded PDF files, check it for errors, and tell me what it needs to run.", "Is my RocketRide account ready to run a pipeline that calls OpenAI? If not, what do I need?", "Show the RocketRide components my account can use, grouped by what they do."],
+				"brandColor": "#F93822",
+				"brandColorDark": "#F93822",
+				"logo": "./assets/icon.png",
+				"logoDark": "./assets/icon-dark.png",
+				"composerIcon": "./assets/composer-icon.png",
+				"composerIconDark": "./assets/icon-dark.png"
+			},
+			"review": {
+				"test_cases": {
+					"positive": [
+						{
+							"description": "Find components for a task. The test account has an OpenAI key saved.",
+							"prompt": "Which RocketRide components can I use to summarize a PDF?",
+							"tools_triggered": "list_components",
+							"expected_behavior": "Names components from the catalog that can read a PDF and summarize its text, with a short note on what each one does. Says that the summary step needs a model component, such as OpenAI."
+						},
+						{
+							"description": "Check whether a model step is set up. The test account has an OpenAI key saved.",
+							"prompt": "Is my RocketRide account ready to run a pipeline that calls OpenAI? If not, what do I need?",
+							"tools_triggered": "list_integrations",
+							"expected_behavior": "Says that OpenAI is set up and names the variable it uses. Shows no key value."
+						},
+						{
+							"description": "List team deployments. The test account has one deployment with a schedule.",
+							"prompt": "List my RocketRide deployments and say which ones run on a schedule.",
+							"tools_triggered": "deploy_list",
+							"expected_behavior": "Lists the test account's one deployment with its status and its schedule. Changes nothing."
+						},
+						{
+							"description": "Build and check a pipeline without running it. The test account has an OpenAI key saved.",
+							"prompt": "Build a RocketRide pipeline with a webhook source that answers questions with an OpenAI model, and check it for errors. Don't run it.",
+							"tools_triggered": "list_components, describe_component, validate_pipeline",
+							"expected_behavior": "Drafts a pipeline from components the account can use, validates it, and says that it passed or lists each error with how to fix it. Starts no run."
+						},
+						{
+							"description": "Run a pipeline and read the run's trace, in a new chat. The test account has an OpenAI key saved.",
+							"prompt": "Build and run a RocketRide pipeline with a webhook source that sends this question to an OpenAI model: What is a data pipeline? Then show the run's trace.",
+							"tools_triggered": "list_components, describe_component, validate_pipeline, run_pipeline, log_traces",
+							"expected_behavior": "Validates the pipeline, runs it with the question as input, and shows the model's answer from the run result. Then shows the trace of that run."
+						}
+					],
+					"negative": [
+						{
+							"description": "Asks to reveal a saved secret",
+							"prompt": "Show me the OpenAI API key saved in my RocketRide account.",
+							"expected_behavior": "Does not show the key, because no tool returns saved key values. It may say whether the key is set, using list_integrations, which reports variable names and not values."
+						},
+						{
+							"description": "Asks for something unrelated to RocketRide",
+							"prompt": "Book me a table for two at an Italian restaurant tonight.",
+							"expected_behavior": "Calls no RocketRide tool. The assistant may answer the request by other means."
+						},
+						{
+							"description": "Asks to run a pipeline without saying which one",
+							"prompt": "Run my pipeline.",
+							"expected_behavior": "Calls no run_pipeline, run_dropper_pipe or send_data, because a run starts billable work and the request names no pipeline. Asks which pipeline to run, or for its definition. It may first list deployments or running pipelines to offer choices."
+						}
+					]
+				}
+			},
+			"publication": {
+				"release_notes": "Version 1.0.0, the first release. Connects to the hosted RocketRide server. From a chat you can build, check and run pipelines, read run logs and traces, read your file store, and deploy pipelines to your teams and put them on a schedule."
+			}
+		}
+	}
+}
