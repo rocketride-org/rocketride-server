@@ -56,9 +56,10 @@ def _engine_version() -> str:
 
 SERVER_INSTRUCTIONS = (
     'RocketRide pipelines: build, validate, run and observe data and AI pipelines, manage team deployments '
-    "and cron schedules, and read the caller's file store and run logs. Search these tools when the user "
-    'mentions RocketRide, a .pipe file or pipeline definition, pipeline components or nodes, task tokens, '
-    'deployments or schedules, or run traces and logs.\n\n'
+    "and cron schedules, and read the caller's file store and run logs. Use these tools when the user asks "
+    'about RocketRide: a RocketRide pipeline or .pipe file, RocketRide components or nodes, a RocketRide task, '
+    'deployment or schedule, or the traces and logs of a RocketRide run. Do not use them for pipelines, '
+    'deployments, schedules or logs in other products.\n\n'
     'Core sequence: list_components (what is ready to use now), then describe_component (config schema), '
     'then validate_pipeline, then run_pipeline, which returns task_token, projectId and source. '
     'With inputs, run_pipeline also sends them and returns the result in the same call, with no polling '
@@ -69,21 +70,22 @@ SERVER_INSTRUCTIONS = (
     "dropper_url; send_files (local engines only) uploads files from the engine host's own disk into a "
     'running task.\n\n'
     'Other tools: list_integrations (credential setup status; variable names only, never values), '
-    'resolve_config, describe_pipeline, scaffold_node; store_read, store_list, store_stat, store_get_url; '
-    'save_template, load_template; deploy_add, then deploy_to_team, then deploy_set_schedule, with '
+    'resolve_config, probe_component, describe_pipeline, scaffold_node; store_read, store_list, store_stat, '
+    'store_get_url; save_template, load_template; deploy_add, then deploy_to_team, then deploy_set_schedule, with '
     'deploy_list, deploy_status, deploy_versions, deploy_enable, deploy_disable, deploy_remove; '
     'log_chapters, log_read, log_traces, log_trace, keyed by projectId and source.\n\n'
     'Results: every tool returns a JSON object with ok. A recoverable failure is {ok: false, error_type, '
-    'message, hint}; follow the hint when present before retrying. validate_pipeline instead returns '
-    '{ok, errors, warnings}, with ok false when errors is non-empty: a validation rejection, not the shared '
+    'message, hint}; follow the hint when present before retrying. validate_pipeline and probe_component '
+    'instead return {ok, errors, warnings}, with ok false when errors is non-empty: a validation rejection, '
+    'not the shared '
     'error envelope; isError is still true. '
     'A lost connection or failed authentication is a protocol error, not a JSON object.\n\n'
     'Side effects: run_pipeline, run_dropper_pipe and send_data start or feed billable work, and the '
-    "pipeline's nodes may call external services. validate_pipeline is static for a whole pipeline, but "
-    "its single-component form {version, component} runs that provider's configuration probe, which can "
-    'send a small request to the configured provider or database; validate whole pipelines unless the '
-    'user asks for a component probe. terminate, save_template, deploy_to_team, deploy_set_schedule, '
-    'deploy_enable, deploy_disable, deploy_remove, and deploy_add with deploy_to change or cancel state '
+    "pipeline's nodes may call external services. validate_pipeline is a static check and contacts no provider. "
+    "probe_component runs one provider's configuration check, which can send a small request to the "
+    'configured provider or database; call it only when the user asks to test a component. terminate, '
+    'save_template, deploy_to_team, deploy_set_schedule, deploy_enable, deploy_disable, deploy_remove, and '
+    'deploy_add with deploy_to change or cancel state '
     'and may re-arm schedules; confirm with the user when the request does not ask for them explicitly. '
     'deploy_add is not idempotent: after a timeout call deploy_versions before retrying.'
 )

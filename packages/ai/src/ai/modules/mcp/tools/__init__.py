@@ -13,6 +13,7 @@ from . import execution
 from . import integrations
 from . import introspection
 from . import logs
+from . import probe
 from . import scaffold
 from . import visibility
 
@@ -28,7 +29,7 @@ def register_all(registry: ToolRegistry) -> None:
     `save_template`, `load_template`, `deploy_add`, `deploy_list`,
     `deploy_status`, `deploy_versions`, `deploy_to_team`,
     `deploy_set_schedule`, `deploy_enable`, `deploy_disable`,
-    `deploy_remove`), the visibility tools
+    `deploy_remove`), the component probe (`probe_component`), the visibility tools
     (`monitor`, `list_running_pipelines`), the DVR run-log tools
     (`log_chapters`, `log_read`, `log_traces`, `log_trace`), the node
     scaffolding tool (`scaffold_node`), and the
@@ -38,6 +39,7 @@ def register_all(registry: ToolRegistry) -> None:
     introspection.register(registry)
     execution.register(registry)
     capability.register(registry)
+    probe.register(registry)
     visibility.register(registry)
     logs.register(registry)
     scaffold.register(registry)

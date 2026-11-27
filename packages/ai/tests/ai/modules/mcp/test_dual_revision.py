@@ -224,7 +224,7 @@ def _assert_listing_carries_explicit_annotations(tools):
     by_name = {tool['name']: tool for tool in tools}
     assert by_name['list_components']['_meta']['anthropic/alwaysLoad'] is True
     assert '_meta' not in by_name['store_read']
-    assert by_name['validate_pipeline']['annotations'] == {
+    assert by_name['probe_component']['annotations'] == {
         'readOnlyHint': False,
         'destructiveHint': True,
         'openWorldHint': True,

@@ -8,7 +8,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[4] / 'src'))
 import pytest
 
 # The full expected MCP tool surface, in registration order (register_all:
-# introspection, execution, capability, visibility, logs, integrations).
+# introspection, execution, capability, probe, visibility, logs, scaffold,
+# integrations).
 # Single source of truth for the suite — assert against this instead of
 # copying the list or hard-coding its count in individual test files.
 # This is the LOCAL-engine (loopback-bound) surface; a deployed engine omits
@@ -45,6 +46,8 @@ EXPECTED_TOOL_NAMES = (
     'deploy_enable',
     'deploy_disable',
     'deploy_remove',
+    # probe
+    'probe_component',
     # visibility
     'monitor',
     'list_running_pipelines',

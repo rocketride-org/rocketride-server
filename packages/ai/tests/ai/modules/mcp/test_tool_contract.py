@@ -22,7 +22,7 @@ EXPECTED_HINTS = {
     'list_components': (True, False, False),
     'describe_component': (True, False, False),
     'resolve_config': (True, False, False),
-    'validate_pipeline': (False, True, True),
+    'validate_pipeline': (True, False, False),
     'describe_pipeline': (True, False, False),
     'run_pipeline': (False, True, True),
     'run_dropper_pipe': (False, True, True),
@@ -44,6 +44,7 @@ EXPECTED_HINTS = {
     'deploy_enable': (False, True, False),
     'deploy_disable': (False, True, False),
     'deploy_remove': (False, True, False),
+    'probe_component': (False, True, True),
     'monitor': (True, False, False),
     'list_running_pipelines': (True, False, False),
     'log_chapters': (True, False, False),
@@ -103,10 +104,10 @@ def test_read_only_tools_are_never_destructive(registry):
         assert not (read_only and destructive), name
 
 
-def test_open_world_tools_are_exactly_the_execution_tools_and_validate_pipeline(registry):
+def test_open_world_tools_are_exactly_the_execution_tools_and_probe_component(registry):
     open_world = {name for name, triple in _annotation_triples(registry).items() if triple[2]}
 
-    assert open_world == {'run_pipeline', 'run_dropper_pipe', 'send_data', 'send_files', 'validate_pipeline'}
+    assert open_world == {'run_pipeline', 'run_dropper_pipe', 'send_data', 'send_files', 'probe_component'}
 
 
 def test_always_load_is_exactly_the_core_workflow_tools(registry):
@@ -147,6 +148,6 @@ def test_three_corrected_descriptions(registry):
     descriptions = {tool.name: tool.description for tool in registry.tools()}
 
     assert 'zero client-side' not in descriptions['validate_pipeline']
-    assert 'single-component form' in descriptions['validate_pipeline']
+    assert 'probe_component' in descriptions['validate_pipeline']
     assert 'status' in descriptions['list_running_pipelines']
     assert 'not terminated' in descriptions['deploy_remove']

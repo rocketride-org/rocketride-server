@@ -2,9 +2,9 @@
 """Authoring / introspection tools: `list_components`, `describe_component`,
 `validate_pipeline`, `describe_pipeline`.
 
-Four of these are read-only; `validate_pipeline`'s single-component form runs
-a provider probe (see its hints). None of them issues a task token or starts a
-run. `describe_pipeline` has no backing
+All of them are read-only: `validate_pipeline` takes whole pipelines only, and
+`probe_component` (`probe.py`) runs a single component's provider probe. None of
+them issues a task token or starts a run. `describe_pipeline` has no backing
 SDK method; it is synthesized client-side via a static parse of the pipeline
 plus a best-effort `get_service` lookup per component provider.
 """
@@ -23,6 +23,10 @@ from ._common import load_pipeline
 # holds the tool call open for providers x per-call timeout. Providers left
 # unresolved when the budget elapses fall back to the pipeline's own metadata.
 DESCRIBE_LOOKUP_BUDGET_SECONDS = 30
+
+# validate_pipeline unwraps at most this many {'pipeline': {...}} envelopes and
+# refuses a deeper one, so the form it checks is the form the engine runs.
+MAX_PIPELINE_ENVELOPES = 8
 
 _PIPELINE_SCHEMA = {
     'type': 'object',
@@ -105,15 +109,56 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
     return result
 
 
+def _placeholder_in_key_or_unclosed(pipeline: Dict[str, Any]) -> bool:
+    """Whether a top-level key has a ``${`` or any string has a ``${`` with no ``}`` after it.
+
+    The engine fills in ``${...}`` placeholders (``task/pipeline.py``) before it
+    picks a form. With neither of these, each placeholder lies inside one string,
+    so the top-level keys checked here are the ones the engine sees.
+    """
+    if any('${' in key for key in pipeline):
+        return True
+    stack = [pipeline]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, dict):
+            stack.extend(value.keys())
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+        elif isinstance(value, str):
+            start = value.rfind('${')
+            if start >= 0 and '}' not in value[start + 2 :]:
+                return True
+    return False
+
+
 async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
-    # The engine requires the {'pipeline': {...}} envelope and treats a missing
-    # version as legacy v0; add both the same way /pipe/validate does, but never
-    # double-wrap an already-enveloped config.
+    # The engine unwraps {'pipeline': {...}} envelopes again before it picks a
+    # form, so decide on the pipeline it will see, not on the outer envelope.
+    for _ in range(MAX_PIPELINE_ENVELOPES - 1):
+        if not isinstance(pipeline.get('pipeline'), dict):
+            break
+        pipeline = pipeline['pipeline']
     if isinstance(pipeline.get('pipeline'), dict):
-        payload = pipeline
-    else:
-        payload = {'pipeline': {**pipeline, 'version': pipeline.get('version', 1)}}
+        return _bad('pipeline is nested too deep', 'send the pipeline itself, or wrapped once as {"pipeline": {...}}')
+    # The engine runs the provider probe for this form, the same test as cmd_misc.
+    if 'component' in pipeline and 'components' not in pipeline:
+        return _bad(
+            'validate_pipeline takes a whole pipeline, not one component',
+            'send the whole pipeline with its components list, or, if the user asked to test this component, '
+            "call probe_component with {component: ...}, which can contact that component's provider",
+        )
+    if _placeholder_in_key_or_unclosed(pipeline):
+        return _bad(
+            'validate_pipeline cannot check a pipeline with a ${...} placeholder in a top-level key '
+            'or one that is not closed',
+            'close each placeholder inside its own string',
+        )
+    # The engine treats a missing version as legacy v0; add it the same way
+    # /pipe/validate does, and send the one envelope the engine expects.
+    payload = {'pipeline': {**pipeline, 'version': pipeline.get('version', 1)}}
     validated, err = await engine_call(client.validate(payload), 'validate_pipeline')
     if err:
         return err
@@ -195,11 +240,11 @@ async def _describe_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 _VALIDATE_PIPELINE_DESCRIPTION = (
-    "Validate a pipeline with the engine's validator, which also checks each component's provider, control "
-    "entries and lanes against this engine's services. ok is false when errors is non-empty. "
-    'A whole pipeline is checked statically; '
-    "the single-component form {version, component} instead runs that provider's configuration probe, which "
-    'may contact the configured provider or database.'
+    "Validate a whole pipeline with the engine's validator. It also checks that each component names a service "
+    'on this engine and that control entries and lanes fit those services. ok is false when errors is non-empty. '
+    'The check is static. It runs no component code and contacts no provider. It refuses a single component. '
+    "If the user asks to test one component's settings, call probe_component, which can contact that component's "
+    'provider.'
 )
 
 
@@ -250,15 +295,9 @@ def register(registry: ToolRegistry) -> None:
         'validate_pipeline',
         _VALIDATE_PIPELINE_DESCRIPTION,
         _PIPELINE_SCHEMA,
-        hints=ToolHints(
-            read_only=False,
-            destructive=True,
-            open_world=True,
-            reason='Whole-pipeline validation is a static engine check, but the accepted single-component form '
-            "{version, component} runs that provider's own configuration probe inside the engine: LLM nodes "
-            'send a small completion request to the configured endpoint, a charge that cannot be undone, '
-            'and store nodes connect to the configured database with the supplied credentials. Destinations '
-            'are caller-configured, so the tool is open-world. No run is started and nothing is saved.',
+        hints=ToolHints.reads(
+            "Checks a whole pipeline statically against this engine's catalog; runs no node code, starts no run "
+            'and saves nothing.'
         ),
         always_load=True,
     )(_validate_pipeline)
