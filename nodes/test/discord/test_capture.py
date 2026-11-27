@@ -1809,7 +1809,7 @@ class TestWriterThread:
     def test_stop_keeps_to_its_budget_even_with_a_full_queue(self):
         """Queueing the stop marker and the drain share one budget, not one each."""
         release = threading.Event()
-        pipe = _StuckPipe(release, wait=30)
+        pipe = _StuckPipe(release, wait=None)
         writer = _writer(_FakeTarget(pipe), [])
         writer.start()
         thread = writer._thread
