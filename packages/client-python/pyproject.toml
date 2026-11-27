@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rocketride"
-version = "1.6.0"
+version = "1.7.0"
 description = "RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. Python SDK and CLI."
 readme = "README.md"
 authors = [
