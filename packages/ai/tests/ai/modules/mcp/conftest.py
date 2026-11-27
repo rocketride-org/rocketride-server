@@ -132,6 +132,10 @@ class FakeEngineClient:
         self._fs_get_url_result = fs_get_url_result
         self.fs_stat_calls = []
         self.fs_get_url_calls = []
+        # Store files as bytes by path. A handle is the path, kept in open_handles until closed.
+        self.files = {'foo/bar.txt': b'file contents'}
+        self.listing = {'entries': []}
+        self.open_handles = []
         self.add_monitor_calls = []
         self.log_chapters_result = {'chapters': [], 'horizonSeq': 0}
         self.log_read_result = {'events': [], 'nextSeq': None}
@@ -237,11 +241,18 @@ class FakeEngineClient:
         self.sent_files.append({'files': files, 'token': token})
         return {'uploaded': len(files)}
 
-    async def fs_read_string(self, path):
-        return 'file contents'
+    async def fs_open(self, path, mode='r'):
+        self.open_handles.append(path)
+        return {'handle': path, 'size': len(self.files[path])}
+
+    async def fs_read(self, handle, offset=0, length=4_194_304):
+        return self.files[handle][offset : offset + length]
+
+    async def fs_close(self, handle, mode='r'):
+        self.open_handles.remove(handle)
 
     async def fs_list_dir(self, path=''):
-        return {'entries': []}
+        return self.listing
 
     async def save_template(self, template_id, pipeline):
         # Mirrors rocketride.mixins.store.save_template: writes the bare
@@ -396,6 +407,14 @@ class FakeEngineClient:
     async def close(self):
         self.close_calls += 1
         self.closed = True
+
+
+@pytest.fixture
+def result_limit():
+    from ai.modules.mcp import result_size
+
+    yield result_size.configure
+    result_size.configure(result_size.DEFAULT_MAX_CHARS)
 
 
 @pytest.fixture

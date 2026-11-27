@@ -17,11 +17,21 @@ Every result is a JSON object with `ok`. `ok: false` carries `error_type`, `mess
 the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JSON.
 **Check `ok` — a successful tool *call* is not a successful *result*.**
 
+Size limit: a result's JSON text is at most 40,000 characters by default (`MCP_RESULT_MAX_CHARS`). A tool that
+can shorten its result adds `truncated: {<key>: {returned, total} | {returned_chars, total_chars} | {dropped: true},
+hint?}`; a run tool that still cannot fit sets every key but `ok` and `task_token` to `null` and names them in
+`truncated.dropped`. `log_read` instead ends the page early and sets `nextCursor`. Any other result over the limit
+becomes `{ok: false, error_type: 'ResultTooLarge', message, hint}`: ask for less, never repeat the same call.
+
+Paging: `store_read`, `store_list`, `list_components` and bare `list_integrations` return what fits plus
+`next_offset`; call again with `offset: next_offset` until it is `null`. Lists also take `limit` (rows) and return
+`total`; `store_read` takes `max_bytes` and returns `size` (bytes).
+
 ## Introspection
 
 | Tool | Input | Result (key fields) |
 |---|---|---|
-| `list_components` | — | `{ok, components: [{name, category, summary, wiring?}], note?}`. **No `lanes`/`invoke`** — wire from the bundled L1 index. Components whose integration isn't configured are **hidden**, with `note` pointing at `list_integrations`. |
+| `list_components` | `{offset?, limit?}` | `{ok, components: [{name, category, summary, wiring?}], total, next_offset, note?}`. **No `lanes`/`invoke`** — wire from the bundled L1 index. Components whose integration isn't configured are **hidden**, with `note` pointing at `list_integrations`. |
 | `describe_component` | `{name}` | Full service definition (the L2 schema). |
 | `resolve_config` | `{provider, config?}` | `{ok, ...engine resolution, hint?}` — what a component config actually becomes at load, after profile and default merging; omit `config` for defaults. Discarded keys come back as `dropped` plus a `hint` naming the profile they belong inside. |
 | `validate_pipeline` | `{pipeline}` (inline object) | `{ok, errors, warnings}` — the compiler. Zero errors before any run. |
@@ -55,15 +65,15 @@ chapters/console but **empty traces**.
 |---|---|
 | `log_chapters` | Run/chapter listing — find the run. |
 | `log_read` | Paged events (≤200 events / 1 MiB per page, cursor to continue). |
-| `log_traces` | Per-object trace summaries (1–100, default 20). |
+| `log_traces` | Per-object trace summaries (1–50, default 20). |
 | `log_trace` | One object's full node/lane trace — the per-node enter/leave evidence. |
 
 ## Capability
 
 | Tool | Purpose |
 |---|---|
-| `store_read` | `{path}` → `{ok, path, content}`. Text only, inline and uncapped — prefer `store_stat` + `store_get_url` for big objects. |
-| `store_list` | `{path?}` (default `''` = root) → `{ok, path, listing}`. |
+| `store_read` | `{path, offset?, max_bytes?}` → `{ok, path, content, offset, next_offset, size}`. UTF-8 text only, in pages; a binary file is `BadRequest` — use `store_get_url`. |
+| `store_list` | `{path?, offset?, limit?}` (default `''` = root) → `{ok, path, listing: {entries, count}, total, next_offset}`. |
 | `store_stat` | `{path}` → `{ok, path, stat}` — exists, type (`file\|dir`), size, modified. |
 | `store_get_url` | `{path, expires_in?, download_name?}` → `{ok, path, url, expires_in}`. Signed URL — artifact-by-reference for large results. |
 | `save_template` | `{template_id, pipeline}` → `{ok, template_id}`. Gate D "save to cloud". |

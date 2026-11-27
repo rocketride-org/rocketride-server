@@ -338,3 +338,29 @@ async def test_server_info_version_falls_back_when_get_version_raises(monkeypatc
     async with Client(server) as client:
         assert client.server_info.version == '0.0.0'
     assert 'engine version unavailable' in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_result_over_the_size_limit_becomes_result_too_large(monkeypatch, fake_engine, result_limit):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    def _register_all(registry):
+        @registry.register('big_tool', 'A tool with a large result', _dummy_schema())
+        async def _handler(client, tasks, args):
+            return {'ok': True, 'blob': b'x' * 50_000}  # measured as the text the client gets (default=str)
+
+    monkeypatch.setattr(handlers_mod.tools_pkg, 'register_all', _register_all)
+    server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        result_limit(40_000)
+        too_large = await client.call_tool('big_tool', {})
+        unknown = await client.call_tool('n' * 50_000, {})
+        result_limit(0)
+        whole = await client.call_tool('big_tool', {})
+
+    assert too_large.is_error is True
+    assert json.loads(too_large.content[0].text) == too_large.structured_content
+    assert too_large.structured_content['error_type'] == 'ResultTooLarge'
+    assert too_large.structured_content['message'].startswith('big_tool ran, but its result is 50,0')
+    assert len(unknown.content[0].text) < 1000 and 'nnn' not in unknown.content[0].text
+    assert whole.is_error is False and len(whole.structured_content['blob']) == 50_003

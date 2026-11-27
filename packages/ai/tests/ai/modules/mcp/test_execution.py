@@ -8,6 +8,7 @@ import asyncio
 import pytest
 
 from ai.modules.mcp.registry import TaskRegistry
+from ai.modules.mcp.result_size import size_of
 from ai.modules.mcp.tooling import ToolRegistry
 from ai.modules.mcp.tools import execution
 from ai.modules.mcp.tools import register_all
@@ -534,3 +535,23 @@ async def test_run_pipeline_use_timeout_registers_no_token(fake_engine, monkeypa
     assert result['error_type'] == 'Timeout'
     assert 'start the task' in result['message']
     assert tasks.list() == []
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_over_the_size_limit_keeps_the_token(fake_engine, result_limit):
+    result_limit(1000)
+    run = execution._run_pipeline
+    fake_engine._result = 'x' * 5000
+
+    clipped = await run(fake_engine, TaskRegistry(), {'pipeline': PIPE, 'inputs': 'go'})
+    assert (clipped['task_token'], clipped['projectId'], clipped['source']) == ('tok-1', 'proj-fake', 'src-fake')
+    assert clipped['truncated']['result'] == {'returned_chars': len(clipped['result']), 'total_chars': 5000}
+    assert 0 < len(clipped['result']) < 5000 and size_of(clipped) <= 1000
+
+    async def use(**kwargs):  # the engine echoes the pipeline's own project_id, at any length
+        return {'token': 'tk_1', 'projectId': 'p' * 50_000, 'source': 'src-fake'}
+
+    fake_engine.use = use
+    long_id = await run(fake_engine, TaskRegistry(), {'pipeline': PIPE})
+    assert (long_id['ok'], long_id['task_token'], long_id['projectId']) == (True, 'tk_1', None)
+    assert long_id['truncated']['dropped'] == ['projectId', 'source'] and size_of(long_id) <= 1000

@@ -23,6 +23,22 @@ is not offered (see its entry). This page is the full reference; the
   tools), `Unavailable` (a local-engine-only tool called on a deployed engine),
   `UnknownTool`. Hard failures (lost engine connection, auth) surface
   as MCP protocol errors with the original message preserved.
+- **One size limit.** The JSON text of a result is at most 40,000 characters,
+  or the value of `MCP_RESULT_MAX_CHARS` on a
+  [self-hosted engine](/connect/mcp/http/self-hosting#configuration). A tool
+  that can shorten its own result does so and adds a `truncated` object: one
+  entry per shortened key, with counts, and a `hint` where there is a next step.
+  The entries below say how each tool shortens. Any other result over the limit
+  is replaced by `{ok: false, error_type: 'ResultTooLarge', message, hint}`,
+  with `isError` set. The run tools always keep `task_token`.
+- **Paging.** `store_read`, `store_list`, `list_components` and
+  `list_integrations` (without `name`) return one page that fits under the
+  size limit, and `next_offset` for the next one. Call again with `offset`
+  set to `next_offset` until it is `null`. A list takes `offset` (rows,
+  default 0) and `limit` (the most rows); `store_read` takes `offset` (bytes,
+  default 0) and `max_bytes`. A list that fits, or a small file, still comes
+  back whole in one call. With the limit off (`MCP_RESULT_MAX_CHARS=0`) only
+  `limit` and `max_bytes` cut a page.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
   `send_files`, `terminate`) get 120 seconds per engine call.
@@ -48,11 +64,13 @@ minus credentialed integrations that are not fully configured (call
 [`list_integrations`](#list_integrations) to see those and how to finish their
 setup).
 
-- **Parameters:** none.
-- **Returns:** `{ok, components: [{name, category, summary, wiring?}], note?}`.
-  `wiring` (a config-path → `${ENV_VAR}` map) appears only for configured
-  credentialed integrations; `note` appears when unconfigured integrations were
-  omitted.
+- **Parameters:** `offset` and `limit` (integers, optional — see
+  [Paging](#how-every-tool-behaves)).
+- **Returns:** `{ok, components: [{name, category, summary, wiring?}], total,
+  next_offset, note?}`. `wiring` (a config-path → `${ENV_VAR}` map) appears
+  only for configured credentialed integrations; `note` appears when
+  unconfigured integrations were omitted. `total` counts every listed
+  component.
 - **Notable:** on an engine that runs `llm_openai` on RocketRide-hosted models
   (the engine reports the `hosted-models:openai` capability), `llm_openai` is
   listed even when you saved no key, with an empty `wiring`: leave `apikey`
@@ -69,6 +87,13 @@ integration.
 - **Returns:** the engine's whole service definition at top level, plus
   `ok: true` and, for integrations, `credentials: {status, missing, candidates,
   wiring | setup}`.
+- **Size limit:** a definition over the limit first loses each config section's
+  `ui` block, which lays out the visual editor's form, so `truncated` holds
+  `{"Pipe.ui": {dropped: true}}`. If it is still too large, the profile branches
+  in `<section>.schema.dependencies.profile.oneOf` are cut from the end, with
+  `{returned, total}` and a hint. Every profile name stays in
+  `<section>.schema.properties.profile.enum`, and `resolve_config` shows what
+  one profile resolves to.
 
 ### resolve_config
 
@@ -91,11 +116,13 @@ Report credential setup status for integrations — the discovery counterpart to
 node on the connected engine are listed.
 
 - **Parameters:** `name` (string, optional) — request full field detail for one
-  integration.
+  integration. Without `name`: `offset` and `limit` (integers, optional — see
+  [Paging](#how-every-tool-behaves)).
 - **Returns (bare call):** `{ok, integrations: [{name, title, status,
-  missing_count, hosted?}], note}` with status one of `configured`, `available`
-  (needs setup — no matching variables found), or `unconfirmed` (candidate
-  variables found for you to confirm, or the variable read failed).
+  missing_count, hosted?}], total, next_offset, note}` with status one of
+  `configured`, `available` (needs setup — no matching variables found), or
+  `unconfirmed` (candidate variables found for you to confirm, or the variable
+  read failed).
 - **Returns (with `name`):** `{ok, name, title, fields, caller_variables,
   status, missing, candidates, wiring | setup, hosted?, note?}` — `setup`
   carries the suggested variable names, instructions to relay to the user, and
@@ -133,6 +160,8 @@ configured database. Validate whole pipelines unless you want that probe.
 - **Returns:** `{ok, errors: [], warnings: []}` — `ok` is true only when there
   are no errors. A rejection (`ok: false`) sets the MCP `isError` flag but is
   not the shared error envelope.
+- **Size limit:** `warnings` loses rows first and `errors` second, and
+  `truncated` gives `{returned, total}` for each. `ok` still counts every error.
 
 ### describe_pipeline
 
@@ -202,6 +231,12 @@ optionally send data in the same call and get the result back synchronously.
   [replay tools](#replay-past-runs).
 - **Notable:** if the initial send times out, the error hint still reports the
   token so you can `monitor` the task instead of losing it.
+- **Size limit:** output over the limit comes back as the first part of its
+  text, and `truncated.result` gives `{returned_chars, total_chars}`. If the
+  reply is still too large (a very long `projectId` or `source` taken from the
+  pipeline), every key but `ok` and `task_token` is `null` and
+  `truncated.dropped` names them. `send_data` and `send_files` shorten
+  `result` the same way.
 
 ### run_dropper_pipe
 
@@ -264,6 +299,8 @@ always returns within the timeout.
 - **Returns:** `{ok, task_token, state, state_label, completed, terminal,
   status, counts: {completedCount, failedCount, totalCount}, errors, warnings,
   polls, poll_timed_out?}`.
+- **Size limit:** a snapshot over the limit sends `status` as `{}` first, then
+  shortens `warnings` and last `errors`. `truncated` says which.
 - **Notable:** `state` is an integer enum (0 none, 1 starting,
   2 initializing, 3 running, 4 stopping, 5 completed, 6 cancelled);
   `state_label` is the readable form. Long-lived pipelines (webhook sources)
@@ -289,17 +326,28 @@ account's file store.
 
 ### store_read
 
-Read a text file from the store.
+Read a UTF-8 text file from the store, one page at a time.
 
-- **Parameters:** `path` (string, required).
-- **Returns:** `{ok, path, content}`.
+- **Parameters:** `path` (string, required); `offset` (integer ≥ 0, optional —
+  the byte to start at, default 0); `max_bytes` (integer ≥ 4, optional — the
+  most bytes to read; the default and the most is three quarters of the size
+  limit, 30,000 bytes by default).
+- **Returns:** `{ok, path, content, offset, next_offset, size}`. `size` is the
+  file's size in bytes, and `next_offset` is `null` at the end of the file.
+- **Notable:** a page never ends inside a character. Text that takes more
+  JSON than bytes (quotes, backslashes, non-ASCII) comes back in a shorter
+  page. A file that is not UTF-8 text, or an `offset` inside a character,
+  returns `BadRequest`; use `store_get_url` for binary files.
 
 ### store_list
 
 List the entries under a store directory.
 
-- **Parameters:** `path` (string, optional — defaults to the store root).
-- **Returns:** `{ok, path, listing}`.
+- **Parameters:** `path` (string, optional — defaults to the store root);
+  `offset` and `limit` (integers, optional — see
+  [Paging](#how-every-tool-behaves)).
+- **Returns:** `{ok, path, listing: {entries, count}, total, next_offset}`.
+  `entries` holds this page; `listing.count` and `total` count every entry.
 
 ### store_stat
 
@@ -461,6 +509,10 @@ Read raw run-log events, cursor-paged.
   only).
 - **Returns:** `{ok, events, nextCursor, truncatedAtSeq}`.
 - **Notable:** pages are additionally capped at 1 MiB.
+- **Size limit:** a page over the limit ends early, and `nextCursor` is the
+  number of the first event left out. An event too large to send alone comes
+  back as a stub, `{event, body: {logSeq, eventTime}, truncated: {chars}}`,
+  with the start of its name, and `nextCursor` moves past it.
 
 ### log_traces
 
@@ -468,12 +520,14 @@ List per-object trace summaries — one per file or document that traveled the
 pipeline — for the latest run or a specific past run.
 
 - **Parameters:** the key parameters; `n` (integer, optional, default 20,
-  clamped 1–100); `chapterBeginSeq` (integer, optional — address a specific
+  clamped 1–50); `chapterBeginSeq` (integer, optional — address a specific
   past run by its chapter `beginSeq` from `log_chapters`).
 - **Returns:** `{ok, traces, open, context, note?}` — `traces` are finished
   journeys, `open` are still in flight; each summary carries `beginSeq`, the
   permanent trace id. In MCP Apps hosts the result renders in the
   [trace-viewer widget](/connect/mcp/http/resources-and-widgets#widgets).
+- **Size limit:** `traces` loses rows first and `open` second, with
+  `{returned, total}` in `truncated` and a hint to ask for a smaller `n`.
 
 ### log_trace
 
@@ -483,6 +537,8 @@ lane data, plus node narration.
 - **Parameters:** the key parameters; `beginSeq` (integer, required — a trace
   id from `log_traces`).
 - **Returns:** `{ok, beginSeq, summary, events, context}`.
+- **Size limit:** `events` keeps its leading rows, with `{returned, total}` in
+  `truncated` and a hint to read the rest with `log_read` from `beginSeq`.
 - **Errors:** a trace below the retention horizon returns
   `{ok: false, error_type: 'TraceExpired', ...}`.
 

@@ -10,6 +10,7 @@ import asyncio
 
 import pytest
 
+from ai.modules.mcp.result_size import size_of
 from ai.modules.mcp.tooling import ToolRegistry
 from ai.modules.mcp.tools import capability
 from ai.modules.mcp.tools import register_all
@@ -104,7 +105,96 @@ async def test_store_read_returns_content(fake_engine):
 
     result = await registry.handler('store_read')(fake_engine, None, {'path': 'foo/bar.txt'})
 
-    assert result == {'ok': True, 'path': 'foo/bar.txt', 'content': 'file contents'}
+    page = {'ok': True, 'path': 'foo/bar.txt', 'content': 'file contents', 'offset': 0, 'next_offset': None}
+    assert result == {**page, 'size': 13}
+    assert fake_engine.open_handles == []
+
+
+async def _read_pages(engine, path, **args):
+    """Call store_read from the start and follow next_offset to the end."""
+    pages = [await capability._store_read(engine, None, {'path': path, **args})]
+    while pages[-1]['next_offset'] is not None:
+        assert pages[-1]['next_offset'] > pages[-1]['offset']
+        args['offset'] = pages[-1]['next_offset']
+        pages.append(await capability._store_read(engine, None, {'path': path, **args}))
+    return pages
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text', ['ab"\\\\' * 400, '\u4e2d\u6587\U0001f600a' * 300])
+async def test_store_read_pages_join_back_to_the_file(fake_engine, result_limit, text):
+    result_limit(1000)
+    fake_engine.files['f.txt'] = text.encode()
+    pages = await _read_pages(fake_engine, 'f.txt')
+    assert len(pages) >= 3 and all(size_of(page) <= 1000 for page in pages)
+    assert ''.join(page['content'] for page in pages) == text
+    assert fake_engine.open_handles == []
+
+
+@pytest.mark.asyncio
+async def test_store_read_measures_the_page_with_its_next_offset(fake_engine, result_limit):
+    result_limit(1000)
+    empty = {'ok': True, 'path': 'f.txt', 'content': '', 'offset': 20000, 'next_offset': None, 'size': 20760}
+    # 750 bytes whose page is exactly 1,000 characters with a null next_offset, and 1,001 with 20750.
+    quotes = 1000 - size_of(empty) - 750
+    fake_engine.files['f.txt'] = b'a' * 20000 + b'"' * quotes + b'a' * (760 - quotes)
+    page = await capability._store_read(fake_engine, None, {'path': 'f.txt', 'offset': 20000})
+    assert size_of(page) <= 1000 and page['next_offset'] > 20000
+
+
+@pytest.mark.asyncio
+async def test_store_read_moves_forward_with_the_smallest_max_bytes(fake_engine):
+    fake_engine.files['e.txt'] = 'a\U0001f600\u4e2db'.encode()
+    pages = await _read_pages(fake_engine, 'e.txt', max_bytes=4)
+    past_the_end = await capability._store_read(fake_engine, None, {'path': 'e.txt', 'offset': 100})
+    assert [page['content'] for page in pages] == ['a', '\U0001f600', '\u4e2db']
+    assert (past_the_end['content'], past_the_end['next_offset']) == ('', None)
+
+
+@pytest.mark.asyncio
+async def test_store_read_clamps_max_bytes_and_reads_all_with_no_limit(fake_engine, result_limit):
+    fake_engine.files['big.txt'] = b'x' * 100_000
+    result_limit(1000)
+    clamped = await capability._store_read(fake_engine, None, {'path': 'big.txt', 'max_bytes': 100_000})
+    result_limit(0)
+    whole = await capability._store_read(fake_engine, None, {'path': 'big.txt'})
+
+    assert (len(clamped['content']), clamped['next_offset']) == (750, 750)
+    assert (len(whole['content']), whole['next_offset']) == (100_000, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'args, message, hint',
+    [
+        ({'max_bytes': 0}, 'max_bytes must', 'leave max_bytes out'),
+        ({'max_bytes': 3}, 'max_bytes must', 'leave max_bytes out'),
+        ({'max_bytes': 'x'}, 'max_bytes must', 'leave max_bytes out'),
+        ({'offset': -1}, 'offset must', 'next_offset'),
+        ({'offset': 2}, 'not at the start of a character', 'next_offset'),
+        ({'path': 'image.png'}, 'not UTF-8 text', 'store_get_url'),
+    ],
+)
+async def test_store_read_refuses_bad_ranges_and_binary_files(fake_engine, args, message, hint):
+    fake_engine.files['e.txt'] = 'a\U0001f600'.encode()
+    fake_engine.files['image.png'] = b'\x89PNG\r\n\x1a\n'
+
+    result = await capability._store_read(fake_engine, None, {'path': 'e.txt', **args})
+
+    assert (result['error_type'], message in result['message'], hint in result['hint']) == ('BadRequest', True, True)
+    assert fake_engine.open_handles == []
+
+
+@pytest.mark.asyncio
+async def test_store_read_closes_the_file_when_a_read_fails(fake_engine, monkeypatch):
+    async def failing_read(*args):
+        raise RuntimeError('read failed')
+
+    monkeypatch.setattr(fake_engine, 'fs_read', failing_read)
+
+    with pytest.raises(RuntimeError):
+        await capability._store_read(fake_engine, None, {'path': 'foo/bar.txt'})
+    assert fake_engine.open_handles == []
 
 
 # --- store_list --------------------------------------------------------------
@@ -117,7 +207,7 @@ async def test_store_list_defaults_to_root(fake_engine):
 
     result = await registry.handler('store_list')(fake_engine, None, {})
 
-    assert result == {'ok': True, 'path': '', 'listing': {'entries': []}}
+    assert result == {'ok': True, 'path': '', 'listing': {'entries': []}, 'total': 0, 'next_offset': None}
 
 
 @pytest.mark.asyncio
@@ -127,7 +217,20 @@ async def test_store_list_with_explicit_path(fake_engine):
 
     result = await registry.handler('store_list')(fake_engine, None, {'path': 'sub/dir'})
 
-    assert result == {'ok': True, 'path': 'sub/dir', 'listing': {'entries': []}}
+    assert result == {'ok': True, 'path': 'sub/dir', 'listing': {'entries': []}, 'total': 0, 'next_offset': None}
+
+
+@pytest.mark.asyncio
+async def test_store_list_pages_a_large_folder(fake_engine, result_limit):
+    result_limit(1000)
+    entries = [{'name': f'file-{i:04d}.txt', 'type': 'file'} for i in range(25)]
+    fake_engine.listing = {'entries': entries, 'count': 25}
+    first = await capability._store_list(fake_engine, None, {})
+    rest = await capability._store_list(fake_engine, None, {'offset': first['next_offset']})
+
+    assert first['listing']['entries'] + rest['listing']['entries'] == entries
+    assert (first['listing']['count'], first['total'], rest['next_offset']) == (25, 25, None)
+    assert size_of(first) <= 1000
 
 
 # --- store_stat ----------------------------------------------------------------

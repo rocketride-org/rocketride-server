@@ -329,3 +329,14 @@ async def test_monitor_oversized_timeout_is_clamped_to_max(fake_engine, monkeypa
     assert result['ok'] is True
     assert result['terminal'] is False
     assert len(fake_engine.get_task_status_calls) <= 10, 'deadline was not clamped to MAX_TIMEOUT_SECONDS'
+
+
+@pytest.mark.asyncio
+async def test_monitor_drops_a_status_too_large_to_send(fake_engine, result_limit):
+    result_limit(1000)
+    fake_engine._task_statuses = [{'state': 5, 'completedCount': 1, 'pipeline': {'big': 'x' * 5000}}]
+
+    result = await visibility._monitor(fake_engine, None, {'task_token': 'tk_1'})
+
+    assert (result['status'], result['truncated']) == ({}, {'status': {'dropped': True}})
+    assert (result['state_label'], result['terminal'], result['counts']['completedCount']) == ('completed', True, 1)
