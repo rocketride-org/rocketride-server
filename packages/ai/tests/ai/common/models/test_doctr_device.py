@@ -6,6 +6,7 @@ import types
 import pytest
 
 from ai.common.models.ocr.doctr import DocTRLoader
+from ai.common.utils import cuda_utils
 
 
 class _Predictor:
@@ -54,6 +55,8 @@ def predictor(monkeypatch):
     models = types.SimpleNamespace(ocr_predictor=lambda **kw: built)
     cuda = types.SimpleNamespace(is_available=lambda: True)
     monkeypatch.setattr(DocTRLoader, '_ensure_dependencies', staticmethod(lambda: None))
+    # Every CUDA device runs here; the fallback is covered in test_cuda_utils.py
+    monkeypatch.setattr(cuda_utils, '_cuda_kernels_run', lambda index: True)
     monkeypatch.setitem(sys.modules, 'doctr', types.SimpleNamespace(models=models))
     monkeypatch.setitem(sys.modules, 'doctr.models', models)
     # load() marks docTR's drawing helpers absent; setitem removes that entry after the test.

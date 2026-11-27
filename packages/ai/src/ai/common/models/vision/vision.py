@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ai.web.metrics import metrics
 from ai.common.utils.image_utils import image_to_bytes
-from ai.common.utils.cuda_utils import model_gpu_gb
+from ai.common.utils.cuda_utils import model_gpu_gb, select_torch_device
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.vision')
@@ -61,7 +61,8 @@ class VisionLoader(BaseLoader):
         """
         VisionLoader._ensure_dependencies()
 
-        from ai.common.torch import torch
+        # Installs torch before transformers imports it below
+        from ai.common.torch import torch  # noqa: F401
 
         variant = (variant or 'clip').lower()
         if variant not in ('clip', 'vit'):
@@ -77,9 +78,7 @@ class VisionLoader(BaseLoader):
             logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for vision {variant} {model_name}')
             device = torch_device
         else:
-            if device is None:
-                device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-            gpu_index = int(device.split(':')[1]) if ':' in str(device) else (0 if device == 'cuda' else -1)
+            device, gpu_index = select_torch_device(device)
 
         if variant == 'clip':
             from transformers import CLIPModel as HFCLIPModel, AutoProcessor

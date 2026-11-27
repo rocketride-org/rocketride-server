@@ -28,7 +28,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
-from ai.common.utils.cuda_utils import model_gpu_gb
+from ai.common.utils.cuda_utils import model_gpu_gb, select_torch_device
 from ..base import BaseLoader, get_model_server_address, ModelClient
 from ..device_budget import device_budget
 from .utils import preprocess_image_transparency, group_words_into_lines, raise_on_error, with_error_field
@@ -91,7 +91,6 @@ class TrOCRLoader(BaseLoader):
         # disable contract check for craft_text_detector due to opencv conflict (see README)
         from craft_text_detector import Craft  # contract-check: ignore  requirements_trocr.txt is `disable`d
         from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-        from ai.common.torch import torch
 
         exclude_gpus = exclude_gpus or []
 
@@ -102,24 +101,13 @@ class TrOCRLoader(BaseLoader):
             gpu_index, torch_device = allocate_gpu(memory_gb, exclude_gpus)
             logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for TrOCR')
         else:
-            if device is None:
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-            if device == 'cpu':
-                gpu_index = -1
-                torch_device = 'cpu'
-            elif ':' in device:
-                gpu_index = int(device.split(':')[1])
-                torch_device = device
-            else:
-                gpu_index = 0
-                torch_device = 'cuda:0'
+            torch_device, gpu_index = select_torch_device(device)
 
         logger.info(f'Loading TrOCR pipeline on {torch_device}')
 
         try:
             # Load CRAFT text detector
-            use_cuda = torch_device != 'cpu'
+            use_cuda = torch_device.startswith('cuda')
             craft = Craft(
                 output_dir=None,
                 crop_type='poly',
