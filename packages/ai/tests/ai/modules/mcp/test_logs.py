@@ -4,6 +4,7 @@ import asyncio
 import pytest
 
 from ai.modules.mcp.engine import LogNotFound
+from ai.modules.mcp.result_size import size_of
 from ai.modules.mcp.tooling import ToolRegistry
 from ai.modules.mcp.tools import logs
 
@@ -182,7 +183,10 @@ async def test_log_traces_unrelated_keyerror_is_not_swallowed(fake_engine):
 
 @pytest.mark.asyncio
 async def test_log_traces_clamps_n_to_valid_range(fake_engine):
-    """Finding 5: n is clamped to 1..100 (default 20)."""
+    """Finding 5: n is clamped to 1..50 (default 20), the most the SDK's get_traces accepts."""
+    from rocketride.log_stream import _MAX_TRACES
+
+    assert logs.LOG_TRACES_MAX_N == _MAX_TRACES
     fake_engine.log_traces_result = {'open': [], 'closed': []}
     await logs._log_traces(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'n': 5000})
     assert fake_engine.log_calls[0]['n'] == logs.LOG_TRACES_MAX_N
@@ -304,3 +308,64 @@ def test_trace_tools_link_the_trace_viewer_widget():
     # The list/read tools stay plain JSON.
     assert tools['log_chapters'].meta is None
     assert tools['log_read'].meta is None
+
+
+def _event(seq, text):
+    return {'type': 'event', 'event': 'apaevt_output', 'body': {'logSeq': seq, 'eventTime': 1.5, 'text': text}}
+
+
+@pytest.mark.asyncio
+async def test_log_read_shortens_a_page_over_the_size_limit(fake_engine, result_limit):
+    result_limit(2000)
+    key = {'projectId': 'p1', 'source': 's1'}
+    # Two events that fit only without the two characters between them.
+    first = _event(1, 'a' * 500)
+    base = size_of({'ok': True, 'events': [], 'nextCursor': None, 'truncatedAtSeq': None})
+    second = _event(2, 'b' * (2000 - base - size_of(first) - size_of(_event(2, ''))))
+    fake_engine.log_read_result = {'events': [first, second]}
+    page = await logs._log_read(fake_engine, None, key)
+    assert (page['events'], page['nextCursor'], size_of(page) <= 2000) == ([first], 2, True)
+    assert 'truncated' not in page
+
+    # A first event that fills the page to the limit exactly is sent whole, not as a stub.
+    probe = {'ok': True, 'events': [_event(1, '')], 'nextCursor': 2, 'truncatedAtSeq': None}
+    first = _event(1, 'a' * (2000 - size_of(probe)))
+    fake_engine.log_read_result = {'events': [first, _event(2, 'b')]}
+    page = await logs._log_read(fake_engine, None, key)
+    assert (page['events'], page['nextCursor'], size_of(page)) == ([first], 2, 2000)
+
+    # One event too large to send alone comes back as a stub, and the cursor moves past it.
+    result_limit(1000)
+    big = {'event': '\U0001f600' * 200, 'body': {'logSeq': 7, 'eventTime': 1.5, 'text': 'x' * 5000}}
+    fake_engine.log_read_result = {'events': [big, _event(8, 'y')], 'nextSeq': 9}
+    page = await logs._log_read(fake_engine, None, key)
+    stub = page['events'][0]
+    assert (len(page['events']), page['nextCursor'], size_of(page) <= 1000) == (1, 8, True)
+    assert stub == {
+        'event': '\U0001f600' * 60,
+        'body': {'logSeq': 7, 'eventTime': 1.5},
+        'truncated': {'chars': size_of(big)},
+    }
+
+
+@pytest.mark.asyncio
+async def test_log_trace_and_log_traces_shorten_their_lists_over_the_size_limit(fake_engine, result_limit):
+    result_limit(1000)
+    fake_engine.log_trace_result = {'summary': None, 'events': [_event(i, 'x' * 50) for i in range(100)]}
+    result = await logs._log_trace(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'beginSeq': 3})
+    kept = len(result['events'])
+    assert result['truncated']['events'] == {'returned': kept, 'total': 100} and size_of(result) <= 1000
+    hint = result['truncated']['hint']
+    assert f"any teamId from this reply's context, and fromSeq set to {kept}." in hint
+
+    # Finished traces come oldest first, so the hint asks for exactly the newest ones left out.
+    fake_engine.log_traces_result = {'open': [], 'closed': [{'beginSeq': i, 'doc': 'd' * 40} for i in range(50)]}
+    result = await logs._log_traces(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'n': 50})
+    newest = 50 - len(result['traces'])
+    assert 0 < newest < 50 and result['truncated']['hint'].endswith(f'again with n set to {newest}.')
+
+    # When objects still in flight leave no room for any finished trace, the hint does not repeat the same call.
+    closed = [{'beginSeq': i, 'doc': 'd' * 400} for i in range(50)]
+    fake_engine.log_traces_result = {'open': [{'beginSeq': i} for i in range(20)], 'closed': closed}
+    result = await logs._log_traces(fake_engine, None, {'projectId': 'p1', 'source': 's1', 'n': 50})
+    assert (result['traces'], len(result['open'])) == ([], 20) and 'fromSeq set to 1.' in result['truncated']['hint']

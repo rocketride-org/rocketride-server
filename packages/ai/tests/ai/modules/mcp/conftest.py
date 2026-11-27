@@ -399,6 +399,14 @@ class FakeEngineClient:
 
 
 @pytest.fixture
+def result_limit():
+    from ai.modules.mcp import result_size
+
+    yield result_size.configure
+    result_size.configure(result_size.DEFAULT_MAX_CHARS)
+
+
+@pytest.fixture
 def fake_engine():
     return FakeEngineClient()
 

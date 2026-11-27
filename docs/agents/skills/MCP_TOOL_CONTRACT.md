@@ -17,6 +17,12 @@ Every result is a JSON object with `ok`. `ok: false` carries `error_type`, `mess
 the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JSON.
 **Check `ok` — a successful tool *call* is not a successful *result*.**
 
+Size limit: a result's JSON text is at most 40,000 characters by default (`MCP_RESULT_MAX_CHARS`). A tool that
+can shorten its result adds `truncated: {<key>: {returned, total} | {returned_chars, total_chars} | {dropped: true},
+hint?}`; a run tool that still cannot fit sets every key but `ok` and `task_token` to `null` and names them in
+`truncated.dropped`. `log_read` instead ends the page early and sets `nextCursor`. Any other result over the limit
+becomes `{ok: false, error_type: 'ResultTooLarge', message, hint}`: ask for less, never repeat the same call.
+
 ## Introspection
 
 | Tool | Input | Result (key fields) |
@@ -55,14 +61,14 @@ chapters/console but **empty traces**.
 |---|---|
 | `log_chapters` | Run/chapter listing — find the run. |
 | `log_read` | Paged events (≤200 events / 1 MiB per page, cursor to continue). |
-| `log_traces` | Per-object trace summaries (1–100, default 20). |
+| `log_traces` | Per-object trace summaries (1–50, default 20). |
 | `log_trace` | One object's full node/lane trace — the per-node enter/leave evidence. |
 
 ## Capability
 
 | Tool | Purpose |
 |---|---|
-| `store_read` | `{path}` → `{ok, path, content}`. Text only, inline and uncapped — prefer `store_stat` + `store_get_url` for big objects. |
+| `store_read` | `{path}` → `{ok, path, content}`. Text only, inline. A file whose result is over the size limit returns `ResultTooLarge`; use `store_stat` + `store_get_url` for big objects. |
 | `store_list` | `{path?}` (default `''` = root) → `{ok, path, listing}`. |
 | `store_stat` | `{path}` → `{ok, path, stat}` — exists, type (`file\|dir`), size, modified. |
 | `store_get_url` | `{path, expires_in?, download_name?}` → `{ok, path, url, expires_in}`. Signed URL — artifact-by-reference for large results. |

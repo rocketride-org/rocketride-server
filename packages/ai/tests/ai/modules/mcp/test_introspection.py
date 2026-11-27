@@ -655,3 +655,50 @@ async def test_validate_pipeline_reports_an_unknown_provider_once(fake_engine):
     result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
 
     assert result == {'ok': False, 'errors': [error], 'warnings': []}
+
+
+@pytest.mark.asyncio
+async def test_validate_pipeline_over_the_size_limit_keeps_the_leading_errors(fake_engine, result_limit):
+    result_limit(1000)
+    fake_engine._validate_result = {'errors': ['e' * 50] * 100, 'warnings': ['w' * 50] * 100}
+
+    result = await introspection._validate_pipeline(fake_engine, None, {'pipeline': {'components': []}})
+
+    kept = len(result['errors'])
+    assert (result['ok'], result['warnings'], len(json.dumps(result)) <= 1000) == (False, [], True)
+    assert result['truncated'] == {
+        'warnings': {'returned': 0, 'total': 100},
+        'errors': {'returned': kept, 'total': 100},
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_components_over_the_size_limit_lists_the_leading_rows(fake_engine, result_limit):
+    result_limit(1000)
+    fake_engine._services = {'services': {f'node_{i}': {'description': 'd' * 40} for i in range(100)}}
+
+    result = await introspection._list_components(fake_engine, None, {})
+
+    kept = len(result['components'])
+    assert 0 < kept < 100 and len(json.dumps(result)) <= 1000
+    assert result['truncated']['components'] == {'returned': kept, 'total': 100}
+    assert 'describe_component' in result['truncated']['hint']
+
+
+@pytest.mark.asyncio
+async def test_describe_component_over_the_size_limit_drops_the_layout_then_profiles(fake_engine, result_limit):
+    result_limit(3000)
+    names = [f'p{i}' for i in range(100)]
+    schema = {
+        'properties': {'profile': {'enum': names}},
+        'dependencies': {'profile': {'oneOf': [{'properties': {'profile': {'enum': [n]}}} for n in names]}},
+    }
+    fake_engine._service_defs = {'llm_x': {'title': 'X', 'Pipe': {'schema': schema, 'ui': {'form': 'x' * 5000}}}}
+
+    result = await introspection._describe_component(fake_engine, None, {'name': 'llm_x'})
+
+    kept = len(result['Pipe']['schema']['dependencies']['profile']['oneOf'])
+    assert (result['Pipe']['ui'], 0 < kept < 100, len(json.dumps(result)) <= 3000) == ({}, True, True)
+    assert result['truncated']['Pipe.ui'] == {'dropped': True}
+    assert result['truncated']['Pipe.schema.dependencies.profile.oneOf'] == {'returned': kept, 'total': 100}
+    assert f'only {kept} of 100 profiles' in result['truncated']['hint']

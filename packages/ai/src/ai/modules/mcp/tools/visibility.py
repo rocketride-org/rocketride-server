@@ -50,6 +50,7 @@ import asyncio
 import time
 from typing import Any, Dict
 
+from .. import result_size
 from ..apps import PIPELINES_TABLE_URI
 from ..errors import _bad
 from ..errors import _timeout
@@ -72,6 +73,10 @@ MIN_INTERVAL_SECONDS = 0.25
 DEFAULT_PER_POLL_TIMEOUT_SECONDS = 5
 
 _TERMINAL_STATES = {5, 6}
+
+# What a snapshot over the size limit gives up, in order. The engine's whole
+# status goes first; errors go last because they say why a run failed.
+_SNAPSHOT_STEPS = (result_size.drop('status', {}), result_size.rows('warnings'), result_size.rows('errors'))
 
 _STATE_LABELS = {
     0: 'none',
@@ -107,10 +112,10 @@ def _is_terminal(status: Dict[str, Any], state: int) -> bool:
     return state in _TERMINAL_STATES or bool(status.get('completed'))
 
 
-def _snapshot(token: str, status: Dict[str, Any], polls: int) -> dict:
+def _snapshot(token: str, status: Dict[str, Any], polls: int, poll_timed_out: bool = False) -> dict:
     state = status.get('state', 0)
     completed = bool(status.get('completed'))
-    return {
+    snapshot = {
         'ok': True,
         'task_token': token,
         'state': state,
@@ -127,6 +132,10 @@ def _snapshot(token: str, status: Dict[str, Any], polls: int) -> dict:
         'warnings': status.get('warnings', []),
         'polls': polls,
     }
+    if poll_timed_out:
+        snapshot['poll_timed_out'] = True
+    result_size.fit(snapshot, _SNAPSHOT_STEPS)
+    return snapshot
 
 
 async def _monitor(client, tasks, args: Dict[str, Any]) -> dict:
@@ -155,9 +164,7 @@ async def _monitor(client, tasks, args: Dict[str, Any]) -> dict:
             # (last-known, necessarily non-terminal) snapshot rather than
             # blow through the caller's overall `timeout`. Marked so the
             # caller can tell "the poll timed out" from "state is none".
-            snapshot = _snapshot(token, status, polls)
-            snapshot['poll_timed_out'] = True
-            return snapshot
+            return _snapshot(token, status, polls, poll_timed_out=True)
         except Exception as exc:  # noqa: BLE001 - normalized below, HardError re-raises
             return normalize_error(exc)
         polls += 1

@@ -29,6 +29,7 @@ from .errors import HardError, normalize_error
 from .registry import TaskRegistry
 from .tooling import ToolRegistry
 from . import apps as apps_mod
+from . import result_size
 from . import resources as resources_mod
 from . import tools as tools_pkg
 
@@ -198,6 +199,16 @@ def build_mcp_server(
         # json.loads of that same text guarantees structured_content can't
         # crash SDK serialization or diverge from the text content.
         text = json.dumps(result, default=str)
+        # The last check: nothing over the size limit leaves. The envelope names
+        # the tool only when the registry knows it, so it carries no caller text.
+        max_chars = result_size.limit()
+        if max_chars and len(text) > max_chars:
+            tool = None
+            if handler is not None:
+                tool = name
+            logger.warning('MCP tool %s returned %d characters, over the %d limit', tool, len(text), max_chars)
+            result = result_size.too_large(tool, len(text))
+            text = json.dumps(result)
         return types.CallToolResult(
             content=[types.TextContent(type='text', text=text)],
             structured_content=json.loads(text),

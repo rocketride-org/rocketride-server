@@ -30,6 +30,7 @@ import asyncio
 from typing import Any, Dict
 from urllib.parse import urlencode
 
+from .. import result_size
 from ..apps import DROPPER_URI
 from ..errors import _bad, _timeout
 from ..tooling import ToolHints, ToolRegistry
@@ -40,6 +41,26 @@ from ..tooling import ToolHints, ToolRegistry
 DEFAULT_TIMEOUT_SECONDS = 120
 
 _OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads', 'pipelineTraceLevel')
+
+
+def _output_note(payload: dict, notes: Dict[str, Any], kept: int, whole: str) -> None:
+    """Say how much of a run's output fits, and how to get all of it."""
+    notes['result'] = {'returned_chars': kept, 'total_chars': len(whole)}
+    notes['hint'] = (
+        f'The pipeline ran. Only the first {kept:,} of the {len(whole):,} characters of its output fit in one reply, '
+        'and running it again as it is will not return more. To get all of it, add a filestore component and run the '
+        'pipeline again. Filestore saves text, documents and tables as files under output/ in the file store, unless '
+        "you set its target directory. For a model's answers, put an answer_documents component in front of it. Then "
+        'find the file with store_list and call store_get_url on it for a download link.'
+    )
+
+
+_OUTPUT_STEPS = (result_size.text('result', note=_output_note),)
+# When even the run's identity and nulled output do not fit with the caller's own long values.
+_KEEP_HINT = (
+    'The pipeline started, but its reply was too large to send, so the values named in dropped were left out. '
+    'task_token still identifies the run, so use it with monitor or terminate.'
+)
 
 _RUN_PIPELINE_SCHEMA = {
     'type': 'object',
@@ -174,6 +195,8 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
         # registry for the life of the process (see registry.py).
         tasks.remove(token)
 
+    # The run has happened: whatever else is cut, the caller keeps the token.
+    result_size.fit(result_payload, _OUTPUT_STEPS, hint=_KEEP_HINT, keep=('ok', 'task_token'))
     return result_payload
 
 
@@ -223,6 +246,7 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
         'source': started.get('source'),
     }
 
+    result_size.fit(result_payload, (), hint=_KEEP_HINT, keep=('ok', 'task_token', 'upload_url', 'dropper_url'))
     return result_payload
 
 
@@ -251,7 +275,9 @@ async def _send_data(client, tasks, args: Dict[str, Any]) -> dict:
             'the task may still be processing; retry send_data or call monitor',
         )
 
-    return {'ok': True, 'result': result}
+    payload = {'ok': True, 'result': result}
+    result_size.fit(payload, _OUTPUT_STEPS)
+    return payload
 
 
 async def _terminate(client, tasks, args: Dict[str, Any]) -> dict:
@@ -288,7 +314,9 @@ async def _send_files(client, tasks, args: Dict[str, Any]) -> dict:
             'the upload may still be in progress; retry send_files or call monitor',
         )
 
-    return {'ok': True, 'result': result}
+    payload = {'ok': True, 'result': result}
+    result_size.fit(payload, _OUTPUT_STEPS)
+    return payload
 
 
 def register(registry: ToolRegistry) -> None:

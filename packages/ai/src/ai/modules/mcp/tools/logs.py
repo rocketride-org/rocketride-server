@@ -12,6 +12,7 @@ and console still exist, but traces come back empty.
 import asyncio
 from typing import Any, Dict
 
+from .. import result_size
 from ..apps import TRACE_VIEWER_URI
 from ..engine import LogNotFound
 from ..errors import _bad, _timeout
@@ -29,8 +30,12 @@ LOG_READ_MAX_BYTES = 1_048_576
 # unbounded concurrency multiplies worst-case memory.
 _LOG_READ_CONCURRENCY = asyncio.Semaphore(4)
 LOG_TRACES_MIN_N = 1
-LOG_TRACES_MAX_N = 100
+# The SDK's get_traces refuses more than 50 (rocketride.log_stream._MAX_TRACES).
+LOG_TRACES_MAX_N = 50
 LOG_TRACES_DEFAULT_N = 20
+
+# The longest event name a stub keeps, so a stub page always fits the smallest limit.
+_STUB_EVENT_CHARS = 60
 
 _RETENTION_HINT = (
     'runs are evicted after 7 days (dev) / 30 days (deploy), or earlier under '
@@ -135,11 +140,43 @@ async def _log_read(client, tasks, args: Dict[str, Any]) -> dict:
             'hint': _RETENTION_HINT,
         }
     result = result or {}
-    return {
+    events = result.get('events') or []
+    page = {
         'ok': True,
-        'events': result.get('events') or [],
+        'events': events,
         'nextCursor': result.get('nextSeq'),
         'truncatedAtSeq': result.get('truncatedAtSeq'),
+    }
+    # A page over the size limit loses events from the end, and nextCursor
+    # points at the first one left out. One event too large to send alone
+    # becomes a stub, so every page moves the cursor forward.
+    result_size.fit(page, (result_size.rows('events', note=_next_cursor),))
+    if events and not page['events']:
+        page['events'] = [_stub(events[0])]
+        page['nextCursor'] = _log_seq(events[0]) + 1
+    return page
+
+
+def _log_seq(event: Dict[str, Any]) -> int:
+    body = event.get('body')
+    if not isinstance(body, dict):
+        return 0
+    return int(body.get('logSeq') or 0)
+
+
+def _next_cursor(page: dict, notes: Dict[str, Any], kept: int, events: list) -> None:
+    page['nextCursor'] = _log_seq(events[kept])
+
+
+def _stub(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Stand in for one event too large to send: its name, number, time and size."""
+    body = event.get('body')
+    if not isinstance(body, dict):
+        body = {}
+    return {
+        'event': str(event.get('event') or '')[:_STUB_EVENT_CHARS],
+        'body': {'logSeq': body.get('logSeq'), 'eventTime': body.get('eventTime')},
+        'truncated': {'chars': result_size.size_of(event)},
     }
 
 
@@ -184,7 +221,69 @@ async def _log_traces(client, tasks, args: Dict[str, Any]) -> dict:
             'no traces recorded — the run may have been submitted with '
             "pipelineTraceLevel 'none' (MCP run tools default to 'summary')"
         )
+    result_size.fit(payload, (result_size.rows('traces', note=_traces_note), result_size.rows('open', note=_open_note)))
     return payload
+
+
+def _after_run(open_traces: list) -> str:
+    """The next step when objects still in flight leave no room for finished traces."""
+    text = f'When the run ends, call log_traces again to see the newest finished traces, up to {LOG_TRACES_MAX_N}.'
+    # Without fromSeq, log_read starts at the oldest retained event, which can belong to an older run.
+    starts = []
+    for trace in open_traces:
+        if isinstance(trace, dict) and isinstance(trace.get('beginSeq'), int) and trace['beginSeq'] > 0:
+            starts.append(trace['beginSeq'])
+    if starts:
+        text += (
+            " To read the run's events now, starting where the oldest object still in flight began, call log_read "
+            f"with the projectId, source and any teamId from this reply's context, and fromSeq set to {min(starts)}."
+        )
+    return text
+
+
+def _traces_note(payload: dict, notes: Dict[str, Any], kept: int, traces: list) -> None:
+    # The engine lists finished traces oldest first, so the newest are the ones left out.
+    newest = len(traces) - kept
+    in_flight = len(payload.get('open') or [])
+    notes['traces'] = {'returned': kept, 'total': len(traces)}
+    see = f'To see the {newest} newest'
+    if in_flight:
+        # The objects in flight take room in the next reply too, so it may show only some of them.
+        see = 'To see newer ones'
+    notes['hint'] = (
+        f'Only the oldest {kept} of {len(traces)} finished traces fit in one reply. {see}, call log_traces again with '
+        f'n set to {newest}.'
+    )
+    if kept == 0:
+        none_fit = f'None of the {len(traces):,} finished traces fit in one reply'
+        if in_flight:
+            none_fit += f' next to the {in_flight:,} objects still in flight'
+        notes['hint'] = f'{none_fit}. {_after_run(payload.get("open") or [])}'
+
+
+def _open_note(payload: dict, notes: Dict[str, Any], kept: int, open_traces: list) -> None:
+    # This step runs only after every finished trace was left out.
+    notes['open'] = {'returned': kept, 'total': len(open_traces)}
+    cut = f'Only {kept:,} of the {len(open_traces):,} objects still in flight fit in one reply.'
+    finished = (notes.get('traces') or {}).get('total')
+    if finished:
+        cut = (
+            f'None of the {finished:,} finished traces and only {kept:,} of the {len(open_traces):,} objects still in '
+            'flight fit in one reply.'
+        )
+    notes['hint'] = f'{cut} {_after_run(open_traces)}'
+
+
+def _trace_note(payload: dict, notes: Dict[str, Any], kept: int, events: list) -> None:
+    notes['events'] = {'returned': kept, 'total': len(events)}
+    start = ''
+    if _log_seq(events[kept]):
+        start = f', and fromSeq set to {_log_seq(events[kept])}'
+    notes['hint'] = (
+        f'Only the first {kept:,} of {len(events):,} events of this trace fit in one reply, and calling log_trace '
+        'again returns the same events. To read on, call log_read with the projectId, source and any teamId from this '
+        f"reply's context{start}. log_read returns every object's events, not only this trace's."
+    )
 
 
 async def _log_trace(client, tasks, args: Dict[str, Any]) -> dict:
@@ -214,13 +313,15 @@ async def _log_trace(client, tasks, args: Dict[str, Any]) -> dict:
             'hint': _RETENTION_HINT,
         }
     result = result or {}
-    return {
+    payload = {
         'ok': True,
         'beginSeq': int(begin_seq),
         'summary': result.get('summary'),
         'events': result.get('events') or [],
         'context': _context(project_id, source, team_id),
     }
+    result_size.fit(payload, (result_size.rows('events', note=_trace_note),))
+    return payload
 
 
 def register(registry: ToolRegistry) -> None:

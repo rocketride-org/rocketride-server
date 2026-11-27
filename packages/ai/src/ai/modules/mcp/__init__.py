@@ -18,6 +18,7 @@ from ai.web import oauth_resource, openai_apps_challenge
 
 from . import auth
 from . import identity
+from . import result_size
 from .apps import origin_of
 from .engine import make_engine_client
 from .handlers import build_mcp_server
@@ -700,6 +701,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     engine_origin = _base_url_from_uri(engine_uri)
     ui_domain = _resolve_ui_domain()
     logger.info('MCP widget domain for ChatGPT: %s', ui_domain or 'not set')
+    result_size.configure(result_size.parse(os.environ.get(result_size.ENV_MAX_CHARS)))
     mcp_server = build_mcp_server(
         engine_factory,
         task_registry,
