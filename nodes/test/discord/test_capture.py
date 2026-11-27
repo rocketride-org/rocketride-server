@@ -1826,6 +1826,7 @@ class TestWriterThread:
                 stopper = threading.Thread(target=writer.stop, kwargs={'timeout': 0.1}, daemon=True)
                 stopper.start()
                 stopper.join(30)
+                stop_returned = not stopper.is_alive()
         finally:
             release.set()
         thread.join(5)
@@ -1833,6 +1834,7 @@ class TestWriterThread:
         # The put into the full queue used up the whole budget, so the drain gets none of it.
         put.assert_called_once_with(mock.ANY, timeout=0.1)
         join.assert_called_once_with(0.0)
+        assert stop_returned, 'stop() did not return within 30 s'
 
     def test_a_full_queue_still_lets_the_worker_end(self):
         release = threading.Event()
