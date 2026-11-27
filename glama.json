@@ -1,6 +1,6 @@
 {
 	"$schema": "https://glama.ai/mcp/schemas/server.json",
 	"name": "rocketride",
-	"description": "RocketRide is an open source AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. Its built-in HTTP MCP server lets an AI assistant build, validate, run and observe RocketRide pipelines, manage deployments and read your account file store. Nothing to install.",
+	"description": "Build, check and run RocketRide data and AI pipelines, and read each run's logs and traces. Also deploy pipelines, set their schedules and read files in your account's file store. Connect to the hosted server at https://api.rocketride.ai/mcp with your RocketRide account, so there is nothing to install. A self-hosted RocketRide engine runs the same MCP server.",
 	"maintainers": ["Rod-Christensen", "jmaionchi", "stepmikhaylov", "joshuadarron"]
 }
