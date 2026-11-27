@@ -1148,3 +1148,16 @@ html.docs-doc-id-index .theme-doc-markdown .rr-kicker {
 .pagination-nav__link:hover:not(#\#):not(#\#) {
 	border-color: var(--ifm-link-color);
 }
+
+/* ----------------------------------------------------------------------------
+ * Light and dark variants of one image, marked the way GitHub marks them: a
+ * `#gh-light-mode-only` or `#gh-dark-mode-only` fragment on the image URL. The
+ * page shows the variant for the current theme, and hides the other one with
+ * the link around it, so the hidden link takes no keyboard stop.
+ * ------------------------------------------------------------------------- */
+[data-theme='light'] a:has(> img[src$='#gh-dark-mode-only']),
+[data-theme='dark'] a:has(> img[src$='#gh-light-mode-only']),
+[data-theme='light'] img[src$='#gh-dark-mode-only'],
+[data-theme='dark'] img[src$='#gh-light-mode-only'] {
+	display: none;
+}

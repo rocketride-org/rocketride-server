@@ -30,10 +30,10 @@ Self-hosted engines serve the same endpoint automatically at
 
 ## Authentication
 
-Clients like Claude and ChatGPT authenticate with OAuth — the first connection
-triggers an interactive login, and users without a RocketRide account can sign
-up from the same screen. Header-capable clients (Cursor, scripts, CLIs) can
-instead send a RocketRide API key: `Authorization: Bearer rr_...`.
+Claude, ChatGPT, Cursor and VS Code sign in with OAuth. The first connection
+opens a browser sign-in, and users without a RocketRide account can sign up from
+the same screen. Scripts, CI jobs and clients that cannot open a browser send a
+RocketRide API key instead: `Authorization: Bearer rr_...`.
 
 Task-scoped keys (`tk_`/`pk_`) are never accepted on this endpoint. Setup steps
 for each client are on [Connect a client](/connect/mcp/http/connect).
