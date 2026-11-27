@@ -33,6 +33,7 @@ import pytest
 
 from ai.modules.shell.template import MAX_SECTION_DEPTH, TemplateError, render
 
+from ...linear_time import assert_linear_time
 from .hostile_fixtures import HOSTILE_DESCRIPTION, HOSTILE_NAME
 
 CTX = {
@@ -144,31 +145,10 @@ def test_a_tag_is_one_short_line(tpl):
 
 
 def test_a_run_of_open_braces_renders_in_linear_time():
-    """Four times the input must not approach quadratic (16x) CPU growth.
-
-    Thread CPU time and medians of alternating samples keep a busy machine out of the ratio.
-    """
-    from statistics import median
-    from time import thread_time
-
-    def measure(tpl, repetitions):
-        started = thread_time()
-        for _ in range(repetitions):
-            render(tpl, {})
-        return thread_time() - started
-
     templates = ['{{' * 1_000, '{{' * 4_000]
     for tpl in templates:
         assert render(tpl, {}) == tpl
-    repetitions = 1
-    while measure(templates[0], repetitions) < 0.125:
-        repetitions *= 2
-    samples = [[], []]
-    for _ in range(3):
-        for index, tpl in enumerate(templates):
-            samples[index].append(measure(tpl, repetitions))
-    small, large = (median(sample) for sample in samples)
-    assert large < 8 * small, (small, large)
+    assert_linear_time(lambda tpl: render(tpl, {}), *templates)
 
 
 def test_engine_names_resolve_from_the_root_context_only():

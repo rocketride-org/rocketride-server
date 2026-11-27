@@ -35,6 +35,7 @@ from typing import Any, List, Tuple
 import pytest
 
 from .._real_langchain import LANGCHAIN_SYMBOLS, load_adapter, real_langchain_or_skip
+from ..linear_time import assert_linear_time
 
 FINAL_SENTINEL = 'FINAL>>>'
 ANSWER_JSON = '{"company": "Acme", "revenue": 1200}'
@@ -1626,39 +1627,14 @@ class TestRunModelTurn:
     ],
 )
 def test_a_long_reply_is_read_in_linear_time(make_reply, count):
-    """Four times the input must not approach quadratic (16x) CPU growth.
+    def read(raw):
+        ask, _feedback = scripted(raw)
+        try:
+            reply._run_model_turn(ask)
+        except ValueError:
+            pass
 
-    Alternate sizes on the same worker and compare medians. Thread CPU time excludes
-    scheduling delays from other CI workers; a generous 8x ratio allows normal noise.
-    Batch enough calls to span several Windows CPU-clock ticks (which can be 15.6 ms),
-    using the same repetition count for both sizes. Pytest's suite timeout remains
-    the watchdog for a parser that never returns.
-    """
-    from statistics import median
-    from time import thread_time
-
-    def measure(raw, repetitions):
-        started = thread_time()
-        for _ in range(repetitions):
-            ask, _feedback = scripted(raw)
-            try:
-                reply._run_model_turn(ask)
-            except ValueError:
-                pass
-        return thread_time() - started
-
-    replies = [make_reply(count // 4), make_reply(count)]
-    for raw in replies:
-        measure(raw, 1)
-    repetitions = 1
-    while measure(replies[0], repetitions) < 0.125:
-        repetitions *= 2
-    samples = [[], []]
-    for _ in range(3):
-        for index, raw in enumerate(replies):
-            samples[index].append(measure(raw, repetitions))
-    small, large = (median(sample) for sample in samples)
-    assert large < 8 * small, (small, large)
+    assert_linear_time(read, make_reply(count // 4), make_reply(count))
 
 
 @pytest.mark.parametrize('prefix', ['Sets look like {1, 2}.\n', 'Example: {"x": 1}\n', '{curly} braces.\n'])

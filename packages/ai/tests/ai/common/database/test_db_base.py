@@ -41,6 +41,8 @@ from ai.common.database.db_instance_base import DatabaseInstanceBase, MissingLlm
 from ai.common.schema import Question
 from ai.common.utils import parse_bool
 
+from ...linear_time import assert_linear_time
+
 
 # ---------------------------------------------------------------------------
 # Test subclass that satisfies the two abstract methods
@@ -542,33 +544,10 @@ def test_format_db_error_leaves_text_that_resembles_a_clickhouse_echo_alone(base
 
 @pytest.mark.parametrize('filler', [' ', ' \n', '\n '])
 def test_format_db_error_time_does_not_grow_with_whitespace(base, filler):
-    """Four times the input must not approach quadratic (16x) CPU growth.
-
-    Thread CPU time and medians of alternating samples keep a busy machine out of the ratio.
-    """
-    from statistics import median
-    from time import thread_time
-
-    def measure(exc, repetitions):
-        started = thread_time()
-        for _ in range(repetitions):
-            base._format_db_error(exc)
-        return thread_time() - started
-
-    errors = [
+    small, large = (
         _wrapped(_FakeDriverError(f'bad{filler * size}value [SQL: SELECT 1]'), 'SELECT 1', {}) for size in (250, 1000)
-    ]
-    for exc in errors:
-        measure(exc, 1)
-    repetitions = 1
-    while measure(errors[0], repetitions) < 0.125:
-        repetitions *= 2
-    samples = [[], []]
-    for _ in range(3):
-        for index, exc in enumerate(errors):
-            samples[index].append(measure(exc, repetitions))
-    small, large = (median(sample) for sample in samples)
-    assert large < 8 * small, (small, large)
+    )
+    assert_linear_time(base._format_db_error, small, large)
 
 
 # ---------------------------------------------------------------------------

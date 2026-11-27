@@ -14,6 +14,8 @@ import pytest
 
 from ai.common.database import DatabaseGlobalBase
 
+from ..linear_time import assert_linear_time
+
 NODE_DIR = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'db_clickhouse'
 TRACE = (
     '. Stack trace:\n\n0. DB::Exception::Exception(DB::Exception::MessageMasked&&, int, bool) @ 0x0000000011001070\n'
@@ -348,31 +350,8 @@ def test_a_message_that_was_only_an_echo_says_so(g):
 
 @pytest.mark.parametrize('filler', [' ', '\t', ' \n', '\n: ', '\nRow 1:'])
 def test_formatting_time_does_not_grow_with_whitespace(g, filler):
-    """Four times the input must not approach quadratic (16x) CPU growth.
-
-    Thread CPU time and medians of alternating samples keep a busy machine out of the ratio.
-    """
-    from statistics import median
-    from time import thread_time
-
-    def measure(exc, repetitions):
-        started = thread_time()
-        for _ in range(repetitions):
-            g._format_db_error(exc)
-        return thread_time() - started
-
-    errors = [
+    small, large = (
         DatabaseException(ServerException(27, f"DB::Exception: Cannot parse '{filler * size}' as UInt32" + TRACE))
         for size in (250, 1000)
-    ]
-    for exc in errors:
-        measure(exc, 1)
-    repetitions = 1
-    while measure(errors[0], repetitions) < 0.125:
-        repetitions *= 2
-    samples = [[], []]
-    for _ in range(3):
-        for index, exc in enumerate(errors):
-            samples[index].append(measure(exc, repetitions))
-    small, large = (median(sample) for sample in samples)
-    assert large < 8 * small, (small, large)
+    )
+    assert_linear_time(g._format_db_error, small, large)
