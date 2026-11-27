@@ -1822,7 +1822,10 @@ class TestWriterThread:
                 mock.patch.object(writer._queue, 'put', wraps=writer._queue.put) as put,
                 mock.patch.object(thread, 'join', wraps=thread.join) as join,
             ):
-                writer.stop(timeout=0.1)
+                # On its own thread, so a put with no timeout fails the checks below instead of hanging.
+                stopper = threading.Thread(target=writer.stop, kwargs={'timeout': 0.1}, daemon=True)
+                stopper.start()
+                stopper.join(30)
         finally:
             release.set()
         thread.join(5)
