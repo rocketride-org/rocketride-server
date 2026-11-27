@@ -8,10 +8,12 @@ with an attached ``dap_result`` body. ``normalize_error`` classifies by
 type-name (not class identity, since most failures collapse to
 ``RuntimeError``) into either a hard failure (raised as ``HardError``,
 surfaced to the agent as an MCP tool error) or a structured, self-correctable
-result dict.
+result dict. Every message built here passes ``redact.clean_text``.
 """
 
 from typing import Any, Optional
+
+from .redact import clean_text
 
 HARD_EXC_NAMES = ('ConnectionError', 'AuthenticationException', 'TimeoutError')
 
@@ -22,10 +24,11 @@ class HardError(Exception):
     Raised by ``normalize_error`` for exceptions whose type name is in
     ``HARD_EXC_NAMES``; callers let this propagate so the MCP dispatch layer
     surfaces it as an MCP tool error rather than an in-band ``{ok: False}``
-    result.
+    result. The message is cleaned with ``clean_text``.
     """
 
     def __init__(self, message: str, error_type: str = 'hard'):
+        message = clean_text(message)
         super().__init__(message)
         self.message = message
         self.error_type = error_type
@@ -36,7 +39,7 @@ def _bad(message: str, hint: str) -> dict:
     return {
         'ok': False,
         'error_type': 'BadRequest',
-        'message': message,
+        'message': clean_text(message),
         'hint': hint,
     }
 
@@ -55,7 +58,7 @@ def _timeout(message: str, hint: str) -> dict:
     call happened to run long." Deliberately uses ``error_type: 'Timeout'``
     (not ``'TimeoutError'``) so it never collides with ``HARD_EXC_NAMES``.
     """
-    return {'ok': False, 'error_type': 'Timeout', 'message': message, 'hint': hint}
+    return {'ok': False, 'error_type': 'Timeout', 'message': clean_text(message), 'hint': hint}
 
 
 def _extract_dap_failure(exc: Exception) -> Optional[str]:
@@ -90,6 +93,6 @@ def normalize_error(exc: Exception, *, hint: Optional[str] = None) -> dict:
     return {
         'ok': False,
         'error_type': error_type,
-        'message': _extract_dap_failure(exc) or str(exc),
+        'message': clean_text(_extract_dap_failure(exc) or str(exc)),
         'hint': hint,
     }

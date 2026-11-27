@@ -252,15 +252,27 @@ async def test_monitor_single_poll_timeout_returns_current_snapshot_not_hard_err
 
 
 @pytest.mark.asyncio
-async def test_list_running_pipelines_returns_tasks(fake_engine):
+async def test_list_running_pipelines_returns_rows_without_the_pipeline():
+    from .conftest import FakeEngineClient
+
+    row = {
+        'name': 'demo',
+        'description': 'A running pipeline',
+        'source': 'source_1',
+        'token': 'live-tok',
+        'status': {'state': 3},
+        'teamId': 'team-1',
+        'runKind': 'dev',
+        'ownerKind': 'user',
+        'ownerId': 'user-1',
+    }
+    engine = FakeEngineClient(tasks=[{**row, 'pipeline': {'components': [{'config': {'apikey': 'canary'}}]}}])
     registry = ToolRegistry()
     visibility.register(registry)
 
-    result = await registry.handler('list_running_pipelines')(fake_engine, None, {})
+    result = await registry.handler('list_running_pipelines')(engine, None, {})
 
-    assert result['ok'] is True
-    assert result['count'] == len(result['tasks'])
-    assert result['tasks'][0]['token']
+    assert result == {'ok': True, 'tasks': [row], 'count': 1}
 
 
 def test_list_running_pipelines_registered():

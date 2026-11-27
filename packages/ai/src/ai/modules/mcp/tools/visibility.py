@@ -184,8 +184,10 @@ async def _list_running_pipelines(client, tasks, args: Dict[str, Any]) -> dict:
             'list_running_pipelines timed out waiting for the engine',
             'retry list_running_pipelines',
         )
-    running = running or []
-    return {'ok': True, 'tasks': running, 'count': len(running)}
+    # A row keeps every key the engine sends except `pipeline`, the whole
+    # definition the task was started with.
+    rows = [{key: value for key, value in row.items() if key != 'pipeline'} for row in running or []]
+    return {'ok': True, 'tasks': rows, 'count': len(rows)}
 
 
 def register(registry: ToolRegistry) -> None:
@@ -202,8 +204,8 @@ def register(registry: ToolRegistry) -> None:
     )(_monitor)
     registry.register(
         'list_running_pipelines',
-        'List running pipelines on the connected server with their task tokens, names, and status. '
-        'Use the tokens with monitor, send_data, or terminate.',
+        'List running pipelines on the connected server. Each row has the task token, name, description, '
+        'source, status, run kind, team and owner. Use the tokens with monitor, send_data, or terminate.',
         {'type': 'object', 'properties': {}},
         ui_resource_uri=PIPELINES_TABLE_URI,
         hints=ToolHints.reads('Lists the running tasks the caller is permitted to see on this engine.'),

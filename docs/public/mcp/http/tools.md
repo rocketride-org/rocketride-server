@@ -22,7 +22,9 @@ is not offered (see its entry). This page is the full reference; the
   its budget — the hint says how to recover), `NotFound`/`TraceExpired` (log
   tools), `Unavailable` (a local-engine-only tool called on a deployed engine),
   `UnknownTool`. Hard failures (lost engine connection, auth) surface
-  as MCP protocol errors with the original message preserved.
+  as MCP protocol errors that carry the error's message. In both kinds of error
+  the message shows RocketRide keys (`rr_`, `rrr_`, `rrmg_`), JWTs, and
+  credentials in URLs or `name=value` pairs as `[redacted]`.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
   `send_files`, `terminate`) get 120 seconds per engine call.
@@ -215,7 +217,8 @@ separate HTTP channel (bytes cannot ride an MCP tool call).
   browser page where a person can drag and drop files into the running
   pipeline.
 - **Notable:** the URLs embed only the task's public key (`pk_`); the control
-  token never appears in a URL. If the pipeline has no data-ingress source, the
+  token never appears in a URL. Both URLs work without sign-in while the task
+  runs. If the pipeline has no data-ingress source, the
   task is cleaned up and the call fails with a `BadRequest` instead of leaving
   an orphaned run. In MCP Apps hosts the result renders as the
   [file-dropper widget](/connect/mcp/http/resources-and-widgets#widgets).
@@ -277,8 +280,10 @@ always returns within the timeout.
 List the running pipelines on the connected server.
 
 - **Parameters:** none.
-- **Returns:** `{ok, tasks, count}` — task tokens, names, and status, ready to
-  feed `monitor`, `send_data`, or `terminate`. In MCP Apps hosts the result
+- **Returns:** `{ok, tasks, count}`. Each row has the task's `token`, `name`,
+  `description`, `source`, `status`, `runKind`, `teamId`, `ownerKind` and
+  `ownerId`, but not its pipeline definition. Use the token with `monitor`,
+  `send_data`, or `terminate`. In MCP Apps hosts the result
   renders as the
   [pipelines-table widget](/connect/mcp/http/resources-and-widgets#widgets).
 
@@ -314,9 +319,11 @@ Get a time-limited signed download URL for a store file — the out-of-band
 counterpart to `store_read` for large or binary files.
 
 - **Parameters:** `path` (string, required); `expires_in` (integer ≥ 1,
-  optional, default 3600 seconds); `download_name` (string, optional —
-  filename the browser saves as).
-- **Returns:** `{ok, path, url, expires_in}`.
+  optional, default and at most 3600 seconds); `download_name` (string,
+  optional — filename the browser saves as).
+- **Returns:** `{ok, path, url, expires_in}`. `expires_in` is the link's
+  lifetime, so a request for more than 3600 seconds reports 3600. The link
+  works without sign-in until it expires.
 
 ## Manage deployments
 

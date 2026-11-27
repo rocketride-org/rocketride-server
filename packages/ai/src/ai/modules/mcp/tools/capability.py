@@ -21,6 +21,8 @@ from ..tooling import ToolHints, ToolRegistry
 from ._common import engine_call as _engine_call
 from ._common import load_pipeline
 
+# The longest lifetime the store gives a signed download link, in seconds.
+_MAX_URL_SECONDS = 3600
 
 _PIPELINE_SCHEMA_PROPS = {
     'pipeline': {'type': 'object', 'description': 'Inline pipeline definition'},
@@ -53,7 +55,11 @@ _STORE_GET_URL_SCHEMA = {
     'type': 'object',
     'properties': {
         'path': {'type': 'string', 'description': 'Store-relative file path'},
-        'expires_in': {'type': 'integer', 'minimum': 1, 'description': 'URL lifetime in seconds (default 3600)'},
+        'expires_in': {
+            'type': 'integer',
+            'minimum': 1,
+            'description': 'URL lifetime in seconds (default and at most 3600)',
+        },
         'download_name': {'type': 'string', 'description': 'Optional filename for the browser download'},
     },
     'required': ['path'],
@@ -239,6 +245,9 @@ async def _store_get_url(client, tasks, args: Dict[str, Any]) -> dict:
         expires_in = 3600
     elif not isinstance(expires_in, int) or isinstance(expires_in, bool) or expires_in < 1:
         return _bad('expires_in must be a positive integer', 'omit it to use the 3600-second default')
+    # The store signs a link for at most this long (FileStore.get_url), so the
+    # reply reports the lifetime the link really has.
+    expires_in = min(expires_in, _MAX_URL_SECONDS)
     url, err = await _engine_call(
         client.fs_get_url(path, expires_in=expires_in, download_name=args.get('download_name')), 'store_get_url'
     )
@@ -503,7 +512,8 @@ def register(registry: ToolRegistry) -> None:
     registry.register(
         'store_get_url',
         'Get a time-limited signed download URL for a store file -- the out-of-band '
-        'counterpart to store_read for large files that cannot ride an in-band result.',
+        'counterpart to store_read for large files that cannot ride an in-band result. '
+        'The link works without sign-in until it expires.',
         _STORE_GET_URL_SCHEMA,
         hints=ToolHints.reads(
             "Signs a time-limited download URL for a file in the caller's store; nothing is stored or "

@@ -48,9 +48,11 @@ async def test_call_tool_dispatches_to_registered_handler(monkeypatch, fake_engi
 async def test_call_tool_unknown_name_returns_error_result_not_crash(fake_engine):
     import ai.modules.mcp.handlers as handlers_mod
 
+    key_name = 'rr_' + 'a' * 32
     server = handlers_mod.build_mcp_server(lambda: fake_engine)
     async with Client(server) as client:
         result = await client.call_tool('nope', {})
+        key_named = await client.call_tool(key_name, {})
 
     # A structured, self-correctable result -- not a crash. is_error mirrors
     # the in-band ok flag so hosts see the failure without parsing the body.
@@ -58,6 +60,10 @@ async def test_call_tool_unknown_name_returns_error_result_not_crash(fake_engine
     payload = json.loads(result.content[0].text)
     assert payload['ok'] is False
     assert payload['error_type'] == 'UnknownTool'
+    assert payload['message'] == 'Unknown tool: nope'
+    # A key-shaped name is not repeated back.
+    assert key_name not in key_named.content[0].text
+    assert key_named.structured_content['message'] == 'Unknown tool: [redacted]'
 
 
 @pytest.mark.asyncio

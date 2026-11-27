@@ -26,6 +26,7 @@ from .cache_policy import (
 )
 from .engine import EngineClient
 from .errors import HardError, normalize_error
+from .redact import clean_text
 from .registry import TaskRegistry
 from .tooling import ToolRegistry
 from . import apps as apps_mod
@@ -164,7 +165,7 @@ def build_mcp_server(
             result = {
                 'ok': False,
                 'error_type': 'UnknownTool',
-                'message': f'Unknown tool: {name}',
+                'message': f'Unknown tool: {clean_text(name)}',
                 'hint': f'Call list_tools to see the {len(registry.names())} available tool(s).',
             }
         else:
