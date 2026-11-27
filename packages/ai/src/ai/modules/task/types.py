@@ -150,7 +150,11 @@ class TaskError(RuntimeError):
       ``CONST_SUBMIT_INLINE_MAX``; ``limit``
     - TASK_ENGINE_UNAVAILABLE: the engine under the caller's hold was stopped
       by an operator; ``engineKey`` and ``reason`` say which and why. Told
-      once per control: the next call re-resolves
+      once per control: the next call re-resolves. A start is refused with it
+      too, and no control is dropped, so the same call works later:
+      ``reason='superseded'`` while another version of the address still runs
+      on its rung, ``reason='stopping'`` while the engine of its key still
+      runs a self-driven source after a stop its runtime did not take
     - TASK_ENGINE_START_FAILED: an engine never confirmed running (plan 3.8,
       7.2): no event from the subprocess for ``CONST_MAX_READY_TIME``, a
       spec that cannot be keyed; ``engineKey``

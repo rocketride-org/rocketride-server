@@ -743,6 +743,7 @@ class TaskServer(DAPBase):
         self._launched: Dict[int, Set[str]] = {}  # Launching connection id -> keys of the controls it launched
         self._engine_restarts: Dict[str, Deque[float]] = {}  # Engine key -> automatic restart times, last hour
         self._restart_tasks: Set[asyncio.Task] = set()  # Pending automatic listener restarts
+        self._ttl_stops: Set[asyncio.Task] = set()  # TTL stops still running (_ttl_stop)
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
         self._connection_id = 0  # Monotonic connection identifier generator
         self._unauthed_by_ip: Dict[str, int] = {}  # Count of unauthenticated connections per client IP
@@ -780,8 +781,10 @@ class TaskServer(DAPBase):
         self._server = server
         self._config = server.config
 
-        # The runtime every Task of this process starts with (see launcher())
+        # The runtime every TaskEngine of this process starts with (see launcher()); its
+        # one-time work (docker: info and the startup sweep) runs now, before the first task
         self._launcher: Optional[Launcher] = None
+        self._bg_tasks.append(asyncio.create_task(self._prepare_launcher()))
 
         # Initialize DAP base class with server identification
         super().__init__('SERVER', **kwargs)
@@ -801,6 +804,19 @@ class TaskServer(DAPBase):
         if self._launcher is None:
             self._launcher = create_launcher(self._config.get('runtime') or '', self)
         return self._launcher
+
+    async def _prepare_launcher(self) -> None:
+        """
+        Run the launcher's one-time preparation at startup.
+
+        A failure (no docker daemon) is logged here and raised again by each
+        task start, which retries it.
+        """
+        try:
+            await self.launcher().prepare()
+        except Exception as e:
+            runtime = self._launcher.name if self._launcher else self._config.get('runtime')
+            warning(f'Task runtime {runtime!r} is not ready: {e}')
 
     @property
     def store(self) -> Store:
@@ -897,6 +913,9 @@ class TaskServer(DAPBase):
           ``CONST_ENGINE_IDLE_TTL`` (plan 7.2), even while controls hold it:
           they stay, dormant, and their next request starts the engine again
           (``ensure_engine``). An engine with a ttl-0 holder does not age.
+
+        Each stop runs as its own task (``_ttl_stop``), so a stop that does not
+        end holds no other check.
 
         This method runs as a background async task throughout server lifetime.
         """
@@ -997,7 +1016,7 @@ class TaskServer(DAPBase):
             # Its own idle time reached its ttl: release this hold only.
             # Reason 'ttl', so the run records as completed, never as cancelled
             self.debug_message(f'Task "{control.id}" exceeded TTL ({int(idle)}s >= {control.ttl}s), releasing...')
-            await self.stop_task(control.key, reason='ttl')
+            await self._ttl_stop(self.stop_task(control.key, reason='ttl'))
 
         # Step 2: engines whose own inactivity reached the policy timer
         while self._engine_expiry and self._engine_expiry[0][0] <= now:
@@ -1024,13 +1043,34 @@ class TaskServer(DAPBase):
             # next request starts it again under the same key (plan 7.2)
             self.debug_message(f'Engine "{engine.engine_key}" inactive for {int(idle)}s, stopping...')
             engine.dormant_reason = 'ttl'
-            await self._stop_engine_now(engine, 'ttl')
+            await self._ttl_stop(self._stop_engine_now(engine, 'ttl'))
 
         return popped
 
+    async def _ttl_stop(self, stop: Awaitable[None]) -> None:
+        """
+        Start one stop of a TTL pass as its own task, and go on once it has taken its first step.
+
+        A stop whose runtime does not take its signals waits for its bound
+        (``TaskEngine.stop_task``); the checks after it do not. Its first step
+        marks the engine stopping, so step 2 of the same pass does not stop as
+        inactive an engine whose last control step 1 released.
+
+        Args:
+            stop: The stop to run.
+        """
+        task = asyncio.ensure_future(stop)
+        self._ttl_stops.add(task)
+        task.add_done_callback(self._ttl_stops.discard)
+        await asyncio.wait({task}, timeout=0)
+
     async def shutdown(self) -> None:
-        """Cancel all background tasks, pending listener restarts included."""
-        bg_tasks = getattr(self, '_bg_tasks', []) + list(getattr(self, '_restart_tasks', ()))
+        """Cancel all background tasks, pending listener restarts and TTL stops included."""
+        bg_tasks = (
+            getattr(self, '_bg_tasks', [])
+            + list(getattr(self, '_restart_tasks', ()))
+            + list(getattr(self, '_ttl_stops', ()))
+        )
         for task in bg_tasks:
             if not task.done():
                 task.cancel()
@@ -2840,12 +2880,24 @@ class TaskServer(DAPBase):
                     conn._monitors.pop(monitor_key, None)
 
     def _drop_engine(self, engine: TaskEngine) -> None:
-        """Take ``engine`` out of the pool, unless a newer engine already holds its key."""
+        """Take ``engine`` out of the pool, unless a newer engine holds its key or its stop left it running."""
+        if engine.left_running:
+            return
         self._engines.unregister(engine)
 
     async def _stop_engine_now(self, engine: TaskEngine, reason: str) -> None:
         """
-        Stop an engine and take it out of the pool.
+        Stop an engine; it leaves the pool unless its stop left it running.
+
+        A stop that gives up while the engine's launch still runs
+        (``TaskEngine.left_running``) leaves the engine under its key, or puts
+        it back there when no other engine of the key serves or still runs:
+        the start gate then refuses a self-driven key while it runs
+        (``_require_not_left_running``), and ``stop_engine(key)`` reaches it to
+        signal it again. A later stop that ends it takes it out. An engine
+        started under the key while the stop still signalled keeps the key.
+        Every engine stop comes here: the take-back and the pool removal after
+        the stop live only here.
 
         Args:
             engine: The engine to stop.
@@ -2853,6 +2905,16 @@ class TaskServer(DAPBase):
         """
         self._drop_engine(engine)
         await engine.stop_task(reason)
+        if not engine.left_running:
+            self._engines.unregister(engine)
+            return
+        key = engine.engine_key
+        current = self._engines.get(key)
+        if current is None or not (current.accepting_holds or current.left_running):
+            self._engines.register(key, engine)
+            self.debug_message(f'Engine "{key}" keeps its key while it runs')
+        elif current is not engine:
+            self.debug_message(f'Engine "{key}" is left running beside a newer engine of its key, which keeps the key')
 
     async def remove_task(self, key: str, *, reason: str = 'user') -> TaskControl:
         """
@@ -3682,12 +3744,14 @@ class TaskServer(DAPBase):
                     control,
                     key=key,
                     shared=shared,
+                    self_driven=content.self_driven,
                     threads=threads,
                     launch_args=args,
                     env_source=None if shared else self._owner_chain(control, overrides),
                 ),
                 _register,
                 credential=credential,
+                address=control.address,
             )
 
             # The gate answered with a twin: the caller's control already runs.
@@ -3921,12 +3985,35 @@ class TaskServer(DAPBase):
                 engineKey=engine.engine_key,
             )
 
+    @staticmethod
+    def _require_not_left_running(engine: Optional[TaskEngine], address: str) -> None:
+        """
+        Refuse a start beside ``engine`` while the launch its stop gave up on still runs a self-driven source.
+
+        A second engine of such a shape would take the same input. A door
+        source's requests reach only the engine their control holds, so a door
+        shape starts anew beside it.
+
+        Raises:
+            TaskError: TASK_ENGINE_UNAVAILABLE with ``address``, ``engineKey`` and ``reason='stopping'``.
+        """
+        if engine is not None and engine.left_running and engine.self_driven:
+            raise TaskError(
+                TaskError.ENGINE_UNAVAILABLE,
+                f'The engine {engine.engine_key!r} did not end when it was stopped and still runs; '
+                'stop it again, or call again once it has ended',
+                address=address,
+                engineKey=engine.engine_key,
+                reason='stopping',
+            )
+
     def _new_engine(
         self,
         control: TaskControl,
         *,
         key: str,
         shared: bool,
+        self_driven: bool,
         threads: int,
         launch_args: Dict[str, Any],
         env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
@@ -3949,6 +4036,7 @@ class TaskServer(DAPBase):
             control: The control the engine is started for.
             key: The engine key (plan 7.2).
             shared: True for a shared engine (its key names no owner).
+            self_driven: The shape's entry source drives itself (``EngineContent.self_driven``).
             threads: The engine's thread count.
             launch_args: The launch arguments (``name``, ``args``).
             env_source: Loads the default values at each start (private engines).
@@ -3968,6 +4056,7 @@ class TaskServer(DAPBase):
             launch_type=control.launch_type,
             provider=control.provider,
             shared=shared,
+            self_driven=self_driven,
             threads=threads,
             trace_level='none' if shared else control.trace_level,
             client_id=control.client_id if not shared and control.owner_type == 'user' else '',
@@ -3986,6 +4075,7 @@ class TaskServer(DAPBase):
         hold: Callable[[TaskEngine], None],
         *,
         credential: Optional[str] = None,
+        address: str = '',
     ) -> TaskEngine:
         """
         The start gate: attach to the live engine of ``key``, or start one.
@@ -3994,7 +4084,9 @@ class TaskServer(DAPBase):
         builds and starts the engine, the rest attach to it. A finished or
         stopping engine takes no new holds. ``start_task`` (a new control) and
         ``ensure_engine`` (a dormant control's next request) both come here,
-        so a restart and a fresh start of the same key are one start.
+        so a restart and a fresh start of the same key are one start. A key
+        whose engine a stop left running a self-driven source starts nothing
+        meanwhile (``_require_not_left_running``).
 
         Args:
             key: The engine key.
@@ -4002,14 +4094,19 @@ class TaskServer(DAPBase):
             hold: Takes the caller's hold on the engine (under the lock).
             credential: The presenting connection's, for the databases of an
                 engine this call starts (``TaskEngine.start_task``). Not kept.
+            address: The caller's address, carried by a refusal.
 
         Returns:
             The engine the hold is on.
+
+        Raises:
+            TaskError: TASK_ENGINE_UNAVAILABLE (reason ``stopping``) from ``_require_not_left_running``.
         """
         # Step 1: one gate per key, removed when its last user leaves
         async with self._engines.start_lock(key):
-            # Step 2: the live engine of the key, if any
+            # Step 2: the live engine of the key, if any; none beside one a stop left running
             engine = self._engines.get(key)
+            self._require_not_left_running(engine, address)
             if engine is not None and not engine.accepting_holds:
                 engine = None
 
@@ -4042,7 +4139,11 @@ class TaskServer(DAPBase):
         Identity, holds, deployment and ttl are the control's and do not
         change. Concurrent requests (through this or any
         other holder of the stopped engine) attach to the one new engine.
-        Startup is paid once; there is no error and no re-resolve.
+        Startup is paid once; there is no error and no re-resolve, except
+        while an engine of the key that a stop left running still runs a
+        self-driven source: the gate refuses (``TASK_ENGINE_UNAVAILABLE``,
+        reason ``stopping``) and the control stays dormant for its next
+        request.
 
         An engine that is running, or that stopped for any other reason (an
         operator's stop, a terminate, a natural completion, a failure before
@@ -4104,12 +4205,14 @@ class TaskServer(DAPBase):
                     control,
                     key=stopped.engine_key,
                     shared=stopped.shared,
+                    self_driven=stopped.self_driven,
                     threads=stopped._threads,
                     launch_args=stopped._launch_args or {},
                     env_source=None if stopped.shared else stopped._env_source,
                 ),
                 _hold,
                 credential=credential,
+                address=control.address,
             )
 
         except Exception:
@@ -4162,6 +4265,9 @@ class TaskServer(DAPBase):
             PermissionError: The control is not the caller's.
             TaskError: The spec cannot be keyed (engine_start_failed), or it
                 has no ``project_id``.
+            TaskError: TASK_ENGINE_UNAVAILABLE (reason ``stopping``) while the
+                run's engine, which a stop left running, still runs a
+                self-driven source; the run stays as it was.
         """
         try:
             args = request.get('arguments', {})
@@ -4214,6 +4320,8 @@ class TaskServer(DAPBase):
             # meanwhile still finds it (broadcast_task_event delivers only to
             # a registered control), as does a request naming its id
             old_engine = control.task
+            # A Play over a listener its stop left running starts nothing beside it, whatever the new shape
+            self._require_not_left_running(old_engine, control.address)
             control.restarting = True
             successor = {
                 'command': control.launch_type.value,
@@ -4335,9 +4443,10 @@ class TaskServer(DAPBase):
                     self.debug_message(f'Task "{control.id}" released its engine (reason: {reason})')
                     return
 
-                # The last hold: the engine stops with it, at once
-                self._drop_engine(engine)
-                await engine.stop_task(reason)
+                # The last hold: the engine stops with it, at once. Nobody is left
+                # to keep dormant, also when an inactivity stop gave up before it
+                engine.dormant_reason = None
+                await self._stop_engine_now(engine, reason)
                 self.debug_message(f'Task "{control.id}" stopped on request (reason: {reason})')
 
                 # A @spec control ends with its run: no grace window and no
@@ -4346,8 +4455,8 @@ class TaskServer(DAPBase):
                 # delivered through the registered control. A new run started
                 # under the same key meanwhile is not this control's to remove.
                 # The wait is bounded: a stalled terminal-event forward must not
-                # hold this caller (the ttl monitor stops tasks serially); on a
-                # timeout the control is left to the cleanup pass instead.
+                # hold this caller; on a timeout the control is left to the
+                # cleanup pass instead.
                 if control.run_kind == 'dev':
                     try:
                         await asyncio.wait_for(control.task.wait_terminated(), timeout=CONST_TEARDOWN_WAIT_TIMEOUT)

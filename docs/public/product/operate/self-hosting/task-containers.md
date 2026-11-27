@@ -1,0 +1,321 @@
+---
+title: Tasks in Containers
+---
+
+# Run Each Task in Its Own Container
+
+By default an engine runs every pipeline as a child process on its own host:
+the same filesystem, network and user as the engine, one shared
+`site-packages`, one memory budget. Started with `--runtime=docker`, it runs
+each task in a container of its own instead, through the local Docker daemon.
+
+Each task container gets:
+
+- its own filesystem and network namespace
+- the engine's own user: the container runs with the engine's uid and gid, so
+  it reads a directory mounted into it as the engine does. Under a rootless
+  daemon that user is the container's root; an engine that runs as root, or on
+  Windows, runs tasks as the image's user (see
+  [Files and storage](#files-and-storage))
+- its own dependencies, installed into the container rather than shared
+- a memory and CPU limit (`2g` and one CPU unless you change them)
+- no Linux capabilities and no privilege escalation
+
+Pipelines, their results and the protocol clients speak do not change.
+`--runtime=spawn` keeps tasks as child processes. It is the default, `--saas` or not.
+
+## What the host needs
+
+- The `docker` CLI on the engine's `PATH`, and a daemon it can reach as the
+  engine's user (`docker info` works). A daemon that runs as root gives whoever
+  reaches its socket root on the host, the engine included: prefer a rootless
+  daemon where you can.
+- The node image of the engine's own version, `rocketride/node:<version>`.
+  The engine never pulls it while a task starts; a missing image fails the
+  start with a message naming the task that builds it. Build it from a Linux
+  checkout with `./builder container:build`, or point `RR_DOCKER_IMAGE` at the
+  published image of the same version
+  (`ghcr.io/rocketride-org/rocketride-node:<version>`) after pulling it.
+
+## Turn it on
+
+```bash
+./engine ai/eaas.py --runtime=docker
+```
+
+Everything else is set in the engine's environment or its `.env` file:
+
+| Variable               | Default                     | Effect                                                                                                                                                                                                                    |
+| ---------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_DOCKER_IMAGE`      | `rocketride/node:<version>` | The node image. Never `latest`: a task protocol of another version is not compatible. An image of your own must keep the default one's user, uid and gid 1000, and its entrypoint (tini) or have none.                    |
+| `RR_DOCKER_PUBLISH`    | `auto`                      | `true` dials a port published on `127.0.0.1`, `false` dials the container's IP; `auto` decides from the daemon (below).                                                                                                   |
+| `RR_DOCKER_MEMORY`     | `2g`                        | Memory limit per task.                                                                                                                                                                                                    |
+| `RR_DOCKER_CPUS`       | `1`                         | CPU limit per task.                                                                                                                                                                                                       |
+| `RR_DOCKER_PIDS_LIMIT` | `4096`                      | Processes and threads per task, so that one task cannot use up the host's process table and stop the others.                                                                                                              |
+| `RR_DOCKER_NETWORK`    | `bridge`                    | The Docker network tasks join. `host`, `none` and `container:<name>` are refused: each task needs a network of its own.                                                                                                   |
+| `RR_DOCKER_MODELS`     | none                        | A host directory of model files, mounted read-only at `/models`, with `HF_HOME` pointing there. The daemon must find it at the same path: one it does not find is created on its host, empty.                             |
+| `RR_DOCKER_MOUNTS`     | none                        | Comma-separated names of variables that name host directories a task needs; each is mounted read-only at `/opt/mounts/<name>`, and the variable points there inside the container. The node tests use it for their mocks. |
+| `RR_DOCKER_LOG_DRIVER` | `none`                      | The containers' log driver. Task output always reaches the engine; `json-file` also makes `docker logs` work while a task runs.                                                                                           |
+| `RR_DOCKER_INSTANCE`   | `<hostname>:<engine port>`  | Labels the engine's containers. It must stay the same across restarts so the engine can remove containers an earlier run left behind.                                                                                     |
+
+The engine's server configuration can set the same values under its `docker`
+key, named as the variables are without `RR_DOCKER_` and in lower case
+(`image`, `memory` and so on). A value there wins over the variable.
+
+## How the engine reaches a task
+
+Inside every container the task listens on port 5570. With
+`RR_DOCKER_PUBLISH=auto`, an engine on the Linux host of a rootful Docker
+Engine dials the container's IP. Elsewhere it publishes that port on
+`127.0.0.1` and dials the published port: on Docker Desktop, whose containers
+live in a VM, under a rootless daemon, whose containers live in a network
+namespace of their own, and from macOS or Windows. `true` and `false` choose
+one way or the other wherever the engine runs. The task authenticates the
+engine with a per-run token either way.
+
+The daemon must run on the engine's own host. The engine refuses one that
+`DOCKER_HOST` or the current docker context places on another host: a port
+published there is out of its reach, and a mount would name that host's files.
+
+An engine that itself runs in a container, driving the host's daemon through
+its socket, reaches a task only over a Docker network both share: set
+`RR_DOCKER_PUBLISH=false` and `RR_DOCKER_NETWORK` to a network the engine's
+container is attached to. A published port is on the daemon's host, not in the
+engine's container.
+
+## Services on the host
+
+Inside a container, `127.0.0.1` is the container itself. A loopback address in
+`--modelserver` or in a RocketRide database DSN is therefore rewritten to
+`host.docker.internal`, which every task container can resolve. A DSN is
+rewritten in its single-host URL form only
+(`postgresql://user@127.0.0.1:5432/db`): a loopback host in a host list
+(`h1:5432,h2:5432`), a `?host=` parameter or a `host=` keyword stays as it is.
+
+- On Docker Desktop that name reaches services listening on the host's
+  loopback.
+- On a local Linux Engine it is the bridge gateway, so a model server or
+  PostgreSQL listening only on `127.0.0.1` is unreachable from a task. Make it
+  listen on the bridge address as well, and for PostgreSQL allow the bridge
+  subnet in `pg_hba.conf`.
+
+## Environment
+
+A task container gets the variables a child process would get (see
+[Security](/operate/security)), except the ones that describe the engine's
+host: `PATH`, `HOME`, temporary and certificate paths, `XDG_*`, `UV_CACHE_DIR`,
+the model and data caches (`HF_HOME`, `HF_HUB_CACHE`, `TRANSFORMERS_CACHE`,
+`TORCH_HOME` and their kin) and similar. Values reach the container by name,
+never on a command line.
+
+Everything a task gets is visible to anyone who can run `docker inspect` on
+its container. Treat access to the Docker daemon as access to those values.
+
+## Files and storage
+
+The task file is streamed into the container and goes with it; the engine
+writes no copy to disk. The packaged nodes the run loads go in the same way,
+64 MiB at most, from the engine's own `nodes/` directory, before the task
+starts: the task loads the same copies a child process would.
+
+Pipelines that use the file-system tool (`tool_filesystem`), or the skills
+tool (`tool_skills`) with a skills folder, reach the account's file store
+through the engine, over the task's own connection to it, as a child process
+does: nothing of the store is mounted into the container, and the store's
+address and `RR_STORE_SECRET_KEY` stay in the engine (see
+[Security](/operate/security)). A store with no key pair in
+`RR_STORE_SECRET_KEY` takes its keys from `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY`, and those reach every task, in a container as in a
+child process, since the `AWS_*` variables are passed on for the AWS nodes.
+
+The daemon must find the directories `RR_DOCKER_MOUNTS` names at the same
+paths, as it does when the engine runs on the daemon's host, which is how the
+node tests use them for their mocks. A directory the daemon does not find is
+created on its host, empty, and the task sees an empty mount.
+
+A task reads them as the user it runs as (the image's user for an engine that
+runs as root, or on Windows), so that user must be able to read them. A
+variable a child process would not get (see [Security](/operate/security)) is
+skipped: list it in `RR_SUBPROCESS_ENV` as well. On Docker Engine older than
+25.0, or on Linux kernels older than 5.12, Docker leaves a mount inside such a
+directory writable, so name none that has mounts inside it. The same holds for
+the `RR_DOCKER_MODELS` directory.
+
+## Logs and cleanup
+
+Task output always reaches the engine and its clients as it does today. With
+the default log driver, `docker logs` shows nothing.
+
+Each container is removed when its task ends. When the engine starts, it
+removes containers labelled with its `RR_DOCKER_INSTANCE` that an earlier run
+left behind.
+
+## Known limits
+
+- No GPU reaches a task container, so a node that would compute on a local GPU
+  runs on the CPU. Use a model server for GPU work.
+- Nodes that work on the engine host's own files see only the container's.
+- A task runs the nodes in the image and the packaged nodes its run loads. A
+  custom node that only the engine's own `nodes/` directory holds is not
+  available in a task container.
+- A task's crash dump stays in its container. When the engine runs with
+  `--dumps`, a task that crashes writes one and its console names the file,
+  but the container is removed when the task ends, and the dump with it.
+- A task that is killed from outside the engine without reporting it (by the
+  kernel's out-of-memory killer, for example) ends as `Stopped` with the
+  container's exit code, 137 for `SIGKILL`, not as `Stopped unexpectedly`. A
+  crash the engine reports itself ends as `Stopped unexpectedly`, as without
+  containers.
+- A task that loses its connection to the engine stops at once: its input
+  closes, and it does not run on without the engine. It ends as
+  `Stopped unexpectedly`, with what happened in its console. A node whose own
+  code ends the process with exit code 0 reads the same.
+- A stop that the daemon refuses or does not answer gives up about 40 s after
+  it was asked for, with a warning. The task runs on until it ends; meanwhile a
+  start of the same listener, poller or scan is refused
+  (`TASK_ENGINE_UNAVAILABLE`, reason `stopping`), and a later stop signals it
+  again. Under k8s a kill also closes the task's input, so a task ends without
+  the `delete` right on pods.
+- Task containers can reach whatever the Docker network allows. Restrict
+  egress on the host if tasks must not reach your internal network. On Docker
+  Desktop they can also reach services on the host's loopback, the engine's
+  own port included.
+
+## Tasks as Kubernetes Jobs
+
+Started with `--runtime=k8s`, the engine runs each task as a Kubernetes Job of
+one pod instead of a container, through the `kubectl` CLI. This runtime was
+built to compare with the docker one on the same work. It is never a default,
+and it does less: see [How it differs from docker](#how-it-differs-from-docker).
+
+A task's pod gets what a task container gets: its own filesystem and network
+namespace, its own dependencies, a memory and CPU limit, no Linux capabilities
+and no privilege escalation. It runs as uid and gid 1000, the node image's
+user, without a token for the cluster's API, and fits a namespace that
+enforces the `restricted` Pod Security Standard.
+
+### What the cluster needs
+
+- The `kubectl` CLI on the engine's `PATH`, and a cluster it reaches: through a
+  kubeconfig context (`RR_K8S_CONTEXT`, else the current one), or the cluster
+  the engine itself runs in.
+- A namespace for the tasks, `rocketride-tasks` unless you name another. The
+  engine does not create it. Give it to one engine: the engine knows its pods
+  by their labels, so whoever can create pods there can pose as a task's pod,
+  and get what a task gets: its task file, its environment, and its requests,
+  with the files and state they reach through the engine.
+- The node image of the engine's own version where the cluster's nodes get
+  their images from. `rocketride/node:<version>` is never pulled:
+  no registry of the project publishes that name, so it has to be on the node
+  already, as with `RR_K8S_IMAGE_PULL_POLICY=Never`; a missing image fails the
+  start with a message saying so.
+- These permissions in that namespace, for the account `kubectl` uses:
+
+| Resource                  | Verbs                            | For                                                                                                                    |
+| ------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `jobs` (`batch`)          | `create`, `list`, `delete`       | A Job per task.                                                                                                        |
+| `pods`                    | `get`, `list`, `watch`, `delete` | Following a task's pod, and stopping it.                                                                               |
+| `pods/attach`             | `create`, `get`                  | The task's input and output.                                                                                           |
+| `pods/portforward`        | `create`, `get`                  | Tasks dialled through a forwarded port: `RR_K8S_REACH=forward`, or `auto` with the engine outside the cluster (below). |
+| `pods` (`metrics.k8s.io`) | `list`                           | Only CPU and memory readings; optional.                                                                                |
+
+### Start the engine with it
+
+```bash
+./engine ai/eaas.py --runtime=k8s
+```
+
+Everything else is set in the engine's environment or its `.env` file:
+
+| Variable                                      | Default                                            | Effect                                                                                                                                                                                                                                                        |
+| --------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_K8S_NAMESPACE`                            | `rocketride-tasks`                                 | The namespace the Jobs are created in.                                                                                                                                                                                                                        |
+| `RR_K8S_CONTEXT`                              | the current context                                | The kubeconfig context. Leave it unset for an engine that runs in the cluster.                                                                                                                                                                                |
+| `RR_K8S_IMAGE`                                | `rocketride/node:<version>`                        | The node image. Never `latest`: a task protocol of another version is not compatible.                                                                                                                                                                         |
+| `RR_K8S_IMAGE_PULL_POLICY`                    | `Never` for `rocketride/node`, else `IfNotPresent` | `Always`, `IfNotPresent` or `Never`. By default an image of another name is pulled when the node lacks it.                                                                                                                                                    |
+| `RR_K8S_MEMORY`, `RR_K8S_CPUS`                | `2Gi`, `1`                                         | Memory and CPU limit per task.                                                                                                                                                                                                                                |
+| `RR_K8S_MEMORY_REQUEST`, `RR_K8S_CPU_REQUEST` | `256Mi`, `100m`                                    | What the cluster reserves for each task.                                                                                                                                                                                                                      |
+| `RR_K8S_EPHEMERAL_STORAGE`                    | none                                               | Disk limit per task. Unset, the namespace's own limits apply.                                                                                                                                                                                                 |
+| `RR_K8S_REACH`                                | `auto`                                             | `pod` dials the pod's IP, `forward` dials a port forwarded to `127.0.0.1`; `auto` decides from where the engine runs (below).                                                                                                                                 |
+| `RR_K8S_HOST_ALIAS`                           | none                                               | The name pods reach the engine's host by (see [How it differs from docker](#how-it-differs-from-docker)).                                                                                                                                                     |
+| `RR_K8S_MOUNTS`                               | none                                               | Comma-separated names of variables that name host directories a task needs; each is copied into the pod at `/opt/data/mounts/<name>` without its symbolic links, 16 MiB in all at most, and the variable points there. The node tests use it for their mocks. |
+| `RR_K8S_INSTANCE`                             | `<hostname>-<engine port>`                         | Labels the engine's Jobs. It must stay the same across restarts so the engine can remove Jobs an earlier run left behind.                                                                                                                                     |
+| `RR_K8S_NODE_SELECTOR`                        | none                                               | `key=value[,key=value]`: the node labels a task's pod asks for.                                                                                                                                                                                               |
+| `RR_K8S_TOLERATIONS`                          | none                                               | A JSON list of tolerations, as a pod spec holds them.                                                                                                                                                                                                         |
+| `RR_K8S_NODE`                                 | none                                               | The node tasks run on; `same` is the engine's own, read from `NODE_NAME`.                                                                                                                                                                                     |
+| `RR_K8S_RUNTIME_CLASS`                        | none                                               | The pods' runtime class.                                                                                                                                                                                                                                      |
+| `RR_K8S_START_TIMEOUT`                        | `120`                                              | Seconds a task's pod may take to run before the start fails.                                                                                                                                                                                                  |
+| `RR_K8S_TTL`                                  | `600`                                              | Seconds the cluster keeps a finished Job the engine did not remove itself.                                                                                                                                                                                    |
+
+The engine's server configuration can set the same values under its `k8s`
+key, named as the variables are without `RR_K8S_` and in lower case
+(`namespace`, `image_pull_policy` and so on). A value there wins over the
+variable.
+
+### How the engine reaches a pod
+
+Inside every pod the task listens on port 5570. With `RR_K8S_REACH=auto`, an
+engine that is a pod itself dials the task's pod IP, and any other engine
+forwards a port of its own `127.0.0.1` to the pod (`kubectl port-forward`) and
+dials that. `pod` and `forward` choose one way or the other wherever the engine
+runs. The task authenticates the engine with a per-run token either way. The
+task listens on IPv4 only, so dialling the pod's IP needs a cluster that gives
+pods an IPv4 address.
+
+### How it differs from docker
+
+- **Files and storage.** A pod shares no filesystem with the engine, and
+  nothing is mounted into it: only the packaged nodes the run loads, 64 MiB at
+  most, and the directories named in `RR_K8S_MOUNTS` are copied in, when the
+  task starts; as under docker, a variable a child process would not get is
+  skipped unless `RR_SUBPROCESS_ENV` lists it. The file-system and skills
+  tools reach the store through the engine, as under docker.
+- **CPU and memory readings.** They come from the cluster's metrics API, about
+  every 15 seconds. Without a metrics server they read zero.
+- **Task output.** It reaches the engine and its clients as it does today. The
+  node also keeps it as the container's log, so `kubectl logs` shows it while
+  the pod exists, as far as the node's log rotation keeps it: the oldest output
+  can be gone sooner. There is no setting that turns this off. Reading it takes
+  `get` on `pods/log`, which the engine itself does not need.
+- **Services on the host.** A loopback address in `--modelserver` or in a
+  RocketRide database DSN is rewritten to `RR_K8S_HOST_ALIAS`, a DSN in its
+  single-host URL form only, as under docker: a host list stays as it is. A
+  cluster has no name of its own for the engine's host, so without the alias a
+  task that needs such an address is refused before it starts. On Docker
+  Desktop's cluster the alias is `host.docker.internal`.
+- **Environment.** The values are not in the pod's spec. They travel with the
+  task file on the stream the engine attaches to the pod, so reading the Job
+  or the pod (`kubectl get`, `kubectl describe`) shows none of them.
+- **User.** Tasks run as uid and gid 1000, the node image's user, whatever the
+  image's `USER` says, and never as the engine's. The task's command runs
+  through the image's entrypoint, as under docker, so an image of your own in
+  `RR_K8S_IMAGE` must keep the node image's entrypoint (tini) or have none.
+  It must also let uid 1000 run the engine and write under
+  `/opt/rocketride` and `/opt/data`.
+- **A pod that goes away.** A pod that someone else deletes while its task
+  runs is told to stop first: the task reports its cancel and ends as
+  `Stopped`. A pod that is gone before it showed an exit code, with no word
+  from its task, ends as `Stopped unexpectedly`. So does a task whose output
+  has ended while its pod shows no exit code; the engine then deletes the pod.
+- **Cleanup.** The engine deletes each Job, and its pod with it, when the task
+  ends, and at start it removes the Jobs labelled with its `RR_K8S_INSTANCE`
+  that an earlier run left behind. A finished Job it never got to is removed
+  by the cluster after `RR_K8S_TTL`.
+
+The other [known limits](#known-limits) above hold here too: no GPU, no files
+of the engine host, no custom node the image lacks, a crash dump that stays in
+the container, a task whose container is killed from outside the engine
+without a report ends as `Stopped` with the container's exit code, while one
+whose pod is gone before it showed an exit code ends as `Stopped unexpectedly`
+(above), and a task that loses its connection to the engine ends as
+`Stopped unexpectedly`. The network one is docker's: a pod reaches whatever the
+cluster's network allows, so restrict its egress with a NetworkPolicy in the
+tasks' namespace if tasks must not reach your internal network. A NetworkPolicy
+has an effect only where the cluster's network plugin enforces it: check that
+yours does.
+
+## Related
+
+- [Self-hosting](/operate/self-hosting): install and start the engine.
+- [Docker](/operate/self-hosting/docker): run the engine itself in a container.
+- [Security](/operate/security): what a task can see.

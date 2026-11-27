@@ -1522,13 +1522,16 @@ module.exports = {
 					// Use the pre-built engine binary from the assembled dist directory.
 					const engine = path.join(DIST_DIR, getExecName('engine'));
 
-					// Forward --trace=... and --saas from the CLI to the eaas.py process.
+					// Forward --trace=..., --saas and --runtime=... from the CLI to the eaas.py process.
 					const args = ['ai/eaas.py'];
 					if (options.trace?.length) {
 						args.push(`--trace=${options.trace.join(',')}`);
 					}
 					if (options.saas) {
 						args.push('--saas');
+					}
+					if (options.runtime) {
+						args.push(`--runtime=${options.runtime}`);
 					}
 
 					// --modelserver: true means local (default address), string means use given address

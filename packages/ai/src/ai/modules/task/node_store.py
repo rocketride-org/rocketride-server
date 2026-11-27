@@ -53,6 +53,11 @@ _schemas: Dict[str, Dict[str, Any]] = {}
 # What `rocketlib.resolveConfig` consumes of a service the engine lists
 _SCHEMA_KEYS = ('properties', 'params', 'capabilities')
 
+# Every node the index lists, and provider -> name of those the engine found on disk at start: a copy an earlier
+# run unpacked is the engine's own from then on, yet a run in a container of its own needs it as much
+_index: Dict[str, Dict[str, Any]] = {}
+_on_disk: Dict[str, str] = {}
+
 # Two runs naming the same node must not unpack it at once
 _unpacking = threading.Lock()
 
@@ -66,7 +71,7 @@ def start() -> None:
                 f'NODE_VERSION_MISMATCH: node index contract {index.get("contract")}, engine reads {CONST_NODES_CONTRACT}'
             )
             return
-        nodes, providers, definitions = _served(index)
+        nodes, providers, definitions, on_disk = _served(index)
         # The engine parses them now: a definition it refuses would fail every catalogue call. A
         # definition in the old node format is refused here, like one on disk. What it lists for
         # each is the resolved schema a server-side lookup needs before the node is unpacked. The
@@ -79,6 +84,9 @@ def start() -> None:
             f'NODE_REGISTRY_UNAVAILABLE: the node index could not be used ({e}); only the nodes the server carries are available'
         )
         return
+    # The copies on disk load in every run, whether or not more can be unpacked
+    _index.update(index['nodes'])
+    _on_disk.update(on_disk)
     problem = _unwritable(node_release.nodes_dir()) if nodes else None
     if problem:
         # A read-only install: say so once, rather than refuse every run that names one
@@ -111,17 +119,23 @@ def _schemas_of(listed: Any, providers: Iterable[str]) -> Dict[str, Dict[str, An
     return schemas
 
 
-def _served(index: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Any]]:
-    """The index's nodes the engine does not find on disk: name -> entry, provider -> name, provider -> definition."""
+def _served(index: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Any], Dict[str, str]]:
+    """The index's nodes not on disk (name -> entry, provider -> name, provider -> definition), and those on disk.
+
+    The last map is provider -> name of the nodes the engine finds on disk.
+    """
     nodes: Dict[str, Any] = {}
     providers: Dict[str, str] = {}
     definitions: Dict[str, Any] = {}
+    on_disk: Dict[str, str] = {}
     for name, entry in index['nodes'].items():
         services = {file: json.loads(text) for file, text in entry['services'].items()}
         protocols = [service['protocol'].split(':')[0] for service in services.values() if 'protocol' in service]
         # A node found on disk (a development tree, or the server still carries it) is the engine's own;
         # one with no service, a library others import, is placed only through their `requires`
         if protocols and all(getServiceDefinition(provider) is not None for provider in protocols):
+            for provider in protocols:
+                on_disk.setdefault(provider.lower(), name)
             continue
         for provider in protocols:
             if providers.setdefault(provider.lower(), name) != name:
@@ -133,7 +147,7 @@ def _served(index: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str], Dict
             provider = service.get('protocol', '').split(':')[0].lower()
             if providers.get(provider) == name:
                 definitions[provider] = _inline_icon(service, entry['icons'])
-    return nodes, providers, definitions
+    return nodes, providers, definitions, on_disk
 
 
 def _replace_stale(index: Dict[str, Any]) -> None:
@@ -244,13 +258,36 @@ def _with_requires(names: Iterable[str], nodes: Optional[Dict[str, Any]] = None)
     return order
 
 
-def place(pipeline: Dict[str, Any]) -> List[str]:
-    """Unpack into nodes/ each node the pipeline names that the server does not carry; the nodes placed."""
-    names = _with_requires({_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers})
+def place(pipeline: Dict[str, Any], isolated: bool = False) -> List[str]:
+    """Unpack into nodes/ each node the pipeline names that the server does not carry.
+
+    Args:
+        pipeline: The resolved pipeline.
+        isolated: The run's task sees only nodes/ (a container or a pod): a node the engine loads
+            from a source tree (nodes/src/nodes), which nodes/ has no folder of, is unpacked too.
+
+    Returns:
+        The index's nodes the run loads from nodes/: the nodes placed, then the copies an earlier run
+        unpacked that the pipeline names or a placed node imports. A folder with no digest is the
+        server's own and is not named.
+    """
+    providers = _providers_of(pipeline.get('components', []))
+    names = _with_requires({_providers[p] for p in providers if p in _providers})
+    loaded = _with_requires(set(names) | {_on_disk[p] for p in providers if p in _on_disk}, _index)
+    nodes_dir = node_release.nodes_dir()
     with _unpacking:
         for name in names:
             sha256 = _nodes[name]['sha256']
             # Already unpacked: the package is not read, so a launch does not open the node archive
-            if node_packages.digest_of(os.path.join(node_release.nodes_dir(), name)) != sha256:
-                node_packages.unpack(name, account.node_package(name, sha256), sha256, node_release.nodes_dir())
-    return names
+            if node_packages.digest_of(os.path.join(nodes_dir, name)) != sha256:
+                node_packages.unpack(name, account.node_package(name, sha256), sha256, nodes_dir)
+        # The image of an isolated task holds only the server's own nodes
+        for name in loaded if isolated else []:
+            if name not in names and not os.path.isdir(os.path.join(nodes_dir, name)):
+                sha256 = _index[name]['sha256']
+                node_packages.unpack(name, account.node_package(name, sha256), sha256, nodes_dir)
+        return names + [
+            name
+            for name in loaded
+            if name not in names and node_packages.digest_of(os.path.join(nodes_dir, name)) is not None
+        ]

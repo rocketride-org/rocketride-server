@@ -41,6 +41,7 @@ async function handleTermination(signal) {
 // Linux-only: only the Linux clang flags file defines it
 const CMAKE_CONFIGS = ['Release', 'RelWithDebInfo', 'Sanitize'];
 
+// The command line as the actions it asks for, the global commands among them, and the options
 function parseArgs(args) {
 	const requests = [];
 	const options = {
@@ -138,6 +139,20 @@ function parseArgs(args) {
 			options.cmakeConfig = value;
 		} else if (arg.startsWith('--taskserver=')) {
 			options.taskserver = arg.substring('--taskserver='.length);
+		} else if (arg.startsWith('--checkout=')) {
+			// container:build-on-wsl: the WSL checkout to build in
+			options.checkout = arg.substring('--checkout='.length);
+		} else if (arg.startsWith('--distro=')) {
+			// container:build-on-wsl / container:sync-from-wsl: the WSL distribution
+			options.distro = arg.substring('--distro='.length);
+		} else if (arg.startsWith('--runtime=')) {
+			// How the engine runs tasks (spawn | docker | k8s): node tests, server:dev
+			const runtime = arg.substring('--runtime='.length);
+			if (!['spawn', 'docker', 'k8s'].includes(runtime)) {
+				console.error(`Error: --runtime=${runtime}: expected 'spawn', 'docker' or 'k8s'`);
+				process.exit(1);
+			}
+			options.runtime = runtime;
 		} else if (arg.startsWith('--log=')) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
@@ -226,31 +241,7 @@ function parseArgs(args) {
 	return { requests, options, globalCommands };
 }
 
-/**
- * Expand global commands to all modules that support them
- *
- * Looks for actions like "moduleName:command" with descriptions (public actions)
- */
-function expandGlobalCommands(globalCommands, registry, options) {
-	const requests = [];
-
-	for (const command of globalCommands) {
-		for (const moduleName of registry.names()) {
-			const actionName = `${moduleName}:${command}`;
-			const actionDef = registry.getAction(actionName);
-			if (actionDef) {
-				const actionObj = typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
-				// Only expand to public actions (those with descriptions)
-				if (actionObj?.description) {
-					requests.push({ module: moduleName, command: actionName });
-				}
-			}
-		}
-	}
-
-	return requests;
-}
-
+// Usage, options and the actions the registry has, for --help
 function showHelp(registry, options) {
 	console.log(`
 Rocketride Build System
@@ -286,6 +277,9 @@ Options:
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
   --cmake-config=TYPE C++ build type (default: Release); repeat it on every call
                       (TYPE: Release|RelWithDebInfo|Sanitize; Sanitize = ASan + UBSan, Linux only)
+  --checkout=DIR      container:build-on-wsl: the WSL checkout to build in (or RR_WSL_CHECKOUT)
+  --distro=NAME       container:build-on-wsl, container:sync-from-wsl: the WSL distribution
+                      (default Ubuntu-22.04, or RR_WSL_DISTRO)
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message
@@ -309,6 +303,8 @@ Options:
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
   --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt,
                       requirements.hash and the satisfied/ verdicts)
+  --runtime=spawn|docker|k8s  How the engine runs tasks (node tests, server:dev): a child process,
+                      a container or a Kubernetes Job; default spawn
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
@@ -331,6 +327,7 @@ Examples:
 `);
 }
 
+// The builder: read the command line, resolve the actions it names and run them
 async function main() {
 	const args = process.argv.slice(2);
 
@@ -422,7 +419,7 @@ async function main() {
 	}
 
 	// Expand global commands (e.g., "build" -> "build:server", "build:playground-ui", etc.)
-	const expandedRequests = expandGlobalCommands(globalCommands, registry, options);
+	const expandedRequests = registry.expandGlobalCommands(globalCommands, options);
 	const requests = [...explicitRequests, ...expandedRequests];
 
 	// Handle --list-actions - show ALL registered actions across all modules
@@ -432,7 +429,8 @@ async function main() {
 		const allActions = registry.listActions(options);
 		for (const action of allActions) {
 			const desc = action.description ? ` - ${action.description}` : '';
-			console.log(`  ${action.name}${desc}`);
+			const where = action.available ? '' : ' (not on this OS)';
+			console.log(`  ${action.name}${desc}${where}`);
 		}
 		console.log(`\nTotal: ${allActions.length} actions\n`);
 		process.exit(0);
@@ -473,7 +471,9 @@ async function main() {
 			console.log(`${command}`);
 			console.log('─'.repeat(40));
 
-			if (actionDef) {
+			if (actionDef && !registry.isAvailable(actionDef)) {
+				console.log(`  ✖ ${registry.unavailableMessage(actionDef)}\n`);
+			} else if (actionDef) {
 				const actionObj = typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
 				if (actionObj?.steps) {
 					printFlowDiagram({ steps: actionObj.steps });
@@ -503,12 +503,17 @@ async function main() {
 				.map((a) => a.name)
 				.filter((n) => {
 					const def = registry.getAction(n);
+					if (!registry.isAvailable(def)) return false;
 					const obj = typeof def?.action === 'function' ? def.action(options) : def?.action;
 					return obj?.description;
 				});
 			if (availableActions.length > 0) {
 				console.error(`Available actions: ${availableActions.join(', ')}`);
 			}
+			process.exit(1);
+		}
+		if (!registry.isAvailable(actionDef)) {
+			console.error(`Error: ${registry.unavailableMessage(actionDef)}`);
 			process.exit(1);
 		}
 	}

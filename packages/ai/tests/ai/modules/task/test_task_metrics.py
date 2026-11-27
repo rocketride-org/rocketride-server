@@ -1019,6 +1019,22 @@ async def test_monitoring_loop_bills_nothing_without_a_reading(fake_psutil, no_g
     assert status.metrics.cpu_memory_mb == pytest.approx(256.0)
 
 
+async def test_a_stop_in_the_first_interval_ends_the_loop_at_once(fake_psutil, no_gpu):
+    """A pod sampler's 15 s first interval does not hold the stop for CONST_METRICS_STOP_TIMEOUT."""
+    sampler = _Sampler([(80.0, 256 * 1024 * 1024)], min_interval=15.0)
+    tm, _ = _make_sampled(fake_psutil, sampler)
+    tm._report_to_billing_system = MagicMock(side_effect=lambda: asyncio.sleep(0))
+    tm._audit_task_usage = MagicMock(side_effect=lambda: asyncio.sleep(0))
+
+    tm.start_monitoring()
+    await asyncio.sleep(0)  # the loop is in its first wait
+    loop_task = tm._monitoring_task
+    await tm.stop_monitoring()
+
+    assert loop_task.done() and not loop_task.cancelled()
+    assert sampler.calls == 0
+
+
 async def test_monitoring_loop_counts_the_time_a_reading_takes(fake_psutil, no_gpu, monkeypatch):
     """The interval ends when the reading arrives: a stop asked for during a slow read still bills it."""
     clock = [1000.0]
@@ -1044,3 +1060,187 @@ async def test_monitoring_loop_counts_the_time_a_reading_takes(fake_psutil, no_g
 
     assert sampler.calls == 1
     assert tm._duration_seconds == pytest.approx(5.0)
+
+
+# One sample interval, in real seconds for the loop's wait and in fake seconds on the clock
+_TICK = 0.05
+
+
+class _ClockSampler(_Sampler):
+    """Readings on a fake clock: each arrives a given time after the last pass; the last one stops the loop."""
+
+    def __init__(self, clock, steps):
+        """``steps``: ``(seconds, reading)``; ``(seconds, reading, after[, ready])`` calls set_service_up during the read."""
+        super().__init__([step[1] for step in steps])
+        self.clock = clock
+        self.steps = list(steps)
+        self.metrics = None
+
+    async def sample(self):
+        """Move the clock to the reading's arrival, calling set_service_up on the way when the step says."""
+        seconds, _, *ready = self.steps.pop(0)
+        if ready:
+            self.clock[0] += ready[0]
+            self.metrics.set_service_up(ready[1] if len(ready) > 1 else True)
+            seconds -= ready[0]
+        self.clock[0] += seconds
+        if not self.steps:
+            self.metrics._stop_monitoring.set()
+        return await super().sample()
+
+
+def _on_clock(fake_psutil, monkeypatch, steps):
+    """A sampled TaskMetrics on a fake clock at 1000.0, its interval _TICK; the clock never reaches a billing report."""
+    clock = [1000.0]
+    monkeypatch.setattr(task_metrics, 'time', SimpleNamespace(time=lambda: clock[0]))
+    sampler = _ClockSampler(clock, steps)
+    tm, status = _make_sampled(fake_psutil, sampler, sample_interval=_TICK)
+    sampler.metrics = tm
+    return tm, status, clock, sampler
+
+
+async def test_readiness_during_a_read_bills_only_the_time_after_it(fake_psutil, no_gpu, monkeypatch):
+    """Ready 0.5 into a read of 2 intervals: 1.5 are billed, not 2; a second ready signal later cuts nothing."""
+    reading = (80.0, 256 * 1024 * 1024)
+    tm, _, _, _ = _on_clock(
+        fake_psutil,
+        monkeypatch,
+        [(_TICK, reading), (2 * _TICK, reading, 0.5 * _TICK), (_TICK, reading, 0.5 * _TICK)],
+    )
+
+    tm.start_monitoring()
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    # Gated first interval: 0; then 1.5 of the second and the whole third
+    assert tm._duration_seconds == pytest.approx(2.5 * _TICK)
+    assert tm._cpu_seconds == pytest.approx(80.0 * 2.5 * _TICK / 100.0)
+
+
+async def test_readiness_during_the_wait_bills_only_the_time_after_it(fake_psutil, no_gpu, monkeypatch):
+    """Ready 0.4 into the loop's wait: the reading at 1.0 bills 0.6 of the interval, not all of it."""
+    tm, _, clock, sampler = _on_clock(fake_psutil, monkeypatch, [(0.6 * _TICK, (80.0, 256 * 1024 * 1024))])
+
+    tm.start_monitoring()
+    await asyncio.sleep(0)  # the loop is in its first wait
+    clock[0] += 0.4 * _TICK
+    tm.set_service_up(True)
+    assert sampler.calls == 0
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    assert sampler.calls == 1
+    assert tm._duration_seconds == pytest.approx(0.6 * _TICK)
+
+
+@pytest.mark.parametrize('private', [True, False])
+async def test_a_missed_reading_is_billed_by_the_next_one(fake_psutil, no_gpu, monkeypatch, private):
+    """A gap of 1.5 intervals is billed whole at the next reading's values; a shared engine still debits nothing."""
+    import sys
+
+    reading = (800.0, 256 * 1024 * 1024)
+    tm, status, _, _ = _on_clock(fake_psutil, monkeypatch, [(_TICK, reading), (1.5 * _TICK, None), (_TICK, reading)])
+    tm.org_id, tm.billing_run_id, tm.debit_remainder = 'org-1', 'run-1', private
+    account = sys.modules['ai.account'].account
+    monkeypatch.setattr(account, 'apply_debit', AsyncMock(return_value=True))
+    monkeypatch.setattr(account, 'audit', AsyncMock())
+    tm.set_service_up(True)
+
+    tm.start_monitoring()
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+    await tm.stop_monitoring()
+
+    # The first interval, then the gap and the next reading's own interval
+    assert tm._duration_seconds == pytest.approx(3.5 * _TICK)
+    debits = {call.kwargs['description']: call.kwargs['amount'] for call in account.apply_debit.await_args_list}
+    if private:
+        assert debits['cpu_utilization'] == status.tokens.cpu_utilization == pytest.approx(1.4)
+    else:
+        assert debits == {}
+
+
+async def test_a_long_gap_is_billed_whole_by_the_next_reading(fake_psutil, no_gpu, monkeypatch):
+    """Five missed readings: the next reading bills the whole 5-interval gap and its own interval."""
+    reading = (80.0, 256 * 1024 * 1024)
+    tm, _, _, _ = _on_clock(fake_psutil, monkeypatch, [(_TICK, reading)] + [(_TICK, None)] * 5 + [(_TICK, reading)])
+    tm.set_service_up(True)
+
+    tm.start_monitoring()
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    assert tm._duration_seconds == pytest.approx((1 + 5 + 1) * _TICK)
+
+
+async def test_a_gap_after_readiness_ended_is_not_billed(fake_psutil, no_gpu, monkeypatch):
+    """Not ready from 0.5 into the second pass: the long gap after it holds no billable time."""
+    reading = (80.0, 256 * 1024 * 1024)
+    tm, _, _, _ = _on_clock(
+        fake_psutil,
+        monkeypatch,
+        [(_TICK, reading), (_TICK, None, 0.5 * _TICK, False)] + [(_TICK, None)] * 4 + [(_TICK, reading)],
+    )
+    tm.set_service_up(True)
+
+    tm.start_monitoring()
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    assert tm._duration_seconds == pytest.approx(_TICK)
+
+
+async def test_a_spawn_task_bills_its_last_values_when_a_sample_fails(fake_psutil, no_gpu, monkeypatch):
+    """A spawn task never misses a reading: a pass whose process read fails bills the last values, as it always did."""
+    clock = [1000.0]
+    monkeypatch.setattr(task_metrics, 'time', SimpleNamespace(time=lambda: clock[0]))
+    answers = [0.0, 40.0, _NoSuchProcess(), 40.0]
+    tm, _ = _make_metrics(fake_psutil, sample_interval=_TICK)
+
+    def cpu_percent(interval=None):
+        """One interval after the last call (the loop reads the clock just before it); the last stops the loop."""
+        answer = answers.pop(0)
+        clock[0] += _TICK
+        if not answers:
+            tm._stop_monitoring.set()
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    process = fake_psutil.Process.return_value
+    process.cpu_percent.side_effect = cpu_percent
+    process.memory_info.return_value = SimpleNamespace(rss=256 * 1024 * 1024)
+    process.children.return_value = []
+    tm.set_service_up(True)
+
+    tm.start_monitoring()
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    assert tm._duration_seconds == pytest.approx(3 * _TICK)
+    assert tm._cpu_seconds == pytest.approx(40.0 * 3 * _TICK / 100.0)
+
+
+@pytest.mark.parametrize(
+    'window_end, cpu_seconds',
+    [
+        # Ended before ready (0.5): nothing billed at 400 %, the next reading bills 0.5 + 1 at 80 %
+        (0.2, 0.8 * 1.5),
+        # Ended after ready: 0.5 billed at 400 %, then 1 at 80 %
+        (0.7, 4.0 * 0.5 + 0.8 * 1.0),
+    ],
+)
+async def test_a_window_that_ended_before_ready_is_not_billed(
+    fake_psutil, no_gpu, monkeypatch, window_end, cpu_seconds
+):
+    """A pod's reading averages a past window: one that ended before ready is shown and in the peaks, not billed."""
+    tm, status, _, _ = _on_clock(
+        fake_psutil,
+        monkeypatch,
+        [
+            (_TICK, (400.0, 256 * 1024 * 1024, 1000.0 + window_end * _TICK), 0.5 * _TICK),
+            (_TICK, (80.0, 256 * 1024 * 1024, 1000.0 + 1.9 * _TICK)),
+        ],
+    )
+
+    tm.start_monitoring()
+    await asyncio.wait_for(tm._monitoring_task, timeout=5)
+
+    assert tm._duration_seconds == pytest.approx(1.5 * _TICK)
+    assert tm._cpu_seconds == pytest.approx(cpu_seconds * _TICK)
+    assert status.metrics.peak_cpu_percent == pytest.approx(100.0)
+    assert status.metrics.cpu_percent == pytest.approx(20.0)

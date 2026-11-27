@@ -42,6 +42,7 @@ Classes:
 Constants:
     CONST_DEFAULT_MAX_THREADS: Default thread pool size (64)
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS: Graceful termination timeout (5s)
+    CONST_STOP_WAIT_TIMEOUT: How long a stop waits for the end after its signals (30s)
     CONST_STATUS_UPDATE_FREQ: Status update frequency (100ms)
     CONST_MAX_READY_TIME: Maximum time to wait for task readiness (30s)
 
@@ -70,6 +71,7 @@ from rocketlib import debug, warning, args as startup_args
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
+    CONST_STOP_WAIT_TIMEOUT,
     CONST_STATUS_UPDATE_FREQ,
     CONST_MAX_READY_TIME,
     CONST_READY_POLL_INTERVAL,
@@ -85,6 +87,7 @@ from ai.constants import (
     CONST_CHANNEL_REDIAL_DELAY,
 )
 from ai.account.base import OutOfCreditsError, SubscriptionRequiredError
+from ai.common import node_release
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.node_config import resolve_node_config
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
@@ -403,9 +406,9 @@ def resolve_parameter_tokens(pipeline: Dict[str, Any], environ: Mapping[str, str
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
 # `nosaas` services, but a pipeline can reach the engine without the canvas,
 # so the engine enforces the same rule itself. Any service built on the MCP
-# client node is refused in stdio mode while the task shares the engine's
-# host: that transport launches a command there. Its HTTP transports are
-# fine. Matching is on the node module, not the provider name: several
+# client node is refused in stdio mode while the task gets --shared-host
+# (TaskEngine._shares_host): that transport launches a command. Its HTTP transports
+# are fine. Matching is on the node module, not the provider name: several
 # services share the node (tool_butterbase is one) and provider lookup is
 # case-insensitive.
 CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
@@ -458,8 +461,7 @@ def saas_pipeline_violation(
     production. The MCP transport is resolved the way the node resolves it (schema
     defaults under the component config), because the schema default is itself
     stdio. Anything that cannot be resolved is refused. ``shared_host`` says the
-    task will share the engine's host (the task's ``--shared-host``); only then is
-    stdio MCP refused.
+    task gets ``--shared-host``; only then is stdio MCP refused.
     """
     for component in pipeline.get('components', []) or []:
         provider = str(component.get('provider') or '')
@@ -1040,6 +1042,7 @@ class TaskEngine(DAPBase):
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         shared: bool = False,
+        self_driven: bool = True,
         threads: int = CONST_DEFAULT_MAX_THREADS,
         trace_level: Optional[str] = None,
         client_id: str = '',
@@ -1077,6 +1080,10 @@ class TaskEngine(DAPBase):
             launch_type: Task creation mode (launch/attach)
             shared: True for a shared engine: it has no single owner, so
                 unclaimed work on it reaches no one's state or files (S13)
+            self_driven: Whether the shape's entry source drives itself (a
+                listener, a poller, a scan; ``EngineContent.self_driven``): a
+                second engine of it would take the same input. True unless the
+                server says otherwise, the conservative reading.
             threads: The engine's thread count (policy outside @spec)
             trace_level: The engine's DEFAULT trace level for work outside any
                 binding (``'none'`` on a shared engine, the starting
@@ -1125,6 +1132,7 @@ class TaskEngine(DAPBase):
         self.team_id = team_id
         self.org_id = org_id
         self.shared = shared
+        self.self_driven = self_driven
 
         # Holds: the key of every control that holds this engine, with that
         # control's idle ttl. A hold ENTITLES its control to the engine but
@@ -1183,6 +1191,8 @@ class TaskEngine(DAPBase):
         # Whether the task sent its own >EXIT event this run. Without one,
         # _terminated() falls back to the process exit code.
         self._exit_event_seen = False
+        # Why a stop was requested when that event was read; None when none was
+        self._exit_event_stop: Optional[str] = None
 
         # This run's crash, as the console shows it, and whether the server killed the process
         self._crash: Optional[str] = None
@@ -1224,6 +1234,8 @@ class TaskEngine(DAPBase):
         # Bumped by every stop_task, so a restart can tell whether a stop arrived
         # while it loaded, even on a task whose last run was already stopped
         self._stop_count = 0
+        # The launch a stop gave up on, its signals not taken (left_running)
+        self._given_up_on: Optional[Launch] = None
         # WHY the stop was requested ('user' | 'ttl'); None until requested.
         # A ttl-window expiry is SUCCESS (the run stayed up exactly as
         # configured), so the run-log outcome derives from this.
@@ -1545,10 +1557,12 @@ class TaskEngine(DAPBase):
 
     def _shares_host(self) -> bool:
         """
-        Whether the task shares the engine's host, so it gets --shared-host.
+        Whether the task gets --shared-host.
 
-        A hosted engine's task does: spawn is the only runtime. The pre-launch
-        check and the task's command line both ask here, so they agree.
+        A hosted engine's task does, whatever the runtime, a container or a pod
+        included; #3524 tracks dropping it for the runtimes that isolate the
+        task. The pre-launch check and the task's command line both ask here,
+        so they agree.
 
         Returns:
             True for a task of a hosted engine.
@@ -2147,10 +2161,26 @@ class TaskEngine(DAPBase):
         A process that reported no crash but ended by a crash signal, an OOM
         kill or, on Windows, a crash exception code crashed before its handlers
         could say so, unless the server killed it.
+
+        A task in a container or a pod that left with code 0 was cut off from
+        the engine: a task reports every end it reaches by itself, and leaves
+        with 0 and no word once its input closes (``--autoterm``). Its 0
+        records 1, because the dashboard's task_error goes by a non-zero code.
+        A task its runtime lost (``Launch.lost``) did not end by itself either,
+        whoever killed what was left of it.
         """
         if not self._exit_event_seen and self._stop_reason is None:
             self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
+            if exit_code == 0 and self._launcher.isolated:
+                self._crash = (
+                    'the task ended without reporting its end, as it does when its connection to the engine drops'
+                )
+                self._status.exitCode = 1
+                return
+            if self._launch and self._launch.lost:
+                self._crash = self._launch.lost
+                return
             if exit_code is None or self._process_killed:
                 return
             if exit_code < 0:
@@ -2213,6 +2243,9 @@ class TaskEngine(DAPBase):
 
         reported = self._crash
         self._apply_process_exit_code(exit_code)
+        # How the run ended is read once, from its >EXIT event or else here: a
+        # stop that arrives later (a TTL pass, a user) does not turn that end into a stop
+        stop_reason = self._exit_event_stop if self._exit_event_seen else self._stop_reason
 
         # The engine reported nothing: the console still shows the crash. It is
         # engine-level output, so it reaches the holders of a private engine
@@ -2223,7 +2256,6 @@ class TaskEngine(DAPBase):
                 EVENT_TYPE.OUTPUT, self.build_event('output', body={'category': 'console', 'output': output})
             )
 
-        self._status.completed = True
         self._status.endTime = time.time()
 
         # NOTE: the final zeroed status and the run-log close happen at the
@@ -2325,12 +2357,14 @@ class TaskEngine(DAPBase):
         except Exception as e:
             self.debug_message(f'Error cleaning up update task: {e}')
 
-        # Set final state
-        if self._stop_reason is not None:
+        # Set final state; completed goes with it, so a status sent during the
+        # cleanup above reads Stopping, not completed
+        self._status.completed = True
+        if stop_reason is not None:
             self._status.status = 'Stopped'
             self._status.state = TASK_STATE.CANCELLED.value
             self.state = EngineState.STOPPED
-            self.debug_task_message('stopped', reason=self._stop_reason)
+            self.debug_task_message('stopped', reason=stop_reason)
         elif self._status.exitCode == 0 and not self._crash:
             self._status.status = 'Completed'
             self._status.state = TASK_STATE.COMPLETED.value
@@ -2352,9 +2386,12 @@ class TaskEngine(DAPBase):
             # again under the same key (plan 7.2). Set in the same step as the
             # terminal state, so no request sees a finished engine that is not
             # yet dormant. A run that never confirmed running FAILED and is
-            # not retried.
-            self.state = EngineState.STOPPED if was_running else EngineState.FAILED
-            if was_running:
+            # not retried. A stop requested since the end was read still ends
+            # the engine as a stop does: stopped, and the crash leaves no holder
+            # dormant and restarts no listener.
+            stopped = self._stop_reason is not None
+            self.state = EngineState.STOPPED if was_running or stopped else EngineState.FAILED
+            if was_running and not stopped:
                 self.dormant_reason = 'crash'
                 try:
                     self._server.engine_crashed(self)
@@ -2423,7 +2460,7 @@ class TaskEngine(DAPBase):
                     'name': self._status.name,
                     'projectId': self.project_id,
                     'source': self.source,
-                    **({'reason': self._stop_reason} if self._stop_reason else {}),
+                    **({'reason': stop_reason} if stop_reason else {}),
                 },
                 id=self.id,
             )
@@ -2463,10 +2500,10 @@ class TaskEngine(DAPBase):
             # A ttl-window expiry is SUCCESS: the run stayed up exactly as
             # configured, then shut down. Only a real stop (or abnormal exit)
             # reads as cancelled; a crash is an error.
-            if self._crash and self._stop_reason is None:
+            if self._crash and stop_reason is None:
                 outcome = 'error'
             elif self._status.state == TASK_STATE.CANCELLED.value:
-                outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
+                outcome = 'ok' if stop_reason == 'ttl' else 'cancelled'
             elif self._status.exitCode == 0:
                 outcome = 'ok'
             else:
@@ -2479,7 +2516,7 @@ class TaskEngine(DAPBase):
                     continue
                 ended.add(id(writer))
                 try:
-                    await writer.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
+                    await writer.end_run(outcome, self._status.exitMessage or '', reason=stop_reason)
                 except Exception as e:
                     self.debug_message(f'Run-log close failed for {key}: {e}')
             self._run_logs.clear()
@@ -3221,6 +3258,8 @@ class TaskEngine(DAPBase):
             if self._stop_reason is None:
                 self._status.exitCode = exit_code
                 self._status.exitMessage = exit_message
+            # The run's end is read here: a stop that arrives later does not count
+            self._exit_event_stop = self._stop_reason
             self._exit_event_seen = True
 
             # The engine's handlers caught a crash: its >EXIT code is Crash
@@ -3362,6 +3401,12 @@ class TaskEngine(DAPBase):
     def accepting_holds(self) -> bool:
         """True while a control may take a hold: built, starting or running; never once a stop began."""
         return self.state in (EngineState.NEW, EngineState.STARTING, EngineState.RUNNING)
+
+    @property
+    def left_running(self) -> bool:
+        """True from a stop's give-up until the launch it gave up on has an exit code or the engine has ended."""
+        given_up_on = self._given_up_on
+        return self.state is EngineState.STOPPING and given_up_on is not None and given_up_on.returncode is None
 
     async def wait_for_running(self) -> None:
         """
@@ -3718,11 +3763,13 @@ class TaskEngine(DAPBase):
             self._terminated_called = False
             self._teardown_done = asyncio.Event()
             self._exit_event_seen = False
-            # A crash, and a kill by the server, belong to the run they
-            # happened in: a relaunch that exits cleanly must read Completed,
-            # and one that crashes must be classified on its own exit
+            self._exit_event_stop = None
+            # A crash, a kill by the server and a stop that gave up belong to
+            # the run they happened in: a relaunch that exits cleanly must read
+            # Completed, and one that crashes must be classified on its own exit
             self._crash = None
             self._process_killed = False
+            self._given_up_on = None
             self._stop_reason = None
             self.dormant_reason = None
             self.db_approved = {}
@@ -3782,7 +3829,7 @@ class TaskEngine(DAPBase):
             # The nodes it names that the server does not carry go on disk first: the run's start-up scan
             # loads them. Every control that attaches later runs this engine's spec, so its nodes are these
             try:
-                await asyncio.to_thread(node_store.place, resolved)
+                nodes = await asyncio.to_thread(node_store.place, resolved, self._launcher.isolated)
             except Exception as e:
                 raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
             # Let the copies go out of scope
@@ -3849,10 +3896,11 @@ class TaskEngine(DAPBase):
                     env=subprocess_env,
                     args=child_args,
                     modelserver=self._server._config.get('modelserver'),
-                    # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
+                    # Tell the task it runs under a hosted engine, and which guards apply (see CONST_HOSTED_CHILD_FLAG)
                     hosted=_is_saas_engine(),
                     shared_host=self._shares_host(),
                     debug_attach=debug_attach,
+                    nodes=[os.path.join(node_release.nodes_dir(), name) for name in nodes],
                 )
             )
             del task_file
@@ -3951,10 +3999,17 @@ class TaskEngine(DAPBase):
         """
         Initiate graceful task termination with resource cleanup.
 
+        Returns when the run has ended, or ``CONST_STOP_WAIT_TIMEOUT`` after
+        the signals when its runtime did not take them: the engine then stays
+        stopping (``left_running``), the task runs on, and a later stop signals
+        it again.
+
         Args:
             reason: WHY the stop happens — 'user' (explicit request) or
                 'ttl' (the run window elapsed). Drives the recorded run
-                outcome: a ttl expiry is a successful run, not a cancel.
+                outcome: a ttl expiry is a successful run, not a cancel. A
+                stop that arrives after the run's end was read does not
+                change that end; the engine still ends stopped, not crashed.
         """
         try:
             # Prevent race conditions
@@ -3997,8 +4052,19 @@ class TaskEngine(DAPBase):
                     except Exception as e:
                         self.debug_message(f'Error during subprocess termination: {e}')
 
-                # Wait for completion
+                # Wait for completion, for a while: a runtime that did not take the signals (a docker
+                # kill or a pod delete refused) leaves the task running, and a later stop sends them again
+                deadline = time.monotonic() + CONST_STOP_WAIT_TIMEOUT
                 while self._status.state not in [TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value]:
+                    if time.monotonic() >= deadline:
+                        message = (
+                            f'Engine "{self.engine_key}" did not end within {CONST_STOP_WAIT_TIMEOUT:g}s '
+                            'after its stop signals and is left running; a later stop signals it again'
+                        )
+                        warning(message)
+                        self.debug_message(message)
+                        self._given_up_on = self._launch
+                        return
                     await asyncio.sleep(0.1)
 
         except Exception as e:
