@@ -407,8 +407,8 @@ def test_end_decoding_from_the_frame_callback_stops_ffmpeg_and_the_stream_still_
         extractor.writeAVI(AVI_ACTION.WRITE, 'video/mp4', data[offset : offset + (1 << 20)])
     extractor.writeAVI(AVI_ACTION.END, 'video/mp4', b'')
 
-    emitted = [image for image in frames if image is not None]
-    assert 1 <= len(emitted) < 10, 'at 1 fps the whole 74 s video gives 74 frames'
+    count = len([image for image in frames if image is not None])
+    assert 1 <= count < 10, f'{count} frames after end_decoding; at 1 fps the whole 74 s video gives 74'
     assert frames[-1] is None, 'the end of the stream is still reported'
 
 
@@ -467,7 +467,8 @@ def test_end_decoding_on_a_piped_stream_drops_the_remaining_writes(tmp_path):
     extractor.writeAVI(AVI_ACTION.END, 'video/mp2t', b'')
 
     assert extractor._isStdinCompatible, 'precondition: the stream was piped, not cached'
-    assert 1 <= len([image for image in frames if image is not None]) < 10
+    count = len([image for image in frames if image is not None])
+    assert 1 <= count < 10, f'{count} frames after end_decoding'
     assert frames[-1] is None, 'the end of the stream is still reported'
 
 
