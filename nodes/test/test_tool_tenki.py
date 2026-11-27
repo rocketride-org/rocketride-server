@@ -1071,8 +1071,17 @@ def test_calls_queued_behind_a_resume_refused_for_the_whole_budget_ask_once_each
     session = _Session()
     inst, _ = _used(monkeypatch, session)
     session.state, session.resume_refusals, session.barrier = 'PAUSED', 10**6, threading.Barrier(4)
+    budgets = []
+    resume = mod.IGlobal._resume
+
+    def recording_resume(self, session, budget):
+        budgets.append(budget)
+        return resume(self, session, budget)
+
+    monkeypatch.setattr(mod.IGlobal, '_resume', recording_resume)
     results = _parallel(*[lambda: inst.list_files({})] * 4)
     assert all('still being torn down' in result['error'] for result in results)
+    assert sorted(budgets) == [0, 0, 0, 1.0]
     assert session.calls.count('resume') <= 1.0 / 0.01 + 4
 
 

@@ -685,15 +685,16 @@ class _FakePipe:
 class _StuckPipe(_FakePipe):
     """A database whose INSERT hangs until ``release`` is set."""
 
-    def __init__(self, release, **kwargs):
+    def __init__(self, release, wait=5, **kwargs):
         super().__init__(**kwargs)
         self.release = release
+        self.wait = wait
         self.entered = threading.Event()
 
     def invoke(self, param, component_id=''):
         if param.tool_name == 'execute':
             self.entered.set()
-            self.release.wait(5)
+            self.release.wait(self.wait)
         return super().invoke(param, component_id)
 
 
@@ -1808,7 +1809,7 @@ class TestWriterThread:
     def test_stop_keeps_to_its_budget_even_with_a_full_queue(self):
         """Queueing the stop marker and the drain share one budget, not one each."""
         release = threading.Event()
-        pipe = _StuckPipe(release)
+        pipe = _StuckPipe(release, wait=30)
         writer = _writer(_FakeTarget(pipe), [])
         writer.start()
         thread = writer._thread
@@ -1817,13 +1818,17 @@ class TestWriterThread:
             assert pipe.entered.wait(2)
             for _ in range(QUEUE_MAX_ROWS):
                 writer.submit(_row())
-            with mock.patch.object(thread, 'join', wraps=thread.join) as join:
+            with (
+                mock.patch.object(writer._queue, 'put', wraps=writer._queue.put) as put,
+                mock.patch.object(thread, 'join', wraps=thread.join) as join,
+            ):
                 writer.stop(timeout=0.1)
         finally:
             release.set()
         thread.join(5)
 
         # The put into the full queue used up the whole budget, so the drain gets none of it.
+        put.assert_called_once_with(mock.ANY, timeout=0.1)
         join.assert_called_once_with(0.0)
 
     def test_a_full_queue_still_lets_the_worker_end(self):

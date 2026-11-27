@@ -308,7 +308,7 @@ def _get_until_aborted(session, url, abort_after=0.5):
     threading.Timer(abort_after, session.abort).start()
     start = time.monotonic()
     try:
-        response = session.get(url, timeout=5)
+        response = session.get(url, timeout=60)
         response.content  # noqa: B018 - read the body, which a slow-body server holds open
     except (requests.RequestException, OSError):
         pass
