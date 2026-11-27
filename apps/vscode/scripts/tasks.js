@@ -259,13 +259,13 @@ function makeStageFilesAction() {
 			const stagedPkg = JSON.stringify(pkg, null, 2);
 			const manifestChanged = !buildHasManifest || String(await readFile(stagedPkgPath)) !== stagedPkg;
 
-			// The installable shell package (vendored from the server into
-			// .rocketride/): shipped WITH the extension as the OFFLINE
-			// fallback the App Builder extracts to .rocketride/shell/ when
-			// no server is reachable. Synced BEFORE the early return — it
-			// changes when the vendored shell is refreshed, which the
-			// vscode source hash cannot see.
-			const shellTgzSrc = path.join(PROJECT_ROOT, '.rocketride', 'shell.tgz');
+			// The installable shell package (packed by shell:build into the
+			// served static clients tree): shipped WITH the extension as the
+			// OFFLINE fallback the App Builder extracts to .rocketride/shell/
+			// when no server is reachable. Synced BEFORE the early return — it
+			// changes when the shell is repacked, which the vscode source hash
+			// cannot see.
+			const shellTgzSrc = path.join(DIST_ROOT, 'server', 'static', 'clients', 'shell', 'shell.tgz');
 			if (await exists(shellTgzSrc)) {
 				await mkdir(BUILD_DIR);
 				await copyFile(shellTgzSrc, path.join(BUILD_DIR, 'shell.tgz'));

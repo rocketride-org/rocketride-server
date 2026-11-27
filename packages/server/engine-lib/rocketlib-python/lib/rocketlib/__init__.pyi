@@ -10,7 +10,20 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, NamedTuple, Optional, Protocol, TypedDict, overload
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Protocol,
+    TypedDict,
+    overload,
+)
 
 # ---------------------------------------------------------------------------
 # Re-exports — everything listed in __all__
