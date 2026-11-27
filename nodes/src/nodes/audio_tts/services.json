@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Text To Speech",
+	"title": "Kokoro Text to Speech (local)",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["Converts incoming text into speech using Kokoro-82M (local KPipeline or --modelserver KokoroLoader).", "Output is sent on the audio lane as WAV bytes.", "See README for spaCy en_core_web_sm (misaki) and troubleshooting."],
+	"description": ["Kokoro text-to-speech: converts incoming text into speech using Kokoro-82M (local KPipeline or --modelserver KokoroLoader).", "Output is sent on the audio lane as WAV bytes.", "See README for spaCy en_core_web_sm (misaki) and troubleshooting."],
 	//
 	// Optional:
 	//	  The icon to display in the UI for this node
