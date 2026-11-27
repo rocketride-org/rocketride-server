@@ -988,10 +988,12 @@ class TaskServer(DAPBase):
                 heapq.heappush(self._control_expiry, (now + control.ttl, gen, key))
                 continue
 
-            # Active since it was scheduled: back in at its real deadline
+            # Active since it was scheduled: back in at its real deadline, when that
+            # lies after this pass (in floating point it can round to now)
             idle = control.idle_seconds(now)
-            if idle < control.ttl:
-                heapq.heappush(self._control_expiry, (now - idle + control.ttl, gen, key))
+            deadline = now - idle + control.ttl
+            if deadline > now:
+                heapq.heappush(self._control_expiry, (deadline, gen, key))
                 continue
 
             # Its own idle time reached its ttl: release this hold only.
@@ -1014,10 +1016,12 @@ class TaskServer(DAPBase):
                 heapq.heappush(self._engine_expiry, (now + CONST_ENGINE_IDLE_TTL, gen, engine))
                 continue
 
-            # Activity since it was scheduled: back in at its real deadline
+            # Activity since it was scheduled: back in at its real deadline, when that
+            # lies after this pass (in floating point it can round to now)
             idle = engine.idle_seconds(now)
-            if idle < CONST_ENGINE_IDLE_TTL:
-                heapq.heappush(self._engine_expiry, (now - idle + CONST_ENGINE_IDLE_TTL, gen, engine))
+            deadline = now - idle + CONST_ENGINE_IDLE_TTL
+            if deadline > now:
+                heapq.heappush(self._engine_expiry, (deadline, gen, engine))
                 continue
 
             # Inactive for the whole timer: it stops, its holders stay. Their

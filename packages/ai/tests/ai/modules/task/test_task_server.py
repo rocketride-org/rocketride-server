@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import itertools
 import errno
+import heapq
 import socket
 import sys
 import time
@@ -805,7 +806,7 @@ async def test_cleanup_tasks_skips_running_task(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _ttl_control(ts, key, *, ttl, idle, run_kind='dev', pipeline_event=0.0):
+def _ttl_control(ts, key, *, ttl, idle, run_kind='dev', pipeline_event=0.0, now=None):
     """
     Register a real TaskControl idle for ``idle`` seconds and schedule its expiry.
 
@@ -816,6 +817,7 @@ def _ttl_control(ts, key, *, ttl, idle, run_kind='dev', pipeline_event=0.0):
         idle: Seconds since the control's last activity.
         run_kind: ``'dev'`` counts the engine's pipeline events as activity.
         pipeline_event: The engine's last dev pipeline event (monotonic).
+        now: Monotonic time of the registration (default: the machine's clock).
 
     Returns:
         TaskControl: the registered control.
@@ -824,7 +826,7 @@ def _ttl_control(ts, key, *, ttl, idle, run_kind='dev', pipeline_event=0.0):
     task.is_task_complete = MagicMock(return_value=False)
     task.last_pipeline_event = pipeline_event
     control = TaskControl(id=key, key=key, run_kind=run_kind, ttl=ttl, task=task)
-    control.last_activity = time.monotonic() - idle
+    control.last_activity = (time.monotonic() if now is None else now) - idle
     ts._task_control[key] = control
     ts._schedule_control(control)
     return control
@@ -1151,20 +1153,52 @@ async def _one_ttl_cycle(monkeypatch, ts, *, check=60):
         await TaskServer._monitor_ttl(ts)
 
 
+def _bound_ttl_pushes(monkeypatch, limit=100):
+    """
+    Make a TTL pass that never ends fail fast instead of hanging the run.
+
+    The pass pops while the heap's head is due: an entry pushed back at the
+    pass's own time is popped again for ever, with no await in between.
+    """
+    pushes = itertools.count(1)
+
+    def bounded(heap, item):
+        assert next(pushes) < limit, 'the pass re-pushed an entry due at its own time'
+        heapq.heappush(heap, item)
+
+    monkeypatch.setattr(task_server_module, 'heapq', SimpleNamespace(heappush=bounded, heappop=heapq.heappop))
+
+
 @pytest.mark.asyncio
-async def test_monitor_ttl_ages_a_silent_task(monkeypatch):
+async def test_monitor_ttl_ages_a_silent_task():
     """A control nothing has touched still ages, so the reaper is not disabled."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    control = _ttl_control(ts, 'quiet', ttl=900, idle=0)
+    # A fixed clock: the machine's can put the deadline on a rounding edge (the next test)
+    _ttl_control(ts, 'quiet', ttl=900, idle=0, now=1000.0)
 
     # Not due yet: the pass pops nothing
-    await _one_ttl_cycle(monkeypatch, ts)
+    assert await ts._ttl_cycle(1000.0 + 899) == 0
     ts.stop_task.assert_not_awaited()
 
     # Its own clock runs on: at its ttl it is released
-    assert await ts._ttl_cycle(control.last_activity + 900) == 1
+    assert await ts._ttl_cycle(1000.0 + 900) == 1
     ts.stop_task.assert_awaited_once_with('quiet', reason='ttl')
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_releases_a_control_whose_deadline_rounds_to_the_pass(monkeypatch):
+    """At its ttl a control is released even when its idle time rounds to just under it; never re-pushed for ever."""
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+    # Its + 900 rounds down to the float below: the pass reads 899.9999999997672 s idle
+    control = _ttl_control(ts, 'edge', ttl=900, idle=0, now=2096361.4739867852)
+    now = control.last_activity + 900
+    assert control.idle_seconds(now) < 900
+    _bound_ttl_pushes(monkeypatch)
+
+    assert await ts._ttl_cycle(now) == 1
+    ts.stop_task.assert_awaited_once_with('edge', reason='ttl')
 
 
 @pytest.mark.asyncio
