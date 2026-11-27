@@ -25,7 +25,12 @@ is not offered (see its entry). This page is the full reference; the
   as MCP protocol errors with the original message preserved.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
-  `send_files`, `terminate`) get 120 seconds per engine call.
+  `send_files`, `terminate`) get 120 seconds per engine call. One tool call
+  waits 200 seconds at most in all, which keeps it under the 240 seconds
+  Claude allows a call. `monitor` can add one second for its last poll.
+  When `run_pipeline` or `run_dropper_pipe` makes a second engine call, that
+  call gets only the time the first one left. The cleanup that stops a
+  dropper task with no upload link still gets 5 seconds.
 - **Per-caller identity.** Tools act as the account behind your credential —
   your store, your deployments, your environment variables, your run logs.
 - **Pipelines are inline-only.** Every `pipeline` parameter takes the pipeline
@@ -255,12 +260,13 @@ Terminate a running task by token — also the way to stop a runaway run.
 ### monitor
 
 Poll a task until it reaches a terminal state or the timeout elapses, then
-return a status snapshot. This is bounded polling, not an event stream — it
-always returns within the timeout.
+return a status snapshot. This is bounded polling, not an event stream. It
+returns within the timeout plus one second, whatever the interval: a wait
+between polls never runs past the timeout.
 
 - **Parameters:** `task_token` (string, required); `timeout` (number, optional,
-  default 30, clamped to 0–300 seconds); `interval` (number, optional, default
-  1, minimum 0.25 seconds).
+  default 30, clamped to 0 to 200 seconds); `interval` (number, optional,
+  default 1, minimum 0.25 seconds).
 - **Returns:** `{ok, task_token, state, state_label, completed, terminal,
   status, counts: {completedCount, failedCount, totalCount}, errors, warnings,
   polls, poll_timed_out?}`.
@@ -270,7 +276,10 @@ always returns within the timeout.
   legitimately sit at `running` forever — a timeout then returns the current
   snapshot with `terminal: false`, which is not an error. Once `monitor`
   reports a terminal state, the server drops the token from its own task
-  registry; that is in-memory bookkeeping, not a change to the task.
+  registry; that is in-memory bookkeeping, not a change to the task. Some
+  hosts stop a tool call after about a minute, so the tool description asks
+  for a `timeout` of 45 seconds or less and another call while `terminal` is
+  false.
 
 ### list_running_pipelines
 

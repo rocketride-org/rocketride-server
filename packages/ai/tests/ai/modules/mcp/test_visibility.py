@@ -16,6 +16,7 @@ import pytest
 from ai.modules.mcp.registry import TaskRegistry
 from ai.modules.mcp.tools import register_all
 from ai.modules.mcp.tools import visibility
+from ai.modules.mcp.tools._common import CallBudget
 from ai.modules.mcp.tooling import ToolRegistry
 
 
@@ -313,7 +314,7 @@ async def test_monitor_oversized_timeout_is_clamped_to_max(fake_engine, monkeypa
     # can only be ended by the (clamped) deadline.
     fake_engine._task_statuses = [{'state': 3, 'completed': False}]
 
-    # Each clock read advances 100s: the MAX_TIMEOUT_SECONDS=300 deadline is
+    # Each clock read advances 100s: the MAX_TIMEOUT_SECONDS=200 deadline is
     # crossed within a handful of polls, while an unclamped 999999s deadline
     # would need thousands.
     ticks = itertools.count(start=0.0, step=100.0)
@@ -329,3 +330,36 @@ async def test_monitor_oversized_timeout_is_clamped_to_max(fake_engine, monkeypa
     assert result['ok'] is True
     assert result['terminal'] is False
     assert len(fake_engine.get_task_status_calls) <= 10, 'deadline was not clamped to MAX_TIMEOUT_SECONDS'
+
+
+@pytest.mark.parametrize(('timeout', 'sleeps', 'poll_timeouts'), [(5, [5], [5, 1]), (300, [200], [200, 1])])
+@pytest.mark.asyncio
+async def test_monitor_waits_draw_on_one_call_budget(fake_engine, monkeypatch, timeout, sleeps, poll_timeouts):
+    """Sleeps never pass the time left, and the last poll gets a one-second floor."""
+    now = [0.0]
+    slept = []
+    waits = []
+    real_wait_for = asyncio.wait_for
+
+    async def _sleep(seconds):
+        slept.append(seconds)
+        now[0] += seconds
+
+    async def _wait_for(coro, timeout):
+        waits.append(timeout)
+        return await real_wait_for(coro, timeout)
+
+    monkeypatch.setattr(asyncio, 'sleep', _sleep)
+    monkeypatch.setattr(asyncio, 'wait_for', _wait_for)
+    monkeypatch.setattr(visibility, 'CallBudget', lambda seconds: CallBudget(seconds, clock=lambda: now[0]))
+    fake_engine._task_statuses = [{'state': 3, 'completed': False}]
+    registry = ToolRegistry()
+    visibility.register(registry)
+
+    result = await registry.handler('monitor')(
+        fake_engine, None, {'task_token': 'tok-1', 'timeout': timeout, 'interval': 600}
+    )
+
+    assert result['terminal'] is False
+    assert slept == sleeps
+    assert waits == poll_timeouts

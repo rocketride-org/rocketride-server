@@ -11,6 +11,7 @@ from ai.modules.mcp.registry import TaskRegistry
 from ai.modules.mcp.tooling import ToolRegistry
 from ai.modules.mcp.tools import execution
 from ai.modules.mcp.tools import register_all
+from ai.modules.mcp.tools._common import CallBudget
 
 
 # Minimal inline pipeline used everywhere a definition is required — the
@@ -534,3 +535,34 @@ async def test_run_pipeline_use_timeout_registers_no_token(fake_engine, monkeypa
     assert result['error_type'] == 'Timeout'
     assert 'start the task' in result['message']
     assert tasks.list() == []
+
+
+@pytest.mark.parametrize(
+    ('tool', 'start_seconds', 'engine_waits'), [('run_pipeline', 150, [120, 50]), ('run_dropper_pipe', 200, [120, 5])]
+)
+@pytest.mark.asyncio
+async def test_run_tools_share_one_call_budget(fake_engine, monkeypatch, tool, start_seconds, engine_waits):
+    """The send gets only what the start left; the dropper cleanup keeps a floor of 5 seconds."""
+    now = [0.0]
+    waits = []
+    real_use = fake_engine.use
+    real_wait_for = asyncio.wait_for
+
+    async def _use(**kwargs):
+        now[0] += start_seconds
+        return await real_use(**kwargs)
+
+    async def _wait_for(coro, timeout):
+        waits.append(timeout)
+        return await real_wait_for(coro, timeout)
+
+    monkeypatch.setattr(fake_engine, 'use', _use)
+    monkeypatch.setattr(asyncio, 'wait_for', _wait_for)
+    monkeypatch.setattr(execution, 'CallBudget', lambda: CallBudget(clock=lambda: now[0]))
+    fake_engine._public_token = None  # the dropper then cleans up with terminate
+    registry = ToolRegistry()
+    execution.register(registry)
+
+    await registry.handler(tool)(fake_engine, TaskRegistry(), {'pipeline': PIPE, 'inputs': 'hi'})
+
+    assert waits == engine_waits

@@ -41,7 +41,7 @@ the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JS
 
 | Tool | Input | Result |
 |---|---|---|
-| `monitor` | `{task_token, timeout? ≤300, interval?}` | Bounded poll, returns a snapshot: `{ok, state, state_label, completed, terminal, status, counts: {completedCount, failedCount, totalCount}, errors, warnings, polls, poll_timed_out?}`. `terminal: true` means done; `poll_timed_out: true` means the *poll* hung, not the task. |
+| `monitor` | `{task_token, timeout? ≤200, interval?}` | Bounded poll, returns a snapshot: `{ok, state, state_label, completed, terminal, status, counts: {completedCount, failedCount, totalCount}, errors, warnings, polls, poll_timed_out?}`. `terminal: true` means done; `poll_timed_out: true` means the *poll* hung, not the task. |
 | `list_running_pipelines` | — | `{ok, tasks, count}`. |
 
 ## Run logs (DVR — the debugging evidence)

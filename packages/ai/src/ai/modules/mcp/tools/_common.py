@@ -2,9 +2,29 @@
 """Shared helpers for MCP tool handlers."""
 
 import asyncio
-from typing import Any, Dict, Optional, Tuple
+import time
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from ..errors import _timeout
+
+# The longest one tool call may wait in all. Claude stops a tool call at 240
+# seconds, so every wait inside a call draws on this one budget.
+CALL_BUDGET_SECONDS = 200
+
+
+class CallBudget:
+    """The time left in one tool call, shared by every wait inside it."""
+
+    def __init__(self, seconds: float = CALL_BUDGET_SECONDS, clock: Optional[Callable[[], float]] = None):
+        """Start the budget now. ``clock`` defaults to ``time.monotonic``, looked up at call time."""
+        if clock is None:
+            clock = time.monotonic
+        self._clock = clock
+        self._deadline = clock() + seconds
+
+    def left(self, cap: float, floor: float = 0.0) -> float:
+        """Return the seconds left in the call, at most ``cap`` and at least ``floor``."""
+        return max(floor, min(cap, self._deadline - self._clock()))
 
 
 def load_pipeline(args: Dict[str, Any]) -> Dict[str, Any]:
