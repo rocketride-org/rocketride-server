@@ -528,3 +528,46 @@ does.
 | `log_trace` | true | false | false | Reads one trace's events from the persisted run log. |
 | `scaffold_node` | true | false | false | Renders node file contents for the caller to write; the server writes nothing. |
 | `list_integrations` | true | false | false | Reports credential setup status by variable name; values never transit MCP; nothing is stored. |
+
+## Titles
+
+Every tool has a title, a short phrase that hosts show in place of the tool
+name in tool lists and in the prompt that asks you to allow a call. The server
+sends it as both `title` and `annotations.title`, the two places the MCP
+specification gives a host to read it from.
+
+| Tool | Title |
+| --- | --- |
+| `list_components` | List pipeline components ready to use |
+| `describe_component` | Get a component's full definition |
+| `resolve_config` | Show the settings a component will use |
+| `validate_pipeline` | Validate a pipeline or try a component |
+| `describe_pipeline` | Summarize a pipeline's components |
+| `run_pipeline` | Run a pipeline |
+| `run_dropper_pipe` | Run a pipeline and get file upload links |
+| `send_data` | Send data to a running pipeline |
+| `terminate` | Stop a running pipeline |
+| `send_files` | Send local files to a running pipeline |
+| `store_read` | Read a stored text file |
+| `store_list` | List stored files and folders |
+| `store_stat` | Get details of a stored file or folder |
+| `store_get_url` | Get a download link for a stored file |
+| `save_template` | Save or replace a pipeline template |
+| `load_template` | Get a saved pipeline template |
+| `deploy_add` | Register and optionally deploy a version |
+| `deploy_list` | List pipeline deployments |
+| `deploy_status` | Get a deployment's status |
+| `deploy_versions` | List a pipeline's versions |
+| `deploy_to_team` | Deploy a pipeline version to a team |
+| `deploy_set_schedule` | Set or clear a deployment's schedule |
+| `deploy_enable` | Enable a deployment |
+| `deploy_disable` | Disable a deployment |
+| `deploy_remove` | Remove a deployment |
+| `monitor` | Watch a running pipeline's status |
+| `list_running_pipelines` | List running pipelines |
+| `log_chapters` | List a pipeline's recorded runs |
+| `log_read` | Read a pipeline's run log |
+| `log_traces` | List the documents traced in a run |
+| `log_trace` | Get one document's full trace |
+| `scaffold_node` | Draft files for a new custom component |
+| `list_integrations` | Check which integrations are set up |

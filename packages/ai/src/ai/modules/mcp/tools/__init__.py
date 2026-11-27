@@ -8,6 +8,7 @@ and calling its ``register(registry)`` from ``register_all``.
 """
 
 from ..tooling import ToolRegistry
+from ._titles import TOOL_TITLES
 from . import capability
 from . import execution
 from . import integrations
@@ -42,3 +43,4 @@ def register_all(registry: ToolRegistry) -> None:
     logs.register(registry)
     scaffold.register(registry)
     integrations.register(registry)
+    registry.set_titles(TOOL_TITLES)

@@ -230,6 +230,25 @@ def test_tool_registry_emits_always_load_meta_and_merges_ui_meta():
     assert alone.meta == {'anthropic/alwaysLoad': True}
 
 
+def test_tool_registry_sends_a_title_in_both_fields_only_for_tools_with_a_row():
+    registry = ToolRegistry()
+    schema = {'type': 'object', 'properties': {}}
+
+    @registry.register('titled', 'desc', schema, hints=_hints())
+    async def _titled(client, tasks, args):
+        return {}
+
+    @registry.register('untitled', 'desc', schema, hints=_hints())
+    async def _untitled(client, tasks, args):
+        return {}
+
+    registry.set_titles({'titled': 'Do a thing', 'not_registered': 'Ignored'})
+    titled, untitled = (tool.model_dump(by_alias=True, exclude_none=True) for tool in registry.tools())
+
+    assert titled['title'] == titled['annotations']['title'] == 'Do a thing'
+    assert 'title' not in untitled and 'title' not in untitled['annotations']
+
+
 def test_tool_registry_without_hints_emits_no_annotations_or_meta():
     registry = ToolRegistry()
 
