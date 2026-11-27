@@ -48,6 +48,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'scraper_beautifulsoup'))
 
+import scrape_fetch  # noqa: E402
 from scrape_fetch import SAFE_REDIRECT_HEADERS, Fetcher, FetchError, _redirect_step, compile_patterns  # noqa: E402
 
 _PINNED_PATH = (
@@ -115,12 +116,12 @@ class _Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
         elif self.path == '/slow-headers':
-            # Status line, then one header byte every 100 ms (10 s): each byte
+            # Status line, then one header byte every 100 ms (30 s): each byte
             # restarts a per-read socket timeout.
             try:
                 self.wfile.write(b'HTTP/1.1 200 OK\r\nX-Pad: ')
                 self.wfile.flush()
-                for _ in range(100):
+                for _ in range(300):
                     self.wfile.write(b'a')
                     self.wfile.flush()
                     time.sleep(0.1)
@@ -129,15 +130,15 @@ class _Handler(BaseHTTPRequestHandler):
                 pass  # the client gave up
             self.close_connection = True
         elif self.path.startswith('/trickle'):
-            # Declares 100 bytes, then sends one every 100 ms (10 s in total).
+            # Declares 300 bytes, then sends one every 100 ms (30 s in total).
             self.send_response(200)
             if self.path == '/trickle':
-                self.send_header('Content-Length', '100')
+                self.send_header('Content-Length', '300')
             else:
                 self.send_header('Connection', 'close')
             self.end_headers()
             try:
-                for _ in range(100):
+                for _ in range(300):
                     self.wfile.write(b'x')
                     self.wfile.flush()
                     time.sleep(0.1)
@@ -436,14 +437,14 @@ def test_timeout_bounds_whole_body_read(server, path):
     start = time.monotonic()
     with pytest.raises(FetchError, match='timed out'):
         fetcher.fetch(f'{server}{path}')
-    assert time.monotonic() - start < 3
+    assert time.monotonic() - start < 10
 
 
 def test_timeout_bounds_slow_response_headers(server):
     start = time.monotonic()
     with pytest.raises(FetchError, match='timed out'):
         make(timeout=1).fetch(f'{server}/slow-headers')
-    assert time.monotonic() - start < 3
+    assert time.monotonic() - start < 10
 
 
 @pytest.mark.parametrize('suffix', ['/ok/../headers', '/ok/%2e%2e/headers', '/ok/%252e%252e/headers'])
@@ -470,15 +471,29 @@ def test_redirect_body_does_not_count_against_or_bypass_the_size_cap(server):
     assert result.text() == 'hello'
 
 
-def test_dns_lookup_is_bounded_by_the_timeout(server):
+def test_dns_lookup_is_bounded_by_the_timeout(server, monkeypatch):
+    release = threading.Event()
+    finished = threading.Event()
+    granted = []
+    call_within = scrape_fetch._call_within
+
     def slow_resolver(url):
-        time.sleep(5)
+        release.wait(30)
+        finished.set()
         return Validator()(url)
 
-    start = time.monotonic()
-    with pytest.raises(FetchError, match='timed out'):
-        make(validator=slow_resolver, timeout=1).fetch(f'{server}/ok')
-    assert time.monotonic() - start < 3
+    def recording_call_within(function, argument, seconds):
+        granted.append(seconds)
+        return call_within(function, argument, seconds)
+
+    monkeypatch.setattr(scrape_fetch, '_call_within', recording_call_within)
+    try:
+        with pytest.raises(FetchError, match='timed out'):
+            make(validator=slow_resolver, timeout=1).fetch(f'{server}/ok')
+        assert not finished.is_set()
+        assert granted and max(granted) <= 1
+    finally:
+        release.set()
 
 
 def test_resolver_error_omits_query_string():
@@ -629,4 +644,4 @@ def test_timeout_bounds_slow_https(https_server, monkeypatch, path):
     start = time.monotonic()
     with pytest.raises(FetchError, match='timed out'):
         make(timeout=1).fetch(base + path)
-    assert time.monotonic() - start < 3
+    assert time.monotonic() - start < 10

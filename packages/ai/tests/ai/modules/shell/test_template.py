@@ -29,12 +29,11 @@ Mustache features do not exist, and template syntax inside data is inert.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from ai.modules.shell.template import MAX_SECTION_DEPTH, TemplateError, render
 
+from ...linear_time import assert_linear_time
 from .hostile_fixtures import HOSTILE_DESCRIPTION, HOSTILE_NAME
 
 CTX = {
@@ -146,10 +145,10 @@ def test_a_tag_is_one_short_line(tpl):
 
 
 def test_a_run_of_open_braces_renders_in_linear_time():
-    tpl = '{{' * 100_000  # 200 KB
-    start = time.perf_counter()
-    assert render(tpl, {}) == tpl
-    assert time.perf_counter() - start < 1.0
+    templates = ['{{' * 1_000, '{{' * 4_000]
+    for tpl in templates:
+        assert render(tpl, {}) == tpl
+    assert_linear_time(lambda tpl: render(tpl, {}), *templates)
 
 
 def test_engine_names_resolve_from_the_root_context_only():

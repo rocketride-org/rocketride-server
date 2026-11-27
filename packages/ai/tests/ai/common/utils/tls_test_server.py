@@ -64,15 +64,15 @@ class TrickleHandler(BaseHTTPRequestHandler):
             if self.path == '/slow-headers':
                 self.wfile.write(b'HTTP/1.1 200 OK\r\nX-Pad: ')
                 self.wfile.flush()
-                for _ in range(100):
+                for _ in range(300):
                     self.wfile.write(b'a')
                     self.wfile.flush()
                     time.sleep(0.1)
             else:
                 self.send_response(200)
-                self.send_header('Content-Length', '100')
+                self.send_header('Content-Length', '300')
                 self.end_headers()
-                for _ in range(100):
+                for _ in range(300):
                     self.wfile.write(b'x')
                     self.wfile.flush()
                     time.sleep(0.1)
@@ -112,7 +112,7 @@ def serve_slow_handshake() -> Tuple[socket.socket, int]:
         try:
             conn.recv(4096)  # the ClientHello
             conn.sendall(b'\x16\x03\x03\x40\x00')  # a 16 KB handshake record follows...
-            for _ in range(100):
+            for _ in range(300):
                 conn.sendall(b'\x00')  # ...very slowly
                 time.sleep(0.1)
         except OSError:

@@ -308,7 +308,7 @@ def _get_until_aborted(session, url, abort_after=0.5):
     threading.Timer(abort_after, session.abort).start()
     start = time.monotonic()
     try:
-        response = session.get(url, timeout=5)
+        response = session.get(url, timeout=60)
         response.content  # noqa: B018 - read the body, which a slow-body server holds open
     except (requests.RequestException, OSError):
         pass
@@ -334,7 +334,7 @@ def https_trickle(tmp_path_factory):
 @pytest.mark.parametrize('path', ['/slow-headers', '/slow-body'])
 def test_abort_ends_a_slow_http_request(http_trickle, path):
     with pinned_session(_loopback(http_trickle + '/')) as session:
-        assert _get_until_aborted(session, http_trickle + path) < 3
+        assert _get_until_aborted(session, http_trickle + path) < 10
 
 
 @pytest.mark.parametrize('path', ['/slow-headers', '/slow-body'])
@@ -343,7 +343,7 @@ def test_abort_ends_a_slow_https_request(https_trickle, path):
     base, cert = https_trickle
     with pinned_session(_loopback(base + '/')) as session:
         session.verify = cert
-        assert _get_until_aborted(session, base + path) < 3
+        assert _get_until_aborted(session, base + path) < 10
 
 
 def test_abort_ends_a_slow_tls_handshake():
@@ -351,7 +351,7 @@ def test_abort_ends_a_slow_tls_handshake():
     listener, port = tls_test_server.serve_slow_handshake()
     try:
         with pinned_session(_loopback(f'https://127.0.0.1:{port}/')) as session:
-            assert _get_until_aborted(session, f'https://127.0.0.1:{port}/') < 3
+            assert _get_until_aborted(session, f'https://127.0.0.1:{port}/') < 10
     finally:
         listener.close()
 

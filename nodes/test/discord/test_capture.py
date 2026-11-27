@@ -35,7 +35,6 @@ import queue
 import re
 import sys
 import threading
-import time
 import types
 from datetime import datetime, timezone
 from unittest import mock
@@ -686,15 +685,16 @@ class _FakePipe:
 class _StuckPipe(_FakePipe):
     """A database whose INSERT hangs until ``release`` is set."""
 
-    def __init__(self, release, **kwargs):
+    def __init__(self, release, wait=5, **kwargs):
         super().__init__(**kwargs)
         self.release = release
+        self.wait = wait
         self.entered = threading.Event()
 
     def invoke(self, param, component_id=''):
         if param.tool_name == 'execute':
             self.entered.set()
-            self.release.wait(5)
+            self.release.wait(self.wait)
         return super().invoke(param, component_id)
 
 
@@ -1809,7 +1809,7 @@ class TestWriterThread:
     def test_stop_keeps_to_its_budget_even_with_a_full_queue(self):
         """Queueing the stop marker and the drain share one budget, not one each."""
         release = threading.Event()
-        pipe = _StuckPipe(release)
+        pipe = _StuckPipe(release, wait=None)
         writer = _writer(_FakeTarget(pipe), [])
         writer.start()
         thread = writer._thread
@@ -1818,14 +1818,23 @@ class TestWriterThread:
             assert pipe.entered.wait(2)
             for _ in range(QUEUE_MAX_ROWS):
                 writer.submit(_row())
-            started = time.monotonic()
-            writer.stop(timeout=2.0)
-            elapsed = time.monotonic() - started
+            with (
+                mock.patch.object(writer._queue, 'put', wraps=writer._queue.put) as put,
+                mock.patch.object(thread, 'join', wraps=thread.join) as join,
+            ):
+                # On its own thread, so a put with no timeout fails the checks below instead of hanging.
+                stopper = threading.Thread(target=writer.stop, kwargs={'timeout': 0.1}, daemon=True)
+                stopper.start()
+                stopper.join(30)
+                stop_returned = not stopper.is_alive()
         finally:
             release.set()
         thread.join(5)
 
-        assert elapsed < 3.0
+        # The put into the full queue used up the whole budget, so the drain gets none of it.
+        put.assert_called_once_with(mock.ANY, timeout=0.1)
+        join.assert_called_once_with(0.0)
+        assert stop_returned, 'stop() did not return within 30 s'
 
     def test_a_full_queue_still_lets_the_worker_end(self):
         release = threading.Event()

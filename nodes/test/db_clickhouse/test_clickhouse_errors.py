@@ -7,13 +7,14 @@
 
 import importlib
 import sys
-import time
 import types
 from pathlib import Path
 
 import pytest
 
 from ai.common.database import DatabaseGlobalBase
+
+from ..linear_time import assert_linear_time
 
 NODE_DIR = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'db_clickhouse'
 TRACE = (
@@ -349,11 +350,8 @@ def test_a_message_that_was_only_an_echo_says_so(g):
 
 @pytest.mark.parametrize('filler', [' ', '\t', ' \n', '\n: ', '\nRow 1:'])
 def test_formatting_time_does_not_grow_with_whitespace(g, filler):
-    # Small first: a cubic pattern takes ~0.5 s here and would take an hour at 20,000.
-    for size, limit in ((1000, 0.1), (20000, 1)):
-        exc = DatabaseException(ServerException(27, f"DB::Exception: Cannot parse '{filler * size}' as UInt32" + TRACE))
-
-        start = time.perf_counter()
-        g._format_db_error(exc)
-
-        assert time.perf_counter() - start < limit
+    small, large = (
+        DatabaseException(ServerException(27, f"DB::Exception: Cannot parse '{filler * size}' as UInt32" + TRACE))
+        for size in (250, 1000)
+    )
+    assert_linear_time(g._format_db_error, small, large)

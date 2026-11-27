@@ -20,7 +20,6 @@ subclass that supplies SQLite-compatible stubs, then exercise:
 
 from __future__ import annotations
 
-import time
 from datetime import datetime
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -41,6 +40,8 @@ from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.db_instance_base import DatabaseInstanceBase, MissingLlmError
 from ai.common.schema import Question
 from ai.common.utils import parse_bool
+
+from ...linear_time import assert_linear_time
 
 
 # ---------------------------------------------------------------------------
@@ -543,14 +544,10 @@ def test_format_db_error_leaves_text_that_resembles_a_clickhouse_echo_alone(base
 
 @pytest.mark.parametrize('filler', [' ', ' \n', '\n '])
 def test_format_db_error_time_does_not_grow_with_whitespace(base, filler):
-    # Small first: a cubic pattern takes ~0.5 s here and would take an hour at 20,000.
-    for size, limit in ((1000, 0.1), (20000, 1)):
-        exc = _wrapped(_FakeDriverError(f'bad{filler * size}value [SQL: SELECT 1]'), 'SELECT 1', {})
-
-        start = time.perf_counter()
-        base._format_db_error(exc)
-
-        assert time.perf_counter() - start < limit
+    small, large = (
+        _wrapped(_FakeDriverError(f'bad{filler * size}value [SQL: SELECT 1]'), 'SELECT 1', {}) for size in (250, 1000)
+    )
+    assert_linear_time(base._format_db_error, small, large)
 
 
 # ---------------------------------------------------------------------------
