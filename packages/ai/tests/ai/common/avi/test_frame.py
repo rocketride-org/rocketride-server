@@ -407,18 +407,18 @@ def test_end_decoding_from_the_frame_callback_stops_ffmpeg_and_the_stream_still_
         extractor.writeAVI(AVI_ACTION.WRITE, 'video/mp4', data[offset : offset + (1 << 20)])
     extractor.writeAVI(AVI_ACTION.END, 'video/mp4', b'')
 
-    emitted = [image for image in frames if image is not None]
-    assert 1 <= len(emitted) < 10, 'at 1 fps the whole 74 s video gives 74 frames'
+    count = len([image for image in frames if image is not None])
+    assert 1 <= count < 10, f'{count} frames after end_decoding; at 1 fps the whole 74 s video gives 74'
     assert frames[-1] is None, 'the end of the stream is still reported'
 
 
 def test_writes_after_end_decoding_are_dropped_but_a_failed_decoder_still_raises():
-    """end_decoding's terminate exits nonzero by design; only an unrequested exit is an error."""
+    """end_decoding's kill exits nonzero by design; only an unrequested exit is an error."""
     extractor = _extractor([])
     # A started stream without ffmpeg: write() checks only these, and no real process
     # is involved; _started is cleared after, so __del__'s stop() has nothing to stop
     extractor._started = True
-    extractor._ffmpeg_process = SimpleNamespace(poll=lambda: None, terminate=lambda: None)
+    extractor._ffmpeg_process = SimpleNamespace(poll=lambda: None, kill=lambda: None)
     try:
         extractor.end_decoding()
         extractor._done, extractor._exit_code = True, 1  # what the watcher records next
@@ -467,7 +467,8 @@ def test_end_decoding_on_a_piped_stream_drops_the_remaining_writes(tmp_path):
     extractor.writeAVI(AVI_ACTION.END, 'video/mp2t', b'')
 
     assert extractor._isStdinCompatible, 'precondition: the stream was piped, not cached'
-    assert 1 <= len([image for image in frames if image is not None]) < 10
+    count = len([image for image in frames if image is not None])
+    assert 1 <= count < 10, f'{count} frames after end_decoding'
     assert frames[-1] is None, 'the end of the stream is still reported'
 
 
@@ -475,8 +476,8 @@ def test_end_decoding_terminates_only_a_running_process():
     """No process yet, or one that already exited: nothing to end."""
     extractor = _extractor([])
     terminated = []
-    running = SimpleNamespace(poll=lambda: None, terminate=lambda: terminated.append('running'))
-    exited = SimpleNamespace(poll=lambda: 0, terminate=lambda: terminated.append('exited'))
+    running = SimpleNamespace(poll=lambda: None, kill=lambda: terminated.append('running'))
+    exited = SimpleNamespace(poll=lambda: 0, kill=lambda: terminated.append('exited'))
 
     extractor.end_decoding()
     extractor._ffmpeg_process = exited
