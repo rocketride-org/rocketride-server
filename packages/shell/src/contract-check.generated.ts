@@ -884,6 +884,10 @@ import type { PipeInterfaceNode as Frozen_PipeInterfaceNode } from '../contract/
 import type { PipeInterfaceNode as Current_PipeInterfaceNode } from './api';
 import type { PipeInterfaceMap as Frozen_PipeInterfaceMap } from '../contract/versions/v15';
 import type { PipeInterfaceMap as Current_PipeInterfaceMap } from './api';
+import type { PipeSource as Frozen_PipeSource } from '../contract/versions/v15';
+import type { PipeSource as Current_PipeSource } from './api';
+import type { PipeSourceMap as Frozen_PipeSourceMap } from '../contract/versions/v15';
+import type { PipeSourceMap as Current_PipeSourceMap } from './api';
 import type { PipeParameter as Frozen_PipeParameter } from '../contract/versions/v15';
 import type { PipeParameter as Current_PipeParameter } from './api';
 import type { PipeInterfaces as Frozen_PipeInterfaces } from '../contract/versions/v15';
@@ -1802,6 +1806,10 @@ const _t_PipeInterfaceNode: Frozen_PipeInterfaceNode = {} as Current_PipeInterfa
 void _t_PipeInterfaceNode;
 const _t_PipeInterfaceMap: Frozen_PipeInterfaceMap = {} as Current_PipeInterfaceMap;
 void _t_PipeInterfaceMap;
+const _t_PipeSource: Frozen_PipeSource = {} as Current_PipeSource;
+void _t_PipeSource;
+const _t_PipeSourceMap: Frozen_PipeSourceMap = {} as Current_PipeSourceMap;
+void _t_PipeSourceMap;
 const _t_PipeParameter: Frozen_PipeParameter = {} as Current_PipeParameter;
 void _t_PipeParameter;
 const _t_PipeInterfaces: Frozen_PipeInterfaces = {} as Current_PipeInterfaces;
