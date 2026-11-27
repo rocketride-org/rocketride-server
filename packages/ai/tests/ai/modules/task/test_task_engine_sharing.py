@@ -79,6 +79,8 @@ from ai.modules.task.task_server import ControlRegistry, EngineRegistry, Resolut
 from ai.modules.task.types import EngineState, TaskError
 from ai.modules.task.trace_owner import TraceOwners
 
+from .test_task_server import _bound_ttl_pushes
+
 
 # =============================================================================
 # A SMALL CATALOG
@@ -964,6 +966,24 @@ async def test_an_inactive_engine_stops_while_a_long_ttl_control_survives(catalo
     await ts._ttl_cycle()
     assert patient.key not in ts._task_control
     assert engines == [(engine, 'ttl')]
+
+
+@pytest.mark.asyncio
+async def test_an_engine_whose_deadline_rounds_to_the_pass_stops(catalog, engines, clock, monkeypatch):
+    """At the timer an engine stops even when its idle time rounds to just under it; never re-pushed for ever."""
+    # Its + CONST_ENGINE_IDLE_TTL rounds down to the float below: the pass reads 899.9999999997672 s idle
+    clock.now = 2096361.4739867852
+    ts = _server()
+    patient = await _start(ts, _pipeline(), user='user-a', ttl=24 * 3600)
+    engine = patient.task
+    clock.advance(CONST_ENGINE_IDLE_TTL)
+    assert engine.idle_seconds() < CONST_ENGINE_IDLE_TTL
+    _bound_ttl_pushes(monkeypatch)
+
+    await ts._ttl_cycle()
+
+    assert engines == [(engine, 'ttl')]
+    assert patient.dormant
 
 
 @pytest.mark.asyncio
