@@ -56,7 +56,34 @@ export interface IDeployViewProps {
 	app: AppSummary;
 	/** Render everything non-interactive (namespace mismatch gating). */
 	readOnly?: boolean;
+	/** What is deployed, when it is not an app: its noun, whether it has a
+	 *  public rung, and the copy for the header and the deploy dialog. */
+	subject?: DeploySubject;
 }
+
+/** What a DeployView deploys and publishes (default: an app). */
+export interface DeploySubject {
+	/** 'app' or 'node' — the copy's noun. */
+	noun: string;
+	/** Whether the @public rung exists for it. */
+	publicAudience: boolean;
+	/** The header's one-line purpose. */
+	intro: string;
+	/** What the Deploy dialog's step does. */
+	deployHint: string;
+	/** The Deploy card's one-line hint; the app's when absent. */
+	deployCardHint?: string;
+	/** The Where-live panel's footnote; the app's when absent. */
+	liveFootnote?: string;
+}
+
+/** An app: every audience, the store included. */
+const APP_SUBJECT: DeploySubject = {
+	noun: 'app',
+	publicAudience: true,
+	intro: 'Deploy immutable versions, then publish each to an audience: @me, a team, or the public store. Internal audiences serve instantly; the store gates every version on review.',
+	deployHint: 'Packs the app source and ships it to the server as the next immutable version. Binds nothing. Publish it to an audience afterwards.',
+};
 
 // =============================================================================
 // STYLES
@@ -506,7 +533,7 @@ function formatWhen(unixSeconds?: number): string {
 // by app id.
 const railCache = new Map<string, { versions: AppVersionInfo[] | null; pins: RungPin[] | null }>();
 
-export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) => {
+export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly, subject = APP_SUBJECT }) => {
 	// ── Data — loaded through the host adapter, seeded from the cache ─────
 	const [versions, setVersions] = useState<AppVersionInfo[] | null>(() => railCache.get(app.id)?.versions ?? null);
 	const [pins, setPins] = useState<RungPin[] | null>(() => railCache.get(app.id)?.pins ?? null);
@@ -780,7 +807,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			{/* View header — title + one-line purpose (the pipeline pattern) */}
 			<div style={styles.head}>
 				<div style={styles.h1}>{app.name}</div>
-				<div style={styles.sub}>Deploy immutable versions, then publish each to an audience: @me, a team, or the public store. Internal audiences serve instantly; the store gates every version on review.</div>
+				<div style={styles.sub}>{subject.intro}</div>
 				{/* Failures from the dialog-less actions (publish/submit) land
 				    here — otherwise they are invisible. */}
 				{actionError ? <div style={styles.devError}>{actionError}</div> : null}
@@ -830,7 +857,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 								{/* While the zip is in flight the tile itself is the card —
 								    the version row (and its 'uploaded' tick) exists only
 								    once the server has accepted the upload. */}
-								<span style={styles.publishHint}>{deployBusy ? 'uploading…' : 'snapshot the current build to the server'}</span>
+								<span style={styles.publishHint}>{deployBusy ? 'uploading…' : (subject.deployCardHint ?? 'snapshot the current build to the server')}</span>
 							</div>
 						)}
 						{(versions ?? []).map((v) => {
@@ -924,7 +951,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 
 					{/* Where this app is live — the reverse index */}
 					<div style={styles.livePanel}>
-						<div style={styles.liveHead}>Where this app is live</div>
+						<div style={styles.liveHead}>Where this {subject.noun} is live</div>
 						{(pins ?? []).length === 0 ? (
 							<div style={styles.liveFoot}>Nothing is deployed yet. Publish a version and deploy it to your personal rung to see it here.</div>
 						) : (
@@ -953,9 +980,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 									</div>
 								))}
 								<div style={styles.liveFoot}>
-									{host.submitForReview
+									{subject.liveFootnote ?? (host.submitForReview
 										? 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.'
-										: 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server; the store publishes directly.'}
+										: 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server; the store publishes directly.')}
 								</div>
 							</>
 						)}
@@ -980,7 +1007,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 						</>
 					}
 				>
-					<div style={styles.dialogHint}>Packs the app source and ships it to the server as the next immutable version. Binds nothing. Publish it to an audience afterwards.</div>
+					<div style={styles.dialogHint}>{subject.deployHint}</div>
 					<InputField placeholder="What changed? (optional comment)" value={deployMessage} onChange={(e) => setDeployMessage(e.target.value)} disabled={deployBusy} />
 					{deployError ? <div style={styles.devError}>{deployError}</div> : null}
 				</Modal>
@@ -1021,7 +1048,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					<div style={styles.dialogHint}>
 						{host.submitForReview
 							? 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
-							: 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
+							: subject.publicAudience
+								? 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'
+								: 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly.'}
 					</div>
 					<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@me')}>
 						Me<span style={styles.pubRowState}>{pinStateOf('@me', publishFor)}</span>
@@ -1035,7 +1064,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					{/* Without a review ladder on the host (OSS — the server accepts
 					    any servable version on @public) the store row is as open as
 					    the internal rows; with one, only 'ready' unlocks it. */}
-					{(host.submitForReview ? publishFor.state === 'ready' : publishFor.state !== 'failed') ? (
+					{!subject.publicAudience ? null : (host.submitForReview ? publishFor.state === 'ready' : publishFor.state !== 'failed') ? (
 						<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@public')}>
 							Public: the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
 						</button>
@@ -1051,7 +1080,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			{removePin && (
 				<ConfirmDialog
 					title={`Remove ${app.name} from ${removePin.label}?`}
-					message={`Takes the app off ${removePin.handle}: it stops serving to that audience. This is a SOFT remove: every published version and the audit history survive, and publishing to ${removePin.handle} again revives it.`}
+					message={`Takes the ${subject.noun} off ${removePin.handle}: it stops serving to that audience. This is a SOFT remove: every published version and the audit history survive, and publishing to ${removePin.handle} again revives it.`}
 					confirmLabel="Remove"
 					cancelLabel="Cancel"
 					onConfirm={() => {

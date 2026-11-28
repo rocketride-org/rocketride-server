@@ -21,3 +21,10 @@ test('the builtin catalog follows AGENT_ENABLED', () => {
 	assert.equal(isBuiltinTool('builtin.agent'), AGENT_ENABLED);
 	assert.deepEqual(ids, [...(AGENT_ENABLED ? ['agent'] : []), 'apps', 'nodes', 'pipelines']);
 });
+
+test('the nodes tool opens a document per node', () => {
+	registerBuiltinTools();
+	const nodes = getBuiltinTools().find((tool) => tool.descriptor.id === 'nodes');
+
+	assert.ok(nodes?.descriptor.devToolFrame);
+});

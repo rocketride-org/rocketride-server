@@ -32,9 +32,8 @@
 //                         saves through the view)
 //   apps/<folder>/*.rrapp → the App Builder panel for that app (the .rrapp
 //                         is a contentless trigger marker, same as VS Code)
-//   **.rrnode           → the Node Designer — SEAM ONLY today: the designer
-//                         does not exist yet; when it lands, its static-doc
-//                         uri (`node:<id>`) is wired HERE and nowhere else
+//   **.rrnode           → the Node Designer (`tool:nodes/<id>`): versions and
+//                         audiences of the published node the package names
 //   text-shaped files   → the read-only file viewer tab (`file:<path>`)
 //   binary/media        → not openable in this surface (explorer-ui is the
 //                         store browser with real viewers)
@@ -43,6 +42,7 @@
 import { getDocs } from '../../../docs';
 import { isPipelineFile } from '../projectStore';
 import { readAppPackage } from '../../preview/session/appStore';
+import { nodeIdOfPackage } from 'shared/tools/nodes/nodeRail';
 import { getMediaInfo } from 'shared/utils/mediaTypes';
 
 // =============================================================================
@@ -99,12 +99,18 @@ export async function openWorkspaceFile(path: string): Promise<boolean> {
 		}
 	}
 
-	// ── Node Designer seam (.rrnode) ─────────────────────────────────────
-	// The designer does not exist yet. When it lands, open its static doc
-	// here (`node:<id>`), exactly like the .rrapp branch above.
+	// ── Node Designer (.rrnode) ──────────────────────────────────────────
+	// A node's package is <module>.rrnode, or a folder holding the .rrnode
+	// marker; either names the module, <developerId>__<name>, whose node id
+	// is <developerId>.<name>. The nodes tool owns `tool:nodes/<id>`.
 	if (leaf.endsWith('.rrnode')) {
-		console.log('[openWorkspaceFile] node designer not built yet — .rrnode routing is reserved:', path);
-		return false;
+		const nodeId = nodeIdOfPackage(path);
+		if (!nodeId) {
+			console.log('[openWorkspaceFile] .rrnode does not name a published node (<developerId>__<name>):', path);
+			return false;
+		}
+		docs.openStaticDocument(`tool:nodes/${nodeId}`, nodeId);
+		return true;
 	}
 
 	// ── Read-only text viewer ────────────────────────────────────────────

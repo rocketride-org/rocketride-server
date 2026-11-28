@@ -45,6 +45,7 @@ import { AgentIcon } from './agent/AgentIcon';
 import { AppDevTool } from './appdev/AppDevTool';
 import { AppsToolFrame } from './appdev/AppsToolFrame';
 import { NodesTool } from './nodes/NodesTool';
+import { NodesToolFrame } from './nodes/NodesToolFrame';
 import { PipelinesTool } from './pipelines/PipelinesTool';
 import { AppsIcon } from '../components/icons/AppsIcon';
 import { CodiconCircuitBoard, CodiconTypeHierarchy } from '../components/icons/Codicon';
@@ -119,7 +120,7 @@ export function registerBuiltinTools(): void {
 			// setting deltas store under the product's app partition so they
 			// follow the person across the tool and app surfaces.
 			storageAppId: TOOL_SETTINGS_OWNER,
-			description: 'Browse and scaffold pipeline nodes.',
+			description: 'Upload, version and publish your own pipeline nodes.',
 			icon: nodesIconUrl,
 			categories: ['devTool'],
 		},
@@ -128,6 +129,7 @@ export function registerBuiltinTools(): void {
 			name: 'Nodes',
 			icon: <CodiconCircuitBoard size={16} />,
 			devToolSidebar: NodesTool,
+			devToolFrame: NodesToolFrame,
 		},
 	});
 	registerBuiltinTool({
