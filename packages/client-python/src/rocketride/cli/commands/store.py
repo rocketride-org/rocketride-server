@@ -47,6 +47,7 @@ async def run_store(args) -> int:
     """
 
     async def action(out: Output) -> int:
+        """Connect to the server and dispatch the requested store subcommand."""
         client = await connect_client(args.uri, args.apikey)
         subcommand = args.store_subcommand
 
@@ -132,6 +133,13 @@ async def run_store(args) -> int:
             await client.fs_mkdir(args.path)
             out.line(f'Created: {args.path}/')
             out.result({'path': args.path, 'created': True})
+            return 0
+
+        if subcommand == 'rmdir':
+            recursive = bool(getattr(args, 'recursive', False))
+            await client.fs_rmdir(args.path, recursive=recursive)
+            out.line(f'Removed: {args.path}/')
+            out.result({'path': args.path, 'removed': True, 'recursive': recursive})
             return 0
 
         if subcommand == 'stat':
