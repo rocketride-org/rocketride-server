@@ -279,6 +279,27 @@ def test_background_calls_count_what_is_running_and_what_returned(wave):
     assert calls.wait(None) == 0
 
 
+def test_background_calls_separate_what_may_change_the_work_from_what_runs(wave):
+    """A schema load the wave gave up on is waited for, but its return is not a change."""
+    calls = wave.run_state.BackgroundCalls()
+    load, write = Future(), Future()
+    calls.add(load, changes_work=False)
+    calls.add(write)
+
+    assert calls.snapshot() == (1, 0)
+    assert calls.running() == 2
+
+    load.set_result('loaded')
+
+    assert calls.snapshot() == (1, 0)
+    assert calls.running() == 1
+
+    write.set_result('written')
+
+    assert calls.snapshot() == (0, 1)
+    assert calls.wait(None) == 0
+
+
 @pytest.mark.parametrize('alias', ['{} ', '{}\t', ' {}'])
 def test_a_key_with_spaces_cannot_read_a_hidden_result(run_memory, alias):
     """The store trims keys, so to it 'wave-0.r0 ' is 'wave-0.r0'. Hiding treats them as one key too.
