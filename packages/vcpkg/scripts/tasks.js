@@ -131,6 +131,20 @@ function getVcpkgCmakeArgs(options = {}) {
 	if (options.overlayPorts) args.push(`-DVCPKG_OVERLAY_PORTS=${options.overlayPorts}`);
 	if (options.overlayTriplets) args.push(`-DVCPKG_OVERLAY_TRIPLETS=${options.overlayTriplets}`);
 
+	// Pin the compiler on the command line so CMake resolves it BEFORE
+	// project(). The per-triplet flags file (cmake/flags/<triplet>.cmake) also
+	// FORCE-sets CMAKE_C/CXX_COMPILER to the bare names, but it runs after
+	// project(), by which point CMake has already detected the default compiler
+	// (`cc`, e.g. /usr/bin/cc) and recorded it in CMakeFiles/<ver>/CMakeCCompiler.cmake.
+	// The cache then says `clang` while the compiler-info file says `.../cc`;
+	// on the next regenerate CMake treats that as a compiler change, wipes the
+	// cache and re-runs with none of these -D flags, so the toolchain file and
+	// every ROCKETRIDE_* variable vanish and configure fails. Passing the same
+	// names here makes the two records agree from the first configure.
+	if (!isWindows()) {
+		args.push('-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++');
+	}
+
 	// Opt-in (CI / small-disk hosts): drop each port's buildtree + package
 	// staging right after it builds so peak disk stays low across the whole
 	// from-source build. Without it, the final link accumulates every port's
