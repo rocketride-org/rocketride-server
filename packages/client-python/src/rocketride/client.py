@@ -30,7 +30,7 @@ Basic Usage:
     # Connect and execute a pipeline
     client = RocketRideClient(uri="http://localhost:5565")
     result = await client.connect("your_api_key")
-    token = await client.use(filepath="pipeline.json")
+    token = (await client.use(filepath="pipeline.json"))["token"]
     await client.send(token, "Hello, world!")
     await client.disconnect()
 
@@ -119,7 +119,7 @@ class RocketRideClient(
         client = RocketRideClient(uri="http://localhost:5565")
         result = await client.connect("your_api_key")  # returns ConnectResult
         try:
-            token = await client.use(filepath="my_pipeline.json")
+            token = (await client.use(filepath="my_pipeline.json"))["token"]
             await client.send(token, "Process this data")
         finally:
             await client.disconnect()
@@ -128,7 +128,7 @@ class RocketRideClient(
         client = RocketRideClient()
         result = await client.connect()
         try:
-            token = await client.use(filepath="my_pipeline.json")
+            token = (await client.use(filepath="my_pipeline.json"))["token"]
         finally:
             await client.disconnect()
     """
