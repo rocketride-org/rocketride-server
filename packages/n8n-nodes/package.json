@@ -65,7 +65,7 @@
 		]
 	},
 	"devDependencies": {
-		"@n8n/node-cli": "0.34.0",
+		"@n8n/node-cli": "0.58.5",
 		"@vitest/mocker": "^4.1.11",
 		"eslint": "9.29.0",
 		"js-yaml": "^4.3.2",
