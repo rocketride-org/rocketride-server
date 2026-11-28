@@ -21,8 +21,15 @@
 # SOFTWARE.
 # =============================================================================
 
-from PIL import Image
 from io import BytesIO
+from PIL import Image
+
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass
 
 
 def ensure_png(mime_type: str, image_bytes: bytes) -> tuple[str, bytes]:
@@ -39,10 +46,26 @@ def ensure_png(mime_type: str, image_bytes: bytes) -> tuple[str, bytes]:
         tuple[str, bytes]: A tuple of ('image/png', the PNG image bytes).
     """
     if mime_type.lower() == 'image/png':
-        return 'image/png', image_bytes
+        # Fast pass-through: if PNG has no eXIf chunk, orientation is normal and
+        # no re-encoding is needed. If an eXIf chunk is present, check orientation tag.
+        if b'eXIf' not in image_bytes:
+            return 'image/png', image_bytes
+        try:
+            with Image.open(BytesIO(image_bytes)) as img:
+                exif = img.getexif()
+                if not exif or exif.get(0x0112, 1) == 1:
+                    return 'image/png', image_bytes
+        except Exception:
+            return 'image/png', image_bytes
 
     try:
         with Image.open(BytesIO(image_bytes)) as img:
+            try:
+                from PIL import ImageOps
+
+                img = ImageOps.exif_transpose(img) or img
+            except Exception:
+                pass
             img = img.convert('RGBA')  # PNG supports RGBA
             output = BytesIO()
             img.save(output, format='PNG')

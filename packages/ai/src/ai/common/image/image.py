@@ -1,7 +1,14 @@
 import io
 import base64
-from PIL import Image
+from PIL import Image, ImageOps
 from rocketlib import debug
+
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass
 
 
 class ImageProcessor:
@@ -34,6 +41,7 @@ class ImageProcessor:
             # Decode once; load() forces a full read so the image detaches from the
             # buffer (replaces a costly format-normalizing PNG re-encode round-trip).
             image = Image.open(io.BytesIO(image_data))
+            image = ImageOps.exif_transpose(image) or image
             image.load()
             return image
 
