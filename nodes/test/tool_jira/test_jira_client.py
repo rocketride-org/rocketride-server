@@ -409,6 +409,13 @@ def test_adf_to_text_reads_nodes_jira_writes_itself():
     assert jc.adf_to_text(doc) == 'Ping @Maya see https://example.com\n\n3. c\n4. d'
 
 
+@pytest.mark.parametrize('order', ['x', '2.5', [3]])
+def test_an_ordered_list_whose_order_is_not_a_number_starts_at_1(order):
+    item = {'type': 'listItem', 'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': 'c'}]}]}
+    doc = {'type': 'orderedList', 'attrs': {'order': order}, 'content': [item, item]}
+    assert jc.adf_to_text(doc) == '1. c\n2. c'
+
+
 @pytest.mark.parametrize('value', [None, 'text', 3, []])
 def test_adf_to_text_of_a_non_node_is_empty(value):
     assert jc.adf_to_text(value) == ''

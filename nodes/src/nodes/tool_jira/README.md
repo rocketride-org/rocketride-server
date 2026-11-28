@@ -21,13 +21,13 @@ The server-name prefix is `jira`, producing these registered functions.
 | `jira_check_connection` | Check that the site, email and API token work, and show which account the node acts as. |
 | `jira_search` | Search issues with JQL, a page at a time. |
 | `jira_issue_get` | Read one issue, its description as text and, optionally, its latest comments. |
-| `jira_projects_list` | List the projects the node can use (key, name, type). |
+| `jira_projects_list` | List the projects the node can use (key, name, type): the allowlisted ones, or the first 100 without an allowlist. |
 | `jira_issue_create` | Create an issue. Blocked in read-only mode. |
 | `jira_comment_add` | Add a comment to an issue. Blocked in read-only mode. |
 
 Every function returns `success`, plus its own fields on success and `error` on failure. Jira API failures are returned in that envelope rather than raised: a JQL syntax error comes back with Jira's own message so the agent can fix its query, 401 and 403 say to check the token or the project permissions, and 404 means the issue does not exist or the account cannot see it.
 
-`jira_search` requires `jql` and accepts `max_results` (1–100, default from **Results per page**) and `next_page_token`. Each issue carries `key`, `summary`, `status`, `type`, `assignee`, `priority`, `updated` and `url`; `next_page_token` is set while more pages remain, and passing it back returns the next page. `jira_issue_get` requires `key` and accepts `include_comments` (default false) and `max_comments` (default 20, newest first). `jira_issue_create` requires `project`, `issue_type` (a name such as `Task`) and `summary`, and accepts `description`, `labels`, `priority` and `assignee_account_id`; it returns `key` and `url`. `jira_comment_add` requires `key` and `body` and returns `comment_id` and `url`.
+`jira_search` requires `jql` and accepts `max_results` (1–100, default from **Results per page**) and `next_page_token`. Each issue carries `key`, `summary`, `status`, `type`, `assignee`, `priority`, `updated` and `url`; `next_page_token` is set while more pages remain, and passing it back returns the next page. `jira_issue_get` requires `key` and accepts `include_comments` (default false) and `max_comments` (default 20, newest first). `jira_issue_create` requires `project`, `issue_type` (a name such as `Task`) and `summary`, and accepts `description`, `labels`, `priority` and `assignee_account_id`; it returns `key` and `url`. `jira_comment_add` requires `key` and `body` and returns `comment_id` and `url`. `jira_projects_list` sets `truncated` when the site has more than 100 projects and no allowlist narrows them.
 
 ## Configuration
 

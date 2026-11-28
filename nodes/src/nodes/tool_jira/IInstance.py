@@ -65,6 +65,7 @@ ISSUE_FIELDS = [
     'project',
 ]
 DEFAULT_MAX_COMMENTS = 20
+MAX_PROJECT_KEYS = 50  # GET /project/search takes up to 50 keys
 
 
 def _run(op: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
@@ -76,7 +77,9 @@ def _run(op: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _name(value: Any, key: str = 'name') -> Optional[str]:
-    return value.get(key) if isinstance(value, dict) else None
+    if isinstance(value, dict):
+        return value.get(key)
+    return None
 
 
 def _int_arg(value: Any, default: int, low: int, high: int) -> int:
@@ -222,10 +225,10 @@ class IInstance(IInstanceBase):
             allowed = set(self.IGlobal.projects)
             issues = []
             for issue in resp.get('issues') or []:
-                f = issue.get('fields') or {}
+                fields = issue.get('fields') or {}
                 # the wrapped JQL should already keep results inside the allowlist; a query that slipped past it
                 # through some JQL quirk is refused rather than returned
-                if allowed and str((f.get('project') or {}).get('key') or '').upper() not in allowed:
+                if allowed and str((fields.get('project') or {}).get('key') or '').upper() not in allowed:
                     raise jira_client.JiraAPIError(
                         0,
                         [
@@ -235,19 +238,19 @@ class IInstance(IInstanceBase):
                 issues.append(
                     {
                         'key': issue.get('key'),
-                        'summary': f.get('summary'),
-                        'status': _name(f.get('status')),
-                        'type': _name(f.get('issuetype')),
-                        'assignee': _name(f.get('assignee'), 'displayName'),
-                        'priority': _name(f.get('priority')),
-                        'updated': f.get('updated'),
+                        'summary': fields.get('summary'),
+                        'status': _name(fields.get('status')),
+                        'type': _name(fields.get('issuetype')),
+                        'assignee': _name(fields.get('assignee'), 'displayName'),
+                        'priority': _name(fields.get('priority')),
+                        'updated': fields.get('updated'),
                         'url': self._url(issue.get('key')),
                     }
                 )
-            return {
-                'issues': issues,
-                'next_page_token': None if resp.get('isLast') else resp.get('nextPageToken'),
-            }
+            next_page_token = None
+            if not resp.get('isLast'):
+                next_page_token = resp.get('nextPageToken')
+            return {'issues': issues, 'next_page_token': next_page_token}
 
         return _run(op)
 
@@ -291,20 +294,20 @@ class IInstance(IInstanceBase):
         def op():
             key = _issue_key(args.get('key'))
             issue = self._issue(key, ISSUE_FIELDS)
-            f = issue.get('fields') or {}
+            fields = issue.get('fields') or {}
             out: Dict[str, Any] = {
                 'key': issue.get('key', key),
-                'summary': f.get('summary'),
-                'status': _name(f.get('status')),
-                'type': _name(f.get('issuetype')),
-                'assignee': _name(f.get('assignee'), 'displayName'),
-                'reporter': _name(f.get('reporter'), 'displayName'),
-                'priority': _name(f.get('priority')),
-                'labels': f.get('labels') or [],
-                'fix_versions': [v.get('name') for v in f.get('fixVersions') or [] if isinstance(v, dict)],
-                'created': f.get('created'),
-                'updated': f.get('updated'),
-                'description_text': jira_client.adf_to_text(f.get('description')),
+                'summary': fields.get('summary'),
+                'status': _name(fields.get('status')),
+                'type': _name(fields.get('issuetype')),
+                'assignee': _name(fields.get('assignee'), 'displayName'),
+                'reporter': _name(fields.get('reporter'), 'displayName'),
+                'priority': _name(fields.get('priority')),
+                'labels': fields.get('labels') or [],
+                'fix_versions': [v.get('name') for v in fields.get('fixVersions') or [] if isinstance(v, dict)],
+                'created': fields.get('created'),
+                'updated': fields.get('updated'),
+                'description_text': jira_client.adf_to_text(fields.get('description')),
                 'comments': [],
                 'url': self._url(issue.get('key', key)),
             }
@@ -315,11 +318,11 @@ class IInstance(IInstanceBase):
                 )
                 out['comments'] = [
                     {
-                        'author': _name(c.get('author'), 'displayName'),
-                        'created': c.get('created'),
-                        'body_text': jira_client.adf_to_text(c.get('body')),
+                        'author': _name(comment.get('author'), 'displayName'),
+                        'created': comment.get('created'),
+                        'body_text': jira_client.adf_to_text(comment.get('body')),
                     }
-                    for c in page.get('comments') or []
+                    for comment in page.get('comments') or []
                 ]
             return out
 
@@ -332,25 +335,37 @@ class IInstance(IInstanceBase):
             'properties': {
                 'success': {'type': 'boolean'},
                 'projects': {'type': 'array', 'items': {'type': 'object'}},
+                'truncated': {'type': 'boolean'},
                 **_ERROR_SCHEMA,
             },
         },
-        description='List the Jira projects this node can use (key, name, type), limited to its project allowlist.',
+        description=(
+            'List the Jira projects this node can use (key, name, type): the projects in its allowlist, or with no '
+            'allowlist the first 100, with truncated set when there are more.'
+        ),
     )
     def jira_projects_list(self, args):
-        """GET /project/search, every page."""
+        """GET /project/search, asking for the allowlisted keys only, or one page of 100 without an allowlist."""
 
         def op():
-            projects, start = [], 0
-            while True:
-                page = self._request('GET', '/project/search', params={'startAt': start, 'maxResults': 50})
-                values = page.get('values') or []
-                for p in values:
-                    if not self.IGlobal.projects or p.get('key') in self.IGlobal.projects:
-                        projects.append({'key': p.get('key'), 'name': p.get('name'), 'type': p.get('projectTypeKey')})
-                start += len(values)
-                if page.get('isLast', True) or not values:
-                    return {'projects': projects}
+            allowed = self.IGlobal.projects
+            key_groups = [allowed[i : i + MAX_PROJECT_KEYS] for i in range(0, len(allowed), MAX_PROJECT_KEYS)]
+            projects = []
+            truncated = False
+            for keys in key_groups or [None]:
+                params: Dict[str, Any] = {'maxResults': jira_client.MAX_RESULTS_CAP}
+                if keys:
+                    params['keys'] = keys
+                page = self._request('GET', '/project/search', params=params)
+                # a project Jira returns outside the allowlist is left out, as a search result would be refused
+                projects += [
+                    {'key': project.get('key'), 'name': project.get('name'), 'type': project.get('projectTypeKey')}
+                    for project in page.get('values') or []
+                    if not allowed or project.get('key') in allowed
+                ]
+                if not page.get('isLast', True):
+                    truncated = True
+            return {'projects': projects, 'truncated': truncated}
 
         return _run(op)
 

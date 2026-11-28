@@ -51,7 +51,9 @@ def _as_bool(value: Any, default: bool) -> bool:
     """Coerce a config value to bool, tolerating string forms ('true'/'false')."""
     if isinstance(value, bool):
         return value
-    text = '' if value is None else str(value).strip().lower()
+    text = ''
+    if value is not None:
+        text = str(value).strip().lower()
     if text in ('1', 'true', 'yes', 'on'):
         return True
     if text in ('0', 'false', 'no', 'off'):

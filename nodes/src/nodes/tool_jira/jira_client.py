@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 from urllib.parse import urlsplit
 
 API_PATH = '/rest/api/3'
@@ -78,7 +78,9 @@ def _describe(status_code: int, messages: List[str]) -> str:
         return f'Jira API 404: not found, or not visible to this account ({detail})'
     if status_code == 429:
         return f'Jira API 429: rate limited ({detail})'
-    return f'Jira API {status_code}: {detail}' if status_code else f'Jira: {detail}'
+    if status_code:
+        return f'Jira API {status_code}: {detail}'
+    return f'Jira: {detail}'
 
 
 class Auth(NamedTuple):
@@ -93,8 +95,19 @@ _ATLASSIAN_HOST = re.compile(r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.atlassian\.net')
 
 
 def normalize_site_url(site_url: str) -> str:
-    """``https://<site>.atlassian.net`` without a trailing slash. Anything else (another scheme, a path,
-    a query, credentials in the URL) is refused, so a config value can't point the token somewhere else.
+    """Check a Jira Cloud site URL and return it as ``https://<site>.atlassian.net``.
+
+    Anything else (another scheme, a path, a query, credentials in the URL) is refused, so a config value
+    can't point the token somewhere else.
+
+    Args:
+        site_url: The configured site URL.
+
+    Returns:
+        The URL with its host lower-cased and no trailing slash.
+
+    Raises:
+        JiraAPIError: The URL is not exactly an ``https://<site>.atlassian.net`` host.
     """
     raw = (site_url or '').strip().rstrip('/')
     parts = urlsplit(raw)
@@ -120,25 +133,33 @@ def _error_messages(resp) -> List[str]:
         body = resp.json()
     except ValueError:
         body = None
-    if isinstance(body, dict):
-        listed, fields = body.get('errorMessages'), body.get('errors')
-        # any other shape falls back to the response text instead of raising past the tools' error envelope
-        messages = [str(m) for m in listed] if isinstance(listed, list) else []
-        messages += [f'{field}: {msg}' for field, msg in fields.items()] if isinstance(fields, dict) else []
-        if messages:
-            return messages
-    return [resp.text or resp.reason or 'unknown error']
+    # any other shape falls back to the response text instead of raising past the tools' error envelope
+    if not isinstance(body, dict):
+        body = {}
+    listed = body.get('errorMessages')
+    fields = body.get('errors')
+    messages: List[str] = []
+    if isinstance(listed, list):
+        messages = [str(m) for m in listed]
+    if isinstance(fields, dict):
+        for field, msg in fields.items():
+            messages.append(f'{field}: {msg}')
+    return messages or [resp.text or resp.reason or 'unknown error']
 
 
 def _retry_after(resp, fallback: float) -> Optional[float]:
     """Seconds to wait before retrying a 429, or None when Jira asked for longer than we will wait."""
+    delay = fallback
     value = resp.headers.get('Retry-After')
-    try:
-        delay = float(value) if value else fallback
-    except ValueError:
-        delay = fallback
+    if value:
+        try:
+            delay = float(value)
+        except ValueError:
+            pass  # an HTTP date or junk: keep the fallback
     delay = max(0.0, delay)
-    return delay if delay <= MAX_RETRY_AFTER_SECONDS else None
+    if delay > MAX_RETRY_AFTER_SECONDS:
+        return None
+    return delay
 
 
 def request(
@@ -151,20 +172,38 @@ def request(
     read: Optional[bool] = None,
     base_delay: float = 1.0,
 ) -> Dict[str, Any]:
-    """Execute one Jira API call and return its JSON body ({} when empty).
+    """Execute one Jira API call and return its JSON body.
 
-    ``read`` marks a call that changes nothing (default: GET only; a search POST passes ``read=True``).
     Reads retry a 429 up to twice, waiting out ``Retry-After``, and retry a 5xx or connection error once.
     Writes never retry: a write of unknown outcome must not be sent twice.
+
+    Args:
+        method: The HTTP method.
+        path: The path under ``/rest/api/3``, e.g. ``/issue/PROJ-1``.
+        auth: The site and the account to call it as.
+        json_body: The JSON request body, if any.
+        params: The query parameters, if any.
+        read: Whether the call changes nothing. Default: GET only; a search POST passes ``read=True``.
+        base_delay: Seconds to wait before a retry; a 429 without a usable ``Retry-After`` doubles it each time.
+
+    Returns:
+        The response's JSON object, or ``{}`` when the body is empty.
+
+    Raises:
+        JiraAPIError: An error response, a connection error, or a successful response that is not a JSON object.
     """
     import requests  # lazy
 
-    is_read = method.upper() == 'GET' if read is None else read
+    if read is None:
+        is_read = method.upper() == 'GET'
+    else:
+        is_read = read
     url = f'{auth.site_url}{API_PATH}{path}'
     headers = {'Accept': 'application/json'}
     if json_body is not None:
         headers['Content-Type'] = 'application/json'
-    rate_retries = server_retries = 0
+    rate_retries = 0
+    server_retries = 0
     while True:
         try:
             # auth=, not an Authorization header: requests lets a ~/.netrc entry for the host replace the header
@@ -219,8 +258,19 @@ _PROJECT_KEY = re.compile(r'^[A-Z][A-Z0-9_]+$')
 
 
 def parse_projects(value: str) -> List[str]:
-    """Comma-separated project keys into a list ('' means every project). Keys are upper-cased and checked
-    against Jira's key format, so a value can't smuggle JQL into the allowlist clause.
+    """Split a comma-separated list of project keys into the allowlist.
+
+    Keys are upper-cased and checked against Jira's key format, so a value can't smuggle JQL into the
+    allowlist clause.
+
+    Args:
+        value: The configured keys, e.g. ``'PROJ, ops'``. Empty means every project.
+
+    Returns:
+        The keys, upper-cased, each once, in the order given.
+
+    Raises:
+        JiraAPIError: A key is not in Jira's key format.
     """
     keys: List[str] = []
     for part in (value or '').split(','):
@@ -240,7 +290,10 @@ def _order_by_start(jql: str) -> Optional[int]:
     Raises when quotes or parentheses don't balance: wrapped as ``project in (...) AND (<jql>)``, a JQL with
     an extra ``)`` could close the wrapper and escape the allowlist (``x = 1) OR (project = OTHER``).
     """
-    depth, quote, i, found = 0, '', 0, None
+    depth = 0
+    quote = ''
+    i = 0
+    found = None
     while i < len(jql):
         ch = jql[i]
         if ch == '\\':  # JQL escapes the next character inside and outside quotes alike
@@ -273,19 +326,36 @@ def _order_by_start(jql: str) -> Optional[int]:
 
 
 def wrap_jql(jql: str, projects: Iterable[str]) -> str:
-    """Limit ``jql`` to ``projects``: ``project in (...) AND (<jql>) ORDER BY ...``. With no projects the JQL
-    is returned as it is.
+    """Limit a JQL query to the allowlist: ``project in (...) AND (<jql>) ORDER BY ...``.
+
+    Args:
+        jql: The JQL query.
+        projects: The allowlist keys. With none, the JQL is returned as it is.
+
+    Returns:
+        The wrapped JQL, with any trailing ``ORDER BY`` kept last.
+
+    Raises:
+        JiraAPIError: The JQL's quotes or parentheses don't balance, so wrapping it could let it escape
+            the allowlist.
     """
     keys = list(projects)
     jql = (jql or '').strip()
     if not keys:
         return jql
     start = _order_by_start(jql)
-    where, order = (jql, '') if start is None else (jql[:start].strip(), jql[start:].strip())
+    if start is None:
+        where = jql
+        order = ''
+    else:
+        where = jql[:start].strip()
+        order = jql[start:].strip()
     clause = 'project in (' + ', '.join(f'"{k}"' for k in keys) + ')'
     if where:
         clause += f' AND ({where})'
-    return f'{clause} {order}' if order else clause
+    if order:
+        return f'{clause} {order}'
+    return clause
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +367,18 @@ _FENCE = re.compile(r'^\s*```\s*([\w+-]*)\s*$')
 
 
 def check_body_size(text: str, what: str = 'body') -> str:
-    """Refuse a description or comment over 32,767 bytes (Jira's limit is 32,767 characters) before it is sent."""
+    """Refuse a description or comment over 32,767 bytes (Jira's limit is 32,767 characters) before it is sent.
+
+    Args:
+        text: The description or comment.
+        what: What the text is, for the error message.
+
+    Returns:
+        ``text``, unchanged.
+
+    Raises:
+        JiraAPIError: The text is over the limit.
+    """
     if len(text.encode('utf-8')) > MAX_BODY_BYTES:
         raise JiraAPIError(0, [f'the {what} is over {MAX_BODY_BYTES:,} bytes; shorten it'])
     return text
@@ -314,66 +395,104 @@ def _text_nodes(text: str) -> List[Dict[str, Any]]:
     return nodes
 
 
-def text_to_adf(text: str) -> Dict[str, Any]:
-    """Plain text or a small markdown subset into an ADF document: blank-line-separated paragraphs,
-    ``-``/``*`` bullet lists and fenced code blocks. Anything else stays literal text.
+def _bullet_item(line: str) -> Optional[str]:
+    """The text of a ``- item`` or ``* item`` line, or None when the line is not a bullet with text."""
+    match = _BULLET.match(line)
+    if match and match.group(1).strip():
+        return match.group(1).strip()
+    return None
+
+
+def _is_paragraph_line(line: str) -> bool:
+    """A line of paragraph text: not blank, not a code fence and not a bullet."""
+    return bool(line.strip()) and not _FENCE.match(line) and _bullet_item(line) is None
+
+
+def _read_code_block(lines: List[str], i: int) -> Tuple[Dict[str, Any], int]:
+    """The code block whose opening fence is ``lines[i]``, and the index of the line after its closing fence.
+
+    A fence that is never closed runs to the end of the text.
     """
-    content: List[Dict[str, Any]] = []
-    paragraph: List[str] = []
-    bullets: List[str] = []
+    language = _FENCE.match(lines[i]).group(1)
+    end = i + 1
+    while end < len(lines) and not _FENCE.match(lines[end]):
+        end += 1
+    code = lines[i + 1 : end]
+    block: Dict[str, Any] = {'type': 'codeBlock', 'content': []}
+    if language:
+        block['attrs'] = {'language': language}
+    if any(code):
+        block['content'] = [{'type': 'text', 'text': '\n'.join(code)}]
+    return block, end + 1
+
+
+def _read_bullet_list(lines: List[str], i: int) -> Tuple[Dict[str, Any], int]:
+    """The bullet list starting at ``lines[i]``, and the index of the first line after it."""
+    items: List[Dict[str, Any]] = []
+    end = i
+    while end < len(lines) and _bullet_item(lines[end]) is not None:
+        paragraph = {'type': 'paragraph', 'content': _text_nodes(_bullet_item(lines[end]))}
+        items.append({'type': 'listItem', 'content': [paragraph]})
+        end += 1
+    return {'type': 'bulletList', 'content': items}, end
+
+
+def _read_paragraph(lines: List[str], i: int) -> Tuple[Dict[str, Any], int]:
+    """The paragraph starting at ``lines[i]``, and the index of the first line after it."""
+    end = i
+    while end < len(lines) and _is_paragraph_line(lines[end]):
+        end += 1
+    return {'type': 'paragraph', 'content': _text_nodes('\n'.join(lines[i:end]))}, end
+
+
+def text_to_adf(text: str) -> Dict[str, Any]:
+    """Turn plain text or a small markdown subset into an ADF document.
+
+    Blank lines separate paragraphs, ``-`` and ``*`` lines become bullet lists and fenced code becomes code
+    blocks. Anything else stays literal text, with a single newline kept as a hard break.
+
+    Args:
+        text: The description or comment.
+
+    Returns:
+        An ADF ``doc`` node.
+    """
     lines = (text or '').replace('\r\n', '\n').split('\n')
-
-    def flush() -> None:
-        if paragraph:
-            nodes = _text_nodes('\n'.join(paragraph))
-            if nodes:
-                content.append({'type': 'paragraph', 'content': nodes})
-            paragraph.clear()
-        if bullets:
-            items = [
-                {'type': 'listItem', 'content': [{'type': 'paragraph', 'content': _text_nodes(b)}]} for b in bullets
-            ]
-            content.append({'type': 'bulletList', 'content': items})
-            bullets.clear()
-
+    content: List[Dict[str, Any]] = []
     i = 0
     while i < len(lines):
-        line = lines[i]
-        fence = _FENCE.match(line)
-        if fence:
-            flush()
-            code: List[str] = []
-            i += 1
-            while i < len(lines) and not _FENCE.match(lines[i]):
-                code.append(lines[i])
-                i += 1
-            block: Dict[str, Any] = {'type': 'codeBlock', 'content': []}
-            if fence.group(1):
-                block['attrs'] = {'language': fence.group(1)}
-            if any(code):
-                block['content'] = [{'type': 'text', 'text': '\n'.join(code)}]
-            content.append(block)
-            i += 1  # past the closing fence (or the end of the text)
-            continue
-        bullet = _BULLET.match(line)
-        if bullet and bullet.group(1).strip():
-            if paragraph:
-                flush()
-            bullets.append(bullet.group(1).strip())
-        elif not line.strip():
-            flush()
+        if _FENCE.match(lines[i]):
+            block, i = _read_code_block(lines, i)
+        elif _bullet_item(lines[i]) is not None:
+            block, i = _read_bullet_list(lines, i)
+        elif lines[i].strip():
+            block, i = _read_paragraph(lines, i)
         else:
-            if bullets:
-                flush()
-            paragraph.append(line)
-        i += 1
-    flush()
+            i += 1
+            continue
+        content.append(block)
     return {'type': 'doc', 'version': 1, 'content': content}
 
 
+def _list_start(order: Any) -> int:
+    """The first number of an ordered list: its ``order`` attribute, or 1 when that is missing or not a number."""
+    try:
+        return int(order or 1)
+    except (TypeError, ValueError, OverflowError):  # OverflowError: Python's JSON parser accepts Infinity
+        return 1
+
+
 def adf_to_text(node: Any) -> str:
-    """Flatten an ADF document (or any node) into plain text: one block per paragraph, ``- `` for bullets,
-    ``1.`` for numbered items, fenced code blocks. Unknown nodes contribute their children's text.
+    """Flatten an ADF document, or any ADF node, into plain text.
+
+    Blocks are separated by a blank line, bullets start with ``- ``, numbered items with ``1.`` and code
+    blocks are fenced. Unknown nodes contribute their children's text.
+
+    Args:
+        node: An ADF node. Anything that is not a dict gives ``''``.
+
+    Returns:
+        The text.
     """
     if not isinstance(node, dict):
         return ''
@@ -391,7 +510,7 @@ def adf_to_text(node: Any) -> str:
     if kind == 'codeBlock':
         return f'```{attrs.get("language") or ""}\n' + ''.join(adf_to_text(c) for c in children) + '\n```'
     if kind in ('bulletList', 'orderedList', 'taskList', 'decisionList'):
-        start = int(attrs.get('order') or 1)
+        start = _list_start(attrs.get('order'))
         items = []
         for n, item in enumerate(children):
             if not isinstance(item, dict):
@@ -399,10 +518,14 @@ def adf_to_text(node: Any) -> str:
             if item.get('type') == kind:  # a nested list sits directly in its parent: indent it, no marker
                 items.append('  ' + adf_to_text(item).replace('\n', '\n  '))
                 continue
-            if kind == 'taskList':
-                marker = '- [x]' if (item.get('attrs') or {}).get('state') == 'DONE' else '- [ ]'
+            if kind == 'orderedList':
+                marker = f'{start + n}.'
+            elif kind == 'taskList' and (item.get('attrs') or {}).get('state') == 'DONE':
+                marker = '- [x]'
+            elif kind == 'taskList':
+                marker = '- [ ]'
             else:
-                marker = '-' if kind != 'orderedList' else f'{start + n}.'
+                marker = '-'
             items.append(f'{marker} ' + adf_to_text(item).replace('\n', '\n  '))
         return '\n'.join(items)
     if kind in (
@@ -419,6 +542,8 @@ def adf_to_text(node: Any) -> str:
         'layoutSection',
         'layoutColumn',
     ):
-        sep = '\n' if kind in ('listItem', 'tableRow') else '\n\n'
+        sep = '\n\n'
+        if kind in ('listItem', 'tableRow'):
+            sep = '\n'
         return sep.join(t for t in (adf_to_text(c) for c in children) if t)
     return ''.join(adf_to_text(c) for c in children)

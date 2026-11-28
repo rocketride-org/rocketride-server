@@ -365,23 +365,48 @@ def test_unknown_key_is_a_404_result(api):
     assert out['success'] is False and 'not visible to this account' in out['error']
 
 
-def test_projects_list_pages_and_filters_by_allowlist(api):
+def test_projects_list_asks_for_the_allowlisted_keys_only(api):
     api.queue = [
         _resp(
             200,
             {
-                'values': [{'key': 'RRT', 'name': 'Test', 'projectTypeKey': 'software'}, {'key': 'OPS', 'name': 'Ops'}],
-                'isLast': False,
+                'values': [
+                    {'key': 'RRT', 'name': 'Test', 'projectTypeKey': 'software'},
+                    {'key': 'KAN', 'name': 'Board', 'projectTypeKey': 'software'},
+                    {'key': 'OPS', 'name': 'Ops'},
+                ],
+                'isLast': True,
             },
         ),
-        _resp(200, {'values': [{'key': 'KAN', 'name': 'Board', 'projectTypeKey': 'software'}], 'isLast': True}),
     ]
     out = _node(projects=['RRT', 'KAN']).jira_projects_list({})
-    assert [c[2]['params']['startAt'] for c in api.calls] == [0, 2]
-    assert out['projects'] == [
-        {'key': 'RRT', 'name': 'Test', 'type': 'software'},
-        {'key': 'KAN', 'name': 'Board', 'type': 'software'},
+    assert [c[2]['params'] for c in api.calls] == [{'maxResults': 100, 'keys': ['RRT', 'KAN']}]
+    # a project Jira returns outside the allowlist is still left out
+    assert out == {
+        'success': True,
+        'projects': [
+            {'key': 'RRT', 'name': 'Test', 'type': 'software'},
+            {'key': 'KAN', 'name': 'Board', 'type': 'software'},
+        ],
+        'truncated': False,
+    }
+
+
+def test_projects_list_sends_at_most_50_keys_per_request(api):
+    keys = [f'P{n:02d}' for n in range(51)]
+    api.queue = [_resp(200, {'values': [], 'isLast': True}), _resp(200, {'values': [], 'isLast': True})]
+    _node(projects=keys).jira_projects_list({})
+    assert [c[2]['params']['keys'] for c in api.calls] == [keys[:50], keys[50:]]
+
+
+def test_projects_list_without_an_allowlist_reads_one_page_and_says_it_is_truncated(api):
+    api.queue = [
+        _resp(200, {'values': [{'key': 'RRT', 'name': 'Test', 'projectTypeKey': 'software'}], 'isLast': False})
     ]
+    out = _node().jira_projects_list({})
+    assert [c[2]['params'] for c in api.calls] == [{'maxResults': 100}]
+    assert out['projects'] == [{'key': 'RRT', 'name': 'Test', 'type': 'software'}]
+    assert out['truncated'] is True
 
 
 # ---------------------------------------------------------------------------
