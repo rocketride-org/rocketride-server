@@ -300,6 +300,7 @@ public:
     virtual size_t getNumberFilters() noexcept { return m_numberFilters; }
     virtual Error insertFilter(const Text &filterName,
                                const json::Value &filterConfig);
+    Error buildConnections() noexcept;
 
     //-----------------------------------------------------------------
     // Public functions - Sync Tokens support
@@ -457,7 +458,6 @@ private:
     Error buildGlobalPipe() noexcept;
     Error buildBreakpoints() noexcept;
     Error buildPipeStack() noexcept;
-    Error buildConnections() noexcept;
     Error generatePipelineStack() noexcept;
     ErrorOr<ServicePipe> buildInstancePipe() noexcept;
 
