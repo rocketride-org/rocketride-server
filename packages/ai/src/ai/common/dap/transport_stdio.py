@@ -308,6 +308,11 @@ class TransportStdio(TransportBase):
                 await asyncio.gather(*tasks, return_exceptions=True)
                 self._debug_message('All stream monitoring tasks completed')
 
+            # A disconnect the exit timer is sending is part of this session too
+            dispatch = self._exit_dispatch
+            if dispatch is not None and dispatch is not asyncio.current_task():
+                await asyncio.gather(dispatch, return_exceptions=True)
+
         except Exception as e:
             self._debug_message(f'Failed to accept subprocess: {e}')
             # Trigger disconnected callback with error
@@ -500,8 +505,10 @@ class TransportStdio(TransportBase):
         """End a process whose stdout is still open ``exit_output_timeout`` after its >EXIT."""
         await asyncio.sleep(self.exit_output_timeout)
         # From here on this task runs the disconnect, and with it the task's teardown,
-        # so the end of stdout that the kill causes must not cancel it
+        # so the end of stdout that the kill causes must not cancel it. accept() still
+        # waits for it, so the session ends only once that disconnect is done.
         self._exit_timer = None
+        self._exit_dispatch = asyncio.current_task()
         self._debug_message(f'stdout still open {self.exit_output_timeout}s after >EXIT; ending the process')
 
         # Ended here, within the same limit, so the task does not wait for it again
@@ -536,6 +543,8 @@ class TransportStdio(TransportBase):
         self._exit_disconnect: Optional[tuple] = None
         # Ends the process if stdout is still open exit_output_timeout after its >EXIT
         self._exit_timer: Optional[asyncio.Task] = None
+        # The timer once it is sending the disconnect, so accept() can wait for it
+        self._exit_dispatch: Optional[asyncio.Task] = None
         self._exit_seen = False
 
     async def _read_stream(self, stream: asyncio.StreamReader, stream_name: str) -> None:

@@ -646,9 +646,10 @@ async def _run_child(script, *, exit_output_timeout=5.0, then=None):
             once its ``apaevt_exit`` has arrived.
 
     Returns:
-        tuple: (timeline, disconnects, process). The timeline lists the console output
+        tuple: (timeline, disconnects, returncode). The timeline lists the console output
         and a ``'disconnected'`` entry in the order they happened; ``disconnects`` holds
-        each disconnect's (reason, has_error).
+        each disconnect's (reason, has_error); ``returncode`` is the child's, read before
+        the helper's own cleanup could end it (None if it was still running).
     """
     import sys
 
@@ -691,12 +692,17 @@ async def _run_child(script, *, exit_output_timeout=5.0, then=None):
     if then is not None:
         await then(transport, exited)
     await asyncio.wait_for(gone.wait(), timeout=10)
-    # Let a second, unwanted disconnect show itself, then keep what the transport sent
-    # on its own: the cleanup below reports its own 'Disconnected by request'
+    # Let a second, unwanted disconnect show itself, then keep what the transport did
+    # on its own: the cleanup below reports its own 'Disconnected by request' and
+    # terminates a child that is still running
     await asyncio.sleep(0.2)
-    seen = (list(timeline), list(disconnects))
+    try:
+        await asyncio.wait_for(process.wait(), timeout=2)
+    except asyncio.TimeoutError:
+        pass
+    seen = (list(timeline), list(disconnects), process.returncode)
     await transport.disconnect()
-    return (*seen, process)
+    return seen
 
 
 @pytest.mark.asyncio
@@ -728,10 +734,10 @@ async def test_a_process_that_keeps_stdout_open_after_exit_is_ended_at_the_limit
     script = "import time; print('>EXIT*0*bye*', flush=True); time.sleep(60)"
     started = asyncio.get_running_loop().time()
 
-    timeline, disconnects, process = await _run_child(script, exit_output_timeout=0.5)
+    timeline, disconnects, returncode = await _run_child(script, exit_output_timeout=0.5)
 
     assert asyncio.get_running_loop().time() - started < 5
-    assert process.returncode is not None  # ended by the transport, not left running
+    assert returncode is not None  # ended by the transport, not by the helper's cleanup
     assert disconnects == [('Process exited: bye (code: 0)', False)]
     assert timeline.count('disconnected') == 1
 
@@ -747,10 +753,10 @@ async def test_a_disconnect_requested_after_exit_still_sends_the_exit():
         await transport.disconnect()
 
     started = asyncio.get_running_loop().time()
-    _, disconnects, process = await _run_child(script, exit_output_timeout=30, then=stop_after_exit)
+    _, disconnects, returncode = await _run_child(script, exit_output_timeout=30, then=stop_after_exit)
 
     assert asyncio.get_running_loop().time() - started < 10
-    assert process.returncode is not None
+    assert returncode is not None  # ended by the requested disconnect
     assert disconnects == [('Process exited: bye (code: 0)', False), ('Disconnected by request', False)]
 
 
@@ -797,3 +803,42 @@ async def test_a_reused_transport_sends_the_next_sessions_disconnect():
     # Each session's own reason, then the requested disconnect after it
     assert disconnects[0] == 'Process exited: first (code: 0)'
     assert 'stdout terminated' in disconnects
+
+
+@pytest.mark.asyncio
+async def test_accept_returns_only_once_the_exit_timer_disconnect_is_done():
+    """accept() ends the session, so it waits for a disconnect the exit timer is still sending."""
+    import sys
+
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        '-c',
+        "import time; print('>EXIT*0*bye*', flush=True); time.sleep(60)",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    transport = TransportStdio()
+    transport.exit_output_timeout = 0.3
+    steps = []
+
+    async def on_disconnected(reason, has_error):
+        if reason.startswith('Process exited'):
+            # A teardown that takes a while, as Task._terminated does
+            await asyncio.sleep(0.5)
+            steps.append('teardown done')
+
+    async def nothing(*_args):
+        pass
+
+    transport.bind(
+        on_debug_message=lambda *_: None,
+        on_debug_protocol=lambda *_: None,
+        on_receive=nothing,
+        on_connected=nothing,
+        on_disconnected=on_disconnected,
+    )
+    await asyncio.wait_for(transport.accept(process), timeout=10)
+    steps.append('accept returned')
+
+    assert steps == ['teardown done', 'accept returned']
