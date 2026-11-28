@@ -25,6 +25,7 @@
 Bedrock binding for the ChatLLM.
 """
 
+import re
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, Optional
 from ai.common.chat import ChatBase
@@ -37,6 +38,81 @@ from packaging.version import InvalidVersion, Version
 # The other Claude 3 models and Claude 2 reject the request with a ValidationException,
 # and Claude 3.5 Sonnet v2 has caching only as a preview, so they never get the marker.
 _CACHEABLE_CLAUDE_3 = ('claude-3-7-sonnet', 'claude-3-5-haiku')
+
+# Geographic prefixes of cross-region inference profile ids. The same list as
+# MODEL_ID_GEO_PREFIXES in langchain-aws, so an id that already carries any of them,
+# not only the three this node adds, is not prefixed a second time.
+_GEO_PREFIX = re.compile(r'^(?:us|eu|apac|au|jp|us-gov|global|amer|sa)\.')
+
+# ARN resource types whose id names the foundation model, so its vendor can be read
+# from the ARN. Provisioned models, imported models and application inference
+# profiles have opaque ids and need the Provider field instead.
+_ARN_MODEL_RESOURCE = re.compile(
+    r'^arn:[^:]+:bedrock:[^:]*:[^:]*:(?:foundation-model|inference-profile|custom-model)/([^/]+)'
+)
+
+ARN_NEEDS_PROVIDER = (
+    "This ARN does not name the model's vendor. Set Provider (for example 'anthropic', "
+    "'meta' or 'amazon') so requests are formatted for the model"
+)
+
+
+def has_geo_prefix(model_id: str) -> bool:
+    """Return True when *model_id* already carries a cross-region prefix such as ``us.``."""
+    return bool(_GEO_PREFIX.match(model_id or ''))
+
+
+def resolve_model_id(model: str, region: Optional[str]) -> str:
+    """Return the model id the node sends to Bedrock for *model* in *region*.
+
+    A plain id gets the cross-region prefix for the region: ``eu.`` for ``eu*``
+    regions, ``apac.`` for ``ap*`` regions and ``us.`` for the rest. ARNs and ids
+    that already carry a geographic prefix are returned unchanged. The save-time
+    check and the pipeline both call this, so they always send the same id.
+
+    Args:
+        model (str): The configured model id or ARN.
+        region (Optional[str]): The configured AWS region.
+
+    Returns:
+        str: The model id to pass to ChatBedrock.
+    """
+    if not model or model.startswith('arn:') or has_geo_prefix(model):
+        return model
+    region = region or ''
+    if region[:2] == 'eu':
+        return 'eu.' + model
+    if region[:2] == 'ap':
+        return 'apac.' + model
+    return 'us.' + model
+
+
+def resolve_model_vendor(model_id: str, configured: Optional[str] = None) -> Optional[str]:
+    """Return the vendor to pass as ChatBedrock's ``provider`` for *model_id*, if any.
+
+    langchain-aws picks the request format from the vendor, which it reads from a
+    plain id but refuses to guess from an ARN. A configured vendor always wins; for
+    an ARN whose resource names a foundation model (a foundation model, a system
+    inference profile or a custom model) it is read from that model id.
+
+    Args:
+        model_id (str): The id returned by resolve_model_id.
+        configured (Optional[str]): The Provider field of the Custom profile.
+
+    Returns:
+        Optional[str]: The vendor, or None when langchain-aws reads it from the id
+        itself, or when an ARN does not name one.
+    """
+    if configured and configured.strip():
+        return configured.strip().lower()
+    if not (model_id or '').startswith('arn:'):
+        return None
+    match = _ARN_MODEL_RESOURCE.match(model_id)
+    if not match:
+        return None
+    base = _GEO_PREFIX.sub('', match.group(1))
+    vendor, dot, _ = base.partition('.')
+    return vendor if dot and vendor.isalnum() else None
 
 
 def _accepts_cache_marker(model_id: str) -> bool:
@@ -181,22 +257,22 @@ class Chat(ChatBase):
         # Get the AWS region, save it
         self.region = config.get('region')
 
-        # Setup
-        model_prefix = 'us.'
-        if self.region[:2] == 'eu':
-            model_prefix = 'eu.'
-        elif self.region[:2] == 'ap':
-            model_prefix = 'apac.'
+        # The same id and vendor the save-time check probed with
+        model_id = resolve_model_id(self._model, self.region)
+        vendor = resolve_model_vendor(model_id, config.get('modelProvider'))
+        if model_id.startswith('arn:') and not vendor:
+            raise ValueError(ARN_NEEDS_PROVIDER)
 
         # Get the llm
         self._llm = _ChatBedrock(
-            model=model_prefix + self._model,
+            model=model_id,
             aws_access_key_id=accessKey,
             aws_secret_access_key=secretKey,
             region=self.region,
             temperature=0,
             max_tokens=self._modelOutputTokens,
             custom_get_token_ids=self._estimate_token_ids,
+            **({'provider': vendor} if vendor else {}),
         )
 
         # Save our chat class into the bag
