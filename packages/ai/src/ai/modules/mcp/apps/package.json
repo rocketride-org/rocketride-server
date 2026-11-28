@@ -12,6 +12,7 @@
 	},
 	"dependencies": {
 		"@modelcontextprotocol/ext-apps": "^1.7.0",
+		"@xyflow/react": "~12.3.4",
 		"react": "^18.3.0",
 		"react-dom": "^18.3.0"
 	},

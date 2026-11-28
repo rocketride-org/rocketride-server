@@ -33,15 +33,19 @@ empty rather than duplicating them.
 
 ## Widgets
 
-In hosts that support MCP Apps, three tool results render as interactive
+In hosts that support MCP Apps, four tool results render as interactive
 widgets. Hosts without MCP Apps see the same results as plain JSON — the
-widget is a rendering hint, never a different payload.
+widget is a rendering hint, never a different payload. The one addition is the
+pipeline canvas: its drawing data (nodes without settings, catalog entries and
+icons) rides in the result's `_meta`, which hosts hand to the widget and not
+to the model.
 
 | Widget | Rendered for | What it does |
 | --- | --- | --- |
 | Pipelines table | `list_running_pipelines` | Live table of running pipelines with refresh and terminate actions |
 | File dropper | `run_dropper_pipe` | In-chat drag-and-drop upload into the running pipeline, with progress |
 | Trace viewer | `log_traces`, `log_trace` | Replay a run object-by-object: components entered, lane data, narration |
+| Pipeline canvas | `view_pipeline` | Read-only diagram of a saved pipeline, drawn with the builder's nodes and edges; pan and zoom, nothing to edit or run |
 
 Widgets follow the host's light or dark theme, and use the system setting
 when a host sends none.
@@ -54,10 +58,11 @@ spec, ChatGPT among them, read it from the `resources/read` result.
 
 - `csp`: what the widget may load and contact. The bundles are single files
   with no outside scripts, styles, fonts or frames, so `resourceDomains` is
-  empty for all three. Only the file dropper connects out: its
+  empty for all four. Only the file dropper connects out: its
   `connectDomains` holds the engine's origin, where it uploads files. The
-  pipelines table and the trace viewer call tools through the host and
-  declare no origins.
+  pipelines table and the trace viewer call tools through the host, the
+  pipeline canvas draws the result it is given, and none of them declares an
+  origin.
 - `openai/widgetDomain` (next to `ui`, not inside it): ChatGPT's widget
   domain, from `MCP_UI_DOMAIN` (see [Self-hosting](/connect/mcp/http/self-hosting)).
   It is left out when that is unset. The server never sends `ui.domain`:

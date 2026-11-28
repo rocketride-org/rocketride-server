@@ -25,6 +25,7 @@ OPENAI_WIDGET_DOMAIN_KEY = 'openai/widgetDomain'
 PIPELINES_TABLE_URI = 'ui://rocketride/pipelines-table.html'
 DROPPER_URI = 'ui://rocketride/dropper.html'
 TRACE_VIEWER_URI = 'ui://rocketride/trace-viewer.html'
+PIPELINE_CANVAS_URI = 'ui://rocketride/pipeline-canvas.html'
 
 _APPS_DIST = Path(__file__).parent / 'apps' / 'dist'
 
@@ -53,6 +54,11 @@ APPS: List[AppSpec] = [
         uri=TRACE_VIEWER_URI,
         filename='trace-viewer.html',
         title='Pipeline trace',
+    ),
+    AppSpec(
+        uri=PIPELINE_CANVAS_URI,
+        filename='pipeline-canvas.html',
+        title='Pipeline canvas',
     ),
 ]
 

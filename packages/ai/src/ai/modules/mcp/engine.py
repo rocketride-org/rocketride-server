@@ -9,7 +9,40 @@ without touching any tool code.
 
 import asyncio
 import os
+import re
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
+# The private workspace root: the caller's own `.projects` tree.
+PRIVATE_WORKSPACE_ROOT = '.projects'
+
+# Team ids ride inside store paths, so only plain id characters are allowed.
+# Same pattern as the builder's SAFE_TEAM_ID
+# (apps/rocket-ui/src/surfaces/workspace/vfs/workspace.ts).
+SAFE_TEAM_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+
+
+def workspace_root_for(account_info: Any) -> str:
+    """Return the workspace root the builder uses for this sign-in result.
+
+    Mirrors the builder's ``resolveWorkspaceScope``
+    (apps/rocket-ui/src/surfaces/workspace/vfs/workspace.ts): the account's
+    development team roots the workspace in that team's shared files, but
+    only while the team id is a plain id and names one of the active
+    organization's teams. Every other case (no team, a team from another
+    organization, an unsafe id, no sign-in result) is the caller's private
+    tree. An open source engine signs every caller in with its single
+    ``local`` team as the development team, so there the root is
+    ``@/Team/=local/.projects``, which is also where the builder saves.
+    """
+    info = account_info if isinstance(account_info, dict) else {}
+    dev_team = info.get('devTeam')
+    if not isinstance(dev_team, str) or not SAFE_TEAM_ID.match(dev_team):
+        return PRIVATE_WORKSPACE_ROOT
+    organization = info.get('organization')
+    teams = organization.get('teams') if isinstance(organization, dict) else None
+    if not isinstance(teams, list) or not any(isinstance(team, dict) and team.get('id') == dev_team for team in teams):
+        return PRIVATE_WORKSPACE_ROOT
+    return f'@/Team/={dev_team}/{PRIVATE_WORKSPACE_ROOT}'
 
 
 class LogNotFound(KeyError):
@@ -105,6 +138,7 @@ class EngineClient(Protocol):
     async def get_environment_keys(self) -> List[str]: ...
     async def get_capabilities(self) -> List[str]: ...
     async def deploy_artifact(self, project_id: str, version: int) -> Dict[str, Any]: ...
+    async def get_workspace_root(self) -> str: ...
     async def close(self) -> None: ...
 
 
@@ -444,6 +478,15 @@ class WsEngineClient:
         info = self._client.get_account_info() or {}
         capabilities = info.get('capabilities') if isinstance(info, dict) else None
         return [c for c in capabilities if isinstance(c, str)] if isinstance(capabilities, (list, tuple)) else []
+
+    async def get_workspace_root(self) -> str:
+        """Return the caller's active workspace root (see ``workspace_root_for``).
+
+        Reads the sign-in result the SDK keeps from ``connect()``, so the
+        client connects first if it has not yet.
+        """
+        await self._ensure_connected()
+        return workspace_root_for(self._client.get_account_info())
 
 
 def make_engine_client(config: Dict[str, Any]) -> EngineClient:
