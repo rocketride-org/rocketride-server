@@ -414,6 +414,8 @@ class ExecutionMixin(DAPClient):
               5 COMPLETED, 6 CANCELLED)
             - status: Current status message (str)
             - completed: Whether the task has finished (bool)
+            - exitCode: Task exit code, nonzero indicates failure (int)
+            - exitMessage: Task termination reason or exit message (str)
             - completedCount / totalCount: Items processed so far / expected (int)
             - failedCount: Items that failed processing (int)
             - errors / warnings: Recent error and warning messages (list of str)
@@ -443,7 +445,10 @@ class ExecutionMixin(DAPClient):
                     total = status.get('totalCount', 0)
                     print(f"Processing: {done}/{total} items")
                 elif state == TASK_STATE.COMPLETED.value:
-                    print("Pipeline completed successfully!")
+                    if status.get('exitCode', 0) != 0:
+                        print(f"Pipeline failed: {status.get('exitMessage', 'Unknown error')}")
+                    else:
+                        print("Pipeline completed successfully!")
                     break
                 elif state == TASK_STATE.CANCELLED.value:
                     print(f"Pipeline terminated: {status.get('exitMessage', '')}")
@@ -457,7 +462,7 @@ class ExecutionMixin(DAPClient):
             - 2 (INITIALIZING): Subprocess is initializing
             - 3 (RUNNING): Pipeline is actively processing data
             - 4 (STOPPING): Graceful shutdown in progress
-            - 5 (COMPLETED): Pipeline finished successfully
+            - 5 (COMPLETED): Pipeline finished (check 'exitCode' for success vs failure)
             - 6 (CANCELLED): Pipeline was terminated before completion
 
         Tips:
