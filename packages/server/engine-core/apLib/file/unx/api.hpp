@@ -149,4 +149,11 @@ Opt<bool> isRemovable(const std::vector<FsType> &types) noexcept;
 ap::file::FsType toFsType(TextView str) noexcept;
 std::vector<FsType> toFsTypeArray(TextView str) noexcept;
 
+#if ROCKETRIDE_PLAT_LIN
+// read the mounted file systems from the first of the given mount tables (in
+// setmntent format, such as /etc/mtab) that can be opened
+SharedPtr<MntEntInfoCache> refreshMounting(
+    std::initializer_list<const char *> sources) noexcept;
+#endif
+
 }  // namespace ap::file
